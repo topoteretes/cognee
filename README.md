@@ -3,9 +3,9 @@ Memory management for the AI Applications and AI Agents
 
 
 
-![Infographic Image](./src/infographic.jpg)
+![Infographic Image](./infographic_final.jpg)
 
-A journey toward a production ready modern data platform
+## A journey toward a production-ready modern data platform
 
 Browsing the database of theresanaiforthat.com, we can observe around [7000 new, mostly semi-finished projects](https://theresanaiforthat.com/) in the field of applied AI, whose development is fueled by new improvements in foundation models and open-source community contributions.
 
