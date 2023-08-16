@@ -1,7 +1,13 @@
 # PromethAI-Memory
 Memory management for the AI Applications and AI Agents
 
-Browsing the database of theresanaiforthat.com, we can observe around [7000 new, mostly semi-finished projects](https://theresanaiforthat.com/) in the field of applied AI, whose development is fueled by new improvements in  foundation models and open source community contributions.
+
+
+![Infographic Image](./src/infographic.jpg)
+
+A journey toward a production ready modern data platform
+
+Browsing the database of theresanaiforthat.com, we can observe around [7000 new, mostly semi-finished projects](https://theresanaiforthat.com/) in the field of applied AI, whose development is fueled by new improvements in foundation models and open-source community contributions.
 
 It seems it has never been easier to create a startup, build an app, and go to market… and fail.
 
@@ -20,4 +26,9 @@ The rise of this new profession is perhaps signaling the need for a solution tha
 
 To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on a productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
 
-## Read about it [prometh.ai](http://prometh.ai/promethai-memory-blog-post-on)
+## Find more about the problem at [prometh.ai](http://prometh.ai/promethai-memory-blog-post-on)
+
+
+# PromethAI-Memory Repo Structure
+
+The repository is organised in such a way as to showcase
