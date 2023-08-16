@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "ticketType": {
+      "type": "string",
+      "enum": ["online ticket", "ICE ticket"]
+    },
+    "departureDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "priceType": {
+      "type": "string",
+      "enum": ["Flex price (single journey)"]
+    },
+    "class": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "adult": {
+      "type": "object",
+      "properties": {
+        "quantity": {
+          "type": "integer"
+        },
+        "BC50": {
+          "type": "integer"
+        }
+      },
+      "required": ["quantity", "BC50"]
+    },
+    "journey": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "via": {
+          "type": "string"
+        },
+        "train": {
+          "type": "string",
+          "enum": ["ICE"]
+        }
+      },
+      "required": ["from", "to", "via", "train"]
+    },
+    "refundPolicy": {
+      "type": "string"
+    },
+    "payment": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer"
+              },
+              "price": {
+                "type": "number"
+              },
+              "vat19": {
+                "type": "number"
+              },
+              "vat7": {
+                "type": "number"
+              }
+            },
+            "required": ["name", "quantity", "price", "vat19", "vat7"]
+          }
+        },
+        "total": {
+          "type": "number"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["credit card"]
+        },
+        "transactionDetails": {
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "number"
+            },
+            "VUNumber": {
+              "type": "integer"
+            },
+            "transactionNumber": {
+              "type": "integer"
+            },
+            "date": {
+              "type": "string",
+              "format": "date"
+            },
+            "genNumber": {
+              "type": "string"
+            }
+          },
+          "required": ["amount", "VUNumber", "transactionNumber", "date", "genNumber"]
+        }
+      },
+      "required": ["items", "total", "method", "transactionDetails"]
+    },
+    "bookingDetails": {
+      "type": "object",
+      "properties": {
+        "bookingDate": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "bookingAddress": {
+          "type": "string"
+        },
+        "taxNumber": {
+          "type": "string"
+        }
+      },
+      "required": ["bookingDate", "bookingAddress", "taxNumber"]
+    },
+    "journeyDetails": {
+      "type": "object",
+      "properties": {
+        "validFrom": {
+          "type": "string",
+          "format": "date"
+        },
+        "passengerName": {
+          "type": "string"
+        },
+        "orderNumber": {
+          "type": "string"
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stop": {
+                "type": "string"
+              },
+              "date": {
+                "type": "string",
+                "format": "date"
+              },
+              "time": {
+                "type": "string",
+                "format": "time"
+              },
+              "track": {
+                "type": "integer"
+              },
+              "product": {
+                "type": "string"
+              },
+              "reservation": {
+                "type": "string"
+              }
+            },
+            "required": ["stop", "date", "time", "track", "product", "reservation"]
+          }
+        }
+      },
+      "required": ["validFrom", "passengerName", "orderNumber", "stops"]
+    },
+    "usageNotes": {
+      "type": "string"
+    }
+  },
+  "required": ["ticketType", "departureDate", "priceType", "class", "adult", "journey", "refundPolicy", "payment", "bookingDetails", "journeyDetails", "usageNotes"]
+}
