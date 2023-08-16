@@ -3,7 +3,7 @@ Memory management for the AI Applications and AI Agents
 
 
 
-![Infographic Image](./infographic_final.jpg)
+![Infographic Image](/infographic_final.jpg)
 
 ## A journey toward a production-ready modern data platform
 
