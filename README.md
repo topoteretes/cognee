@@ -3,7 +3,7 @@ Memory management for the AI Applications and AI Agents
 
 
 
-![Infographic Image](/infographic_final.jpg)
+![Infographic Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/infographic_final.png))
 
 ## A journey toward a production-ready modern data platform
 
