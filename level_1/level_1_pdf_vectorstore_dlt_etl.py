@@ -363,12 +363,12 @@ def main(raw_loading, processed_loading,document_paths):
             file_path = os.path.join(BASE_DIR, "ticket_schema.json")
             json_schema = load_json_or_infer_schema(file_path, document)
             output = _convert_pdf_to_document(path=document)
-            find_data_in_store = get_from_weaviate(query="Train", path=['year'], operator='Equal', valueText='2017*')
+            try:
+                find_data_in_store = get_from_weaviate(query="Train", path=['year'], operator='Equal', valueText='2017*')
 
-            if find_data_in_store:
                 output = find_data_in_store
                 print(output[1])
-            else:
+            except:
                 load_to_weaviate(document)
 
             pipeline = dlt.pipeline(pipeline_name="train_ticket", destination='duckdb', dataset_name='train_ticket_data')
