@@ -10,7 +10,7 @@ import weaviate
 import os
 import json
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Coroutine
 from deep_translator import (GoogleTranslator)
 from langchain.chat_models import ChatOpenAI
 from langchain.schema import LLMResult, HumanMessage
@@ -186,14 +186,12 @@ class VectorDB:
             return  retriever.add_documents([
                 Document(
                     metadata={
-                        "inserted_at": str(datetime.now()),
                         "text": observation,
                         "user_id": str(self.user_id),
                         "memory_id": str(self.memory_id),
                         "ltm_memory_id": str(self.ltm_memory_id),
                         "st_memory_id": str(self.st_memory_id),
                         "buffer_id": str(self.buffer_id),
-                        "last_accessed_at": str(datetime.now()),
 
                         # **source_metadata,
                     },
@@ -205,7 +203,7 @@ class VectorDB:
     #         index_name=self.index, embedding=OpenAIEmbeddings(), namespace=namespace
     #     )
 
-    async def fetch_memories(self, observation: str, params = None):
+    async def fetch_memories(self, observation: str, namespace:str, params = None):
         if self.db_type == "pinecone":
             # Fetch Pinecone memories here
             pass
@@ -223,44 +221,71 @@ class VectorDB:
             Example:
                 get_from_weaviate(query="some query", path=['year'], operator='Equal', valueText='2017*')
             """
-            retriever = self.init_weaviate(self.namespace)
+            client = self.init_weaviate_client(self.namespace)
 
             print(self.namespace)
             print(str(datetime.now()))
             print(observation)
+            if namespace is None:
+                namespace= self.namespace
 
-            # Retrieve documents with filters applied
-            output = retriever.get_relevant_documents(
-                observation
-                # ,
-                # score=True
-                # ,
-                # where_filter=params
-            )
-            print(output)
-            return output
-
-
-    # def
-
-    def delete_memories(self, params: None):
-        auth_config = weaviate.auth.AuthApiKey(api_key=os.environ.get('WEAVIATE_API_KEY'))
-        client = weaviate.Client(
-            url=os.environ.get('WEAVIATE_API_KEY'),
-            auth_client_secret=auth_config,
-
-            additional_headers={
-                "X-OpenAI-Api-Key": os.environ.get('OPENAI_API_KEY')
+            params_user_id= {
+              "path": ["user_id"],
+              "operator": "Like",
+              "valueText": self.user_id
             }
-        )
-        client.batch.delete_objects(
-            class_name=self.namespace,
-            # Same `where` filter as in the GraphQL API
-            where=params,
-        )
 
-    def update_memories(self):
-        pass
+            if params:
+                query_output = client.query.get(namespace, ["text","user_id", "memory_id", "ltm_memory_id", "st_memory_id", "buffer_id"]).with_where(params).with_additional(['id','creationTimeUnix','lastUpdateTimeUnix']).with_where(params_user_id).do()
+                return query_output
+            else:
+                query_output = client.query.get(namespace, ["text","user_id", "memory_id", "ltm_memory_id","st_memory_id", "buffer_id"]).with_additional(['id','creationTimeUnix','lastUpdateTimeUnix']).with_where(params_user_id).do()
+                return query_output
+
+    async def delete_memories(self, params:dict = None):
+        client = self.init_weaviate_client(self.namespace)
+        if params:
+            where_filter = {
+                "path": ["id"],
+                "operator": "Equal",
+                "valueText": params.get('id', None)
+            }
+            return client.batch.delete_objects(
+                class_name=self.namespace,
+                # Same `where` filter as in the GraphQL API
+                where=where_filter,
+            )
+        else:
+            #Delete all objects
+
+            return client.batch.delete_objects(
+                class_name=self.namespace,
+                where={
+                    'path': ['user_id'],
+                    'operator': 'Equal',
+                    'valueText': self.user_id
+                }
+            )
+
+    def update_memories(self, observation, namespace:str,params:dict = None):
+        client = self.init_weaviate_client(self.namespace)
+        client.data_object.update(
+            data_object={
+                "text": observation,
+                "user_id": str(self.user_id),
+                "memory_id": str(self.memory_id),
+                "ltm_memory_id": str(self.ltm_memory_id),
+                "st_memory_id": str(self.st_memory_id),
+                "buffer_id": str(self.buffer_id),
+
+                # **source_metadata,
+
+            },
+            class_name="Test",
+            uuid=params.get('id', None),
+            consistency_level=weaviate.data.replication.ConsistencyLevel.ALL,  # default QUORUM
+        )
+        return
 
 
 
@@ -278,17 +303,64 @@ class SemanticMemory:
 
 
 
-    def _update_memories(self ,memory_id:str="None", semantic_memory: str="None") -> None:
+    async def _add_memories(self, semantic_memory: str="None") ->list[str]:
         """Update semantic memory for the user"""
 
         if self.db_type == "weaviate":
-            self.vector_db.add_memories( observation = semantic_memory)
+            out = await self.vector_db.add_memories( observation = semantic_memory)
+            return out
 
         elif self.db_type == "pinecone":
             pass
 
 
-    def _fetch_memories(self, observation: str,params) -> dict[str, str] | str:
+    async def _fetch_memories(self, observation: str,params:str=None) -> Coroutine[Any, Any, Any]:
+        """Fetch related characteristics, preferences or dislikes for a user."""
+        # self.init_pinecone(index_name=self.index)
+
+        if self.db_type == "weaviate":
+
+            return await self.vector_db.fetch_memories(observation, params)
+
+        elif self.db_type == "pinecone":
+            pass
+
+    async def _delete_memories(self,params:str=None) -> Coroutine[Any, Any, Any]:
+        """Fetch related characteristics, preferences or dislikes for a user."""
+        # self.init_pinecone(index_name=self.index)
+
+        if self.db_type == "weaviate":
+
+            return await self.vector_db.delete_memories( params=params)
+
+        elif self.db_type == "pinecone":
+            pass
+
+class EpisodicMemory:
+    def __init__(self, user_id: str, memory_id:str, ltm_memory_id:str, index_name: str, db_type:str="weaviate", namespace:str="EPISODICMEMORY"):
+        # Add any semantic memory-related attributes or setup here
+        self.user_id=user_id
+        self.index_name = index_name
+        self.namespace = namespace
+        self.episodic_memory_id = str(uuid.uuid4())
+        self.memory_id = memory_id
+        self.ltm_memory_id = ltm_memory_id
+        self.vector_db = VectorDB(user_id=user_id, memory_id= self.memory_id, ltm_memory_id = self.ltm_memory_id, index_name=index_name, db_type=db_type, namespace=self.namespace)
+        self.db_type = db_type
+
+
+
+    async def _add_memories(self ,observation:str=None) -> list[str]:
+        """Update semantic memory for the user"""
+
+        if self.db_type == "weaviate":
+            return await self.vector_db.add_memories( observation = observation)
+
+        elif self.db_type == "pinecone":
+            pass
+
+
+    def _fetch_memories(self, observation: str,params:str=None) -> Coroutine[Any, Any, Any]:
         """Fetch related characteristics, preferences or dislikes for a user."""
         # self.init_pinecone(index_name=self.index)
 
@@ -298,7 +370,16 @@ class SemanticMemory:
 
         elif self.db_type == "pinecone":
             pass
+    async def _delete_memories(self, params:str=None) -> Coroutine[Any, Any, Any]:
+        """Fetch related characteristics, preferences or dislikes for a user."""
+        # self.init_pinecone(index_name=self.index)
 
+        if self.db_type == "weaviate":
+
+            return await self.vector_db.delete_memories( params=params)
+
+        elif self.db_type == "pinecone":
+            pass
 
 class LongTermMemory:
     def __init__(self, user_id: str = "676", memory_id:str=None, index_name: str = None, namespace:str=None, db_type:str="weaviate"):
@@ -310,6 +391,10 @@ class LongTermMemory:
         self.db_type = db_type
         # self.episodic_memory = EpisodicMemory()
         self.semantic_memory = SemanticMemory(user_id = self.user_id, memory_id=self.memory_id, ltm_memory_id = self.ltm_memory_id, index_name=self.index_name, db_type=self.db_type)
+        self.episodic_memory = EpisodicMemory(user_id=self.user_id, memory_id=self.memory_id,
+                                              ltm_memory_id=self.ltm_memory_id, index_name=self.index_name,
+                                              db_type=self.db_type)
+
 
 class ShortTermMemory:
     def __init__(self, user_id: str = "676", memory_id:str=None, index_name: str = None, namespace:str=None, db_type:str="weaviate"):
@@ -387,14 +472,49 @@ class EpisodicBuffer:
         query = await vector_db.add_memories(observation)
         return query
 
+    async def _delete_memories(self, params:str=None) -> Coroutine[Any, Any, Any]:
+        """Fetch related characteristics, preferences or dislikes for a user."""
+        # self.init_pinecone(index_name=self.index)
 
-    def encoding(self, document: str, namespace: str = "EPISODICBUFFER") -> None:
+        if self.db_type == "weaviate":
+
+            return await self.vector_db.delete_memories( params=params)
+
+        elif self.db_type == "pinecone":
+            pass
+
+    async def freshness(self, observation: str,namespace:str) -> str:
+        """Freshness - Score between 1 and 5  on how often was the information processed in episodic memory in the past"""
+
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+
+        # gg = await memory._run_buffer(user_input= "bla", content = "blablabla ")
+        # print(gg)
+
+        ggur = await memory._fetch_episodic_memory(observation="bla bla bla")
+        print(ggur)
+        # @ai_classifier
+        # class MemoryRoute(Enum):
+        #     """Represents classifer for semantic fetching of memories"""
+        #
+        #     storage_of_documents_and_knowledge_to_memory = "SEMANTICMEMORY"
+        #     raw_information_currently_processed_in_short_term_memory = "EPISODICBUFFER"
+        #     raw_information_kept_in_short_term_memory = "SHORTTERMMEMORY"
+        #     long_term_recollections_of_past_events_and_emotions = "EPISODICMEMORY"
+        #     raw_information_to_store_as_events = "EVENTBUFFER"
+        #
+        # namespace= MemoryRoute(observation)
+
+        return ggur
+
+    async def encoding(self, document: str, namespace: str = "EPISODICBUFFER") -> None:
         """Encoding for the buffer, stores raw data in the buffer
         Note, this is not comp-sci encoding, but rather encoding in the sense of storing the content in the buffer"""
         vector_db = VectorDB(user_id=self.user_id, memory_id=self.memory_id, st_memory_id=self.st_memory_id,
                              index_name=self.index_name, db_type=self.db_type, namespace=namespace)
 
-        query = vector_db.add_memories(document)
+        query = await vector_db.add_memories(document)
         return query
 
     async def main_buffer(self, user_input=None, content=None):
@@ -406,13 +526,23 @@ class EpisodicBuffer:
         if content is not None:
 
             #We need to encode the content. Note, this is not comp-sci encoding, but rather encoding in the sense of storing the content in the buffer
-            self.encoding(content)
+            output_translated = GoogleTranslator(source='auto', target='en').translate(text=content)
+            await self.encoding(output_translated)
+            freshness_score =await  self.freshness(output_translated, namespace="EPISODICBUFFER")
+            print(freshness_score)
+            # shows how much the data is relevant for the user, provided by the user in a separate step, starts at 0
+            user_relevance_score ="0"
+            # similarity score between the user input and the content already available in the buffer
 
-            prompt_filter = ChatPromptTemplate.from_template("Filter and remove uneccessary information that is not relevant in the user query {query}")
-            chain_filter = prompt_filter | self.llm
-            output = await chain_filter.ainvoke({"query": user_input})
 
-            print(output)
+
+
+
+            # prompt_filter = ChatPromptTemplate.from_template("Filter and remove uneccessary information that is not relevant in the user query {query}")
+            # chain_filter = prompt_filter | self.llm
+            # output = await chain_filter.ainvoke({"query": user_input})
+
+            # print(output)
 
         if content is None:
             # Sensory and Linguistic Processing
@@ -424,7 +554,7 @@ class EpisodicBuffer:
 
             def top_down_processing():
                 """Top-down processing"""
-
+                pass
 
             def bottom_up_processing():
                 """Bottom-up processing"""
@@ -434,6 +564,9 @@ class EpisodicBuffer:
             def interactive_processing():
                 """interactive processing"""
                 pass
+
+
+
 
 
             working_memory_activation =  "bla"
@@ -652,31 +785,55 @@ class Memory:
         #     user_id=self.user_id, memory_id=self.memory_id, index_name=self.index_name, db_type=self.db_type
         # )
 
-    def _update_semantic_memory(self, semantic_memory:str):
-        return self.long_term_memory.semantic_memory._update_memories(
-            memory_id=self.memory_id,
+    async def _add_semantic_memory(self, semantic_memory:str):
+        return await self.long_term_memory.semantic_memory._add_memories(
             semantic_memory=semantic_memory
 
         )
 
-    def _fetch_semantic_memory(self, observation, params):
-        return self.long_term_memory.semantic_memory._fetch_memories(
+    async def _fetch_semantic_memory(self, observation, params):
+        return await self.long_term_memory.semantic_memory._fetch_memories(
             observation=observation, params=params
 
 
 
         )
+    async def _delete_semantic_memory(self,  params:str=None):
+        return await self.long_term_memory.semantic_memory._delete_memories(
+            params=params
+        )
 
-    async def _run_buffer(self, user_input:str):
-        return await self.short_term_memory.episodic_buffer.main_buffer(user_input=user_input)
+    async def _add_episodic_memory(self, observation:str):
+        return await self.long_term_memory.episodic_memory._add_memories(
+            observation=observation
+
+        )
+
+    async def _fetch_episodic_memory(self, observation, params:str=None):
+        return await self.long_term_memory.episodic_memory._fetch_memories(
+            observation=observation, params=params
+        )
+
+    async def _delete_episodic_memory(self, params:str=None):
+        return await self.long_term_memory.episodic_memory._delete_memories(
+             params=params
+        )
+
+    async def _run_buffer(self, user_input:str, content:str=None):
+        return await self.short_term_memory.episodic_buffer.main_buffer(user_input=user_input, content=content)
 
 
 
-    async def _add_memories_buffer(self, user_input: str, namespace: str = None ):
+    async def _add_buffer_memory(self, user_input: str, namespace: str = None ):
         return await self.short_term_memory.episodic_buffer._add_memories(observation=user_input, namespace=namespace)
 
-    async def _fetch_memories_buffer(self, user_input: str, namespace: str = None ):
+    async def _fetch_buffer_memory(self, user_input: str, namespace: str = None ):
         return await self.short_term_memory.episodic_buffer._fetch_memories(observation=user_input, namespace=namespace)
+
+    async def _delete_buffer_memory(self, params:str=None):
+        return await self.long_term_memory.episodic_buffer._delete_memories(
+             params=params
+        )
 
 
 
@@ -684,12 +841,18 @@ async def main():
     memory = Memory(user_id="123")
     await memory.async_init()
 
-    # gg = await memory._run_buffer(user_input="I want to get a my past data from 2017")
+    # gg = await memory._run_buffer(user_input= "bla", content = "blablabla ")
+    # print(gg)
 
-    ggur = await memory._add_memories_buffer(user_input = "bla bla bla", namespace="test")
-    print(ggur)
-    fff = await memory._fetch_memories_buffer(user_input = "bla bla bla", namespace="Test")
-    print(fff)
+    gg = await memory._delete_episodic_memory()
+    print(gg)
+
+    # ggur = await memory._add_episodic_memory(observation = "bla bla bla")
+    # print(ggur)
+    # ggur = await memory._fetch_episodic_memory(observation = "bla bla bla")
+    # print(ggur)
+    # fff = await memory._fetch_memories_buffer(user_input = "bla bla bla", namespace="Test")
+    # print(fff)
 
 if __name__ == "__main__":
     import asyncio

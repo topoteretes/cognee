@@ -114,7 +114,7 @@ async def upload_pdf_and_payload(
             logging.info(" PDF split into pages")
             Memory_ = Memory(index_name="my-agent", user_id='555' )
             await Memory_.async_init()
-            Memory_._run_buffer(user_input="I want to get a schema for my data", content =pages)
+            Memory_._add_episodic_memory(user_input="I want to get a schema for my data", content =pages)
 
 
             # Run the buffer
@@ -135,7 +135,82 @@ async def upload_pdf_and_payload(
 
             # Append the in-memory file to the files list
             # files.append(UploadFile(pdf_stream, filename="downloaded.pdf"))
-    #
+
+
+
+def memory_factory(memory_type):
+    class Payload(BaseModel):
+        payload: Dict[str, Any]
+    @app.post("/{memory_type}/add-memory", response_model=dict)
+    async def add_memory(
+            payload: Payload,
+            # files: List[UploadFile] = File(...),
+    ):
+        try:
+
+
+            decoded_payload = payload.payload
+
+            Memory_ = Memory( user_id='555')
+
+            await Memory_.async_init()
+
+            memory_class = getattr(Memory_, f"_add_{memory_type}_memory", None)
+            output= memory_class(observation=decoded_payload['prompt'])
+            return JSONResponse(content={"response": output}, status_code=200)
+
+        except Exception as e:
+
+            return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
+
+    @app.post("/{memory_type}/fetch-memory", response_model=dict)
+    async def add_memory(
+            payload: Payload,
+            # files: List[UploadFile] = File(...),
+    ):
+        try:
+
+            decoded_payload = payload.payload
+
+            Memory_ = Memory(user_id='555')
+
+            await Memory_.async_init()
+
+            memory_class = getattr(Memory_, f"_fetch_{memory_type}_memory", None)
+            output = memory_class(observation=decoded_payload['prompt'])
+            return JSONResponse(content={"response": output}, status_code=200)
+
+        except Exception as e:
+
+            return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
+
+    @app.post("/{memory_type}/delete-memory", response_model=dict)
+    async def add_memory(
+            payload: Payload,
+            # files: List[UploadFile] = File(...),
+    ):
+        try:
+
+            decoded_payload = payload.payload
+
+            Memory_ = Memory(user_id='555')
+
+            await Memory_.async_init()
+
+            memory_class = getattr(Memory_, f"_delete_{memory_type}_memory", None)
+            output = memory_class(observation=decoded_payload['prompt'])
+            return JSONResponse(content={"response": output}, status_code=200)
+
+        except Exception as e:
+
+            return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
+
+memory_list = ["episodic", "buffer", "semantic"]
+for memory_type in memory_list:
+    memory_factory(memory_type)
+
+
+#
     #     # Process each uploaded PDF file
     #     results = []
     #     for file in files:
