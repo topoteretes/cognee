@@ -35,9 +35,10 @@ python-jose = "^3.3.0"
 pypdf = "^3.12.0"
 fastjsonschema = "^2.18.0"
 marvin = "^1.3.0"
-dlt = { version ="^0.3.8" , extras = ["duckdb"]}
+dlt = { version ="^0.3.8",  extras = ["duckdb"]}
 weaviate-client = "^3.22.1"
 python-multipart = "^0.0.6"
+deep-translator = "^1.11.4"
 
 
 
