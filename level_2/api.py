@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from langchain.document_loaders import PyPDFLoader
 
 from level_2_pdf_vectorstore__dlt_contracts import Memory
@@ -27,7 +29,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 app = FastAPI(debug=True)
 
@@ -63,82 +65,73 @@ def health_check():
 
 #curl -X POST -H "Content-Type: application/json" -d '{"data": "YourPayload"}' -F "files=@/path/to/your/pdf/file.pdf" http://127.0.0.1:8000/upload/
 
-from fastapi import FastAPI, UploadFile, File
-import requests
-import os
-import json
-
-app = FastAPI()
-
-
-from io import BytesIO
-
 
 class Payload(BaseModel):
     payload: Dict[str, Any]
 
-@app.post("/upload/", response_model=dict)
-async def upload_pdf_and_payload(
-        payload: Payload,
-        # files: List[UploadFile] = File(...),
-):
-    try:
-        # Process the payload
-        decoded_payload = payload.payload
-    # except:
-    #     pass
-    #
-    # return JSONResponse(content={"response": decoded_payload}, status_code=200)
-
-        # Download the remote PDF if URL is provided
-        if 'pdf_url' in decoded_payload:
-            pdf_response = requests.get(decoded_payload['pdf_url'])
-            pdf_content = pdf_response.content
-
-            logging.info("Downloaded PDF from URL")
-
-            # Create an in-memory file-like object for the PDF content
-            pdf_stream = BytesIO(pdf_content)
-
-            contents = pdf_stream.read()
-
-            tmp_location = os.path.join('/tmp', "tmp.pdf")
-            with open(tmp_location, 'wb') as tmp_file:
-                tmp_file.write(contents)
-
-            logging.info("Wrote PDF from URL")
-
-            # Process the PDF using PyPDFLoader
-            loader = PyPDFLoader(tmp_location)
-            pages = loader.load_and_split()
-            logging.info(" PDF split into pages")
-            Memory_ = Memory(index_name="my-agent", user_id='555' )
-            await Memory_.async_init()
-            Memory_._add_episodic_memory(user_input="I want to get a schema for my data", content =pages)
-
-
-            # Run the buffer
-            response = Memory_._run_buffer(user_input="I want to get a schema for my data")
-            return JSONResponse(content={"response": response}, status_code=200)
-
-            #to do: add the user id to the payload
-            #to do add the raw pdf to payload
-            # bb = await Memory_._run_buffer(user_input=decoded_payload['prompt'])
-            # print(bb)
-
-
-    except Exception as e:
-
-        return {"error": str(e)}
-            # Here you can perform your processing on the PDF contents
-            # results.append({"filename": file.filename, "size": len(contents)})
-
-            # Append the in-memory file to the files list
-            # files.append(UploadFile(pdf_stream, filename="downloaded.pdf"))
-
+# @app.post("/upload/", response_model=dict)
+# async def upload_pdf_and_payload(
+#         payload: Payload,
+#         # files: List[UploadFile] = File(...),
+# ):
+#     try:
+#         # Process the payload
+#         decoded_payload = payload.payload
+#     # except:
+#     #     pass
+#     #
+#     # return JSONResponse(content={"response": decoded_payload}, status_code=200)
+#
+#         # Download the remote PDF if URL is provided
+#         if 'pdf_url' in decoded_payload:
+#             pdf_response = requests.get(decoded_payload['pdf_url'])
+#             pdf_content = pdf_response.content
+#
+#             logging.info("Downloaded PDF from URL")
+#
+#             # Create an in-memory file-like object for the PDF content
+#             pdf_stream = BytesIO(pdf_content)
+#
+#             contents = pdf_stream.read()
+#
+#             tmp_location = os.path.join('/tmp', "tmp.pdf")
+#             with open(tmp_location, 'wb') as tmp_file:
+#                 tmp_file.write(contents)
+#
+#             logging.info("Wrote PDF from URL")
+#
+#             # Process the PDF using PyPDFLoader
+#             loader = PyPDFLoader(tmp_location)
+#             pages = loader.load_and_split()
+#             logging.info(" PDF split into pages")
+#             Memory_ = Memory(index_name="my-agent", user_id='555' )
+#             await Memory_.async_init()
+#             Memory_._add_episodic_memory(user_input="I want to get a schema for my data", content =pages)
+#
+#
+#             # Run the buffer
+#             response = Memory_._run_buffer(user_input="I want to get a schema for my data")
+#             return JSONResponse(content={"response": response}, status_code=200)
+#
+#             #to do: add the user id to the payload
+#             #to do add the raw pdf to payload
+#             # bb = await Memory_._run_buffer(user_input=decoded_payload['prompt'])
+#             # print(bb)
+#
+#
+#     except Exception as e:
+#
+#         return {"error": str(e)}
+#             # Here you can perform your processing on the PDF contents
+#             # results.append({"filename": file.filename, "size": len(contents)})
+#
+#             # Append the in-memory file to the files list
+#             # files.append(UploadFile(pdf_stream, filename="downloaded.pdf"))
+#
 
 
 def memory_factory(memory_type):
+    load_dotenv()
     class Payload(BaseModel):
         payload: Dict[str, Any]
     @app.post("/{memory_type}/add-memory", response_model=dict)
@@ -148,16 +141,40 @@ def memory_factory(memory_type):
     ):
         try:
 
+            logging.info(" Init PDF processing")
+
 
             decoded_payload = payload.payload
 
-            Memory_ = Memory( user_id='555')
+            if 'pdf_url' in decoded_payload:
+                pdf_response = requests.get(decoded_payload['pdf_url'])
+                pdf_content = pdf_response.content
 
-            await Memory_.async_init()
+                logging.info("Downloaded PDF from URL")
 
-            memory_class = getattr(Memory_, f"_add_{memory_type}_memory", None)
-            output= memory_class(observation=decoded_payload['prompt'])
-            return JSONResponse(content={"response": output}, status_code=200)
+                # Create an in-memory file-like object for the PDF content
+                pdf_stream = BytesIO(pdf_content)
+
+                contents = pdf_stream.read()
+
+                tmp_location = os.path.join('/tmp', "tmp.pdf")
+                with open(tmp_location, 'wb') as tmp_file:
+                    tmp_file.write(contents)
+
+                logging.info("Wrote PDF from URL")
+
+                # Process the PDF using PyPDFLoader
+                loader = PyPDFLoader(tmp_location)
+                # pages = loader.load_and_split()
+                logging.info(" PDF split into pages")
+
+                Memory_ = Memory(user_id='555')
+
+                await Memory_.async_init()
+
+                memory_class = getattr(Memory_, f"_add_{memory_type}_memory", None)
+                output= await memory_class(observation=str(loader))
+                return JSONResponse(content={"response": output}, status_code=200)
 
         except Exception as e:
 
