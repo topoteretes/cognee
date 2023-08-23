@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.10"
 #langchain = {git = "https://github.com/topoteretes/langchain.git" , tag = "v0.0.209"}
-langchain = "v0.0.250"
+langchain = "v0.0.271"
 
 nltk = "3.8.1"
 openai = "0.27.8"

@@ -13,6 +13,7 @@ import asyncio
 from typing import Any, Dict, List, Coroutine
 from deep_translator import (GoogleTranslator)
 from langchain.chat_models import ChatOpenAI
+from langchain.output_parsers import PydanticOutputParser
 from langchain.schema import LLMResult, HumanMessage
 from langchain.callbacks.base import AsyncCallbackHandler, BaseCallbackHandler
 from pydantic import BaseModel, Field, parse_obj_as
@@ -512,14 +513,6 @@ class EpisodicBuffer:
 
         # self.vector_db = VectorDB(user_id=user_id, memory_id= self.memory_id, st_memory_id = self.st_memory_id, index_name=index_name, db_type=db_type, namespace=self.namespace)
 
-        def _compute_weights(self, context: str):
-            """Computes the weights for the buffer"""
-            pass
-
-        def _temporal_weighting(self, context: str):
-            """Computes the temporal weighting for the buffer"""
-            pass
-
     # async def infer_schema_from_text(self, text: str):
     #     """Infer schema from text"""
     #
@@ -739,7 +732,46 @@ class EpisodicBuffer:
         # Extract the list of tasks
         tasks_list = data["tasks"]
 
+        result_tasks =[]
+
         for task in tasks_list:
+            class PromptWrapper(BaseModel):
+                observation: str = Field(
+                    description="observation we want to fetch from vectordb"
+                )
+            @tool("convert_to_structured", args_schema=PromptWrapper, return_direct=True)
+            def convert_to_structured( observation=None, json_schema=None):
+                """Convert unstructured data to structured data"""
+                BASE_DIR = os.getcwd()
+                json_path = os.path.join(BASE_DIR, "schema_registry", "ticket_schema.json")
+
+                def load_json_or_infer_schema(file_path, document_path):
+                    """Load JSON schema from file or infer schema from text"""
+
+                    # Attempt to load the JSON file
+                    with open(file_path, 'r') as file:
+                        json_schema = json.load(file)
+                    return json_schema
+
+                json_schema =load_json_or_infer_schema(json_path, None)
+                def run_open_ai_mapper(observation=None, json_schema=None):
+                    """Convert unstructured data to structured data"""
+
+                    prompt_msgs = [
+                        SystemMessage(
+                            content="You are a world class algorithm converting unstructured data into structured data."
+                        ),
+                        HumanMessage(content="Convert unstructured data to structured data:"),
+                        HumanMessagePromptTemplate.from_template("{input}"),
+                        HumanMessage(content="Tips: Make sure to answer in the correct format"),
+                    ]
+                    prompt_ = ChatPromptTemplate(messages=prompt_msgs)
+                    chain_funct = create_structured_output_chain(json_schema, prompt=prompt_, llm=self.llm, verbose=True)
+                    output = chain_funct.run(input=observation, llm=self.llm)
+                    return output
+
+                result = run_open_ai_mapper(observation, json_schema)
+                return result
             class TranslateText(BaseModel):
                 observation: str = Field(
                     description="observation we want to translate"
@@ -753,7 +785,7 @@ class EpisodicBuffer:
 
             agent = initialize_agent(
                 llm=self.llm,
-                tools=[translate_to_en],
+                tools=[translate_to_en, convert_to_structured],
                 agent=AgentType.OPENAI_FUNCTIONS,
 
                 verbose=True,
@@ -761,25 +793,50 @@ class EpisodicBuffer:
             print("HERE IS THE TASK", task)
             output = agent.run(input=task)
             print(output)
-            await self.encoding(output)
+            result_tasks.append(task)
+            result_tasks.append(output)
+
+
+        await self.encoding(str(result_tasks), self.namespace, params=params)
 
 
 
         buffer_result = await self._fetch_memories(observation=str(output), namespace=self.namespace)
 
-        #json here
 
-        prompt_filter = ChatPromptTemplate.from_template(
-            "Format and collect all outputs from the tasks presented here {tasks} and their results {results}")
-        chain_filter_chunk = prompt_filter | self.llm.bind(function_call={"TaskList": "tasks"}, functions=TaskList)
-        output = await chain_filter_chunk.ainvoke({"query": buffer_result})
-        print("HERE IS THE OUTPUT", output)
+        class EpisodicTask(BaseModel):
+            """Schema for an individual task."""
+            task_order: str = Field(..., description="The order at which the task needs to be performed")
+            task_name: str = Field(None, description="The task that needs to be performed")
+            operation: str = Field(None, description="The operation to be performed")
 
+        class EpisodicList(BaseModel):
+            """Schema for the record containing a list of tasks."""
+            tasks: List[EpisodicTask] = Field(..., description="List of tasks")
+            start_date: str = Field(..., description="The order at which the task needs to be performed")
+            end_date: str = Field(..., description="The order at which the task needs to be performed")
+            user_query: str = Field(..., description="The order at which the task needs to be performed")
 
-        memory = Memory(user_id=self.user_id)
-        await memory.async_init()
+        parser = PydanticOutputParser(pydantic_object=EpisodicList)
 
-        lookup_value = await memory._add_episodic_memory(observation=str(output), params={})
+        prompt = PromptTemplate(
+            template="Format the result.\n{format_instructions}\nOriginal query is: {query}\n Steps are: {steps}, buffer is: {buffer}",
+            input_variables=["query", "steps", "buffer"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+
+        _input = prompt.format_prompt(query=user_input, steps=str(tasks_list), buffer=buffer_result)
+
+        return "a few things to do like load episodic memory in a structured format"
+
+        # output = self.llm(_input.to_string())
+        #
+        # parser.parse(output)
+        # memory = Memory(user_id=self.user_id)
+        # await memory.async_init()
+        #
+        # lookup_value = await memory._add_episodic_memory(observation=str(output), params=params)
+        # return lookup_value
 
 
         #load to buffer once is done
@@ -1163,8 +1220,8 @@ class Memory:
             params=params
         )
 
-    async def _run_buffer(self, user_input: str, content: str = None):
-        return await self.short_term_memory.episodic_buffer.main_buffer(user_input=user_input, content=content)
+    async def _run_buffer(self, user_input: str, content: str = None, params:str=None):
+        return await self.short_term_memory.episodic_buffer.main_buffer(user_input=user_input, content=content, params=params)
 
     async def _add_buffer_memory(self, user_input: str, namespace: str = None, params: dict = None):
         return await self.short_term_memory.episodic_buffer._add_memories(observation=user_input, namespace=namespace,
@@ -1197,7 +1254,7 @@ async def main():
         "validity_end": "2024-07-31"
     }
 
-    gg = await memory._run_buffer(user_input="i NEED TRANSLATION TO GERMAN ", content="i NEED TRANSLATION TO GERMAN ")
+    gg = await memory._run_buffer(user_input="i NEED TRANSLATION TO GERMAN ", content="i NEED TRANSLATION TO GERMAN ", params=params)
     print(gg)
 
     # gg = await memory._delete_buffer_memory()
