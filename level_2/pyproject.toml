@@ -39,6 +39,7 @@ dlt = { version ="^0.3.8",  extras = ["duckdb"]}
 weaviate-client = "^3.22.1"
 python-multipart = "^0.0.6"
 deep-translator = "^1.11.4"
+humanize = "^4.8.0"
 
 
 

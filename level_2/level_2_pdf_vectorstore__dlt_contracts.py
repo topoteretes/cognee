@@ -55,7 +55,7 @@ from langchain.schema import Document, SystemMessage, HumanMessage
 from langchain.vectorstores import Weaviate
 import weaviate
 import uuid
-
+import humanize
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -542,7 +542,7 @@ class EpisodicBuffer:
         vector_db = VectorDB(user_id=self.user_id, memory_id=self.memory_id, st_memory_id=self.st_memory_id,
                              index_name=self.index_name, db_type=self.db_type, namespace=namespace)
 
-        query = await vector_db.fetch_memories(observation=observation)
+        query = await vector_db.fetch_memories(observation=observation, namespace=namespace)
         return query
 
     async def _add_memories(self, observation: str, namespace: str, params: dict = None):
@@ -555,175 +555,380 @@ class EpisodicBuffer:
     async def _delete_memories(self, params: str = None) -> Coroutine[Any, Any, Any]:
         """Fetch related characteristics, preferences or dislikes for a user."""
         # self.init_pinecone(index_name=self.index)
+        vector_db = VectorDB(user_id=self.user_id, memory_id=self.memory_id, st_memory_id=self.st_memory_id,
+                             index_name=self.index_name, db_type=self.db_type, namespace=self.namespace)
 
         if self.db_type == "weaviate":
 
-            return await self.vector_db.delete_memories(params=params)
+            return await vector_db.delete_memories(params=params)
 
         elif self.db_type == "pinecone":
             pass
 
-    # async def freshness(self, observation: str,namespace:str) -> str:
-    #     """Freshness - Score between 1 and 5  on how often was the information processed in episodic memory in the past"""
-    #
-    #     memory = Memory(user_id=self.user_id)
-    #     await memory.async_init()
-    #
-    #     # gg = await memory._run_buffer(user_input= "bla", content = "blablabla ")
-    #     # print(gg)
-    #
-    #
-    #
-    #     ggur = await memory._fetch_episodic_memory(observation=observation)
-    #     print(ggur)
+    async def freshness(self, observation: str,namespace:str=None) -> list[str]:
+        """Freshness - Score between 1 and 5  on how often was the information updated in episodic or semantic memory in the past"""
+
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+
+        lookup_value = await memory._fetch_episodic_memory(observation = observation)
+        unix_t = lookup_value["data"]["Get"]["EPISODICMEMORY"][0]["_additional"]["lastUpdateTimeUnix"]
+
+        # Convert Unix timestamp to datetime
+        last_update_datetime = datetime.fromtimestamp(int(unix_t) / 1000)
+        time_difference = datetime.now() - last_update_datetime
+        time_difference_text = humanize.naturaltime(time_difference)
+        marvin.settings.openai.api_key = os.environ.get('OPENAI_API_KEY')
+        @ai_classifier
+        class MemoryRoute(Enum):
+            """Represents classifer for freshness of memories"""
+
+            data_uploaded_now = "0"
+            data_uploaded_very_recently = "1"
+            data_uploaded_recently = "2"
+            data_uploaded_more_than_a_month_ago = "3"
+            data_uploaded_more_than_three_months_ago = "4"
+            data_uploaded_more_than_six_months_ago = "5"
+
+        namespace = MemoryRoute(str(time_difference_text))
+        return [namespace.value, lookup_value]
+
+
+    async def frequency(self, observation: str,namespace:str) -> list[str]:
+        """Frequency - Score between 1 and 5 on how often was the information processed in episodic memory in the past
+           Counts the number of times a memory was accessed in the past and divides it by the total number of memories in the episodic memory """
+        client = self.init_weaviate_client(self.namespace)
+
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+
+        result_output = await memory._fetch_episodic_memory(observation=observation)
+        number_of_relevant_events = len(result_output["data"]["Get"]["EPISODICMEMORY"])
+        number_of_total_events = client.query.aggregate( self.namespace).with_meta_count().do()
+        frequency = float(number_of_relevant_events) / float(number_of_total_events)
+        return [str(frequency), result_output["data"]["Get"]["EPISODICMEMORY"][0]]
+
+
+
+    async def relevance(self, observation: str) -> list[str]:
+        """Relevance - Score between 1 and 5 on how often was the final information relevant to the user in the past.
+           Stored in the episodic memory, mainly to show how well a buffer did the job
+           Starts at 1, gets updated based on the user feedback """
+
+        return ["5", "memory"]
+
+    async def saliency(self, observation: str) -> list[str]:
+        """Determines saliency by finding relevance between user input and document schema values.
+        After finding document schena value relevant for the user, it forms a new query based on the schema value and the user input """
+
+        return ["5", "memory"]
 
     # @ai_classifier
     # class MemoryRoute(Enum):
-    #     """Represents classifer for semantic fetching of memories"""
+    #     """Represents classifer for freshness of memories"""
     #
-    #     storage_of_documents_and_knowledge_to_memory = "SEMANTICMEMORY"
-    #     raw_information_currently_processed_in_short_term_memory = "EPISODICBUFFER"
-    #     raw_information_kept_in_short_term_memory = "SHORTTERMMEMORY"
-    #     long_term_recollections_of_past_events_and_emotions = "EPISODICMEMORY"
-    #     raw_information_to_store_as_events = "EVENTBUFFER"
+    #     data_uploaded_now = "0"
+    #     data_uploaded_very_recently = "1"
+    #     data_uploaded_recently = "2"
+    #     data_uploaded_more_than_a_month_ago = "3"
+    #     data_uploaded_more_than_three_months_ago = "4"
+    #     data_uploaded_more_than_six_months_ago = "5"
     #
     # namespace= MemoryRoute(observation)
 
     # return ggur
 
-    async def encoding(self, document: str, namespace: str = "EPISODICBUFFER") -> None:
+    async def encoding(self, document: str, namespace: str = "EPISODICBUFFER", params:dict=None) -> list[str]:
         """Encoding for the buffer, stores raw data in the buffer
         Note, this is not comp-sci encoding, but rather encoding in the sense of storing the content in the buffer"""
         vector_db = VectorDB(user_id=self.user_id, memory_id=self.memory_id, st_memory_id=self.st_memory_id,
                              index_name=self.index_name, db_type=self.db_type, namespace=namespace)
 
-        query = await vector_db.add_memories(document)
+        query = await vector_db.add_memories(document, params=params)
         return query
 
-    async def main_buffer(self, user_input=None, content=None):
-        """AI buffer to convert unstructured data to structured data"""
-        # Here we define the user prompt and the structure of the output we desire
-        # prompt = output[0].page_content
+    async def available_operations(self) -> list[str]:
+        """Determines what operations are available for the user to process PDFs"""
 
+        return ["translate", "structure", "load to database", "load to semantic memory", "load to episodic memory", "load to buffer"]
+
+    async def main_buffer(self, user_input=None, content=None, params=None):
+
+        """AI buffer to understand user PDF query, prioritize memory info and process it based on available operations"""
+
+
+        list_of_operations = await self.available_operations()
+
+
+        #we just filter the data here
+        prompt_filter = ChatPromptTemplate.from_template(
+            "Filter and remove uneccessary information that is not relevant in the user query {query}")
+        chain_filter = prompt_filter | self.llm
+        output = await chain_filter.ainvoke({"query": user_input})
+
+
+        if params:
+            context =[]
+
+            if "freshness" in params:
+                params.get('freshness', None) # get the value of freshness
+                freshness = await self.freshness(observation=str(output))
+                context.append(freshness)
+
+            elif "frequency" in params:
+                params.get('freshness', None)
+                frequency = await self.freshness(observation=str(output))
+                print("freshness", frequency)
+                context.append(frequency)
+
+                #fix this so it actually filters
+
+
+        else:
+            #defaults to semantic search
+            memory = Memory(user_id=self.user_id)
+            await memory.async_init()
+
+            lookup_value_episodic = await memory._fetch_episodic_memory(observation=str(output))
+            lookup_value_semantic = await memory._fetch_episodic_memory(observation=str(output))
+            lookup_value_buffer = await self._fetch_memories(observation=str(output), namespace=self.namespace)
+
+            context = [lookup_value_episodic, lookup_value_semantic, lookup_value_buffer]
+            #copy the context over into the buffer
+            #do i need to do it for the episodic + raw data, might make sense
+
+
+
+        print("HERE WE ARE")
+
+        class Task(BaseModel):
+            """Schema for an individual task."""
+            task_order: str = Field(..., description="The order at which the task needs to be performed")
+            task_name: str = Field(None, description="The task that needs to be performed")
+            operation: str = Field(None, description="The operation to be performed")
+
+        class TaskList(BaseModel):
+            """Schema for the record containing a list of tasks."""
+            tasks: List[Task] = Field(..., description="List of tasks")
+
+        prompt_filter_chunk = f" Based on available operations {list_of_operations} determine only the relevant list of steps and operations sequentially based {output}"
+        # chain_filter_chunk = prompt_filter_chunk | self.llm.bind(function_call={"TaskList": "tasks"}, functions=TaskList)
+        # output_chunk = await chain_filter_chunk.ainvoke({"query": output, "list_of_operations": list_of_operations})
+        prompt_msgs = [
+            SystemMessage(
+                content="You are a world class algorithm for decomposing prompts into steps and operations and choosing relevant ones"
+            ),
+            HumanMessage(content="Decompose based on the following prompt:"),
+            HumanMessagePromptTemplate.from_template("{input}"),
+            HumanMessage(content="Tips: Make sure to answer in the correct format"),
+            HumanMessage(content="Tips: Only choose actions that are relevant to the user query and ignore others")
+
+        ]
+        prompt_ = ChatPromptTemplate(messages=prompt_msgs)
+        chain = create_structured_output_chain(TaskList, self.llm, prompt_, verbose=True)
+        from langchain.callbacks import get_openai_callback
+        with get_openai_callback() as cb:
+            output = await chain.arun(input=prompt_filter_chunk, verbose=True)
+            print(cb)
+        # output = json.dumps(output)
+        my_object = parse_obj_as(TaskList, output)
+        print("HERE IS THE OUTPUT", my_object.json())
+
+        data = json.loads(my_object.json())
+
+        # Extract the list of tasks
+        tasks_list = data["tasks"]
+
+        for task in tasks_list:
+            class TranslateText(BaseModel):
+                observation: str = Field(
+                    description="observation we want to translate"
+                )
+
+            @tool("translate_to_en", args_schema=TranslateText, return_direct=True)
+            def translate_to_en(observation, args_schema=TranslateText):
+                """Translate to English"""
+                out = GoogleTranslator(source='auto', target='en').translate(text=observation)
+                return out
+
+            agent = initialize_agent(
+                llm=self.llm,
+                tools=[translate_to_en],
+                agent=AgentType.OPENAI_FUNCTIONS,
+
+                verbose=True,
+            )
+            print("HERE IS THE TASK", task)
+            output = agent.run(input=task)
+            print(output)
+            await self.encoding(output)
+
+
+
+        buffer_result = await self._fetch_memories(observation=str(output), namespace=self.namespace)
+
+        #json here
+
+        prompt_filter = ChatPromptTemplate.from_template(
+            "Format and collect all outputs from the tasks presented here {tasks} and their results {results}")
+        chain_filter_chunk = prompt_filter | self.llm.bind(function_call={"TaskList": "tasks"}, functions=TaskList)
+        output = await chain_filter_chunk.ainvoke({"query": buffer_result})
+        print("HERE IS THE OUTPUT", output)
+
+
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+
+        lookup_value = await memory._add_episodic_memory(observation=str(output), params={})
+
+
+        #load to buffer once is done
+
+        #fetch everything in the current session and load to episodic memory
+
+
+
+
+
+
+
+        #for files where user input is provided and they are directly proccessed
+
+
+        #
+        # based on the semantic search , raw memory data will be fetched. also, episodic memory will be fetched
+        # they will be written down as a "context" for the user
+
+
+        # i get scores for the episodic memory and the semantic memory
+        # i get only the data with the highest score
+        # i use that data to form the context
         # file_upload
         #
 
-        if content is not None:
 
-            # operations -> translate, structure, load to db
+        #for files where user input is provided and they are directly proccessed
 
-            list_of_operations = ["translate", "structure", "load to db"]
 
-            prompt_filter = ChatPromptTemplate.from_template(
-                "Filter and remove uneccessary information that is not relevant in the user query {query}")
-            chain_filter = prompt_filter | self.llm
-            output = await chain_filter.ainvoke({"query": user_input})
-
-            class Task(BaseModel):
-                """Schema for an individual task."""
-                task_order: str = Field(..., description="The order at which the task needs to be performed")
-                task_name: str = Field(None, description="The task that needs to be performed")
-                operation: str = Field(None, description="The operation to be performed")
-
-            class TaskList(BaseModel):
-                """Schema for the record containing a list of tasks."""
-                tasks: List[Task] = Field(..., description="List of tasks")
-
-            prompt_filter_chunk = f" Based on available operations {list_of_operations} determine only the relevant list of steps and operations sequentially based {output}"
-            # chain_filter_chunk = prompt_filter_chunk | self.llm.bind(function_call={"TaskList": "tasks"}, functions=TaskList)
-            # output_chunk = await chain_filter_chunk.ainvoke({"query": output, "list_of_operations": list_of_operations})
-            prompt_msgs = [
-                SystemMessage(
-                    content="You are a world class algorithm for decomposing prompts into steps and operations and choosing relevant ones"
-                ),
-                HumanMessage(content="Decompose based on the following prompt:"),
-                HumanMessagePromptTemplate.from_template("{input}"),
-                HumanMessage(content="Tips: Make sure to answer in the correct format"),
-                HumanMessage(content="Tips: Only choose actions that are relevant to the user query and ignore others")
-
-            ]
-            prompt_ = ChatPromptTemplate(messages=prompt_msgs)
-            chain = create_structured_output_chain(TaskList, self.llm, prompt_, verbose=True)
-            from langchain.callbacks import get_openai_callback
-            with get_openai_callback() as cb:
-                output = await chain.arun(input=prompt_filter_chunk, verbose=True)
-                print(cb)
-            # output = json.dumps(output)
-            my_object = parse_obj_as(TaskList, output)
-            print("HERE IS THE OUTPUT", my_object.json())
-
-            data = json.loads(my_object.json())
-
-            # Extract the list of tasks
-            tasks_list = data["tasks"]
-
-            for task in tasks_list:
-                class TranslateText(BaseModel):
-                    observation: str = Field(
-                        description="observation we want to translate"
-                    )
-
-                @tool("translate_to_en", args_schema=TranslateText, return_direct=True)
-                def translate_to_en(observation, args_schema=TranslateText):
-                    """Translate to English"""
-                    out = GoogleTranslator(source='auto', target='en').translate(text=observation)
-                    return out
-
-                agent = initialize_agent(
-                    llm=self.llm,
-                    tools=[translate_to_en],
-                    agent=AgentType.OPENAI_FUNCTIONS,
-
-                    verbose=True,
-                )
-
-                agent.run(task)
-
-            # We need to encode the content. Note, this is not comp-sci encoding, but rather encoding in the sense of storing the content in the buffer
-            # output_translated = GoogleTranslator(source='auto', target='en').translate(text=content)
-            # await self.encoding(output_translated)
-            # freshness_score =await self.freshness(output_translated, namespace="EPISODICBUFFER")
-            # print(freshness_score)
-            # shows how much the data is relevant for the user, provided by the user in a separate step, starts at 0
-            user_relevance_score = "0"
-            # similarity score between the user input and the content already available in the buffer
-
-            # write this to episodic memory
-
-            # prompt_filter = ChatPromptTemplate.from_template("Filter and remove uneccessary information that is not relevant in the user query {query}")
-            # chain_filter = prompt_filter | self.llm
-            # output = await chain_filter.ainvoke({"query": user_input})
-
-            # print(output)
-
-        if content is None:
-            # Sensory and Linguistic Processing
-            prompt_filter = ChatPromptTemplate.from_template(
-                "Filter and remove uneccessary information that is not relevant in the user query {query}")
-            chain_filter = prompt_filter | self.llm
-            output = await chain_filter.ainvoke({"query": user_input})
-            translation = GoogleTranslator(source='auto', target='en').translate(text=output.content)
-
-            def top_down_processing():
-                """Top-down processing"""
-                pass
-
-            def bottom_up_processing():
-                """Bottom-up processing"""
-                pass
-
-            def interactive_processing():
-                """interactive processing"""
-                pass
-
-            working_memory_activation = "bla"
-
-            prompt_chunk = ChatPromptTemplate.from_template(
-                "Can you break down the instruction 'Structure a PDF and load it into duckdb' into smaller tasks or actions? Return only tasks or actions. Be brief")
-            chain_chunk = prompt_chunk | self.llm
-            output_chunks = await chain_chunk.ainvoke({"query": output.content})
-
-            print(output_chunks.content)
+        #
+        # #
+        #
+        # if content is not None:
+        #
+        #     # operations -> translate, structure, load to db
+        #
+        #     list_of_operations = ["translate", "structure", "load to db"]
+        #
+        #     prompt_filter = ChatPromptTemplate.from_template(
+        #         "Filter and remove uneccessary information that is not relevant in the user query {query}")
+        #     chain_filter = prompt_filter | self.llm
+        #     output = await chain_filter.ainvoke({"query": user_input})
+        #
+        #     class Task(BaseModel):
+        #         """Schema for an individual task."""
+        #         task_order: str = Field(..., description="The order at which the task needs to be performed")
+        #         task_name: str = Field(None, description="The task that needs to be performed")
+        #         operation: str = Field(None, description="The operation to be performed")
+        #
+        #     class TaskList(BaseModel):
+        #         """Schema for the record containing a list of tasks."""
+        #         tasks: List[Task] = Field(..., description="List of tasks")
+        #
+        #     prompt_filter_chunk = f" Based on available operations {list_of_operations} determine only the relevant list of steps and operations sequentially based {output}"
+        #     # chain_filter_chunk = prompt_filter_chunk | self.llm.bind(function_call={"TaskList": "tasks"}, functions=TaskList)
+        #     # output_chunk = await chain_filter_chunk.ainvoke({"query": output, "list_of_operations": list_of_operations})
+        #     prompt_msgs = [
+        #         SystemMessage(
+        #             content="You are a world class algorithm for decomposing prompts into steps and operations and choosing relevant ones"
+        #         ),
+        #         HumanMessage(content="Decompose based on the following prompt:"),
+        #         HumanMessagePromptTemplate.from_template("{input}"),
+        #         HumanMessage(content="Tips: Make sure to answer in the correct format"),
+        #         HumanMessage(content="Tips: Only choose actions that are relevant to the user query and ignore others")
+        #
+        #     ]
+        #     prompt_ = ChatPromptTemplate(messages=prompt_msgs)
+        #     chain = create_structured_output_chain(TaskList, self.llm, prompt_, verbose=True)
+        #     from langchain.callbacks import get_openai_callback
+        #     with get_openai_callback() as cb:
+        #         output = await chain.arun(input=prompt_filter_chunk, verbose=True)
+        #         print(cb)
+        #     # output = json.dumps(output)
+        #     my_object = parse_obj_as(TaskList, output)
+        #     print("HERE IS THE OUTPUT", my_object.json())
+        #
+        #     data = json.loads(my_object.json())
+        #
+        #     # Extract the list of tasks
+        #     tasks_list = data["tasks"]
+        #
+        #     for task in tasks_list:
+        #         class TranslateText(BaseModel):
+        #             observation: str = Field(
+        #                 description="observation we want to translate"
+        #             )
+        #
+        #         @tool("translate_to_en", args_schema=TranslateText, return_direct=True)
+        #         def translate_to_en(observation, args_schema=TranslateText):
+        #             """Translate to English"""
+        #             out = GoogleTranslator(source='auto', target='en').translate(text=observation)
+        #             return out
+        #
+        #         agent = initialize_agent(
+        #             llm=self.llm,
+        #             tools=[translate_to_en],
+        #             agent=AgentType.OPENAI_FUNCTIONS,
+        #
+        #             verbose=True,
+        #         )
+        #
+        #         agent.run(task)
+        #
+        #     # We need to encode the content. Note, this is not comp-sci encoding, but rather encoding in the sense of storing the content in the buffer
+        #     # output_translated = GoogleTranslator(source='auto', target='en').translate(text=content)
+        #     # await self.encoding(output_translated)
+        #     # freshness_score =await self.freshness(output_translated, namespace="EPISODICBUFFER")
+        #     # print(freshness_score)
+        #     # shows how much the data is relevant for the user, provided by the user in a separate step, starts at 0
+        #     user_relevance_score = "0"
+        #     # similarity score between the user input and the content already available in the buffer
+        #
+        #     # write this to episodic memory
+        #
+        #     # prompt_filter = ChatPromptTemplate.from_template("Filter and remove uneccessary information that is not relevant in the user query {query}")
+        #     # chain_filter = prompt_filter | self.llm
+        #     # output = await chain_filter.ainvoke({"query": user_input})
+        #
+        #     # print(output)
+        #
+        # if content is None:
+        #     # Sensory and Linguistic Processing
+        #     prompt_filter = ChatPromptTemplate.from_template(
+        #         "Filter and remove uneccessary information that is not relevant in the user query {query}")
+        #     chain_filter = prompt_filter | self.llm
+        #     output = await chain_filter.ainvoke({"query": user_input})
+        #     translation = GoogleTranslator(source='auto', target='en').translate(text=output.content)
+        #
+        #     def top_down_processing():
+        #         """Top-down processing"""
+        #         pass
+        #
+        #     def bottom_up_processing():
+        #         """Bottom-up processing"""
+        #         pass
+        #
+        #     def interactive_processing():
+        #         """interactive processing"""
+        #         pass
+        #
+        #     working_memory_activation = "bla"
+        #
+        #     prompt_chunk = ChatPromptTemplate.from_template(
+        #         "Can you break down the instruction 'Structure a PDF and load it into duckdb' into smaller tasks or actions? Return only tasks or actions. Be brief")
+        #     chain_chunk = prompt_chunk | self.llm
+        #     output_chunks = await chain_chunk.ainvoke({"query": output.content})
+        #
+        #     print(output_chunks.content)
 
         # vectorstore = Weaviate.from_documents(documents, embeddings, client=client, by_text=False)
         # retriever = WeaviateHybridSearchRetriever(
@@ -969,10 +1174,11 @@ class Memory:
         return await self.short_term_memory.episodic_buffer._fetch_memories(observation=user_input, namespace=namespace)
 
     async def _delete_buffer_memory(self, params: str = None):
-        return await self.long_term_memory.episodic_buffer._delete_memories(
+        return await self.short_term_memory.episodic_buffer._delete_memories(
             params=params
         )
-
+    async def _available_operations(self):
+        return await self.long_term_memory.episodic_buffer._available_operations()
 
 async def main():
     memory = Memory(user_id="123")
@@ -994,15 +1200,34 @@ async def main():
     gg = await memory._run_buffer(user_input="i NEED TRANSLATION TO GERMAN ", content="i NEED TRANSLATION TO GERMAN ")
     print(gg)
 
-    # gg = await memory._delete_episodic_memory()
+    # gg = await memory._delete_buffer_memory()
     # print(gg)
 
-    # ggur = await memory._add_episodic_memory(observation = "bla bla bla", params=params)
+    episodic = """{
+        "start_date": "2023-08-23",
+        "end_date": "2023-08-30",
+        "user_query": "How can I plan a healthy diet?",
+        "action_steps": [
+            {
+                "step_number": 1,
+                "description": "Research and gather information about basic principles of a healthy diet."
+            },
+            {
+                "step_number": 2,
+                "description": "Create a weekly meal plan that includes a variety of nutritious foods."
+            },
+            {
+                "step_number": 3,
+                "description": "Prepare and cook meals according to your meal plan. Include fruits, vegetables, lean proteins, and whole grains."
+            }
+        ]
+    }"""
+    #
+    # ggur = await memory._add_episodic_memory(observation = episodic, params=params)
     # print(ggur)
-    # ggur = await memory._fetch_episodic_memory(observation = "bla bla bla")
-    # print(ggur)
-    # fff = await memory._fetch_memories_buffer(user_input = "bla bla bla", namespace="Test")
-    # print(fff)
+
+    # fff = await memory._fetch_episodic_memory(observation = "healthy diet")
+    # print(len(fff["data"]["Get"]["EPISODICMEMORY"]))
 
 
 if __name__ == "__main__":
