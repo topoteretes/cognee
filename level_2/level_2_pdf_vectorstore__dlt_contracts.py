@@ -655,7 +655,8 @@ class EpisodicBuffer:
 
         """AI buffer to understand user PDF query, prioritize memory info and process it based on available operations"""
 
-
+        # we get a list of available operations for our buffer to consider
+        # these operations are what we can do with the data, in the context of PDFs (load, translate, structure, etc)
         list_of_operations = await self.available_operations()
 
         memory = Memory(user_id=self.user_id)
@@ -663,15 +664,15 @@ class EpisodicBuffer:
         await memory._delete_buffer_memory()
 
 
-        #we just filter the data here
+        #we just filter the data here to make sure input is clean
         prompt_filter = ChatPromptTemplate.from_template(
             "Filter and remove uneccessary information that is not relevant in the user query, keep it as original as possbile: {query}")
         chain_filter = prompt_filter | self.llm
         output = await chain_filter.ainvoke({"query": user_input})
 
-
+        # this part is mostly unfinished but the idea is to apply different algorithms to the data to fetch the most relevant information from the vector stores
+        context = []
         if params:
-            context =[]
 
             if "freshness" in params:
                 params.get('freshness', None) # get the value of freshness
@@ -688,19 +689,50 @@ class EpisodicBuffer:
 
 
         else:
-            #defaults to semantic search
+            #defaults to semantic search if we don't want to apply algorithms on the vectordb data
             memory = Memory(user_id=self.user_id)
             await memory.async_init()
 
             lookup_value_episodic = await memory._fetch_episodic_memory(observation=str(output))
-            lookup_value_semantic = await memory._fetch_episodic_memory(observation=str(output))
+            lookup_value_semantic = await memory._fetch_semantic_memory(observation=str(output))
             lookup_value_buffer = await self._fetch_memories(observation=str(output), namespace=self.namespace)
 
-            context = [lookup_value_episodic, lookup_value_semantic, lookup_value_buffer]
+
+            context.append(lookup_value_buffer)
+            context.append(lookup_value_semantic)
+            context.append(lookup_value_episodic)
+
             #copy the context over into the buffer
             #do i need to do it for the episodic + raw data, might make sense
+        print( "HERE IS THE CONTEXT", context)
+        class BufferRawContextTerms(BaseModel):
+            """Schema for documentGroups"""
+            semantic_search_term: str = Field(..., description="The search term to use to get relevant input based on user query")
+            document_description: str = Field(None, description="The short summary of what the document is about")
+            document_relevance: str = Field(None, description="The relevance of the document for the task on the scale from 1 to 5")
 
 
+        class BufferRawContextList(BaseModel):
+            """Buffer raw context processed by the buffer"""
+            docs: List[BufferRawContextTerms] = Field(..., description="List of docs")
+            user_query: str = Field(..., description="The original user query")
+
+
+        parser = PydanticOutputParser(pydantic_object=BufferRawContextList)
+
+        prompt = PromptTemplate(
+            template="Summarize and create semantic search queries and relevant document summaries for the user query.\n{format_instructions}\nOriginal query is: {query}\n Retrieved context is: {context}",
+            input_variables=["query", "context"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+
+        _input = prompt.format_prompt(query=user_input,  context=context)
+
+        document_context_result = self.llm_base(_input.to_string())
+
+        document_context_result_parsed = parser.parse(document_context_result)
+
+        print("HERE ARE THE DOCS PARSED AND STRUCTURED",document_context_result_parsed)
         class Task(BaseModel):
             """Schema for an individual task."""
             task_order: str = Field(..., description="The order at which the task needs to be performed")
@@ -712,7 +744,7 @@ class EpisodicBuffer:
             """Schema for the record containing a list of tasks."""
             tasks: List[Task] = Field(..., description="List of tasks")
 
-        prompt_filter_chunk = f" Based on available operations {list_of_operations} determine only the relevant list of steps and operations sequentially based {output}"
+        prompt_filter_chunk = f"The raw context data is {str(document_context_result_parsed)} Based on available operations {list_of_operations} determine only the relevant list of steps and operations sequentially based {output}"
         # chain_filter_chunk = prompt_filter_chunk | self.llm.bind(function_call={"TaskList": "tasks"}, functions=TaskList)
         # output_chunk = await chain_filter_chunk.ainvoke({"query": output, "list_of_operations": list_of_operations})
         prompt_msgs = [
