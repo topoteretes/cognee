@@ -249,6 +249,26 @@ async def available_buffer_actions(
 
         return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
 
+@app.post("/run-buffer", response_model=dict)
+async def available_buffer_actions(
+        payload: Payload,
+        # files: List[UploadFile] = File(...),
+):
+    try:
+
+        decoded_payload = payload.payload
+
+        Memory_ = Memory(user_id=decoded_payload['user_id'])
+
+        await Memory_.async_init()
+
+        # memory_class = getattr(Memory_, f"_delete_{memory_type}_memory", None)
+        output = Memory_._run_buffer(user_input=decoded_payload['prompt'], params=decoded_payload['params'])
+        return JSONResponse(content={"response": output}, status_code=200)
+
+    except Exception as e:
+
+        return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
 
 #
     #     # Process each uploaded PDF file
