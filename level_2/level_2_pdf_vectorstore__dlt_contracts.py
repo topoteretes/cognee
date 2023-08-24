@@ -510,6 +510,12 @@ class EpisodicBuffer:
             model_name="gpt-4-0613",
             callbacks=[MyCustomSyncHandler(), MyCustomAsyncHandler()],
         )
+        self.llm_base = OpenAI(
+            temperature=0.0,
+            max_tokens=1200,
+            openai_api_key=os.environ.get('OPENAI_API_KEY'),
+            model_name="gpt-4-0613"
+        )
 
         # self.vector_db = VectorDB(user_id=user_id, memory_id= self.memory_id, st_memory_id = self.st_memory_id, index_name=index_name, db_type=db_type, namespace=self.namespace)
 
@@ -652,6 +658,10 @@ class EpisodicBuffer:
 
         list_of_operations = await self.available_operations()
 
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+        await memory._delete_buffer_memory()
+
 
         #we just filter the data here
         prompt_filter = ChatPromptTemplate.from_template(
@@ -690,9 +700,6 @@ class EpisodicBuffer:
             #copy the context over into the buffer
             #do i need to do it for the episodic + raw data, might make sense
 
-
-
-        print("HERE WE ARE")
 
         class Task(BaseModel):
             """Schema for an individual task."""
@@ -808,12 +815,15 @@ class EpisodicBuffer:
 
         buffer_result = await self._fetch_memories(observation=str(output), namespace=self.namespace)
 
+        print("HERE IS THE RESULT TASKS", str(buffer_result))
+
 
         class EpisodicTask(BaseModel):
             """Schema for an individual task."""
             task_order: str = Field(..., description="The order at which the task needs to be performed")
             task_name: str = Field(None, description="The task that needs to be performed")
             operation: str = Field(None, description="The operation to be performed")
+            operation_result: str = Field(None, description="The result of the operation")
 
         class EpisodicList(BaseModel):
             """Schema for the record containing a list of tasks."""
@@ -831,19 +841,24 @@ class EpisodicBuffer:
         )
 
         _input = prompt.format_prompt(query=user_input, steps=str(tasks_list), buffer=buffer_result)
-
-        print("a few things to do like load episodic memory in a structured format")
-
-        return "a few things to do like load episodic memory in a structured format"
-
-        # output = self.llm(_input.to_string())
         #
-        # parser.parse(output)
-        # memory = Memory(user_id=self.user_id)
-        # await memory.async_init()
+        # print("a few things to do like load episodic memory in a structured format")
         #
-        # lookup_value = await memory._add_episodic_memory(observation=str(output), params=params)
-        # return lookup_value
+        # return "a few things to do like load episodic memory in a structured format"
+
+        output = self.llm_base(_input.to_string())
+
+        result_parsing = parser.parse(output)
+
+        print("here is the parsing result", result_parsing)
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+        #
+        lookup_value = await memory._add_episodic_memory(observation=str(output), params=params)
+        #now we clean up buffer memory
+
+        await memory._delete_buffer_memory()
+        return lookup_value
 
 
         #load to buffer once is done
