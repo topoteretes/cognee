@@ -58,19 +58,19 @@ jobs:
     outputs:
       promethai_docker_tag_backend: ${{ steps.export-promethai-docker-tag.outputs.promethai_docker_tag_backend }}
 
-  apply_tf:
-    name: Trigger terraform apply workflow
-    runs-on: ubuntu-latest
-    needs: publish_docker_to_ecr
-    steps:
-      - name: TF apply workflow triggers step
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: 'topoteretes',
-              repo: 'PromethAI-Infra',
-              workflow_id: 'terraform.apply.yml',
-              ref: 'main'
-            })
+#  apply_tf:
+#    name: Trigger terraform apply workflow
+#    runs-on: ubuntu-latest
+#    needs: publish_docker_to_ecr
+#    steps:
+#      - name: TF apply workflow triggers step
+#        uses: actions/github-script@v6
+#        with:
+#          github-token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
+#          script: |
+#            await github.rest.actions.createWorkflowDispatch({
+#              owner: 'topoteretes',
+#              repo: 'PromethAI-Infra',
+#              workflow_id: 'terraform.apply.yml',
+#              ref: 'main'
+#            })
