@@ -490,16 +490,11 @@ class EpisodicBuffer(BaseMemory):
         return ["translate", "structure", "load to database", "load to semantic memory", "load to episodic memory",
                 "load to buffer"]
 
-    async def main_buffer(self, user_input=None, content=None, params=None):
-
-        """AI buffer to understand user PDF query, prioritize memory info and process it based on available operations"""
-
+    async def buffer_context(self, user_input=None, content=None, params=None):
+        """Generates the context to be used for the buffer and passed to the agent"""
         # we get a list of available operations for our buffer to consider
         # these operations are what we can do with the data, in the context of PDFs (load, translate, structure, etc)
         list_of_operations = await self.available_operations()
-
-        memory = Memory(user_id=self.user_id)
-        await memory.async_init()
 
         try:
             # we delete all memories in the episodic buffer, so we can start fresh
@@ -530,8 +525,6 @@ class EpisodicBuffer(BaseMemory):
                 context.append(frequency)
 
                 # fix this so it actually filters
-
-
         else:
             # defaults to semantic search if we don't want to apply algorithms on the vectordb data
             memory = Memory(user_id=self.user_id)
@@ -616,7 +609,15 @@ class EpisodicBuffer(BaseMemory):
 
         # Extract the list of tasks
         tasks_list = data["tasks"]
+        return tasks_list
 
+    async def main_buffer(self, user_input=None, content=None, params=None):
+
+        """AI buffer to understand user PDF query, prioritize memory info and process it based on available operations"""
+
+        memory = Memory(user_id=self.user_id)
+        await memory.async_init()
+        tasks_list = await self.buffer_context(user_input=user_input, content=content, params=params)
         result_tasks = []
 
         for task in tasks_list:
@@ -716,20 +717,13 @@ class EpisodicBuffer(BaseMemory):
         )
 
         _input = prompt.format_prompt(query=user_input, steps=str(tasks_list), buffer=buffer_result)
-        #
-        # print("a few things to do like load episodic memory in a structured format")
-        #
+
         # return "a few things to do like load episodic memory in a structured format"
 
         output = self.llm_base(_input.to_string())
-
         result_parsing = parser.parse(output)
-
         print("here is the parsing result", result_parsing)
-        #
         lookup_value = await memory._add_episodic_memory(observation=str(output), params=params)
-        # now we clean up buffer memory
-
         await self.delete_memories()
         return lookup_value
 
@@ -856,6 +850,10 @@ class Memory:
     async def _delete_buffer_memory(self, params: str = None):
         return await self.short_term_memory.episodic_buffer.delete_memories(
             params=params
+        )
+    async def _create_buffer_context(self,  user_input: str, content: str = None, params:str=None):
+        return await self.short_term_memory.episodic_buffer.buffer_context(
+            user_input=user_input, content=content, params=params
         )
     async def _available_operations(self):
         return await self.long_term_memory.episodic_buffer.available_operations()

@@ -242,7 +242,7 @@ async def available_buffer_actions(
         await Memory_.async_init()
 
         # memory_class = getattr(Memory_, f"_delete_{memory_type}_memory", None)
-        output = Memory_._available_operations()
+        output = await Memory_._available_operations()
         return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
@@ -263,12 +263,34 @@ async def available_buffer_actions(
         await Memory_.async_init()
 
         # memory_class = getattr(Memory_, f"_delete_{memory_type}_memory", None)
-        output = Memory_._run_buffer(user_input=decoded_payload['prompt'], params=decoded_payload['params'])
+        output = await Memory_._run_buffer(user_input=decoded_payload['prompt'], params=decoded_payload['params'])
         return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
 
         return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
+
+@app.post("/buffer/create-context", response_model=dict)
+async def available_buffer_actions(
+        payload: Payload,
+        # files: List[UploadFile] = File(...),
+):
+    try:
+
+        decoded_payload = payload.payload
+
+        Memory_ = Memory(user_id=decoded_payload['user_id'])
+
+        await Memory_.async_init()
+
+        # memory_class = getattr(Memory_, f"_delete_{memory_type}_memory", None)
+        output = await Memory_._create_buffer_context(user_input=decoded_payload['prompt'], params=decoded_payload['params'])
+        return JSONResponse(content={"response": output}, status_code=200)
+
+    except Exception as e:
+
+        return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
+
 
 #
     #     # Process each uploaded PDF file

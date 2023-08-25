@@ -24,21 +24,43 @@ Initial code lets you do three operations:
 
 ## Usage
 
-The fast API endpoint accepts prompts and PDF files and returns a JSON object with the generated text.
+The fast API endpoint accepts prompts and stores data with the help of the Memory Manager
 
-```curl                                                                    
-    -X POST                                                                                             
-    -F "prompt=The quick brown fox"                                                                     
-    -F "file=@/path/to/file.pdf"                                                                       
-    http://localhost:8000/upload/                                                                    
+The types of memory are: Episodic, Semantic, Buffer
+
+Endpoint Overview
+The Memory API provides the following endpoints:
+
+- /[memory_type]/add-memory (POST)
+- /[memory_type]/fetch-memory (POST)
+- /[memory_type]/delete-memory (POST)
+- /available-buffer-actions (GET)
+- /run-buffer (POST)
+- /buffer/create-context (POST)
+
+Here is a payload example:
+
 ```
-
 {
   "payload": {
     "user_id": "681",
     "session_id": "471",
     "model_speed": "slow",
-    "prompt": "Temperature=Cold;Food Type=Ice Cream",
-    "pdf_url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+    "prompt": "I want ",
+    "pdf_url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+    "params": {
+        "version": "1.0",
+        "agreement_id": "AG123456",
+        "privacy_policy": "https://example.com/privacy",
+        "terms_of_service": "https://example.com/terms",
+        "format": "json",
+        "schema_version": "1.1",
+        "checksum": "a1b2c3d4e5f6",
+        "owner": "John Doe",
+        "license": "MIT",
+        "validity_start": "2023-08-01",
+        "validity_end": "2024-07-31"
+    }
   }
 }
+```
