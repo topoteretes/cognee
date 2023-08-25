@@ -1,18 +1,12 @@
-set -euo pipefail
-
-AWS_REGION=${region:-eu-west-1}
-AWS_DEPLOYMENT_ACCOUNT=${account:-463722570299}
-AWS_REPOSITORY=${repo:-"${AWS_DEPLOYMENT_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"}
-
 STAGE=${stage:-"dev"}
 SHA_SHORT="$(git rev-parse --short HEAD)"
 CUR_DATE="$(date +%Y%m%d%H%M%S)"
 VERSION="$STAGE-$CUR_DATE-$SHA_SHORT"
-IMAGE_NAME=${image_name:-promethai-${STAGE}-promethai-backend}
+IMAGE_NAME=${image_name:-promethai-${STAGE}-promethai-backend-memory}
 
 REPO_NAME="${AWS_REPOSITORY}/${IMAGE_NAME}"
 FULL_IMAGE_NAME="${REPO_NAME}:${VERSION}"
-APP_DIR=${app_dir:-"."}
+APP_DIR=${app_dir:-"./level_2"}   # Updated this line
 
 PUBLISH=${publish:-false}
 
