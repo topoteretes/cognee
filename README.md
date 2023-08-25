@@ -26,7 +26,7 @@ The rise of this new profession is perhaps signaling the need for a solution tha
 
 To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on a productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
 
-## Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-on)
+## Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-one)
 
 
 # PromethAI-Memory Repo Structure
