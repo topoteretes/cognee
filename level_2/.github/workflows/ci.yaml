@@ -1,0 +1,25 @@
+name: Test build docker image for PromethAI backend app
+
+on: pull_request
+
+env:
+  AWS_ACCOUNT_ID_DEV: "463722570299"
+
+jobs:
+
+  build_docker:
+    name: Build PromethAI Backend Docker App Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PromethAI code
+        uses: actions/checkout@v3
+
+      - name: Build PromethAI backend Docker image tag
+        id: backend-docker-tag
+        run: |
+          export SHA_SHORT="$(git rev-parse --short HEAD)"
+          export CUR_DATE="$(date +%Y%m%d%H%M%S)"
+          export VERSION="dev-$CUR_DATE-$SHA_SHORT"
+          image_name="backend" docker_login="false" version="$VERSION" account="${{ env.AWS_ACCOUNT_ID_DEV }}" app_dir="backend" publish="false" ./bin/dockerize
+          export DOCKER_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
+          echo "Successfully built PromethAI backend Docker tag is: $DOCKER_TAG"
