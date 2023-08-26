@@ -18,8 +18,27 @@ To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://pro
 ### Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-one)
 
 
-# PromethAI-Memory Repo Structure
+## PromethAI-Memory Repo Structure
 
 The repository contains a set of folders that represent the steps in the evolution of the modern data stack from POC to production
 - Level 1 - CMD script to process PDFs
+  We introduce the following concepts:
+  1. Structured output with Pydantic
+  2. CMD script to process custom PDFs
 - Level 2 - Memory Manager implemented in Python
+  We introduce the following concepts:
+  1. Long Term Memory
+  2. Short Term Memory
+  3. Episodic Buffer
+  4. Attention Modulators
+  The code at this level contains:
+  1. Simple PDF ingestion
+  2. FastAPI
+  3. Docker Image
+  4. Memory manager
+  5. Langchain-based Agent Simulator
+  6. Data schema
+
+## How to use
+
+Each of the folders contains a README to get started. 
