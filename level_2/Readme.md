@@ -44,10 +44,7 @@ Here is a payload example:
 {
   "payload": {
     "user_id": "681",
-    "session_id": "471",
-    "model_speed": "slow",
     "prompt": "I want ",
-    "pdf_url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
     "params": {
         "version": "1.0",
         "agreement_id": "AG123456",
@@ -60,7 +57,47 @@ Here is a payload example:
         "license": "MIT",
         "validity_start": "2023-08-01",
         "validity_end": "2024-07-31"
-    }
+    },
+    "loader_settings": {
+    "format": "PDF", // or "HTML" // or 'DOCX' // or 'TXT'
+    "source": "url", // or "file" 
+    "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
+    },
+    "attention_modulators": {
+        "relevance": 0.5,
+        "saliency": 0.5,
+        "frequency": 0.5, 
+        "repetition": 0.5,
+        "length": 0.5,
+        "position": 0.5,
+        "context": 0.5,
+        "emotion": 0.5,
+        "sentiment": 0.5,
+        "perspective": 0.5,
+        "style": 0.5,
+        "grammar": 0.5,
+        "spelling": 0.5,
+        "logic": 0.5,
+        "coherence": 0.5,
+        "cohesion": 0.5,
+        "plausibility": 0.5,
+        "consistency": 0.5,
+        "informativeness": 0.5,
+        "specificity": 0.5,
+        "detail": 0.5,
+        "accuracy": 0.5,
+        "topicality": 0.5,
+        "focus": 0.5,
+        "clarity": 0.5,
+        "simplicity": 0.5,
+        "naturalness": 0.5,
+        "fluency": 0.5,
+        "variety": 0.5,
+        "vividness": 0.5,
+        "originality": 0.5,
+        "creativity": 0.5,
+        "humor": 0.5,
+    },
   }
 }
 ```
