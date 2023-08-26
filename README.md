@@ -26,12 +26,14 @@ The repository contains a set of folders that represent the steps in the evoluti
   1. Structured output with Pydantic
   2. CMD script to process custom PDFs
 - Level 2 - Memory Manager implemented in Python
-  We introduce the following concepts:
+
+We introduce the following concepts:
   1. Long Term Memory
   2. Short Term Memory
   3. Episodic Buffer
   4. Attention Modulators
-  The code at this level contains:
+
+The code at this level contains:
   1. Simple PDF ingestion
   2. FastAPI
   3. Docker Image
