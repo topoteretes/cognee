@@ -21,11 +21,13 @@ To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://pro
 ## PromethAI-Memory Repo Structure
 
 The repository contains a set of folders that represent the steps in the evolution of the modern data stack from POC to production
-- Level 1 - CMD script to process PDFs
+
+#### Level 1 - CMD script to process PDFs
   We introduce the following concepts:
   1. Structured output with Pydantic
   2. CMD script to process custom PDFs
-- Level 2 - Memory Manager implemented in Python
+ 
+#### Level 2 - Memory Manager implemented in Python
 
 We introduce the following concepts:
   1. Long Term Memory
