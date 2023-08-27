@@ -687,15 +687,16 @@ class EpisodicBuffer(BaseMemory):
             pass
         # we just filter the data here to make sure input is clean
         prompt_filter = ChatPromptTemplate.from_template(
-            "Filter and remove uneccessary information that is not relevant in the query to the vector store to get more information, keep it as original as possbile: {query}"
+            """Filter and remove uneccessary information that is not relevant in the query to 
+            the vector store to get more information, keep it as original as possbile: {query}"""
         )
         chain_filter = prompt_filter | self.llm
         output = await chain_filter.ainvoke({"query": user_input})
 
-        # this part is unfinished but the idea is to apply different attention modulators to the data to fetch the most relevant information from the vector stores
+        # this part is partially done but the idea is to apply different attention modulators
+        # to the data to fetch the most relevant information from the vector stores
         context = []
         if attention_modulators:
-            print("HERE ARE THE ATTENTION MODULATORS: ", attention_modulators)
             from typing import Optional, Dict, List, Union
 
             lookup_value_semantic = await self.fetch_memories(
@@ -758,10 +759,14 @@ class EpisodicBuffer(BaseMemory):
             docs: List[BufferRawContextTerms] = Field(..., description="List of docs")
             user_query: str = Field(..., description="The original user query")
 
+        # we structure the data here to make it easier to work with
         parser = PydanticOutputParser(pydantic_object=BufferRawContextList)
 
         prompt = PromptTemplate(
-            template="Summarize and create semantic search queries and relevant document summaries for the user query.\n{format_instructions}\nOriginal query is: {query}\n Retrieved context is: {context}",
+            template="""Summarize and create semantic search queries and relevant 
+                        document summaries for the user query.\n
+                        {format_instructions}\nOriginal query is: 
+                        {query}\n Retrieved context is: {context}""",
             input_variables=["query", "context"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
@@ -769,8 +774,6 @@ class EpisodicBuffer(BaseMemory):
         _input = prompt.format_prompt(query=user_input, context=context)
         document_context_result = self.llm_base(_input.to_string())
         document_context_result_parsed = parser.parse(document_context_result)
-        print("HERE ARE THE DOCS PARSED AND STRUCTURED", document_context_result_parsed.json())
-
         return document_context_result_parsed
 
     async def get_task_list(
@@ -1187,6 +1190,8 @@ class Memory:
 
 
 async def main():
+
+    # if you want to run the script as a standalone script, do so with the examples below
     memory = Memory(user_id="123")
     await memory.async_init()
     params = {
@@ -1202,36 +1207,24 @@ async def main():
         "validity_start": "2023-08-01",
         "validity_end": "2024-07-31",
     }
-
-    # gg = await memory._run_buffer(user_input="i NEED TRANSLATION TO GERMAN ", content="i NEED TRANSLATION TO GERMAN ", params=params)
-    # print(gg)
-
-    # gg = await memory._fetch_buffer_memory(user_input="i  TO GERMAN ")
-    # print(gg)
-
-
-    modulator = {"relevance": 0.0, "saliency": 0.0, "frequency": 0.0}
-    # #
-    ggur = await memory._run_main_buffer(
-        user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
-        params=params,
-        attention_modulators=modulator,
-    )
-    print(ggur)
-
-    ll =  {
+    loader_settings =  {
     "format": "PDF",
     "source": "url",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
-    # ggur = await memory._add_semantic_memory(observation = "bla", loader_settings=ll, params=params)
-    # print(ggur)
-    # fff = await memory._delete_semantic_memory()
-    # print(fff)
+    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    print(load_jack_london)
 
-    # fff = await memory._fetch_semantic_memory(observation = "dog pulling sleds ", params=None)
-    # print(fff)
-    # print(len(fff["data"]["Get"]["EPISODICMEMORY"]))
+    modulator = {"relevance": 0.0, "saliency": 0.0, "frequency": 0.0}
+    # #
+    run_main_buffer = await memory._run_main_buffer(
+        user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
+        params=params,
+        attention_modulators=modulator,
+    )
+    print(run_main_buffer)
+    # del_semantic = await memory._delete_semantic_memory()
+    # print(del_semantic)
 
 
 if __name__ == "__main__":
