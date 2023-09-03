@@ -4,7 +4,6 @@ AWS_REGION=${region:-eu-west-1}
 AWS_DEPLOYMENT_ACCOUNT=${account:-463722570299}
 AWS_REPOSITORY=${repo:-"${AWS_DEPLOYMENT_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"}
 
-
 STAGE=${stage:-"dev"}
 SHA_SHORT="$(git rev-parse --short HEAD)"
 CUR_DATE="$(date +%Y%m%d%H%M%S)"
