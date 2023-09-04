@@ -48,7 +48,7 @@ jobs:
           aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
           should_publish: true
           ecr_image_repo_name: promethai-dev-backend-promethai-backend-memory
-          dockerfile_location: ./level_2
+          dockerfile_location: level_2/.
       - name: Export Docker image tag
         id: export-promethai-docker-tag
         run: |
