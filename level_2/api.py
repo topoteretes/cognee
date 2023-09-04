@@ -23,7 +23,11 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 app = FastAPI(debug=True)
 
+from auth.cognito.JWTBearer import JWTBearer
+from auth.auth import jwks
+auth = JWTBearer(jwks)
 
+from fastapi import Depends
 class ImageResponse(BaseModel):
     success: bool
     message: str
