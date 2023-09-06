@@ -80,9 +80,13 @@ It seems it has never been easier to create a startup, build an app, and go to m
 
 AI apps currently being pushed out still mostly feel and perform like demos.
 
-To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on a productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
+To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
+
+We go on a journey and propose a new way to reason about Language Architecture for Agents based on cognitive sciences.
 
 ### Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-one)
+
+### Or check this [Princeton paper](https://arxiv.org/abs/2309.02427) released after our demo
 
 
 ## PromethAI-Memory Repo Structure
