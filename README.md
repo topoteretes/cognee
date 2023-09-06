@@ -84,9 +84,9 @@ To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://pro
 
 We go on a journey and propose a new way to reason about Language Architecture for Agents based on cognitive sciences.
 
-### Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-one)
+#### Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-one)
 
-### Or check this [Princeton paper](https://arxiv.org/abs/2309.02427) released after our demo
+#### Or check this [Princeton paper](https://arxiv.org/abs/2309.02427) released after our demo
 
 
 ## PromethAI-Memory Repo Structure
