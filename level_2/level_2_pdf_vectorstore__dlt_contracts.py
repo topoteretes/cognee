@@ -15,11 +15,12 @@ from langchain.retrievers import WeaviateHybridSearchRetriever
 from langchain.tools import tool
 from marvin import ai_classifier
 from pydantic import parse_obj_as
-
+from weaviate.gql.get import HybridFusion
+import numpy as np
 load_dotenv()
 from langchain import OpenAI
 from langchain.chat_models import ChatOpenAI
-from typing import Optional
+from typing import Optional, Dict, List, Union
 
 import tracemalloc
 
@@ -76,6 +77,35 @@ LTM_MEMORY_ID_DEFAULT = "00000"
 ST_MEMORY_ID_DEFAULT = "0000"
 BUFFER_ID_DEFAULT = "0000"
 
+
+class DifferentiableLayer:
+    def __init__(self, attention_modulators: dict):
+        self.weights = {modulator: 1.0 for modulator in attention_modulators}
+        self.learning_rate = 0.1
+        self.regularization_lambda = 0.01
+        self.weight_decay = 0.99
+
+    async def adjust_weights(self, feedbacks: list[float]):
+        """
+        Adjusts the weights of the attention modulators based on user feedbacks.
+
+        Parameters:
+        - feedbacks: A list of feedback scores (between 0 and 1).
+        """
+        avg_feedback = np.mean(feedbacks)
+        feedback_diff = 1.0 - avg_feedback
+
+        # Adjust weights based on average feedback
+        for modulator in self.weights:
+            self.weights[modulator] += self.learning_rate * (-feedback_diff) - self.regularization_lambda * \
+                                       self.weights[modulator]
+            self.weights[modulator] *= self.weight_decay
+
+        # Decaying the learning rate
+        self.learning_rate *= 0.99
+
+    async def get_weights(self):
+        return self.weights
 
 class VectorDBFactory:
     def create_vector_db(
@@ -352,6 +382,7 @@ class WeaviateVectorDB(VectorDB):
                 )
                 .with_hybrid(
                     query=observation,
+                    fusion_type=HybridFusion.RELATIVE_SCORE
                 )
                 .with_autocut(1)
                 .with_where(params_user_id)
@@ -452,7 +483,8 @@ class BaseMemory:
     ):
         if self.db_type == "weaviate":
             return await self.vector_db.add_memories(
-                observation=observation, loader_settings=loader_settings, params=params, namespace=namespace
+                observation=observation, loader_settings=loader_settings,
+                params=params, namespace=namespace
             )
         # Add other db_type conditions if necessary
 
@@ -464,7 +496,8 @@ class BaseMemory:
     ):
         if self.db_type == "weaviate":
             return await self.vector_db.fetch_memories(
-                observation=observation, params=params, namespace=namespace
+                observation=observation, params=params,
+                namespace=namespace
             )
 
     async def delete_memories(self, params: Optional[str] = None):
@@ -483,8 +516,7 @@ class SemanticMemory(BaseMemory):
         db_type: str = "weaviate",
     ):
         super().__init__(
-            user_id, memory_id, index_name, db_type, namespace="SEMANTICMEMORY"
-        )
+            user_id, memory_id, index_name, db_type, namespace="SEMANTICMEMORY")
 
 
 class EpisodicMemory(BaseMemory):
@@ -580,12 +612,66 @@ class EpisodicBuffer(BaseMemory):
         )
         return [str(frequency), result_output["data"]["Get"]["EPISODICMEMORY"][0]]
 
-    async def relevance(self, observation: str, namespace: str) -> list[str]:
-        """Relevance - Score between 0 and 1 on how often was the final information relevant to the user in the past.
-        Stored in the episodic memory, mainly to show how well a buffer did the job
-        Starts at 0, gets updated based on the user feedback"""
+    async def repetition(self, observation: str, namespace: str) -> list[str]:
+        """Repetition - Score between 0 and 1 based on how often and at what intervals a memory has been revisited.
+        Accounts for the spacing effect, where memories accessed at increasing intervals are given higher scores.
+        """
+        weaviate_client = self.init_client(namespace=namespace)
 
-        return ["0", "memory"]
+        result_output = await self.fetch_memories(
+            observation=observation, params=None, namespace=namespace
+        )
+
+        access_times = result_output["data"]["Get"]["EPISODICMEMORY"][0]["_additional"]["accessTimes"]
+        # Calculate repetition score based on access times
+        if not access_times or len(access_times) == 1:
+            return ["0", result_output["data"]["Get"]["EPISODICMEMORY"][0]]
+
+        # Sort access times
+        access_times = sorted(access_times)
+        # Calculate intervals between consecutive accesses
+        intervals = [access_times[i + 1] - access_times[i] for i in range(len(access_times) - 1)]
+        # A simple scoring mechanism: Longer intervals get higher scores, as they indicate spaced repetition
+        repetition_score = sum([1.0 / (interval + 1) for interval in intervals]) / len(intervals)
+
+        return [str(repetition_score), result_output["data"]["Get"]["EPISODICMEMORY"][0]]
+
+    async def relevance(self, observation: str, namespace: str) -> list[str]:
+        """
+        Fetches the relevance score for a given observation from the episodic memory.
+
+        Parameters:
+        - observation: The user's query or observation.
+        - namespace: The namespace for the data.
+
+        Returns:
+        - The relevance score between 0 and 1.
+        """
+
+        # Fetch the memory content based on the observation
+        result_output = await self.fetch_memories(
+            observation=observation, params=None, namespace=namespace
+        )
+
+        # Extract the relevance score from the memory content
+        score = result_output["data"]["Get"]["EPISODICMEMORY"][0]["_additional"]["score"]
+
+        return score
+
+
+    #each of the requests is numbered, and then the previous requests are retrieved . The request is classified based on past and current content as :
+    # 1. Very positive request
+    # 2. Positive request
+    # 3. Neutral request
+    # 4. Negative request
+    # 5. Very negative request
+
+
+    # After this, we update the weights of the request based on the classification of the request.
+    # After updating the weights, we update the buffer with the new weights. When new weights are calculated, we start from the updated values
+    # Which chunking strategy works best?
+
+    # Adding to the buffer - process the weights, and then use them as filters
 
     async def saliency(self, observation: str, namespace=None) -> list[str]:
         """Determines saliency by scoring the set of retrieved documents against each other and trying to determine saliency
@@ -616,6 +702,19 @@ class EpisodicBuffer(BaseMemory):
         return document_context_result_parsed.json()
 
 
+
+
+    # Example Usage
+    # attention_modulators = {"freshness": 0.8, "frequency": 0.7, "relevance": 0.9, "saliency": 0.85}
+    # diff_layer = DifferentiableLayer(attention_modulators)
+    #
+    # # Sample batch feedback
+    # feedbacks = [0.75, 0.8, 0.9]
+    #
+    # # Adjust weights based on batch feedback
+    # diff_layer.adjust_weights(feedbacks)
+    #
+    # print(diff_layer.get_weights())
 
     async def handle_modulator(
         self,
@@ -679,12 +778,6 @@ class EpisodicBuffer(BaseMemory):
         attention_modulators: dict = None,
     ):
         """Generates the context to be used for the buffer and passed to the agent"""
-        try:
-            # we delete all memories in the episodic buffer, so we can start fresh
-            await self.delete_memories()
-        except:
-            # in case there are no memories, we pass
-            pass
         # we just filter the data here to make sure input is clean
         prompt_filter = ChatPromptTemplate.from_template(
             """Filter and remove uneccessary information that is not relevant in the query to 
@@ -695,40 +788,106 @@ class EpisodicBuffer(BaseMemory):
 
         # this part is partially done but the idea is to apply different attention modulators
         # to the data to fetch the most relevant information from the vector stores
-        context = []
-        if attention_modulators:
-            from typing import Optional, Dict, List, Union
+        class BufferModulators(BaseModel):
+            """Value of buffer modulators"""
+            frequency: str = Field(..., description="Frequency score of the document")
+            saliency: str = Field(..., description="Saliency score of the document")
+            relevance: str = Field(..., description="Relevance score of the document")
+            description:str = Field(..., description="Latest buffer modulators")
+            direction: str= Field(..., description="Increase or a decrease of the modulator")
 
-            lookup_value_semantic = await self.fetch_memories(
-                observation=str(output), namespace="SEMANTICMEMORY"
-            )
-            context = []
-            for memory in lookup_value_semantic["data"]["Get"]["SEMANTICMEMORY"]:
-                # extract memory id, and pass it to fetch function as a parameter
-                modulators = list(attention_modulators.keys())
-                for modulator in modulators:
-                    result = await self.handle_modulator(
-                        modulator,
-                        attention_modulators,
-                        str(output),
-                        namespace="EPISODICMEMORY",
+        parser = PydanticOutputParser(pydantic_object=BufferModulators)
+
+        prompt = PromptTemplate(
+            template="""Structure the buffer modulators to be used for the buffer. \n
+                        {format_instructions} \nOriginal observation is: 
+                        {query}\n """,
+            input_variables=["query"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+
+        # check if modulators exist, initialize the modulators if needed
+        if attention_modulators is None:
+            try:
+                attention_modulators = await self.fetch_memories(observation="Attention modulators",
+                                                             namespace="BUFFERMEMORY")
+                lookup_value_episodic = await self.fetch_memories(
+                    observation=str(output), namespace="EPISODICCMEMORY"
+                )
+                prompt_classify = ChatPromptTemplate.from_template(
+                    """You are a classifier. Determine if based on the previous query if the user was satisfied with the output : {query}"""
+                )
+                json_structure = {
+                    "name": "classifier",
+                    "description": "Classification indicating if it's output is satisfactory",
+                    "type": "boolean",
+                    "required": True
+                }
+                chain_filter = prompt_classify | self.llm.bind(function_call= {"name": "classifier"}, functions= json_structure)
+                classifier_output = await chain_filter.ainvoke({"query": lookup_value_episodic})
+                arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
+                arguments_dict = json.loads(arguments_str)
+                classfier_value = arguments_dict.get('classifier', None)
+
+                if classfier_value:
+                    # adjust the weights of the modulators by adding a positive value
+                    prompt_classify = ChatPromptTemplate.from_template(
+                        """ We know we need to increase the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
                     )
-                    if result:
-                        context.append(result)
-                        context.append(memory)
-        else:
-            # defaults to semantic search if we don't want to apply algorithms on the vectordb data
-            lookup_value_episodic = await self.fetch_memories(
-                observation=str(output), namespace="EPISODICMEMORY"
-            )
-            lookup_value_semantic = await self.fetch_memories(
-                observation=str(output), namespace="SEMANTICMEMORY"
-            )
-            lookup_value_buffer = await self.fetch_memories(observation=str(output))
+                    chain_modulator = prompt_classify | self.llm
+                    classifier_output = await chain_modulator.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
+                    diff_layer = DifferentiableLayer(attention_modulators)
+                    adjusted_modulator = diff_layer.adjust_weights(classifier_output)
+                    _input = prompt.format_prompt(query=adjusted_modulator)
+                    document_context_result = self.llm_base(_input.to_string())
+                    document_context_result_parsed = parser.parse(document_context_result)
+                    await self.add_memories(observation=document_context_result_parsed, namespace="BUFFERMEMORY")
+                else:
+                    # adjust the weights of the modulators by adding a negative value
+                    prompt_classify = ChatPromptTemplate.from_template(
+                        """ We know we need to decrease the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
+                    )
+                    chain_modulator_reduction = prompt_classify | self.llm
 
-            context.append(lookup_value_buffer)
-            context.append(lookup_value_semantic)
-            context.append(lookup_value_episodic)
+                    classifier_output = await chain_modulator_reduction.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
+                    diff_layer = DifferentiableLayer(attention_modulators)
+                    adjusted_modulator =diff_layer.adjust_weights(classifier_output)
+                    _input = prompt.format_prompt(query=adjusted_modulator)
+                    document_context_result = self.llm_base(_input.to_string())
+                    document_context_result_parsed = parser.parse(document_context_result)
+                    await self.add_memories(observation=document_context_result_parsed, namespace="BUFFERMEMORY")
+            except:
+                # initialize the modulators with default values if they are not provided
+                print("Starting with default modulators")
+                attention_modulators = {
+                    "freshness": 0.5,
+                    "frequency": 0.5,
+                    "relevance": 0.5,
+                    "saliency": 0.5,
+                }
+
+        elif attention_modulators:
+            pass
+
+
+        lookup_value_semantic = await self.fetch_memories(
+            observation=str(output), namespace="SEMANTICMEMORY"
+        )
+        context = []
+        for memory in lookup_value_semantic["data"]["Get"]["SEMANTICMEMORY"]:
+            # extract memory id, and pass it to fetch function as a parameter
+            modulators = list(attention_modulators.keys())
+            for modulator in modulators:
+                result = await self.handle_modulator(
+                    modulator,
+                    attention_modulators,
+                    str(output),
+                    namespace="EPISODICMEMORY",
+                )
+                if result:
+                    context.append(result)
+                    context.append(memory)
+
 
         class BufferModulators(BaseModel):
             frequency: str = Field(..., description="Frequency score of the document")
@@ -939,12 +1098,7 @@ class EpisodicBuffer(BaseMemory):
             result_tasks.append(task)
             result_tasks.append(output)
 
-        # print("HERE IS THE RESULT TASKS", str(result_tasks))
-        #
         # buffer_result = await self.fetch_memories(observation=str(user_input))
-        #
-        # print("HERE IS THE RESULT TASKS", str(buffer_result))
-
         class EpisodicTask(BaseModel):
             """Schema for an individual task."""
 
@@ -972,18 +1126,19 @@ class EpisodicBuffer(BaseMemory):
             user_query: str = Field(
                 ..., description="The order at which the task needs to be performed"
             )
-
+            attention_modulators: str = Field(..., description="List of attention modulators")
         parser = PydanticOutputParser(pydantic_object=EpisodicList)
+        date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         prompt = PromptTemplate(
-            template="Format the result.\n{format_instructions}\nOriginal query is: {query}\n Steps are: {steps}, buffer is: {buffer}",
-            input_variables=["query", "steps", "buffer"],
+            template="Format the result.\n{format_instructions}\nOriginal query is: {query}\n Steps are: {steps}, buffer is: {buffer}, date is:{date}, attention modulators are: {attention_modulators} \n",
+            input_variables=["query", "steps", "buffer", "date", "attention_modulators"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
         _input = prompt.format_prompt(
             query=user_input, steps=str(tasks_list)
-            , buffer=str(result_tasks)
+            , buffer=str(result_tasks), date= date, attention_modulators=attention_modulators
         )
 
         # return "a few things to do like load episodic memory in a structured format"
@@ -992,8 +1147,7 @@ class EpisodicBuffer(BaseMemory):
         lookup_value = await self.add_memories(
             observation=str(result_parsing.json()), params=params, namespace='EPISODICMEMORY'
         )
-        # print("THE RESULT OF THIS QUERY IS ", result_parsing.json())
-        await self.delete_memories()
+        # await self.delete_memories()
         return result_parsing.json()
 
 
@@ -1188,6 +1342,9 @@ class Memory:
     async def _available_operations(self):
         return await self.long_term_memory.episodic_buffer.available_operations()
 
+    async def _provide_feedback(self, score:str =None, params: dict = None, attention_modulators: dict = None):
+        return await self.short_term_memory.episodic_buffer.provide_feedback(score=score, params=params, attention_modulators=attention_modulators)
+
 
 async def main():
 
@@ -1212,8 +1369,8 @@ async def main():
     "source": "url",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
-    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    print(load_jack_london)
+    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    # print(load_jack_london)
 
     modulator = {"relevance": 0.0, "saliency": 0.0, "frequency": 0.0}
     # #

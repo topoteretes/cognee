@@ -40,6 +40,7 @@ weaviate-client = "^3.22.1"
 python-multipart = "^0.0.6"
 deep-translator = "^1.11.4"
 humanize = "^4.8.0"
+deepeval = "^0.10.12"
 
 
 
