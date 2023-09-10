@@ -808,63 +808,86 @@ class EpisodicBuffer(BaseMemory):
 
         # check if modulators exist, initialize the modulators if needed
         if attention_modulators is None:
-            try:
-                attention_modulators = await self.fetch_memories(observation="Attention modulators",
-                                                             namespace="BUFFERMEMORY")
-                lookup_value_episodic = await self.fetch_memories(
-                    observation=str(output), namespace="EPISODICCMEMORY"
-                )
+            # try:
+            print("Starting with attention mods")
+            attention_modulators = await self.fetch_memories(observation="Attention modulators",
+                                                         namespace="BUFFERMEMORY")
+
+            print("Attention modulators exist", str(attention_modulators))
+            lookup_value_episodic = await self.fetch_memories(
+                observation=str(output), namespace="EPISODICMEMORY"
+            )
+            # lookup_value_episodic= lookup_value_episodic["data"]["Get"]["EPISODICMEMORY"][0]["text"]
+            prompt_classify = ChatPromptTemplate.from_template(
+                """You are a classifier. Determine if based on the previous query if the user was satisfied with the output : {query}"""
+            )
+            json_structure = [{
+                "name": "classifier",
+                "description": "Classification indicating if it's output is satisfactory",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "classification": {
+                            "type": "boolean",
+                            "description": "The classification true or false"
+                        }
+                    }, "required": ["classification"]}
+            }]
+            chain_filter = prompt_classify | self.llm.bind(function_call= {"name": "classifier"}, functions= json_structure)
+            classifier_output = await chain_filter.ainvoke({"query": lookup_value_episodic})
+            arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
+            print("This is the arguments string", arguments_str)
+            arguments_dict = json.loads(arguments_str)
+            classfier_value = arguments_dict.get('classification', None)
+
+            print("This is the classifier value", classfier_value)
+
+            if classfier_value:
+                # adjust the weights of the modulators by adding a positive value
+                print("Lookup value, episodic", lookup_value_episodic["data"]["Get"]["EPISODICMEMORY"][0]["text"])
                 prompt_classify = ChatPromptTemplate.from_template(
-                    """You are a classifier. Determine if based on the previous query if the user was satisfied with the output : {query}"""
+                    """ We know we need to increase the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
                 )
-                json_structure = {
-                    "name": "classifier",
-                    "description": "Classification indicating if it's output is satisfactory",
-                    "type": "boolean",
-                    "required": True
-                }
-                chain_filter = prompt_classify | self.llm.bind(function_call= {"name": "classifier"}, functions= json_structure)
-                classifier_output = await chain_filter.ainvoke({"query": lookup_value_episodic})
-                arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
-                arguments_dict = json.loads(arguments_str)
-                classfier_value = arguments_dict.get('classifier', None)
+                chain_modulator = prompt_classify | self.llm
+                classifier_output = await chain_modulator.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
+                print("classifier output 1", classifier_output)
+                diff_layer = DifferentiableLayer(attention_modulators)
+                adjusted_modulator = await diff_layer.adjust_weights(classifier_output)
+                _input = prompt.format_prompt(query=adjusted_modulator)
+                document_context_result = self.llm_base(_input.to_string())
+                document_context_result_parsed = parser.parse(document_context_result)
+                print("Updating with the following weights", str(document_context_result_parsed))
+                await self.add_memories(observation=str(document_context_result_parsed), params=params, namespace="BUFFERMEMORY")
+            else:
+                # adjust the weights of the modulators by adding a negative value
+                print("Lookup value, episodic", lookup_value_episodic)
+                prompt_classify = ChatPromptTemplate.from_template(
+                    """ We know we need to decrease the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
+                )
+                chain_modulator_reduction = prompt_classify | self.llm
 
-                if classfier_value:
-                    # adjust the weights of the modulators by adding a positive value
-                    prompt_classify = ChatPromptTemplate.from_template(
-                        """ We know we need to increase the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
-                    )
-                    chain_modulator = prompt_classify | self.llm
-                    classifier_output = await chain_modulator.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
-                    diff_layer = DifferentiableLayer(attention_modulators)
-                    adjusted_modulator = diff_layer.adjust_weights(classifier_output)
-                    _input = prompt.format_prompt(query=adjusted_modulator)
-                    document_context_result = self.llm_base(_input.to_string())
-                    document_context_result_parsed = parser.parse(document_context_result)
-                    await self.add_memories(observation=document_context_result_parsed, namespace="BUFFERMEMORY")
-                else:
-                    # adjust the weights of the modulators by adding a negative value
-                    prompt_classify = ChatPromptTemplate.from_template(
-                        """ We know we need to decrease the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
-                    )
-                    chain_modulator_reduction = prompt_classify | self.llm
-
-                    classifier_output = await chain_modulator_reduction.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
-                    diff_layer = DifferentiableLayer(attention_modulators)
-                    adjusted_modulator =diff_layer.adjust_weights(classifier_output)
-                    _input = prompt.format_prompt(query=adjusted_modulator)
-                    document_context_result = self.llm_base(_input.to_string())
-                    document_context_result_parsed = parser.parse(document_context_result)
-                    await self.add_memories(observation=document_context_result_parsed, namespace="BUFFERMEMORY")
-            except:
-                # initialize the modulators with default values if they are not provided
-                print("Starting with default modulators")
-                attention_modulators = {
-                    "freshness": 0.5,
-                    "frequency": 0.5,
-                    "relevance": 0.5,
-                    "saliency": 0.5,
-                }
+                classifier_output = await chain_modulator_reduction.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
+                print("classifier output 2", classifier_output)
+                diff_layer = DifferentiableLayer(attention_modulators)
+                adjusted_modulator =diff_layer.adjust_weights(classifier_output)
+                _input = prompt.format_prompt(query=adjusted_modulator)
+                document_context_result = self.llm_base(_input.to_string())
+                document_context_result_parsed = parser.parse(document_context_result)
+                print("Updating with the following weights", str(document_context_result_parsed))
+                await self.add_memories(observation=str(document_context_result_parsed), params=params, namespace="BUFFERMEMORY")
+            # except:
+            #     # initialize the modulators with default values if they are not provided
+            #     print("Starting with default modulators")
+            #     attention_modulators = {
+            #         "freshness": 0.5,
+            #         "frequency": 0.5,
+            #         "relevance": 0.5,
+            #         "saliency": 0.5,
+            #     }
+            #     _input = prompt.format_prompt(query=attention_modulators)
+            #     document_context_result = self.llm_base(_input.to_string())
+            #     document_context_result_parsed = parser.parse(document_context_result)
+            #     await self.add_memories(observation=str(document_context_result_parsed), params=params, namespace="BUFFERMEMORY")
 
         elif attention_modulators:
             pass
@@ -1140,7 +1163,8 @@ class EpisodicBuffer(BaseMemory):
             query=user_input, steps=str(tasks_list)
             , buffer=str(result_tasks), date= date, attention_modulators=attention_modulators
         )
-
+        print("HERE ARE THE STEPS, BUFFER AND DATE", str(tasks_list))
+        print("here are the result_tasks", str(result_tasks))
         # return "a few things to do like load episodic memory in a structured format"
         output = self.llm_base(_input.to_string())
         result_parsing = parser.parse(output)
@@ -1373,13 +1397,20 @@ async def main():
     # print(load_jack_london)
 
     modulator = {"relevance": 0.0, "saliency": 0.0, "frequency": 0.0}
-    # #
+
     run_main_buffer = await memory._run_main_buffer(
         user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
         params=params,
         attention_modulators=modulator,
     )
     print(run_main_buffer)
+    # #
+    # run_main_buffer = await memory._run_main_buffer(
+    #     user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
+    #     params=params,
+    #     attention_modulators=None,
+    # )
+    # print(run_main_buffer)
     # del_semantic = await memory._delete_semantic_memory()
     # print(del_semantic)
 
