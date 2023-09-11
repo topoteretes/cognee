@@ -1,3 +1,5 @@
+#file is very long. consider breaking into separate files for each class
+
 # Make sure to install the following packages: dlt, langchain, duckdb, python-dotenv, openai, weaviate-client
 import json
 from enum import Enum
@@ -128,6 +130,7 @@ class VectorDB:
 
 
 class PineconeVectorDB(VectorDB):
+    #not familiar with this init method as an override to the parent class. I'd expect you to have the same signature as the parent class.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.init_pinecone(self.index_name)
@@ -148,11 +151,18 @@ class WeaviateVectorDB(VectorDB):
         auth_config = weaviate.auth.AuthApiKey(
             api_key=os.environ.get("WEAVIATE_API_KEY")
         )
+        #why not using init_weaviate_client here? 
         client = weaviate.Client(
             url=os.environ.get("WEAVIATE_URL"),
             auth_client_secret=auth_config,
             additional_headers={"X-OpenAI-Api-Key": os.environ.get("OPENAI_API_KEY")},
         )
+
+        #that's cool that WeaviateHybridSearchRetriever wrappes a hybrid index. in pinecone you need to do it yourself. 
+        #at least the last time i checked it few months ago. 
+        #in keepi - each user gets a namespace so we store all the data in the same index but with different namespaces.
+        # seems like here you're using the namespace as the name for the index which could be very costly? at least in pinecone. 
+        # how do you separate multiple users in this approach? 
         retriever = WeaviateHybridSearchRetriever(
             client=client,
             index_name=namespace,
@@ -161,6 +171,8 @@ class WeaviateVectorDB(VectorDB):
             embedding=embeddings,
             create_schema_if_missing=True,
         )
+
+        #where do you create the index and metadata schema if the index does not exist?
         return retriever  # If this is part of the initialization, call it here.
 
     def init_weaviate_client(self, namespace: str):
@@ -175,6 +187,10 @@ class WeaviateVectorDB(VectorDB):
         )
         return client
 
+    #why have observation here at all? it's only used when the file is not PDF. maybe raise exeption that file type is not supported?
+    #this could use some more encapsulation i think for file loader. eg. PDF or other files all use the same approach below. 
+    #i've been avoiding writing to local files and just load the stream in memory. Each approach has it's pros and cons i guess. 
+    #why is document_loader under the webviate class? it can be used more widely. at a minimum move it to the base class but alternatively to a separate class.
     def _document_loader(self, observation: str, loader_settings: dict):
         # Create an in-memory file-like object for the PDF content
 
@@ -216,6 +232,8 @@ class WeaviateVectorDB(VectorDB):
             namespace = self.namespace
         retriever = self.init_weaviate(namespace)
 
+        #you can probably move the below to a json file or if you dont always need all the params, just iterate over the params and add them to the metadata.
+        #assuming here that non of the metadata fields are used for filtering? 
         def _stuct(observation, params):
             """Utility function to not repeat metadata structure"""
             # needs smarter solution, like dynamic generation of metadata
@@ -225,6 +243,7 @@ class WeaviateVectorDB(VectorDB):
                     # "text": observation,
                     "user_id": str(self.user_id),
                     "memory_id": str(self.memory_id),
+                    #what are those IDs meant for ?
                     "ltm_memory_id": str(self.ltm_memory_id),
                     "st_memory_id": str(self.st_memory_id),
                     "buffer_id": str(self.buffer_id),
@@ -232,11 +251,13 @@ class WeaviateVectorDB(VectorDB):
                     "agreement_id": params.get("agreement_id", None) or "",
                     "privacy_policy": params.get("privacy_policy", None) or "",
                     "terms_of_service": params.get("terms_of_service", None) or "",
+                    #is format refers to file format? e.g. pdf? 
                     "format": params.get("format", None) or "",
                     "schema_version": params.get("schema_version", None) or "",
                     "checksum": params.get("checksum", None) or "",
                     "owner": params.get("owner", None) or "",
                     "license": params.get("license", None) or "",
+                    #is validity start and end refers to the time the document was saved? 
                     "validity_start": params.get("validity_start", None) or "",
                     "validity_end": params.get("validity_end", None) or ""
                     # **source_metadata,
@@ -277,6 +298,7 @@ class WeaviateVectorDB(VectorDB):
         """
         client = self.init_weaviate_client(self.namespace)
 
+        #dont forget to remove prints
         print(self.namespace)
         print(str(datetime.now()))
         print(observation)
@@ -313,7 +335,7 @@ class WeaviateVectorDB(VectorDB):
                         "validity_end",
                     ],
                 )
-                .with_where(params)
+                .with_where(params) #is this your filtering? e.g. memories added last week from pdf? 
                 .with_near_text({"concepts": [observation]})
                 .with_additional(
                     ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score",'distance']
@@ -350,15 +372,19 @@ class WeaviateVectorDB(VectorDB):
                 .with_additional(
                     ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
                 )
+                #so if not params than you run a hybrid search using keywords? 
                 .with_hybrid(
                     query=observation,
                 )
+                #what is autocut?
                 .with_autocut(1)
+                #i guess this is how you incorporate multiple users into the same index. you may want to define it as a filter / index to make the retrieval faster.
                 .with_where(params_user_id)
                 .do()
             )
             return query_output
 
+    #why use async methods everywhere? 
     async def delete_memories(self, params: dict = None):
         client = self.init_weaviate_client(self.namespace)
         if params:
@@ -409,6 +435,8 @@ class WeaviateVectorDB(VectorDB):
                 # **source_metadata,
             },
             class_name="Test",
+            #what is uuid here? is it auto generated by webviate and is the primary key for the row? 
+            #where do you get that id from? do you want to update the full set of metadata each time? 
             uuid=params.get("id", None),
             consistency_level=weaviate.data.replication.ConsistencyLevel.ALL,  # default QUORUM
         )
