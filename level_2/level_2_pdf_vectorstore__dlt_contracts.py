@@ -478,6 +478,7 @@ class BaseMemory:
         params: Optional[dict] = None,
         namespace: Optional[str] = None,
     ):
+        #i dont think you need this check. Raise an exception in the init method if db type is not supported.
         if self.db_type == "weaviate":
             return await self.vector_db.add_memories(
                 observation=observation, loader_settings=loader_settings, params=params, namespace=namespace
@@ -490,6 +491,7 @@ class BaseMemory:
         params: Optional[str] = None,
         namespace: Optional[str] = None,
     ):
+        #same comment here. no need for this check.
         if self.db_type == "weaviate":
             return await self.vector_db.fetch_memories(
                 observation=observation, params=params, namespace=namespace
@@ -540,14 +542,17 @@ class EpisodicBuffer(BaseMemory):
             user_id, memory_id, index_name, db_type, namespace="BUFFERMEMORY"
         )
 
+        #double checking "blah" needs to be here? :)
         self.st_memory_id = "blah"
         self.llm = ChatOpenAI(
             temperature=0.0,
             max_tokens=1200,
             openai_api_key=os.environ.get("OPENAI_API_KEY"),
-            model_name="gpt-4-0613",
+            model_name="gpt-4-0613", #going to be expensive. why not use gpt-3.5-16k-0613 ?
+            #maybe add cost reporting to track costs? 
             # callbacks=[MyCustomSyncHandler(), MyCustomAsyncHandler()],
         )
+        #remind me why you need both llm and llm_base? 
         self.llm_base = OpenAI(
             temperature=0.0,
             max_tokens=1200,
