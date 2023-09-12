@@ -2,8 +2,10 @@
 import json
 from enum import Enum
 from io import BytesIO
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Any
+import logging
 
+logging.basicConfig(level=logging.INFO)
 import marvin
 import requests
 from deep_translator import GoogleTranslator
@@ -15,11 +17,12 @@ from langchain.retrievers import WeaviateHybridSearchRetriever
 from langchain.tools import tool
 from marvin import ai_classifier
 from pydantic import parse_obj_as
-
+from weaviate.gql.get import HybridFusion
+import numpy as np
 load_dotenv()
 from langchain import OpenAI
 from langchain.chat_models import ChatOpenAI
-from typing import Optional
+from typing import Optional, Dict, List, Union
 
 import tracemalloc
 
@@ -71,407 +74,10 @@ marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # Assuming OpenAIEmbeddings and other necessary imports are available
 
-# Default Values
-LTM_MEMORY_ID_DEFAULT = "00000"
-ST_MEMORY_ID_DEFAULT = "0000"
-BUFFER_ID_DEFAULT = "0000"
+from vectordb.basevectordb import  BaseMemory
 
 
-class VectorDBFactory:
-    def create_vector_db(
-        self,
-        user_id: str,
-        index_name: str,
-        memory_id: str,
-        ltm_memory_id: str = LTM_MEMORY_ID_DEFAULT,
-        st_memory_id: str = ST_MEMORY_ID_DEFAULT,
-        buffer_id: str = BUFFER_ID_DEFAULT,
-        db_type: str = "pinecone",
-        namespace: str = None,
-    ):
-        db_map = {"pinecone": PineconeVectorDB, "weaviate": WeaviateVectorDB}
-
-        if db_type in db_map:
-            return db_map[db_type](
-                user_id,
-                index_name,
-                memory_id,
-                ltm_memory_id,
-                st_memory_id,
-                buffer_id,
-                namespace,
-            )
-
-        raise ValueError(f"Unsupported database type: {db_type}")
-
-
-class VectorDB:
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-
-    def __init__(
-        self,
-        user_id: str,
-        index_name: str,
-        memory_id: str,
-        ltm_memory_id: str = LTM_MEMORY_ID_DEFAULT,
-        st_memory_id: str = ST_MEMORY_ID_DEFAULT,
-        buffer_id: str = BUFFER_ID_DEFAULT,
-        namespace: str = None,
-    ):
-        self.user_id = user_id
-        self.index_name = index_name
-        self.namespace = namespace
-        self.memory_id = memory_id
-        self.ltm_memory_id = ltm_memory_id
-        self.st_memory_id = st_memory_id
-        self.buffer_id = buffer_id
-
-
-class PineconeVectorDB(VectorDB):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.init_pinecone(self.index_name)
-
-    def init_pinecone(self, index_name):
-        # Pinecone initialization logic
-        pass
-
-
-class WeaviateVectorDB(VectorDB):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.init_weaviate(self.namespace)
-
-    def init_weaviate(self, namespace: str):
-        # Weaviate initialization logic
-        embeddings = OpenAIEmbeddings()
-        auth_config = weaviate.auth.AuthApiKey(
-            api_key=os.environ.get("WEAVIATE_API_KEY")
-        )
-        client = weaviate.Client(
-            url=os.environ.get("WEAVIATE_URL"),
-            auth_client_secret=auth_config,
-            additional_headers={"X-OpenAI-Api-Key": os.environ.get("OPENAI_API_KEY")},
-        )
-        retriever = WeaviateHybridSearchRetriever(
-            client=client,
-            index_name=namespace,
-            text_key="text",
-            attributes=[],
-            embedding=embeddings,
-            create_schema_if_missing=True,
-        )
-        return retriever  # If this is part of the initialization, call it here.
-
-    def init_weaviate_client(self, namespace: str):
-        # Weaviate client initialization logic
-        auth_config = weaviate.auth.AuthApiKey(
-            api_key=os.environ.get("WEAVIATE_API_KEY")
-        )
-        client = weaviate.Client(
-            url=os.environ.get("WEAVIATE_URL"),
-            auth_client_secret=auth_config,
-            additional_headers={"X-OpenAI-Api-Key": os.environ.get("OPENAI_API_KEY")},
-        )
-        return client
-
-    def _document_loader(self, observation: str, loader_settings: dict):
-        # Create an in-memory file-like object for the PDF content
-
-        if loader_settings.get("format") == "PDF":
-
-            if loader_settings.get("source") == "url":
-                pdf_response = requests.get(loader_settings["path"])
-                pdf_stream = BytesIO(pdf_response.content)
-                contents = pdf_stream.read()
-                tmp_location = os.path.join("/tmp", "tmp.pdf")
-                with open(tmp_location, "wb") as tmp_file:
-                    tmp_file.write(contents)
-
-                # Process the PDF using PyPDFLoader
-                loader = PyPDFLoader(tmp_location)
-                # adapt this for different chunking strategies
-                pages = loader.load_and_split()
-                return pages
-
-            if loader_settings.get("source") == "file":
-                # Process the PDF using PyPDFLoader
-                # might need adapting for different loaders + OCR
-                # need to test the path
-                loader = PyPDFLoader(loader_settings["path"])
-                pages = loader.load_and_split()
-
-                return pages
-        else:
-            # Process the text by just loading the base text
-            return observation
-
-
-    async def add_memories(
-        self, observation: str, loader_settings: dict = None, params: dict = None ,namespace:str=None
-    ):
-        # Update Weaviate memories here
-        print(self.namespace)
-        if namespace is None:
-            namespace = self.namespace
-        retriever = self.init_weaviate(namespace)
-
-        def _stuct(observation, params):
-            """Utility function to not repeat metadata structure"""
-            # needs smarter solution, like dynamic generation of metadata
-            return [
-            Document(
-                metadata={
-                    # "text": observation,
-                    "user_id": str(self.user_id),
-                    "memory_id": str(self.memory_id),
-                    "ltm_memory_id": str(self.ltm_memory_id),
-                    "st_memory_id": str(self.st_memory_id),
-                    "buffer_id": str(self.buffer_id),
-                    "version": params.get("version", None) or "",
-                    "agreement_id": params.get("agreement_id", None) or "",
-                    "privacy_policy": params.get("privacy_policy", None) or "",
-                    "terms_of_service": params.get("terms_of_service", None) or "",
-                    "format": params.get("format", None) or "",
-                    "schema_version": params.get("schema_version", None) or "",
-                    "checksum": params.get("checksum", None) or "",
-                    "owner": params.get("owner", None) or "",
-                    "license": params.get("license", None) or "",
-                    "validity_start": params.get("validity_start", None) or "",
-                    "validity_end": params.get("validity_end", None) or ""
-                    # **source_metadata,
-                },
-                page_content=observation,
-            )
-        ]
-
-        if loader_settings:
-            # Load the document
-            document = self._document_loader(observation, loader_settings)
-            print("DOC LENGTH", len(document))
-            for doc in document:
-                document_to_load = _stuct(doc.page_content, params)
-                retriever.add_documents(
-                    document_to_load
-                )
-
-        return retriever.add_documents(
-            _stuct(observation, params)
-        )
-
-    async def fetch_memories(
-        self, observation: str, namespace: str, params: dict = None
-    ):
-        # Fetch Weaviate memories here
-        """
-        Get documents from weaviate.
-
-        Args a json containing:
-            query (str): The query string.
-            path (list): The path for filtering, e.g., ['year'].
-            operator (str): The operator for filtering, e.g., 'Equal'.
-            valueText (str): The value for filtering, e.g., '2017*'.
-
-        Example:
-            get_from_weaviate(query="some query", path=['year'], operator='Equal', valueText='2017*')
-        """
-        client = self.init_weaviate_client(self.namespace)
-
-        print(self.namespace)
-        print(str(datetime.now()))
-        print(observation)
-        if namespace is None:
-            namespace = self.namespace
-
-        params_user_id = {
-            "path": ["user_id"],
-            "operator": "Like",
-            "valueText": self.user_id,
-        }
-
-        if params:
-            query_output = (
-                client.query.get(
-                    namespace,
-                    [
-                        # "text",
-                        "user_id",
-                        "memory_id",
-                        "ltm_memory_id",
-                        "st_memory_id",
-                        "buffer_id",
-                        "version",
-                        "agreement_id",
-                        "privacy_policy",
-                        "terms_of_service",
-                        "format",
-                        "schema_version",
-                        "checksum",
-                        "owner",
-                        "license",
-                        "validity_start",
-                        "validity_end",
-                    ],
-                )
-                .with_where(params)
-                .with_near_text({"concepts": [observation]})
-                .with_additional(
-                    ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score",'distance']
-                )
-                .with_where(params_user_id)
-                .do()
-            )
-            return query_output
-        else:
-            query_output = (
-                client.query.get(
-                    namespace,
-
-                    [
-                        "text",
-                        "user_id",
-                        "memory_id",
-                        "ltm_memory_id",
-                        "st_memory_id",
-                        "buffer_id",
-                        "version",
-                        "agreement_id",
-                        "privacy_policy",
-                        "terms_of_service",
-                        "format",
-                        "schema_version",
-                        "checksum",
-                        "owner",
-                        "license",
-                        "validity_start",
-                        "validity_end",
-                    ],
-                )
-                .with_additional(
-                    ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
-                )
-                .with_hybrid(
-                    query=observation,
-                )
-                .with_autocut(1)
-                .with_where(params_user_id)
-                .do()
-            )
-            return query_output
-
-    async def delete_memories(self, params: dict = None):
-        client = self.init_weaviate_client(self.namespace)
-        if params:
-            where_filter = {
-                "path": ["id"],
-                "operator": "Equal",
-                "valueText": params.get("id", None),
-            }
-            return client.batch.delete_objects(
-                class_name=self.namespace,
-                # Same `where` filter as in the GraphQL API
-                where=where_filter,
-            )
-        else:
-            # Delete all objects
-            print("HERE IS THE USER ID", self.user_id)
-            return client.batch.delete_objects(
-                class_name=self.namespace,
-                where={
-                    "path": ["user_id"],
-                    "operator": "Equal",
-                    "valueText": self.user_id,
-                },
-            )
-
-    def update_memories(self, observation, namespace: str, params: dict = None):
-        client = self.init_weaviate_client(self.namespace)
-
-        client.data_object.update(
-            data_object={
-                # "text": observation,
-                "user_id": str(self.user_id),
-                "memory_id": str(self.memory_id),
-                "ltm_memory_id": str(self.ltm_memory_id),
-                "st_memory_id": str(self.st_memory_id),
-                "buffer_id": str(self.buffer_id),
-                "version": params.get("version", None) or "",
-                "agreement_id": params.get("agreement_id", None) or "",
-                "privacy_policy": params.get("privacy_policy", None) or "",
-                "terms_of_service": params.get("terms_of_service", None) or "",
-                "format": params.get("format", None) or "",
-                "schema_version": params.get("schema_version", None) or "",
-                "checksum": params.get("checksum", None) or "",
-                "owner": params.get("owner", None) or "",
-                "license": params.get("license", None) or "",
-                "validity_start": params.get("validity_start", None) or "",
-                "validity_end": params.get("validity_end", None) or ""
-                # **source_metadata,
-            },
-            class_name="Test",
-            uuid=params.get("id", None),
-            consistency_level=weaviate.data.replication.ConsistencyLevel.ALL,  # default QUORUM
-        )
-        return
-
-
-class BaseMemory:
-    def __init__(
-        self,
-        user_id: str,
-        memory_id: Optional[str],
-        index_name: Optional[str],
-        db_type: str,
-        namespace: str,
-    ):
-        self.user_id = user_id
-        self.memory_id = memory_id
-        self.index_name = index_name
-        self.namespace = namespace
-        self.memory_type_id = str(uuid.uuid4())
-        self.db_type = db_type
-        factory = VectorDBFactory()
-        self.vector_db = factory.create_vector_db(
-            self.user_id,
-            self.index_name,
-            self.memory_id,
-            db_type=self.db_type,
-            namespace=self.namespace,
-        )
-
-    def init_client(self, namespace: str):
-        if self.db_type == "weaviate":
-            return self.vector_db.init_weaviate_client(namespace)
-
-    async def add_memories(
-        self,
-        observation: Optional[str] = None,
-        loader_settings: dict = None,
-        params: Optional[dict] = None,
-        namespace: Optional[str] = None,
-    ):
-        if self.db_type == "weaviate":
-            return await self.vector_db.add_memories(
-                observation=observation, loader_settings=loader_settings, params=params, namespace=namespace
-            )
-        # Add other db_type conditions if necessary
-
-    async def fetch_memories(
-        self,
-        observation: str,
-        params: Optional[str] = None,
-        namespace: Optional[str] = None,
-    ):
-        if self.db_type == "weaviate":
-            return await self.vector_db.fetch_memories(
-                observation=observation, params=params, namespace=namespace
-            )
-
-    async def delete_memories(self, params: Optional[str] = None):
-        if self.db_type == "weaviate":
-            return await self.vector_db.delete_memories(params)
-
-    # Additional methods for specific Memory can be added here
+from modulators.modulators import DifferentiableLayer
 
 
 class SemanticMemory(BaseMemory):
@@ -483,8 +89,7 @@ class SemanticMemory(BaseMemory):
         db_type: str = "weaviate",
     ):
         super().__init__(
-            user_id, memory_id, index_name, db_type, namespace="SEMANTICMEMORY"
-        )
+            user_id, memory_id, index_name, db_type, namespace="SEMANTICMEMORY")
 
 
 class EpisodicMemory(BaseMemory):
@@ -512,7 +117,7 @@ class EpisodicBuffer(BaseMemory):
             user_id, memory_id, index_name, db_type, namespace="BUFFERMEMORY"
         )
 
-        self.st_memory_id = "blah"
+        self.st_memory_id = str( uuid.uuid4())
         self.llm = ChatOpenAI(
             temperature=0.0,
             max_tokens=1200,
@@ -526,6 +131,34 @@ class EpisodicBuffer(BaseMemory):
             openai_api_key=os.environ.get("OPENAI_API_KEY"),
             model_name="gpt-4-0613",
         )
+
+    async def _summarizer(self, text: str, document:str,  max_tokens: int = 1200):
+        """Summarize text using OpenAI API, to reduce amount of code for modulators contributing to context"""
+        class Summaries(BaseModel):
+            """Schema for documentGroups"""
+            summary: str = Field(
+                ...,
+                description="Summarized document")
+        class SummaryContextList(BaseModel):
+            """Buffer raw context processed by the buffer"""
+
+            summaries: List[Summaries] = Field(..., description="List of summaries")
+            observation: str = Field(..., description="The original user query")
+
+        parser = PydanticOutputParser(pydantic_object=SummaryContextList)
+        prompt = PromptTemplate(
+            template=" \n{format_instructions}\nSummarize the observation briefly based on the user query, observation is: {query}\n. The document is: {document}",
+            input_variables=["query", "document"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+
+        _input = prompt.format_prompt(query=text, document=document)
+        document_context_result = self.llm_base(_input.to_string())
+        document_context_result_parsed = parser.parse(document_context_result)
+        document_context_result_parsed = json.loads(document_context_result_parsed.json())
+        document_summary = document_context_result_parsed["summaries"][0]["summary"]
+
+        return document_summary
 
     async def memory_route(self, text_time_diff: str):
         @ai_classifier
@@ -543,8 +176,9 @@ class EpisodicBuffer(BaseMemory):
 
         return namespace
 
-    async def freshness(self, observation: str, namespace: str = None) -> list[str]:
+    async def freshness(self, observation: str, namespace: str = None, memory=None) -> list[str]:
         """Freshness - Score between 0 and 1  on how often was the information updated in episodic or semantic memory in the past"""
+        logging.info("Starting with Freshness")
 
         lookup_value = await self.fetch_memories(
             observation=observation, namespace=namespace
@@ -557,13 +191,14 @@ class EpisodicBuffer(BaseMemory):
         last_update_datetime = datetime.fromtimestamp(int(unix_t) / 1000)
         time_difference = datetime.now() - last_update_datetime
         time_difference_text = humanize.naturaltime(time_difference)
-        namespace = await self.memory_route(str(time_difference_text))
-        return [namespace.value, lookup_value]
+        namespace_ = await self.memory_route(str(time_difference_text))
+        return [namespace_.value, lookup_value]
 
-    async def frequency(self, observation: str, namespace: str) -> list[str]:
+    async def frequency(self, observation: str, namespace: str, memory) -> list[str]:
         """Frequency - Score between 0 and 1 on how often was the information processed in episodic memory in the past
         Counts the number of times a memory was accessed in the past and divides it by the total number of memories in the episodic memory
         """
+        logging.info("Starting with Frequency")
         weaviate_client = self.init_client(namespace=namespace)
 
         result_output = await self.fetch_memories(
@@ -578,23 +213,62 @@ class EpisodicBuffer(BaseMemory):
                 "count"
             ]
         )
-        return [str(frequency), result_output["data"]["Get"]["EPISODICMEMORY"][0]]
+        summary = await self._summarizer(text=observation, document=result_output["data"]["Get"]["EPISODICMEMORY"][0])
+        logging.info("Frequency summary is %s", str(summary))
+        return [str(frequency), summary]
 
-    async def relevance(self, observation: str, namespace: str) -> list[str]:
-        """Relevance - Score between 0 and 1 on how often was the final information relevant to the user in the past.
-        Stored in the episodic memory, mainly to show how well a buffer did the job
-        Starts at 0, gets updated based on the user feedback"""
+    async def repetition(self, observation: str, namespace: str, memory) -> list[str]:
+        """Repetition - Score between 0 and 1 based on how often and at what intervals a memory has been revisited.
+        Accounts for the spacing effect, where memories accessed at increasing intervals are given higher scores.
+        # TO DO -> add metadata column to make sure that the access is not equal to update, and run update vector function each time a memory is accessed
+        """
+        logging.info("Starting with Repetition")
 
-        return ["0", "memory"]
+        result_output = await self.fetch_memories(
+            observation=observation, params=None, namespace=namespace
+        )
 
-    async def saliency(self, observation: str, namespace=None) -> list[str]:
+        access_times = result_output["data"]["Get"]["EPISODICMEMORY"][0]["_additional"]["lastUpdateTimeUnix"]
+        # Calculate repetition score based on access times
+        if not access_times or len(access_times) == 1:
+            return ["0", result_output["data"]["Get"]["EPISODICMEMORY"][0]]
+
+        # Sort access times
+        access_times = sorted(access_times)
+        # Calculate intervals between consecutive accesses
+        intervals = [access_times[i + 1] - access_times[i] for i in range(len(access_times) - 1)]
+        # A simple scoring mechanism: Longer intervals get higher scores, as they indicate spaced repetition
+        repetition_score = sum([1.0 / (interval + 1) for interval in intervals]) / len(intervals)
+        summary = await self._summarizer(text = observation, document=result_output["data"]["Get"]["EPISODICMEMORY"][0])
+        logging.info("Repetition is %s", str(repetition_score))
+        logging.info("Repetition summary is %s", str(summary))
+        return [str(repetition_score), summary]
+
+    async def relevance(self, observation: str, namespace: str, memory) -> list[str]:
+        """
+        Fetches the fusion relevance score for a given observation from the episodic memory.
+        Learn more about fusion scores here on Weaviate docs: https://weaviate.io/blog/hybrid-search-fusion-algorithms
+        Parameters:
+        - observation: The user's query or observation.
+        - namespace: The namespace for the data.
+
+        Returns:
+        - The relevance score between 0 and 1.
+        """
+        logging.info("Starting with Relevance")
+        score = memory["_additional"]["score"]
+        logging.info("Relevance is %s", str(score))
+        return [score, "fusion score"]
+
+    async def saliency(self, observation: str, namespace=None, memory=None) -> list[str]:
         """Determines saliency by scoring the set of retrieved documents against each other and trying to determine saliency
         """
+        logging.info("Starting with Saliency")
         class SaliencyRawList(BaseModel):
             """Schema for documentGroups"""
-            original_document: str = Field(
+            summary: str = Field(
                 ...,
-                description="The original document retrieved from the database")
+                description="Summarized document")
             saliency_score: str = Field(
                 None, description="The score between 0 and 1")
         class SailencyContextList(BaseModel):
@@ -605,7 +279,7 @@ class EpisodicBuffer(BaseMemory):
 
         parser = PydanticOutputParser(pydantic_object=SailencyContextList)
         prompt = PromptTemplate(
-            template="Determine saliency of documents compared to the other documents retrieved \n{format_instructions}\nOriginal observation is: {query}\n",
+            template="Determine saliency of documents compared to the other documents retrieved \n{format_instructions}\nSummarize the observation briefly based on the user query, observation is: {query}\n",
             input_variables=["query"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
@@ -613,9 +287,29 @@ class EpisodicBuffer(BaseMemory):
         _input = prompt.format_prompt(query=observation)
         document_context_result = self.llm_base(_input.to_string())
         document_context_result_parsed = parser.parse(document_context_result)
-        return document_context_result_parsed.json()
+        document_context_result_parsed = json.loads(document_context_result_parsed.json())
+        saliency_score = document_context_result_parsed["docs"][0]["saliency_score"]
+        saliency_values = document_context_result_parsed["docs"][0]["summary"]
+
+        logging.info("Saliency is %s", str(saliency_score))
+        logging.info("Saliency summary is %s", str(saliency_values))
+
+        return [saliency_score, saliency_values]
 
 
+
+
+    # Example Usage
+    # attention_modulators = {"freshness": 0.8, "frequency": 0.7, "relevance": 0.9, "saliency": 0.85}
+    # diff_layer = DifferentiableLayer(attention_modulators)
+    #
+    # # Sample batch feedback
+    # feedbacks = [0.75, 0.8, 0.9]
+    #
+    # # Adjust weights based on batch feedback
+    # diff_layer.adjust_weights(feedbacks)
+    #
+    # print(diff_layer.get_weights())
 
     async def handle_modulator(
         self,
@@ -623,6 +317,7 @@ class EpisodicBuffer(BaseMemory):
         attention_modulators: Dict[str, float],
         observation: str,
         namespace: Optional[str] = None,
+        memory: Optional[Dict[str, Any]] = None,
     ) -> Optional[List[Union[str, float]]]:
         """
         Handle the given modulator based on the observation and namespace.
@@ -638,22 +333,25 @@ class EpisodicBuffer(BaseMemory):
         """
         modulator_value = attention_modulators.get(modulator_name, 0.0)
         modulator_functions = {
-            "freshness": lambda obs, ns: self.freshness(observation=obs, namespace=ns),
-            "frequency": lambda obs, ns: self.frequency(observation=obs, namespace=ns),
-            "relevance": lambda obs, ns: self.relevance(observation=obs, namespace=ns),
-            "saliency": lambda obs, ns: self.saliency(observation=obs, namespace=ns),
+            "freshness": lambda obs, ns, mem: self.freshness(observation=obs, namespace=ns, memory=mem),
+            "frequency": lambda obs, ns, mem: self.frequency(observation=obs, namespace=ns, memory=mem),
+            "relevance": lambda obs, ns, mem: self.relevance(observation=obs, namespace=ns, memory=mem),
+            "saliency": lambda obs, ns, mem: self.saliency(observation=obs, namespace=ns, memory=mem),
         }
 
         result_func = modulator_functions.get(modulator_name)
         if not result_func:
             return None
 
-        result = await result_func(observation, namespace)
+        result = await result_func(observation, namespace, memory)
         if not result:
             return None
 
         try:
-            if float(modulator_value) >= float(result[0]):
+            logging.info("Modulator %s", modulator_name)
+            logging.info("Modulator value %s", modulator_value)
+            logging.info("Result %s", result[0])
+            if  float(result[0]) >= float(modulator_value):
                 return result
         except ValueError:
             pass
@@ -679,12 +377,6 @@ class EpisodicBuffer(BaseMemory):
         attention_modulators: dict = None,
     ):
         """Generates the context to be used for the buffer and passed to the agent"""
-        try:
-            # we delete all memories in the episodic buffer, so we can start fresh
-            await self.delete_memories()
-        except:
-            # in case there are no memories, we pass
-            pass
         # we just filter the data here to make sure input is clean
         prompt_filter = ChatPromptTemplate.from_template(
             """Filter and remove uneccessary information that is not relevant in the query to 
@@ -695,45 +387,160 @@ class EpisodicBuffer(BaseMemory):
 
         # this part is partially done but the idea is to apply different attention modulators
         # to the data to fetch the most relevant information from the vector stores
-        context = []
-        if attention_modulators:
-            from typing import Optional, Dict, List, Union
-
-            lookup_value_semantic = await self.fetch_memories(
-                observation=str(output), namespace="SEMANTICMEMORY"
-            )
-            context = []
-            for memory in lookup_value_semantic["data"]["Get"]["SEMANTICMEMORY"]:
-                # extract memory id, and pass it to fetch function as a parameter
-                modulators = list(attention_modulators.keys())
-                for modulator in modulators:
-                    result = await self.handle_modulator(
-                        modulator,
-                        attention_modulators,
-                        str(output),
-                        namespace="EPISODICMEMORY",
-                    )
-                    if result:
-                        context.append(result)
-                        context.append(memory)
-        else:
-            # defaults to semantic search if we don't want to apply algorithms on the vectordb data
-            lookup_value_episodic = await self.fetch_memories(
-                observation=str(output), namespace="EPISODICMEMORY"
-            )
-            lookup_value_semantic = await self.fetch_memories(
-                observation=str(output), namespace="SEMANTICMEMORY"
-            )
-            lookup_value_buffer = await self.fetch_memories(observation=str(output))
-
-            context.append(lookup_value_buffer)
-            context.append(lookup_value_semantic)
-            context.append(lookup_value_episodic)
-
         class BufferModulators(BaseModel):
+            """Value of buffer modulators"""
             frequency: str = Field(..., description="Frequency score of the document")
             saliency: str = Field(..., description="Saliency score of the document")
             relevance: str = Field(..., description="Relevance score of the document")
+            description:str = Field(..., description="Latest buffer modulators")
+            direction: str= Field(..., description="Increase or a decrease of the modulator")
+
+        parser = PydanticOutputParser(pydantic_object=BufferModulators)
+
+        prompt = PromptTemplate(
+            template="""Structure the buffer modulators to be used for the buffer. \n
+                        {format_instructions} \nOriginal observation is: 
+                        {query}\n """,
+            input_variables=["query"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+
+        # check if modulators exist, initialize the modulators if needed
+        if attention_modulators is None:
+            # try:
+            logging.info("Starting with attention mods")
+            attention_modulators = await self.fetch_memories(observation="Attention modulators",
+                                                         namespace="BUFFERMEMORY")
+
+            logging.info("Attention modulators exist %s", str(attention_modulators))
+            lookup_value_episodic = await self.fetch_memories(
+                observation=str(output), namespace="EPISODICMEMORY"
+            )
+            # lookup_value_episodic= lookup_value_episodic["data"]["Get"]["EPISODICMEMORY"][0]["text"]
+            prompt_classify = ChatPromptTemplate.from_template(
+                """You are a classifier. Determine if based on the previous query if the user was satisfied with the output : {query}"""
+            )
+            json_structure = [{
+                "name": "classifier",
+                "description": "Classification indicating if it's output is satisfactory",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "classification": {
+                            "type": "boolean",
+                            "description": "The classification true or false"
+                        }
+                    }, "required": ["classification"]}
+            }]
+            chain_filter = prompt_classify | self.llm.bind(function_call= {"name": "classifier"}, functions= json_structure)
+            classifier_output = await chain_filter.ainvoke({"query": lookup_value_episodic})
+            arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
+            print("This is the arguments string", arguments_str)
+            arguments_dict = json.loads(arguments_str)
+            classfier_value = arguments_dict.get('classification', None)
+
+            print("This is the classifier value", classfier_value)
+
+            if classfier_value:
+                # adjust the weights of the modulators by adding a positive value
+                print("Lookup value, episodic", lookup_value_episodic["data"]["Get"]["EPISODICMEMORY"][0]["text"])
+                prompt_classify = ChatPromptTemplate.from_template(
+                    """ We know we need to increase the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
+                )
+                chain_modulator = prompt_classify | self.llm
+                classifier_output = await chain_modulator.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
+                print("classifier output 1", classifier_output)
+                diff_layer = DifferentiableLayer(attention_modulators)
+                adjusted_modulator = await diff_layer.adjust_weights(classifier_output)
+                _input = prompt.format_prompt(query=adjusted_modulator)
+                document_context_result = self.llm_base(_input.to_string())
+                document_context_result_parsed = parser.parse(document_context_result)
+                print("Updating with the following weights", str(document_context_result_parsed))
+                await self.add_memories(observation=str(document_context_result_parsed), params=params, namespace="BUFFERMEMORY")
+            else:
+                # adjust the weights of the modulators by adding a negative value
+                print("Lookup value, episodic", lookup_value_episodic)
+                prompt_classify = ChatPromptTemplate.from_template(
+                    """ We know we need to decrease the classifiers for our AI system. The classifiers are {modulators} The query is: {query}. Which of the classifiers should we decrease? Return just the modulator and desired value"""
+                )
+                chain_modulator_reduction = prompt_classify | self.llm
+
+                classifier_output = await chain_modulator_reduction.ainvoke({"query": lookup_value_episodic, "modulators": str(attention_modulators)})
+                print("classifier output 2", classifier_output)
+                diff_layer = DifferentiableLayer(attention_modulators)
+                adjusted_modulator =diff_layer.adjust_weights(classifier_output)
+                _input = prompt.format_prompt(query=adjusted_modulator)
+                document_context_result = self.llm_base(_input.to_string())
+                document_context_result_parsed = parser.parse(document_context_result)
+                print("Updating with the following weights", str(document_context_result_parsed))
+                await self.add_memories(observation=str(document_context_result_parsed), params=params, namespace="BUFFERMEMORY")
+            # except:
+            #     # initialize the modulators with default values if they are not provided
+            #     print("Starting with default modulators")
+            #     attention_modulators = {
+            #         "freshness": 0.5,
+            #         "frequency": 0.5,
+            #         "relevance": 0.5,
+            #         "saliency": 0.5,
+            #     }
+            #     _input = prompt.format_prompt(query=attention_modulators)
+            #     document_context_result = self.llm_base(_input.to_string())
+            #     document_context_result_parsed = parser.parse(document_context_result)
+            #     await self.add_memories(observation=str(document_context_result_parsed), params=params, namespace="BUFFERMEMORY")
+
+        elif attention_modulators:
+            pass
+
+
+        lookup_value_semantic = await self.fetch_memories(
+            observation=str(output), namespace="SEMANTICMEMORY"
+        )
+        print("This is the lookup value semantic", len(lookup_value_semantic))
+        context = []
+        memory_scores = []
+
+        async def compute_score_for_memory(memory, output, attention_modulators):
+            modulators = list(attention_modulators.keys())
+            total_score = 0
+            num_scores = 0
+            individual_scores = {}  # Store individual scores with their modulator names
+
+            for modulator in modulators:
+                result = await self.handle_modulator(
+                    modulator_name=modulator,
+                    attention_modulators=attention_modulators,
+                    observation=str(output),
+                    namespace="EPISODICMEMORY",
+                    memory=memory,
+                )
+                if result:
+                    score = float(result[0])  # Assuming the first value in result is the score
+                    individual_scores[modulator] = score  # Store the score with its modulator name
+                    total_score += score
+                    num_scores += 1
+
+            average_score = total_score / num_scores if num_scores else 0
+            return {
+                "memory": memory,
+                "average_score": average_score,
+                "individual_scores": individual_scores
+            }
+
+        tasks = [
+            compute_score_for_memory(memory=memory, output=output, attention_modulators=attention_modulators)
+            for memory in lookup_value_semantic["data"]["Get"]["SEMANTICMEMORY"]
+        ]
+
+        print("HERE IS THE LENGTH OF THE TASKS", str(tasks))
+        memory_scores = await asyncio.gather(*tasks)
+        # Sort the memories based on their average scores
+        sorted_memories = sorted(memory_scores, key=lambda x: x["average_score"], reverse=True)[:5]
+        # Store the sorted memories in the context
+        context.extend([item for item in sorted_memories])
+        print("HERE IS THE CONTEXT", context)
+
+        class BufferModulators(BaseModel):
+            attention_modulators: Dict[str, float] = Field(... , description="Attention modulators")
 
         class BufferRawContextTerms(BaseModel):
             """Schema for documentGroups"""
@@ -745,18 +552,29 @@ class EpisodicBuffer(BaseMemory):
             document_content: str = Field(
                 None, description="Shortened original content of the document"
             )
-            document_relevance: str = Field(
-                None,
-                description="The relevance of the document for the task on the scale from 0 to 1",
-            )
             attention_modulators_list: List[BufferModulators] = Field(
                 ..., description="List of modulators"
+            )
+            average_modulator_score: str = Field(None, description="Average modulator score")
+        class StructuredEpisodicEvents(BaseModel):
+            """Schema for documentGroups"""
+
+            event_order: str = Field(
+                ...,
+                description="Order when event occured",
+            )
+            event_type: str = Field(
+                None, description="Type of the event"
+            )
+            event_context: List[BufferModulators] = Field(
+                ..., description="Context of the event"
             )
 
         class BufferRawContextList(BaseModel):
             """Buffer raw context processed by the buffer"""
 
             docs: List[BufferRawContextTerms] = Field(..., description="List of docs")
+            events: List[StructuredEpisodicEvents] = Field(..., description="List of events")
             user_query: str = Field(..., description="The original user query")
 
         # we structure the data here to make it easier to work with
@@ -774,6 +592,7 @@ class EpisodicBuffer(BaseMemory):
         _input = prompt.format_prompt(query=user_input, context=context)
         document_context_result = self.llm_base(_input.to_string())
         document_context_result_parsed = parser.parse(document_context_result)
+        # print(document_context_result_parsed)
         return document_context_result_parsed
 
     async def get_task_list(
@@ -939,12 +758,7 @@ class EpisodicBuffer(BaseMemory):
             result_tasks.append(task)
             result_tasks.append(output)
 
-        # print("HERE IS THE RESULT TASKS", str(result_tasks))
-        #
         # buffer_result = await self.fetch_memories(observation=str(user_input))
-        #
-        # print("HERE IS THE RESULT TASKS", str(buffer_result))
-
         class EpisodicTask(BaseModel):
             """Schema for an individual task."""
 
@@ -972,28 +786,29 @@ class EpisodicBuffer(BaseMemory):
             user_query: str = Field(
                 ..., description="The order at which the task needs to be performed"
             )
-
+            attention_modulators: str = Field(..., description="List of attention modulators")
         parser = PydanticOutputParser(pydantic_object=EpisodicList)
+        date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         prompt = PromptTemplate(
-            template="Format the result.\n{format_instructions}\nOriginal query is: {query}\n Steps are: {steps}, buffer is: {buffer}",
-            input_variables=["query", "steps", "buffer"],
+            template="Format the result.\n{format_instructions}\nOriginal query is: {query}\n Steps are: {steps}, buffer is: {buffer}, date is:{date}, attention modulators are: {attention_modulators} \n",
+            input_variables=["query", "steps", "buffer", "date", "attention_modulators"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
         _input = prompt.format_prompt(
             query=user_input, steps=str(tasks_list)
-            , buffer=str(result_tasks)
+            , buffer=str(result_tasks), date= date, attention_modulators=attention_modulators
         )
-
+        print("HERE ARE THE STEPS, BUFFER AND DATE", str(tasks_list))
+        print("here are the result_tasks", str(result_tasks))
         # return "a few things to do like load episodic memory in a structured format"
         output = self.llm_base(_input.to_string())
         result_parsing = parser.parse(output)
         lookup_value = await self.add_memories(
             observation=str(result_parsing.json()), params=params, namespace='EPISODICMEMORY'
         )
-        # print("THE RESULT OF THIS QUERY IS ", result_parsing.json())
-        await self.delete_memories()
+        # await self.delete_memories()
         return result_parsing.json()
 
 
@@ -1188,11 +1003,14 @@ class Memory:
     async def _available_operations(self):
         return await self.long_term_memory.episodic_buffer.available_operations()
 
+    async def _provide_feedback(self, score:str =None, params: dict = None, attention_modulators: dict = None):
+        return await self.short_term_memory.episodic_buffer.provide_feedback(score=score, params=params, attention_modulators=attention_modulators)
+
 
 async def main():
 
     # if you want to run the script as a standalone script, do so with the examples below
-    memory = Memory(user_id="123")
+    memory = Memory(user_id="TestUser")
     await memory.async_init()
     params = {
         "version": "1.0",
@@ -1212,17 +1030,25 @@ async def main():
     "source": "url",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
-    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    print(load_jack_london)
+    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    # print(load_jack_london)
 
-    modulator = {"relevance": 0.0, "saliency": 0.0, "frequency": 0.0}
-    # #
-    run_main_buffer = await memory._run_main_buffer(
+    modulator = {"relevance": 0.1,  "frequency": 0.1}
+    # await memory._delete_episodic_memory()
+    #
+    run_main_buffer = await memory._create_buffer_context(
         user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
         params=params,
         attention_modulators=modulator,
     )
     print(run_main_buffer)
+    # #
+    # run_main_buffer = await memory._run_main_buffer(
+    #     user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
+    #     params=params,
+    #     attention_modulators=None,
+    # )
+    # print(run_main_buffer)
     # del_semantic = await memory._delete_semantic_memory()
     # print(del_semantic)
 
