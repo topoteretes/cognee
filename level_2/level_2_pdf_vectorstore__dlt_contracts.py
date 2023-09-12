@@ -362,9 +362,9 @@ class EpisodicBuffer(BaseMemory):
         """Determines what operations are available for the user to process PDFs"""
 
         return [
-            "translate",
-            "structure",
-            "fetch from vector store"
+            "retrieve over time",
+            "save to personal notes",
+            "translate to german"
             # "load to semantic memory",
             # "load to episodic memory",
             # "load to buffer",
@@ -594,6 +594,8 @@ class EpisodicBuffer(BaseMemory):
             episodic_context = await chain.arun(input=prompt_filter_chunk, verbose=True)
             print(cb)
 
+        print("HERE IS THE EPISODIC CONTEXT", episodic_context)
+
         class BufferModulators(BaseModel):
             attention_modulators: Dict[str, float] = Field(... , description="Attention modulators")
 
@@ -728,55 +730,6 @@ class EpisodicBuffer(BaseMemory):
             complete_agent_prompt= f" Document context is: {document_from_vectorstore} \n  Task is : {task['task_order']} {task['task_name']} {task['operation']} "
 
             # task['vector_store_context_results']=document_context_result_parsed.dict()
-            class PromptWrapper(BaseModel):
-                observation: str = Field(
-                    description="observation we want to fetch from vectordb"
-                )
-
-            @tool(
-                "convert_to_structured", args_schema=PromptWrapper, return_direct=True
-            )
-            def convert_to_structured(observation=None, json_schema=None):
-                """Convert unstructured data to structured data"""
-                BASE_DIR = os.getcwd()
-                json_path = os.path.join(
-                    BASE_DIR, "schema_registry", "ticket_schema.json"
-                )
-
-                def load_json_or_infer_schema(file_path, document_path):
-                    """Load JSON schema from file or infer schema from text"""
-
-                    # Attempt to load the JSON file
-                    with open(file_path, "r") as file:
-                        json_schema = json.load(file)
-                    return json_schema
-
-                json_schema = load_json_or_infer_schema(json_path, None)
-
-                def run_open_ai_mapper(observation=None, json_schema=None):
-                    """Convert unstructured data to structured data"""
-
-                    prompt_msgs = [
-                        SystemMessage(
-                            content="You are a world class algorithm converting unstructured data into structured data."
-                        ),
-                        HumanMessage(
-                            content="Convert unstructured data to structured data:"
-                        ),
-                        HumanMessagePromptTemplate.from_template("{input}"),
-                        HumanMessage(
-                            content="Tips: Make sure to answer in the correct format"
-                        ),
-                    ]
-                    prompt_ = ChatPromptTemplate(messages=prompt_msgs)
-                    chain_funct = create_structured_output_chain(
-                        json_schema, prompt=prompt_, llm=self.llm, verbose=True
-                    )
-                    output = chain_funct.run(input=observation, llm=self.llm)
-                    return output
-
-                result = run_open_ai_mapper(observation, json_schema)
-                return result
 
             class FetchText(BaseModel):
                 observation: str = Field(description="observation we want to translate")
@@ -788,6 +741,34 @@ class EpisodicBuffer(BaseMemory):
                 else:
                     out = self.fetch_memories(observation['original_query'], namespace="SEMANTICMEMORY")
                     return out
+
+            @tool("retrieve_from_memories", args_schema=FetchText, return_direct=True)
+            def retrieve_from_memories(observation, args_schema=FetchText):
+                """Retrieve from episodic memory if data doesn't exist in the context"""
+
+                new_observations = []
+                observation = self.fetch_memories(observation['original_query'], namespace="EPISODICMEMORY")
+
+                for memory in observation:
+
+                    unix_t = memory["data"]["Get"]["EPISODICMEMORY"][0]["_additional"][
+                        "lastUpdateTimeUnix"
+                    ]
+
+                    # Convert Unix timestamp to datetime
+                    last_update_datetime = datetime.fromtimestamp(int(unix_t) / 1000)
+                    time_difference = datetime.now() - last_update_datetime
+                    time_difference_text = humanize.naturaltime(time_difference)
+                    # Append the time difference to the memory
+                    memory["time_difference"] = str(time_difference_text)
+                    #patch the memory
+                    #retrieve again then
+
+                    # Append the modified memory to the new list
+                    new_observations.append(memory)
+
+
+
 
             class TranslateText(BaseModel):
                 observation: str = Field(description="observation we want to translate")
@@ -802,7 +783,7 @@ class EpisodicBuffer(BaseMemory):
 
             agent = initialize_agent(
                 llm=self.llm,
-                tools=[fetch_from_vector_store,translate_to_de, convert_to_structured],
+                tools=[fetch_from_vector_store,translate_to_de],
                 agent=AgentType.OPENAI_FUNCTIONS,
                 verbose=True,
             )
