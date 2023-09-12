@@ -104,10 +104,10 @@ class WeaviateVectorDB(VectorDB):
         return client
 
     def _document_loader(self, observation: str, loader_settings: dict):
-        # Create an in-memory file-like object for the PDF content
+        # Check the format of the document
+        document_format = loader_settings.get("format", "text")
 
-        if loader_settings.get("format") == "PDF":
-
+        if document_format == "PDF":
             if loader_settings.get("source") == "url":
                 pdf_response = requests.get(loader_settings["path"])
                 pdf_stream = BytesIO(pdf_response.content)
@@ -121,19 +121,20 @@ class WeaviateVectorDB(VectorDB):
                 # adapt this for different chunking strategies
                 pages = loader.load_and_split()
                 return pages
-
-            if loader_settings.get("source") == "file":
+            elif loader_settings.get("source") == "file":
                 # Process the PDF using PyPDFLoader
                 # might need adapting for different loaders + OCR
                 # need to test the path
                 loader = PyPDFLoader(loader_settings["path"])
                 pages = loader.load_and_split()
-
                 return pages
-        else:
-            # Process the text by just loading the base text
+
+        elif document_format == "text":
+            # Process the text directly
             return observation
 
+        else:
+            raise ValueError(f"Unsupported document format: {document_format}")
 
     async def add_memories(
         self, observation: str, loader_settings: dict = None, params: dict = None ,namespace:str=None

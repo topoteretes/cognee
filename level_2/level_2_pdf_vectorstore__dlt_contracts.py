@@ -531,13 +531,68 @@ class EpisodicBuffer(BaseMemory):
             for memory in lookup_value_semantic["data"]["Get"]["SEMANTICMEMORY"]
         ]
 
-        print("HERE IS THE LENGTH OF THE TASKS", str(tasks))
         memory_scores = await asyncio.gather(*tasks)
         # Sort the memories based on their average scores
         sorted_memories = sorted(memory_scores, key=lambda x: x["average_score"], reverse=True)[:5]
         # Store the sorted memories in the context
         context.extend([item for item in sorted_memories])
+
+        for item in context:
+            memory = item.get('memory', {})
+            text = memory.get('text', '')
+
+            prompt_sum= ChatPromptTemplate.from_template("""Based on this query: {query} Summarize the following text so it can be best used as a context summary for the user when running query: {text}"""
+            )
+            chain_sum = prompt_sum | self.llm
+            summary_context = await chain_sum.ainvoke({"query": output, "text": text})
+            item['memory']['text'] = summary_context
+
+
         print("HERE IS THE CONTEXT", context)
+
+        lookup_value_episodic = await self.fetch_memories(
+            observation=str(output), namespace="EPISODICMEMORY"
+        )
+
+        class Event(BaseModel):
+            """Schema for an individual event."""
+
+            event_order: str = Field(
+                ..., description="The order at which the task needs to be performed"
+            )
+            event_name: str = Field(
+                None, description="The task that needs to be performed"
+            )
+            operation: str = Field(None, description="The operation that was performed")
+            original_query: str = Field(
+                None, description="Original user query provided"
+            )
+        class EventList(BaseModel):
+            """Schema for the record containing a list of events of the user chronologically."""
+
+            tasks: List[Event] = Field(..., description="List of tasks")
+
+        prompt_filter_chunk = f" Based on available memories {lookup_value_episodic} determine only the relevant list of steps and operations sequentially "
+        prompt_msgs = [
+            SystemMessage(
+                content="You are a world class algorithm for determining what happened in the past and ordering events chronologically."
+            ),
+            HumanMessage(content="Analyze the following memories and provide the relevant response:"),
+            HumanMessagePromptTemplate.from_template("{input}"),
+            HumanMessage(content="Tips: Make sure to answer in the correct format"),
+            HumanMessage(
+                content="Tips: Only choose actions that are relevant to the user query and ignore others"
+            )
+        ]
+        prompt_ = ChatPromptTemplate(messages=prompt_msgs)
+        chain = create_structured_output_chain(
+            EventList, self.llm, prompt_, verbose=True
+        )
+        from langchain.callbacks import get_openai_callback
+
+        with get_openai_callback() as cb:
+            episodic_context = await chain.arun(input=prompt_filter_chunk, verbose=True)
+            print(cb)
 
         class BufferModulators(BaseModel):
             attention_modulators: Dict[str, float] = Field(... , description="Attention modulators")
@@ -579,17 +634,16 @@ class EpisodicBuffer(BaseMemory):
 
         # we structure the data here to make it easier to work with
         parser = PydanticOutputParser(pydantic_object=BufferRawContextList)
-
         prompt = PromptTemplate(
             template="""Summarize and create semantic search queries and relevant 
                         document summaries for the user query.\n
                         {format_instructions}\nOriginal query is: 
-                        {query}\n Retrieved context is: {context}""",
-            input_variables=["query", "context"],
+                        {query}\n Retrieved document context is: {context}. Retrieved memory context is {memory_context}""",
+            input_variables=["query", "context", "memory_context"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
-        _input = prompt.format_prompt(query=user_input, context=context)
+        _input = prompt.format_prompt(query=user_input, context=str(context), memory_context=str(episodic_context))
         document_context_result = self.llm_base(_input.to_string())
         document_context_result_parsed = parser.parse(document_context_result)
         # print(document_context_result_parsed)
