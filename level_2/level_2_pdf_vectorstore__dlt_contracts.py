@@ -74,7 +74,9 @@ marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # Assuming OpenAIEmbeddings and other necessary imports are available
 
-from vectordb.basevectordb import  BaseMemory, PineconeVectorDB, WeaviateVectorDB
+from vectordb.basevectordb import  BaseMemory
+
+
 from modulators.modulators import DifferentiableLayer
 
 
@@ -115,7 +117,7 @@ class EpisodicBuffer(BaseMemory):
             user_id, memory_id, index_name, db_type, namespace="BUFFERMEMORY"
         )
 
-        self.st_memory_id = "blah"
+        self.st_memory_id = str( uuid.uuid4())
         self.llm = ChatOpenAI(
             temperature=0.0,
             max_tokens=1200,
