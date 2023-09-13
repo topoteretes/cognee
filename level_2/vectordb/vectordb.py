@@ -3,29 +3,28 @@
 import logging
 from io import BytesIO
 
+import sys
+import os
 
+from marshmallow import Schema, fields
+from level_2.loaders.loaders import _document_loader
+# Add the parent directory to sys.path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 logging.basicConfig(level=logging.INFO)
 import marvin
 import requests
-from dotenv import load_dotenv
 from langchain.document_loaders import PyPDFLoader
 from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
-
-load_dotenv()
-from typing import Optional
-
 import tracemalloc
-
 tracemalloc.start()
-
 import os
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
 from dotenv import load_dotenv
+from level_2.schema.semantic.semantic_schema import DocumentSchema, SCHEMA_VERSIONS, DocumentMetadataSchemaV1
 from langchain.schema import Document
-import uuid
 import weaviate
 
 load_dotenv()
@@ -103,122 +102,114 @@ class WeaviateVectorDB(VectorDB):
         )
         return client
 
-    def _document_loader(self, observation: str, loader_settings: dict):
-        # Check the format of the document
-        document_format = loader_settings.get("format", "text")
+    # def _document_loader(self, observation: str, loader_settings: dict):
+    #     # Check the format of the document
+    #     document_format = loader_settings.get("format", "text")
+    #
+    #     if document_format == "PDF":
+    #         if loader_settings.get("source") == "url":
+    #             pdf_response = requests.get(loader_settings["path"])
+    #             pdf_stream = BytesIO(pdf_response.content)
+    #             contents = pdf_stream.read()
+    #             tmp_location = os.path.join("/tmp", "tmp.pdf")
+    #             with open(tmp_location, "wb") as tmp_file:
+    #                 tmp_file.write(contents)
+    #
+    #             # Process the PDF using PyPDFLoader
+    #             loader = PyPDFLoader(tmp_location)
+    #             # adapt this for different chunking strategies
+    #             pages = loader.load_and_split()
+    #             return pages
+    #         elif loader_settings.get("source") == "file":
+    #             # Process the PDF using PyPDFLoader
+    #             # might need adapting for different loaders + OCR
+    #             # need to test the path
+    #             loader = PyPDFLoader(loader_settings["path"])
+    #             pages = loader.load_and_split()
+    #             return pages
+    #
+    #     elif document_format == "text":
+    #         # Process the text directly
+    #         return observation
+    #
+    #     else:
+    #         raise ValueError(f"Unsupported document format: {document_format}")
+    def _stuct(self, observation, params, custom_fields=None):
+        """Utility function to create the document structure with optional custom fields."""
+        # Dynamically construct metadata
+        metadata = {
+            key: str(getattr(self, key, params.get(key, "")))
+            for key in [
+                "user_id", "memory_id", "ltm_memory_id",
+                "st_memory_id", "buffer_id", "version",
+                "agreement_id", "privacy_policy", "terms_of_service",
+                "format", "schema_version", "checksum",
+                "owner", "license", "validity_start", "validity_end"
+            ]
+        }
+        # Merge with custom fields if provided
+        if custom_fields:
+            metadata.update(custom_fields)
 
-        if document_format == "PDF":
-            if loader_settings.get("source") == "url":
-                pdf_response = requests.get(loader_settings["path"])
-                pdf_stream = BytesIO(pdf_response.content)
-                contents = pdf_stream.read()
-                tmp_location = os.path.join("/tmp", "tmp.pdf")
-                with open(tmp_location, "wb") as tmp_file:
-                    tmp_file.write(contents)
+        # Construct document data
+        document_data = {
+            "metadata": metadata,
+            "page_content": observation
+        }
 
-                # Process the PDF using PyPDFLoader
-                loader = PyPDFLoader(tmp_location)
-                # adapt this for different chunking strategies
-                pages = loader.load_and_split()
-                return pages
-            elif loader_settings.get("source") == "file":
-                # Process the PDF using PyPDFLoader
-                # might need adapting for different loaders + OCR
-                # need to test the path
-                loader = PyPDFLoader(loader_settings["path"])
-                pages = loader.load_and_split()
-                return pages
+        def get_document_schema_based_on_version(version):
+            metadata_schema_class = SCHEMA_VERSIONS.get(version, DocumentMetadataSchemaV1)
+            class DynamicDocumentSchema(Schema):
+                metadata = fields.Nested(metadata_schema_class, required=True)
+                page_content = fields.Str(required=True)
 
-        elif document_format == "text":
-            # Process the text directly
-            return observation
+            return DynamicDocumentSchema
 
-        else:
-            raise ValueError(f"Unsupported document format: {document_format}")
+        # Validate and deserialize
+        schema_version = params.get("schema_version", "1.0")  # Default to "1.0" if not provided
+        CurrentDocumentSchema = get_document_schema_based_on_version(schema_version)
+        loaded_document = CurrentDocumentSchema().load(document_data)
+        return [loaded_document]
 
-    async def add_memories(
-        self, observation: str, loader_settings: dict = None, params: dict = None ,namespace:str=None
-    ):
+    async def add_memories(self, observation, loader_settings=None, params=None, namespace=None, custom_fields=None):
         # Update Weaviate memories here
-        print(self.namespace)
         if namespace is None:
             namespace = self.namespace
-        retriever = self.init_weaviate(namespace)
-
-        def _stuct(observation, params):
-            """Utility function to not repeat metadata structure"""
-            # needs smarter solution, like dynamic generation of metadata
-            return [
-            Document(
-                metadata={
-                    # "text": observation,
-                    "user_id": str(self.user_id),
-                    "memory_id": str(self.memory_id),
-                    "ltm_memory_id": str(self.ltm_memory_id),
-                    "st_memory_id": str(self.st_memory_id),
-                    "buffer_id": str(self.buffer_id),
-                    "version": params.get("version", None) or "",
-                    "agreement_id": params.get("agreement_id", None) or "",
-                    "privacy_policy": params.get("privacy_policy", None) or "",
-                    "terms_of_service": params.get("terms_of_service", None) or "",
-                    "format": params.get("format", None) or "",
-                    "schema_version": params.get("schema_version", None) or "",
-                    "checksum": params.get("checksum", None) or "",
-                    "owner": params.get("owner", None) or "",
-                    "license": params.get("license", None) or "",
-                    "validity_start": params.get("validity_start", None) or "",
-                    "validity_end": params.get("validity_end", None) or ""
-                    # **source_metadata,
-                },
-                page_content=observation,
-            )
-        ]
-
+        retriever = self.init_weaviate(namespace)  # Assuming `init_weaviate` is a method of the class
         if loader_settings:
-            # Load the document
-            document = self._document_loader(observation, loader_settings)
-            print("DOC LENGTH", len(document))
-            for doc in document:
-                document_to_load = _stuct(doc.page_content, params)
-                retriever.add_documents(
-                    document_to_load
-                )
-
-        return retriever.add_documents(
-            _stuct(observation, params)
-        )
+            # Assuming _document_loader returns a list of documents
+            documents = _document_loader(observation, loader_settings)
+            for doc in documents:
+                document_to_load = self._stuct(doc.page_content, params, custom_fields)
+                print("here is the doc to load1", document_to_load)
+                retriever.add_documents([
+            Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
+        else:
+            document_to_load = self._stuct(observation, params, custom_fields)
+            retriever.add_documents([
+            Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
 
     async def fetch_memories(
-        self, observation: str, namespace: str, params: dict = None, n_of_observations =int(2)
+            self, observation: str, namespace: str, params: dict = None, n_of_observations: int = 2
     ):
         """
-        Get documents from weaviate.
+        Fetch documents from weaviate.
 
-            Parameters:
-            - observation (str): User query.
-            - namespace (str): Type of memory we access.
-            - params (dict, optional):
-            - n_of_observations (int, optional): For weaviate, equals to autocut, defaults to 1. Ranges from 1 to 3. Check weaviate docs for more info.
+        Parameters:
+        - observation (str): User query.
+        - namespace (str): Type of memory accessed.
+        - params (dict, optional): Filtering parameters.
+        - n_of_observations (int, optional): For weaviate, equals to autocut. Defaults to 2. Ranges from 1 to 3.
 
-            Returns:
-            Describe the return type and what the function returns.
-
-        Args a json containing:
-            query (str): The query string.
-            path (list): The path for filtering, e.g., ['year'].
-            operator (str): The operator for filtering, e.g., 'Equal'.
-            valueText (str): The value for filtering, e.g., '2017*'.
+        Returns:
+        List of documents matching the query.
 
         Example:
-            get_from_weaviate(query="some query", path=['year'], operator='Equal', valueText='2017*')
-
+            fetch_memories(query="some query", path=['year'], operator='Equal', valueText='2017*')
         """
         client = self.init_weaviate_client(self.namespace)
 
-        print(self.namespace)
-        print(str(datetime.now()))
-        print(observation)
-        if namespace is None:
+        if not namespace:
             namespace = self.namespace
 
         params_user_id = {
@@ -227,78 +218,39 @@ class WeaviateVectorDB(VectorDB):
             "valueText": self.user_id,
         }
 
+        def list_objects_of_class(class_name, schema):
+            return [
+                prop["name"]
+                for class_obj in schema["classes"]
+                if class_obj["class"] == class_name
+                for prop in class_obj["properties"]
+            ]
+
+        base_query = client.query.get(
+            namespace, list(list_objects_of_class(namespace, client.schema.get()))
+        ).with_additional(
+            ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
+        ).with_where(params_user_id).with_limit(10)
+
         if params:
             query_output = (
-                client.query.get(
-                    namespace,
-                    [
-                        # "text",
-                        "user_id",
-                        "memory_id",
-                        "ltm_memory_id",
-                        "st_memory_id",
-                        "buffer_id",
-                        "version",
-                        "agreement_id",
-                        "privacy_policy",
-                        "terms_of_service",
-                        "format",
-                        "schema_version",
-                        "checksum",
-                        "owner",
-                        "license",
-                        "validity_start",
-                        "validity_end",
-                    ],
-                )
+                base_query
                 .with_where(params)
                 .with_near_text({"concepts": [observation]})
-                .with_additional(
-                    ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score",'distance']
-                )
-                .with_where(params_user_id)
-                .with_limit(10)
                 .do()
             )
-            return query_output
         else:
             query_output = (
-                client.query.get(
-                    namespace,
-
-                    [
-                        "text",
-                        "user_id",
-                        "memory_id",
-                        "ltm_memory_id",
-                        "st_memory_id",
-                        "buffer_id",
-                        "version",
-                        "agreement_id",
-                        "privacy_policy",
-                        "terms_of_service",
-                        "format",
-                        "schema_version",
-                        "checksum",
-                        "owner",
-                        "license",
-                        "validity_start",
-                        "validity_end",
-                    ],
-                )
-                .with_additional(
-                    ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
-                )
+                base_query
                 .with_hybrid(
                     query=observation,
                     fusion_type=HybridFusion.RELATIVE_SCORE
                 )
                 .with_autocut(n_of_observations)
-                .with_where(params_user_id)
-                .with_limit(10)
                 .do()
             )
-            return query_output
+
+        return query_output
 
     async def delete_memories(self, params: dict = None):
         client = self.init_weaviate_client(self.namespace)

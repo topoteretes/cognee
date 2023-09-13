@@ -362,9 +362,9 @@ class EpisodicBuffer(BaseMemory):
         """Determines what operations are available for the user to process PDFs"""
 
         return [
-            "translate",
-            "structure",
-            "fetch from vector store"
+            "retrieve over time",
+            "save to personal notes",
+            "translate to german"
             # "load to semantic memory",
             # "load to episodic memory",
             # "load to buffer",
@@ -594,6 +594,8 @@ class EpisodicBuffer(BaseMemory):
             episodic_context = await chain.arun(input=prompt_filter_chunk, verbose=True)
             print(cb)
 
+        print("HERE IS THE EPISODIC CONTEXT", episodic_context)
+
         class BufferModulators(BaseModel):
             attention_modulators: Dict[str, float] = Field(... , description="Attention modulators")
 
@@ -728,55 +730,6 @@ class EpisodicBuffer(BaseMemory):
             complete_agent_prompt= f" Document context is: {document_from_vectorstore} \n  Task is : {task['task_order']} {task['task_name']} {task['operation']} "
 
             # task['vector_store_context_results']=document_context_result_parsed.dict()
-            class PromptWrapper(BaseModel):
-                observation: str = Field(
-                    description="observation we want to fetch from vectordb"
-                )
-
-            @tool(
-                "convert_to_structured", args_schema=PromptWrapper, return_direct=True
-            )
-            def convert_to_structured(observation=None, json_schema=None):
-                """Convert unstructured data to structured data"""
-                BASE_DIR = os.getcwd()
-                json_path = os.path.join(
-                    BASE_DIR, "schema_registry", "ticket_schema.json"
-                )
-
-                def load_json_or_infer_schema(file_path, document_path):
-                    """Load JSON schema from file or infer schema from text"""
-
-                    # Attempt to load the JSON file
-                    with open(file_path, "r") as file:
-                        json_schema = json.load(file)
-                    return json_schema
-
-                json_schema = load_json_or_infer_schema(json_path, None)
-
-                def run_open_ai_mapper(observation=None, json_schema=None):
-                    """Convert unstructured data to structured data"""
-
-                    prompt_msgs = [
-                        SystemMessage(
-                            content="You are a world class algorithm converting unstructured data into structured data."
-                        ),
-                        HumanMessage(
-                            content="Convert unstructured data to structured data:"
-                        ),
-                        HumanMessagePromptTemplate.from_template("{input}"),
-                        HumanMessage(
-                            content="Tips: Make sure to answer in the correct format"
-                        ),
-                    ]
-                    prompt_ = ChatPromptTemplate(messages=prompt_msgs)
-                    chain_funct = create_structured_output_chain(
-                        json_schema, prompt=prompt_, llm=self.llm, verbose=True
-                    )
-                    output = chain_funct.run(input=observation, llm=self.llm)
-                    return output
-
-                result = run_open_ai_mapper(observation, json_schema)
-                return result
 
             class FetchText(BaseModel):
                 observation: str = Field(description="observation we want to translate")
@@ -802,7 +755,7 @@ class EpisodicBuffer(BaseMemory):
 
             agent = initialize_agent(
                 llm=self.llm,
-                tools=[fetch_from_vector_store,translate_to_de, convert_to_structured],
+                tools=[fetch_from_vector_store,translate_to_de],
                 agent=AgentType.OPENAI_FUNCTIONS,
                 verbose=True,
             )
@@ -1084,18 +1037,21 @@ async def main():
     "source": "url",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
-    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    # print(load_jack_london)
+    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    print(load_jack_london)
 
     modulator = {"relevance": 0.1,  "frequency": 0.1}
+
+    # fdsf = await memory._fetch_semantic_memory(observation="bla", params=None)
+    # print(fdsf)
     # await memory._delete_episodic_memory()
     #
-    run_main_buffer = await memory._create_buffer_context(
-        user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
-        params=params,
-        attention_modulators=modulator,
-    )
-    print(run_main_buffer)
+    # run_main_buffer = await memory._create_buffer_context(
+    #     user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
+    #     params=params,
+    #     attention_modulators=modulator,
+    # )
+    # print(run_main_buffer)
     # #
     # run_main_buffer = await memory._run_main_buffer(
     #     user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
