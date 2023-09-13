@@ -148,15 +148,15 @@ async def main():
     # tasks_list = """tasks": [{"task_order": "1", "task_name": "Fetch Information", "operation": "fetch from vector store", "original_query": "I want to know how does Buck adapt to life in the wild"]"""
     out_tasks = """here are the result_tasks [{'task_order': '1', 'task_name': 'Save Information', 'operation': 'save to vector store', 'original_query': 'Add to notes who is Buck and get info saved yesterday about him'}, {'docs': [{'semantic_search_term': "Add to notes who is Buck", 'document_summary': 'Buck was a dog stolen from his home', 'document_relevance': '0.75', 'attention_modulators_list': [{'frequency': '0.33', 'saliency': '0.75', 'relevance': '0.74'}]}], 'user_query': 'I want to know who buck is and check my notes from yesterday'}, {'task_order': '2', 'task_name': 'Check historical data', 'operation': 'check historical data', 'original_query': ' check my notes from yesterday'}, ' Data saved yesterday about Buck include informaton that he was stolen from home and that he was a pretty dog ']"""
 
-    await _add_to_episodic(user_input=user_input, result_tasks=out_tasks, tasks_list=None, attention_modulators=modulator, params=params)
+    # await _add_to_episodic(user_input=user_input, result_tasks=out_tasks, tasks_list=None, attention_modulators=modulator, params=params)
     # await delete_from_episodic()
-    # aa = await get_from_episodic(observation="summary")
+    aa = await get_from_episodic(observation="summary")
     # await delete_from_buffer()
     modulator_changed = {"relevance": 0.9, "saliency": 0.9, "frequency": 0.9}
-    await add_to_buffer(adjusted_modulator=modulator_changed)
+    # await add_to_buffer(adjusted_modulator=modulator_changed)
 
     # aa = await get_from_buffer(observation="summary")
-    # print(aa)
+    print(aa)
 
 if __name__ == "__main__":
     import asyncio

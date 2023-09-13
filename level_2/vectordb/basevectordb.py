@@ -103,11 +103,13 @@ class BaseMemory:
         loader_settings: dict = None,
         params: Optional[dict] = None,
         namespace: Optional[str] = None,
+        custom_fields: Optional[str] = None,
+
     ):
 
         return await self.vector_db.add_memories(
             observation=observation, loader_settings=loader_settings,
-            params=params, namespace=namespace
+            params=params, namespace=namespace, custom_fields=custom_fields
         )
         # Add other db_type conditions if necessary
 

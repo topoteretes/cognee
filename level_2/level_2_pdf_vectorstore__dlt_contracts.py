@@ -742,34 +742,6 @@ class EpisodicBuffer(BaseMemory):
                     out = self.fetch_memories(observation['original_query'], namespace="SEMANTICMEMORY")
                     return out
 
-            @tool("retrieve_from_memories", args_schema=FetchText, return_direct=True)
-            def retrieve_from_memories(observation, args_schema=FetchText):
-                """Retrieve from episodic memory if data doesn't exist in the context"""
-
-                new_observations = []
-                observation = self.fetch_memories(observation['original_query'], namespace="EPISODICMEMORY")
-
-                for memory in observation:
-
-                    unix_t = memory["data"]["Get"]["EPISODICMEMORY"][0]["_additional"][
-                        "lastUpdateTimeUnix"
-                    ]
-
-                    # Convert Unix timestamp to datetime
-                    last_update_datetime = datetime.fromtimestamp(int(unix_t) / 1000)
-                    time_difference = datetime.now() - last_update_datetime
-                    time_difference_text = humanize.naturaltime(time_difference)
-                    # Append the time difference to the memory
-                    memory["time_difference"] = str(time_difference_text)
-                    #patch the memory
-                    #retrieve again then
-
-                    # Append the modified memory to the new list
-                    new_observations.append(memory)
-
-
-
-
             class TranslateText(BaseModel):
                 observation: str = Field(description="observation we want to translate")
 
@@ -1065,18 +1037,21 @@ async def main():
     "source": "url",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
-    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    # print(load_jack_london)
+    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    print(load_jack_london)
 
     modulator = {"relevance": 0.1,  "frequency": 0.1}
+
+    # fdsf = await memory._fetch_semantic_memory(observation="bla", params=None)
+    # print(fdsf)
     # await memory._delete_episodic_memory()
     #
-    run_main_buffer = await memory._create_buffer_context(
-        user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
-        params=params,
-        attention_modulators=modulator,
-    )
-    print(run_main_buffer)
+    # run_main_buffer = await memory._create_buffer_context(
+    #     user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
+    #     params=params,
+    #     attention_modulators=modulator,
+    # )
+    # print(run_main_buffer)
     # #
     # run_main_buffer = await memory._run_main_buffer(
     #     user_input="I want to know how does Buck adapt to life in the wild and then have that info translated to german ",
