@@ -5,11 +5,11 @@ from io import BytesIO
 
 import sys
 import os
-
-from marshmallow import Schema, fields
-from level_2.loaders.loaders import _document_loader
-# Add the parent directory to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from marshmallow import Schema, fields
+from loaders.loaders import _document_loader
+# Add the parent directory to sys.path
+
 
 logging.basicConfig(level=logging.INFO)
 import marvin
@@ -23,7 +23,7 @@ import os
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
 from dotenv import load_dotenv
-from level_2.schema.semantic.semantic_schema import DocumentSchema, SCHEMA_VERSIONS, DocumentMetadataSchemaV1
+from schema.semantic.semantic_schema import DocumentSchema, SCHEMA_VERSIONS, DocumentMetadataSchemaV1
 from langchain.schema import Document
 import weaviate
 
