@@ -15,7 +15,6 @@ class MetaDatas(Base):
     user_id = Column(String, ForeignKey('users.id'), index=True)
     version = Column(String, nullable=False)
     contract_metadata = Column(String, nullable=False)
-    contract_schema = Column(String, nullable=False)
     memory_id = Column(String, ForeignKey('memories.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
