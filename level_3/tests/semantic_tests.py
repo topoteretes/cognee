@@ -9,7 +9,13 @@ from deepeval.metrics.overall_score import assert_overall_score
 import json
 from deepeval.metrics.overall_score import OverallScoreMetric
 
-# Write a sample ChatGPT function
+# Needs to pass a QA test set
+
+# Needs to separately fetch QA test set from DB
+
+# Needs to have a function to run the tests that contain test set and store results in the DB
+
+
 
 
 async def main():

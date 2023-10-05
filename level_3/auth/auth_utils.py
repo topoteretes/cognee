@@ -1,6 +1,7 @@
 
 from cognito.JWTBearer import JWKS, JWTBearer, JWTAuthorizationCredentials
-
+import os
+import boto3
 import requests
 
 region = "eu-west-1"
@@ -13,17 +14,14 @@ print(jwks)
 
 auth = JWTBearer(jwks)
 
-
-import requests
-
 # Set the Cognito authentication endpoint URL
 
 auth = JWTBearer(jwks)
 
 # Set the user credentials
 
-username = "" #needed
-password = "" #needed
+username = os.getenv("COGNITO_USERNAME")
+password = os.getenv("COGNITO_PASSWORD")
 
 # Create the authentication payload
 payload = {
@@ -36,10 +34,10 @@ payload = {
 token_endpoint = f"https://your-cognito-domain.auth.{region}.amazoncognito.com/oauth2/token"
 
 # Set the client credentials
-client_id = "" #needed
-client_secret = ""
+client_id = os.getenv("AWS_CLIENT_ID")
+client_secret = os.getenv("AWS_CLIENT_SECRET")
 
-import boto3
+
 def authenticate_and_get_token(username: str, password: str,
                                user_pool_id: str, app_client_id: str) -> None:
     client = boto3.client('cognito-idp')
@@ -55,8 +53,8 @@ def authenticate_and_get_token(username: str, password: str,
     )
 
     print("Log in success")
-    print("Access token:", resp['AuthenticationResult']['AccessToken'])
-    print("ID token:", resp['AuthenticationResult']['IdToken'])
+    # print("Access token:", resp['AuthenticationResult']['AccessToken'])
+    # print("ID token:", resp['AuthenticationResult']['IdToken'])
 
 
 authenticate_and_get_token(username, password, user_pool_id, client_id)

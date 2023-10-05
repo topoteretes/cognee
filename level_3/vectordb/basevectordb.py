@@ -27,17 +27,15 @@ import tracemalloc
 
 tracemalloc.start()
 
-import os
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
-from dotenv import load_dotenv
+
 from langchain.schema import Document
 import uuid
 import weaviate
 from marshmallow import Schema, fields
 import json
 
-load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")

@@ -14,7 +14,7 @@ class TestOutput(Base):
     id = Column(String, primary_key=True)
     test_set_id = Column(String, ForeignKey('test_sets.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime,  onupdate=datetime.utcnow)
 
     test_set = relationship("TestSet", back_populates="test_outputs")
 

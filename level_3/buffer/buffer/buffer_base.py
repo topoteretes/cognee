@@ -1,17 +1,8 @@
-
-# Make sure to install the following packages: dlt, langchain, duckdb, python-dotenv, openai, weaviate-client
-import json
-from typing import Any
 import logging
+from typing import Any
 
 logging.basicConfig(level=logging.INFO)
-import marvin
-from deep_translator import GoogleTranslator
 from dotenv import load_dotenv
-from langchain.agents import initialize_agent, AgentType
-from langchain.output_parsers import PydanticOutputParser
-from langchain.tools import tool
-from pydantic import parse_obj_as
 
 load_dotenv()
 from langchain import OpenAI
@@ -23,16 +14,10 @@ import tracemalloc
 tracemalloc.start()
 
 import os
-from datetime import datetime
-from langchain import PromptTemplate
-from langchain.chains.openai_functions import create_structured_output_chain
-from langchain.prompts import HumanMessagePromptTemplate, ChatPromptTemplate
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
-from langchain.schema import SystemMessage, HumanMessage
+
 import uuid
 
-load_dotenv()
+
 
 
 

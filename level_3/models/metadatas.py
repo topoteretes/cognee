@@ -17,7 +17,7 @@ class MetaDatas(Base):
     contract_metadata = Column(String, nullable=False)
     memory_id = Column(String, ForeignKey('memories.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime,  onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="metadatas")
     memory = relationship("MemoryModel", back_populates="metadatas")

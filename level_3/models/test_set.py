@@ -14,7 +14,7 @@ class TestSet(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime,  onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="test_sets")
     test_outputs = relationship("TestOutput", back_populates="test_set", cascade="all, delete-orphan")

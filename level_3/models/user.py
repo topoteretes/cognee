@@ -15,7 +15,7 @@ class User(Base):
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
     memories = relationship("MemoryModel", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")

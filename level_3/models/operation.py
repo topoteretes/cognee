@@ -14,7 +14,7 @@ class Operation(Base):
     id = Column(String, primary_key=True)
     session_id = Column(String, ForeignKey('sessions.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
     session = relationship("Session", back_populates="operations")
 

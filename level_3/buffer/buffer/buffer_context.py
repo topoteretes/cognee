@@ -1,5 +1,4 @@
 
-# Make sure to install the following packages: dlt, langchain, duckdb, python-dotenv, openai, weaviate-client
 import json
 from typing import Any
 import logging
@@ -7,13 +6,12 @@ import logging
 logging.basicConfig(level=logging.INFO)
 import marvin
 from deep_translator import GoogleTranslator
-from dotenv import load_dotenv
+
 from langchain.agents import initialize_agent, AgentType
 from langchain.output_parsers import PydanticOutputParser
 from langchain.tools import tool
 from pydantic import parse_obj_as
 
-load_dotenv()
 from langchain import OpenAI
 from langchain.chat_models import ChatOpenAI
 from typing import Optional, Dict, List, Union
