@@ -116,45 +116,7 @@ class BaseMemory:
         # Create a Schema instance with the dynamic fields
         dynamic_schema_instance = Schema.from_dict(dynamic_fields)()
         return dynamic_schema_instance
-    async def convert_database_schema_to_marshmallow(self, memory_id, user_id):
-        Session = sessionmaker(bind=engine)
-        session = Session()
-            # Fetch schema version and fields from PostgreSQL
-        schema_metadata = session.query(MetaDatas.contract_metadata).where(MetaDatas.memory_id == memory_id).where(MetaDatas.user_id == user_id).first()
 
-
-
-        if not schema_metadata:
-            raise ValueError("Schema not found in database")
-
-        schema_metadata = schema_metadata[0].replace("'", '"')
-
-        print("schema_metadata: ", schema_metadata)
-
-        schema_fields = json.loads(schema_metadata)
-        print("schema_FIELDS: ", schema_fields)
-        # Dynamically create and return marshmallow schema
-
-
-            # if isinstance(field_props, dict) and 'type' in field_props:
-            #     field_type = field_props['type']
-            #     required = field_props.get('required', False)
-            #     default = field_props.get('default', None)
-            # else:
-            #     # Default to string type if field_props is not a dict or doesn't contain type
-            #     field_type = "Str"
-            #     required = False
-            #     default = None
-            #
-            # setattr(DynamicSchema, field_name,
-            #         self.create_field(
-            #             field_type,
-            #             required=required,
-            #             default=default
-            #         )
-            #         )
-
-        return DynamicSchema
 
     async def get_version_from_db(self, user_id, memory_id):
         # Logic to retrieve the version from the database.

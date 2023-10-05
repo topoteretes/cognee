@@ -20,14 +20,13 @@ def chunk_data(chunk_strategy=None, source_data=None, chunk_size=None, chunk_ove
     return chunked_data
 
 
-def vanilla_chunker(source_data, chunk_size, chunk_overlap):
-    # loader = PyPDFLoader(source_data)
+def vanilla_chunker(source_data, chunk_size=100, chunk_overlap=20):
     # adapt this for different chunking strategies
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     text_splitter = RecursiveCharacterTextSplitter(
         # Set a really small chunk size, just to show.
-        chunk_size=100,
-        chunk_overlap=20,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         length_function=len
     )
     pages = text_splitter.create_documents([source_data])

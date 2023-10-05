@@ -5,12 +5,16 @@ import fitz
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from chunkers.chunkers import chunk_data
+from llama_hub.file.base import SimpleDirectoryReader
 from langchain.document_loaders import PyPDFLoader
 
 import requests
 def _document_loader( observation: str, loader_settings: dict):
     # Check the format of the document
     document_format = loader_settings.get("format", "text")
+    loader_strategy = loader_settings.get("strategy", "VANILLA")
+    chunk_size = loader_settings.get("chunk_size", 100)
+    chunk_overlap = loader_settings.get("chunk_overlap", 20)
 
     if document_format == "PDF":
         if loader_settings.get("source") == "url":
@@ -20,20 +24,19 @@ def _document_loader( observation: str, loader_settings: dict):
                 file_content = ""
                 for page in doc:
                     file_content += page.get_text()
-            pages = chunk_data(chunk_strategy= 'VANILLA', source_data=file_content)
+            pages = chunk_data(chunk_strategy= loader_strategy, source_data=file_content, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
             return pages
         elif loader_settings.get("source") == "file":
-            # Process the PDF using PyPDFLoader
-            # might need adapting for different loaders + OCR
-            # need to test the path
-            loader = PyPDFLoader(loader_settings["path"])
-            pages = loader.load_and_split()
+
+            loader = SimpleDirectoryReader('./data', recursive=True, exclude_hidden=True)
+            documents = loader.load_data()
+            pages = documents.load_and_split()
             return pages
 
     elif document_format == "text":
-        # Process the text directly
-        return observation
+        pages = chunk_data(chunk_strategy= loader_strategy, source_data=observation, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        return pages
 
     else:
         raise ValueError(f"Unsupported document format: {document_format}")

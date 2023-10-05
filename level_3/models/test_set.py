@@ -13,6 +13,7 @@ class TestSet(Base):
 
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), index=True)
+    content = Column(String, ForeignKey('users.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime,  onupdate=datetime.utcnow)
 

@@ -102,54 +102,9 @@ class WeaviateVectorDB(VectorDB):
         )
         return client
 
-    # def _document_loader(self, observation: str, loader_settings: dict):
-    #     # Check the format of the document
-    #     document_format = loader_settings.get("format", "text")
-    #
-    #     if document_format == "PDF":
-    #         if loader_settings.get("source") == "url":
-    #             pdf_response = requests.get(loader_settings["path"])
-    #             pdf_stream = BytesIO(pdf_response.content)
-    #             contents = pdf_stream.read()
-    #             tmp_location = os.path.join("/tmp", "tmp.pdf")
-    #             with open(tmp_location, "wb") as tmp_file:
-    #                 tmp_file.write(contents)
-    #
-    #             # Process the PDF using PyPDFLoader
-    #             loader = PyPDFLoader(tmp_location)
-    #             # adapt this for different chunking strategies
-    #             pages = loader.load_and_split()
-    #             return pages
-    #         elif loader_settings.get("source") == "file":
-    #             # Process the PDF using PyPDFLoader
-    #             # might need adapting for different loaders + OCR
-    #             # need to test the path
-    #             loader = PyPDFLoader(loader_settings["path"])
-    #             pages = loader.load_and_split()
-    #             return pages
-    #
-    #     elif document_format == "text":
-    #         # Process the text directly
-    #         return observation
-    #
-    #     else:
-    #         raise ValueError(f"Unsupported document format: {document_format}")
     def _stuct(self, observation, params, metadata_schema_class =None):
         """Utility function to create the document structure with optional custom fields."""
-        # Dynamically construct metadata
-        # metadata = {
-        #     key: str(getattr(self, key, params.get(key, "")))
-        #     for key in [
-        #         "user_id", "memory_id", "ltm_memory_id",
-        #         "st_memory_id", "buffer_id", "version",
-        #         "agreement_id", "privacy_policy", "terms_of_service",
-        #         "format", "schema_version", "checksum",
-        #         "owner", "license", "validity_start", "validity_end"
-        #     ]
-        # }
-        # # Merge with custom fields if provided
-        # if custom_fields:
-        #     metadata.update(custom_fields)
+
 
         # Construct document data
         document_data = {

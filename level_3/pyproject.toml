@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.10"
 #langchain = {git = "https://github.com/topoteretes/langchain.git" , tag = "v0.0.209"}
-langchain = "v0.0.271"
+langchain = "v0.0.303"
 
 nltk = "3.8.1"
 openai = "0.27.8"
@@ -40,9 +40,11 @@ weaviate-client = "^3.22.1"
 python-multipart = "^0.0.6"
 deep-translator = "^1.11.4"
 humanize = "^4.8.0"
-deepeval = "^0.10.12"
+deepeval = "^0.20.0"
 pymupdf = "^1.23.3"
 psycopg2 = "^2.9.8"
+llama-index = "^0.8.39.post2"
+llama-hub = "^0.0.34"
 
 
 

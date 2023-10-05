@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from level_2_pdf_vectorstore__dlt_contracts import Memory
+from vectorstore_manager import Memory
 from dotenv import load_dotenv
 # Set up logging
 logging.basicConfig(
