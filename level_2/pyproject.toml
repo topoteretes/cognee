@@ -42,7 +42,6 @@ deep-translator = "^1.11.4"
 humanize = "^4.8.0"
 deepeval = "^0.10.12"
 pymupdf = "^1.23.3"
-psycopg2 = "^2.9.8"
 
 
 

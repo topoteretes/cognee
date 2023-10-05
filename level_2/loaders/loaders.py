@@ -1,10 +1,8 @@
 import os
 from io import BytesIO
-import sys, os
-import fitz
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from chunkers.chunkers import chunk_data
+import fitz
+from level_2.chunkers.chunkers import chunk_data
 from langchain.document_loaders import PyPDFLoader
 
 import requests

@@ -80,6 +80,30 @@ from vectordb.basevectordb import  BaseMemory
 from modulators.modulators import DifferentiableLayer
 
 
+class SemanticMemory(BaseMemory):
+    def __init__(
+        self,
+        user_id: str,
+        memory_id: Optional[str],
+        index_name: Optional[str],
+        db_type: str = "weaviate",
+    ):
+        super().__init__(
+            user_id, memory_id, index_name, db_type, namespace="SEMANTICMEMORY")
+
+
+class EpisodicMemory(BaseMemory):
+    def __init__(
+        self,
+        user_id: str,
+        memory_id: Optional[str],
+        index_name: Optional[str],
+        db_type: str = "weaviate",
+    ):
+        super().__init__(
+            user_id, memory_id, index_name, db_type, namespace="EPISODICMEMORY"
+        )
+
 
 class EpisodicBuffer(BaseMemory):
     def __init__(
@@ -795,93 +819,37 @@ class EpisodicBuffer(BaseMemory):
         return result_parsing.json()
 
 
-# class LongTermMemory:
-#     def __init__(
-#         self,
-#         user_id: str = "676",
-#         memory_id: Optional[str] = None,
-#         index_name: Optional[str] = None,
-#         db_type: str = "weaviate",
-#     ):
-#         self.user_id = user_id
-#         self.memory_id = memory_id
-#         self.ltm_memory_id = str(uuid.uuid4())
-#         self.index_name = index_name
-#         self.db_type = db_type
-#         self.semantic_memory = SemanticMemory(user_id, memory_id, index_name, db_type)
-#         self.episodic_memory = EpisodicMemory(user_id, memory_id, index_name, db_type)
-
-#
-# class ShortTermMemory:
-#     def __init__(
-#         self,
-#         user_id: str = "676",
-#         memory_id: Optional[str] = None,
-#         index_name: Optional[str] = None,
-#         db_type: str = "weaviate",
-#     ):
-#         self.user_id = user_id
-#         self.memory_id = memory_id
-#         self.stm_memory_id = str(uuid.uuid4())
-#         self.index_name = index_name
-#         self.db_type = db_type
-#         self.episodic_buffer = EpisodicBuffer(user_id, memory_id, index_name, db_type)
-#
-# class PythonClass:
-#     def __init__(self, name):
-#         self.name = name
-#         self.attributes = set()  # Using set to store unique attribute names
-#         self.methods = set()  # Using set to store unique method names
-#         self.inheritance = None
-#         self.associations = []
-#
-#     def add_method(self, method_name):
-#         self.methods.add(method_name)
-#
-#     def add_attribute(self, attribute_name):
-#         self.attributes.add(attribute_name)
-#     async def call_method(self, method_name, *args, **kwargs):
-#         if method_name in self.methods:
-#             method = getattr(self, method_name, None)
-#             if method:
-#                 return await method(*args, **kwargs)
-#         raise AttributeError(f"{self.name} object has no attribute {method_name}")
-#
-#     def get_attribute(self, attribute_name):
-#         return self.attributes.get(attribute_name)
+class LongTermMemory:
+    def __init__(
+        self,
+        user_id: str = "676",
+        memory_id: Optional[str] = None,
+        index_name: Optional[str] = None,
+        db_type: str = "weaviate",
+    ):
+        self.user_id = user_id
+        self.memory_id = memory_id
+        self.ltm_memory_id = str(uuid.uuid4())
+        self.index_name = index_name
+        self.db_type = db_type
+        self.semantic_memory = SemanticMemory(user_id, memory_id, index_name, db_type)
+        self.episodic_memory = EpisodicMemory(user_id, memory_id, index_name, db_type)
 
 
-class DynamicBaseMemory(BaseMemory):
-    def __init__(self, name, user_id, memory_id, index_name, db_type, namespace):
-        super().__init__(user_id, memory_id, index_name, db_type, namespace)
-        self.name = name
-        self.attributes = set()
-        self.methods = set()
-        self.inheritance = None
-        self.associations = []
-
-    def add_method(self, method_name):
-        self.methods.add(method_name)
-
-    def add_attribute(self, attribute_name):
-        self.attributes.add(attribute_name)
-
-    def get_attribute(self, attribute_name):
-        return attribute_name in self.attributes
-
-    def add_association(self, associated_memory):
-        if associated_memory not in self.associations:
-            self.associations.append(associated_memory)
-            # Optionally, establish a bidirectional association
-            associated_memory.associations.append(self)
-
-class Attribute:
-    def __init__(self, name):
-        self.name = name
-
-class Method:
-    def __init__(self, name):
-        self.name = name
+class ShortTermMemory:
+    def __init__(
+        self,
+        user_id: str = "676",
+        memory_id: Optional[str] = None,
+        index_name: Optional[str] = None,
+        db_type: str = "weaviate",
+    ):
+        self.user_id = user_id
+        self.memory_id = memory_id
+        self.stm_memory_id = str(uuid.uuid4())
+        self.index_name = index_name
+        self.db_type = db_type
+        self.episodic_buffer = EpisodicBuffer(user_id, memory_id, index_name, db_type)
 
 
 class Memory:
@@ -889,17 +857,15 @@ class Memory:
     OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-    def __init__(self, user_id: str = "676", index_name: str = None,
-                 knowledge_source: str = None, knowledge_type: str = None,
-                 db_type: str = "weaviate", namespace: str = None, ) -> None:
-        self.memory_class = DynamicBaseMemory('Memory', user_id, str(uuid.uuid4()), index_name, db_type, namespace)
-        self.semantic_memory_class = DynamicBaseMemory('SemanticMemory', user_id, str(uuid.uuid4()), index_name,
-                                                       db_type, namespace)
-        self.episodic_memory_class = DynamicBaseMemory('EpisodicMemory', user_id, str(uuid.uuid4()), index_name,
-                                                       db_type, namespace)
-        self.episodic_buffer_class = DynamicBaseMemory('EpisodicBuffer', user_id, str(uuid.uuid4()), index_name,
-                                                       db_type, namespace)
-
+    def __init__(
+        self,
+        user_id: str = "676",
+        index_name: str = None,
+        knowledge_source: str = None,
+        knowledge_type: str = None,
+        db_type: str = "weaviate",
+        namespace: str = None,
+    ) -> None:
         self.user_id = user_id
         self.index_name = index_name
         self.db_type = db_type
@@ -909,45 +875,150 @@ class Memory:
         self.long_term_memory = None
         self.short_term_memory = None
         self.namespace = namespace
+        load_dotenv()
 
-        attributes_list = ['user_id', 'index_name', 'db_type', 'knowledge_source', 'knowledge_type', 'memory_id',
-                           'long_term_memory', 'short_term_memory', 'namespace']
-        for attr in attributes_list:
-            self.memory_class.add_attribute(attr)
+    # Asynchronous factory function for creating LongTermMemory
+    async def async_create_long_term_memory(
+        self, user_id, memory_id, index_name, db_type
+    ):
+        # Perform asynchronous initialization steps if needed
+        return LongTermMemory(
+            user_id=self.user_id,
+            memory_id=self.memory_id,
+            index_name=self.index_name,
+            db_type=self.db_type,
+        )
 
-        methods_list = ['async_create_long_term_memory', 'async_init', 'add_memories', "fetch_memories", 'async_create_short_term_memory',
-                        '_create_buffer_context', '_get_task_list', '_run_main_buffer',
-                        '_available_operations', '_provide_feedback']
-        for class_instance in [self.memory_class, self.semantic_memory_class, self.episodic_memory_class, self.episodic_buffer_class]:
-            for method in methods_list:
-                class_instance.add_method(method)
+    async def async_init(self):
+        # Asynchronous initialization of LongTermMemory and ShortTermMemory
+        self.long_term_memory = await self.async_create_long_term_memory(
+            user_id=self.user_id,
+            memory_id=self.memory_id,
+            index_name=self.index_name,
+            db_type=self.db_type,
+        )
+        self.short_term_memory = await self.async_create_short_term_memory(
+            user_id=self.user_id,
+            memory_id=self.memory_id,
+            index_name=self.index_name,
+            db_type=self.db_type,
+        )
 
-    async def dynamic_method_call(self, dynamic_base_memory_instance, method_name: str, *args, **kwargs):
-        if method_name in dynamic_base_memory_instance.methods:
-            method = getattr(dynamic_base_memory_instance, method_name, None)
-            if method:
-                return await method(*args, **kwargs)
-        raise AttributeError(f"{dynamic_base_memory_instance.name} object has no attribute {method_name}")
+    async def async_create_short_term_memory(
+        self, user_id, memory_id, index_name, db_type
+    ):
+        # Perform asynchronous initialization steps if needed
+        return ShortTermMemory(
+            user_id=self.user_id,
+            memory_id=self.memory_id,
+            index_name=self.index_name,
+            db_type=self.db_type,
+        )
 
-    def add_dynamic_memory_class(self, class_name: str, namespace: str):
-        new_memory_class = DynamicBaseMemory(class_name, self.user_id, str(uuid.uuid4()), self.index_name,
-                                             self.db_type, namespace)
-        setattr(self, f"{class_name.lower()}_class", new_memory_class)
-        return new_memory_class
+    async def _add_semantic_memory(
+        self, observation: str, loader_settings: dict = None, params: dict = None
+    ):
+        return await self.long_term_memory.semantic_memory.add_memories(
+            observation=observation,
+            loader_settings=loader_settings,
+            params=params,
+        )
 
-    def add_attribute_to_class(self, class_instance, attribute_name: str):
-        class_instance.add_attribute(attribute_name)
+    async def _fetch_semantic_memory(self, observation, params):
+        return await self.long_term_memory.semantic_memory.fetch_memories(
+            observation=observation, params=params
+        )
 
-    def add_method_to_class(self, class_instance, method_name: str):
-        class_instance.add_method(method_name)
+    async def _delete_semantic_memory(self, params: str = None):
+        return await self.long_term_memory.semantic_memory.delete_memories(
+            params=params
+        )
 
+    async def _add_episodic_memory(
+        self, observation: str, loader_settings: dict = None, params: dict = None
+    ):
+        return await self.long_term_memory.episodic_memory.add_memories(
+            observation=observation, loader_settings=loader_settings, params=params
+        )
+
+    async def _fetch_episodic_memory(self, observation, params: str = None):
+        return await self.long_term_memory.episodic_memory.fetch_memories(
+            observation=observation, params=params
+        )
+
+    async def _delete_episodic_memory(self, params: str = None):
+        return await self.long_term_memory.episodic_memory.delete_memories(
+            params=params
+        )
+
+
+    async def _add_buffer_memory(
+        self,
+        user_input: str,
+        namespace: str = None,
+        loader_settings: dict = None,
+        params: dict = None,
+    ):
+        return await self.short_term_memory.episodic_buffer.add_memories(
+            observation=user_input, loader_settings=loader_settings, params=params
+        )
+
+    async def _fetch_buffer_memory(self, user_input: str):
+        return await self.short_term_memory.episodic_buffer.fetch_memories(
+            observation=user_input
+        )
+
+    async def _delete_buffer_memory(self, params: str = None):
+        return await self.short_term_memory.episodic_buffer.delete_memories(
+            params=params
+        )
+
+    async def _create_buffer_context(
+        self,
+        user_input: str,
+        params: dict = None,
+        attention_modulators: dict = None,
+    ):
+        return await self.short_term_memory.episodic_buffer.buffer_context(
+            user_input=user_input,
+            params=params,
+            attention_modulators=attention_modulators,
+        )
+    async def _get_task_list(
+        self,
+        user_input: str,
+        params: str = None,
+        attention_modulators: dict = None,
+    ):
+        return await self.short_term_memory.episodic_buffer.get_task_list(
+            user_input=user_input,
+            params=params,
+            attention_modulators=attention_modulators,
+        )
+    async def _run_main_buffer(
+        self,
+        user_input: str,
+        params: dict = None,
+        attention_modulators: dict = None,
+    ):
+        return await self.short_term_memory.episodic_buffer.main_buffer(
+            user_input=user_input,
+            params=params,
+            attention_modulators=attention_modulators,
+        )
+
+    async def _available_operations(self):
+        return await self.long_term_memory.episodic_buffer.available_operations()
+
+    async def _provide_feedback(self, score:str =None, params: dict = None, attention_modulators: dict = None):
+        return await self.short_term_memory.episodic_buffer.provide_feedback(score=score, params=params, attention_modulators=attention_modulators)
 
 
 async def main():
 
     # if you want to run the script as a standalone script, do so with the examples below
-    # memory = Memory(user_id="TestUser")
-    # await memory.async_init()
+    memory = Memory(user_id="TestUser")
+    await memory.async_init()
     params = {
         "version": "1.0",
         "agreement_id": "AG123456",
@@ -966,18 +1037,8 @@ async def main():
     "source": "url",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
-    # memory_instance = Memory(namespace='SEMANTICMEMORY')
-    # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
-    memory_instance = Memory(namespace='PROCEDURALMEMORY')
-    procedural_memory_class = memory_instance.add_dynamic_memory_class('ProceduralMemory', 'PROCEDURALMEMORY')
-    memory_instance.add_method_to_class(procedural_memory_class, 'add_memories')
-
-    sss = await memory_instance.dynamic_method_call(memory_instance.proceduralmemory_class, 'add_memories',
-                                                    observation='some_observation', params=params)
-
-    print(sss)
-    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    # print(load_jack_london)
+    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    print(load_jack_london)
 
     modulator = {"relevance": 0.1,  "frequency": 0.1}
 
@@ -1000,161 +1061,7 @@ async def main():
     # print(run_main_buffer)
     # del_semantic = await memory._delete_semantic_memory()
     # print(del_semantic)
-    # def __init__(
-    #     self,
-    #     user_id: str = "676",
-    #     index_name: str = None,
-    #     knowledge_source: str = None,
-    #     knowledge_type: str = None,
-    #     db_type: str = "weaviate",
-    #     namespace: str = None,
-    # ) -> None:
-    #     self.user_id = user_id
-    #     self.index_name = index_name
-    #     self.db_type = db_type
-    #     self.knowledge_source = knowledge_source
-    #     self.knowledge_type = knowledge_type
-    #     self.memory_id = str(uuid.uuid4())
-    #     self.long_term_memory = None
-    #     self.short_term_memory = None
-    #     self.namespace = namespace
-    #     load_dotenv()
 
-    # Asynchronous factory function for creating LongTermMemory
-    # async def async_create_long_term_memory(
-    #     self, user_id, memory_id, index_name, db_type
-    # ):
-    #     # Perform asynchronous initialization steps if needed
-    #     return LongTermMemory(
-    #         user_id=self.user_id,
-    #         memory_id=self.memory_id,
-    #         index_name=self.index_name,
-    #         db_type=self.db_type,
-    #     )
-    #
-    # async def async_init(self):
-    #     # Asynchronous initialization of LongTermMemory and ShortTermMemory
-    #     self.long_term_memory = await self.async_create_long_term_memory(
-    #         user_id=self.user_id,
-    #         memory_id=self.memory_id,
-    #         index_name=self.index_name,
-    #         db_type=self.db_type,
-    #     )
-    #     self.short_term_memory = await self.async_create_short_term_memory(
-    #         user_id=self.user_id,
-    #         memory_id=self.memory_id,
-    #         index_name=self.index_name,
-    #         db_type=self.db_type,
-    #     )
-    #
-    # async def async_create_short_term_memory(
-    #     self, user_id, memory_id, index_name, db_type
-    # ):
-    #     # Perform asynchronous initialization steps if needed
-    #     return ShortTermMemory(
-    #         user_id=self.user_id,
-    #         memory_id=self.memory_id,
-    #         index_name=self.index_name,
-    #         db_type=self.db_type,
-    #     )
-    #
-    # async def _add_semantic_memory(
-    #     self, observation: str, loader_settings: dict = None, params: dict = None
-    # ):
-    #     return await self.long_term_memory.semantic_memory.add_memories(
-    #         observation=observation,
-    #         loader_settings=loader_settings,
-    #         params=params,
-    #     )
-    #
-    # async def _fetch_semantic_memory(self, observation, params):
-    #     return await self.long_term_memory.semantic_memory.fetch_memories(
-    #         observation=observation, params=params
-    #     )
-    #
-    # async def _delete_semantic_memory(self, params: str = None):
-    #     return await self.long_term_memory.semantic_memory.delete_memories(
-    #         params=params
-    #     )
-    #
-    # async def _add_episodic_memory(
-    #     self, observation: str, loader_settings: dict = None, params: dict = None
-    # ):
-    #     return await self.long_term_memory.episodic_memory.add_memories(
-    #         observation=observation, loader_settings=loader_settings, params=params
-    #     )
-    #
-    # async def _fetch_episodic_memory(self, observation, params: str = None):
-    #     return await self.long_term_memory.episodic_memory.fetch_memories(
-    #         observation=observation, params=params
-    #     )
-    #
-    # async def _delete_episodic_memory(self, params: str = None):
-    #     return await self.long_term_memory.episodic_memory.delete_memories(
-    #         params=params
-    #     )
-    #
-    #
-    # async def _add_buffer_memory(
-    #     self,
-    #     user_input: str,
-    #     namespace: str = None,
-    #     loader_settings: dict = None,
-    #     params: dict = None,
-    # ):
-    #     return await self.short_term_memory.episodic_buffer.add_memories(
-    #         observation=user_input, loader_settings=loader_settings, params=params
-    #     )
-    #
-    # async def _fetch_buffer_memory(self, user_input: str):
-    #     return await self.short_term_memory.episodic_buffer.fetch_memories(
-    #         observation=user_input
-    #     )
-    #
-    # async def _delete_buffer_memory(self, params: str = None):
-    #     return await self.short_term_memory.episodic_buffer.delete_memories(
-    #         params=params
-    #     )
-    #
-    # async def _create_buffer_context(
-    #     self,
-    #     user_input: str,
-    #     params: dict = None,
-    #     attention_modulators: dict = None,
-    # ):
-    #     return await self.short_term_memory.episodic_buffer.buffer_context(
-    #         user_input=user_input,
-    #         params=params,
-    #         attention_modulators=attention_modulators,
-    #     )
-    # async def _get_task_list(
-    #     self,
-    #     user_input: str,
-    #     params: str = None,
-    #     attention_modulators: dict = None,
-    # ):
-    #     return await self.short_term_memory.episodic_buffer.get_task_list(
-    #         user_input=user_input,
-    #         params=params,
-    #         attention_modulators=attention_modulators,
-    #     )
-    # async def _run_main_buffer(
-    #     self,
-    #     user_input: str,
-    #     params: dict = None,
-    #     attention_modulators: dict = None,
-    # ):
-    #     return await self.short_term_memory.episodic_buffer.main_buffer(
-    #         user_input=user_input,
-    #         params=params,
-    #         attention_modulators=attention_modulators,
-    #     )
-    #
-    # async def _available_operations(self):
-    #     return await self.long_term_memory.episodic_buffer.available_operations()
-    #
-    # async def _provide_feedback(self, score:str =None, params: dict = None, attention_modulators: dict = None):
-    #     return await self.short_term_memory.episodic_buffer.provide_feedback(score=score, params=params, attention_modulators=attention_modulators)
 
 if __name__ == "__main__":
     import asyncio
