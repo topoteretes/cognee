@@ -217,15 +217,15 @@ async def eval_test(query=None, output=None, expected_output=None, context=None)
         output=result_output,
         expected_output=expected_output,
         context=context,
+
     )
     metric = OverallScoreMetric()
-    # if you want to make sure that the test returns an error
-    assert_test(test_case, metrics=[metric])
 
     # If you want to run the test
-    test_result = run_test(test_case, metrics=[metric])
+    test_result = run_test(test_case, metrics=[metric], raise_error=False)
+    return test_result
     # You can also inspect the test result class
-    print(test_result)
+    # print(test_result)
 
 
 
@@ -365,18 +365,28 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
 
 
-        test_result_colletion =[]
+        test_result_collection =[]
 
         for test in test_set:
             retrieve_action = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
                                                                observation=test["question"])
 
             test_results = await eval_test( query=test["question"], expected_output=test["answer"], context= str(retrieve_action))
-            test_result_colletion.append(test_results)
+            test_result_collection.append(test_results)
 
             print(test_results)
+        if dynamic_memory_class is not None:
+            memory.add_method_to_class(dynamic_memory_class, 'delete_memories')
+        else:
+            print(f"No attribute named {test_class.lower()} in memory.")
+        load_action = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
+                                                       namespace ='some_observation', params=metadata,
+                                                       loader_settings=loader_settings)
+        memory.delete_memories(namespace=test_id)
 
-        add_entity(session, TestOutput(id=test_id, user_id=user_id, content=str(test_result_colletion)))
+        print(test_result_collection)
+
+        add_entity(session, TestOutput(id=test_id, user_id=user_id, content=str(test_result_collection)))
 
 async def main():
 

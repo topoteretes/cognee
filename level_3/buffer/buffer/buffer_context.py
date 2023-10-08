@@ -18,7 +18,6 @@ from typing import Optional, Dict, List, Union
 
 import tracemalloc
 
-tracemalloc.start()
 
 import os
 from datetime import datetime
