@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  promethai_mem:
+    networks:
+      - promethai_mem_backend
+    build:
+      context: ./
+    volumes:
+      - "./:/app"
+    environment:
+      - HOST=0.0.0.0
+    profiles: ["exclude-from-up"] # Use `docker-compose run teenage-agi` to get an attached container
+    ports:
+      - 8000:8000
+      - 443:443
+  postgres:
+    image: postgres
+    container_name: postgres
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD= trust
+      - POSTGRES_USER=bla
+      - POSTGRES_PASSWORD=bla
+      - POSTGRES_DB=bubu
+    networks:
+      - promethai_mem_backend
+    ports:
+      - "5432:5432"
+networks:
+  promethai_mem_backend:
+    name: promethai_mem_backend
