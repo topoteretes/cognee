@@ -39,15 +39,51 @@ class DynamicBaseMemory(BaseMemory):
         self.associations = []
 
     def add_method(self, method_name):
+        """
+        Add a method to the memory class.
+
+        Args:
+        - method_name (str): The name of the method to be added.
+
+        Returns:
+        None
+        """
         self.methods.add(method_name)
 
     def add_attribute(self, attribute_name):
+        """
+        Add an attribute to the memory class.
+
+        Args:
+        - attribute_name (str): The name of the attribute to be added.
+
+        Returns:
+        None
+        """
         self.attributes.add(attribute_name)
 
     def get_attribute(self, attribute_name):
+        """
+        Check if the attribute is in the memory class.
+
+        Args:
+        - attribute_name (str): The name of the attribute to be checked.
+
+        Returns:
+        bool: True if attribute exists, False otherwise.
+        """
         return attribute_name in self.attributes
 
     def add_association(self, associated_memory):
+        """
+        Add an association to another memory class.
+
+        Args:
+        - associated_memory (MemoryClass): The memory class to be associated with.
+
+        Returns:
+        None
+        """
         if associated_memory not in self.associations:
             self.associations.append(associated_memory)
             # Optionally, establish a bidirectional association
@@ -55,10 +91,28 @@ class DynamicBaseMemory(BaseMemory):
 
 class Attribute:
     def __init__(self, name):
+        """
+        Initialize the Attribute class.
+
+        Args:
+        - name (str): The name of the attribute.
+
+        Attributes:
+        - name (str): Stores the name of the attribute.
+        """
         self.name = name
 
 class Method:
     def __init__(self, name):
+        """
+        Initialize the Method class.
+
+        Args:
+        - name (str): The name of the method.
+
+        Attributes:
+        - name (str): Stores the name of the method.
+        """
         self.name = name
 
 
@@ -176,7 +230,7 @@ class Memory:
         else:
             # Define default methods for a new user
             methods_list = [
-                'async_create_long_term_memory', 'async_init', 'add_memories', "fetch_memories",
+                'async_create_long_term_memory', 'async_init', 'add_memories', "fetch_memories", "delete_memories",
                 'async_create_short_term_memory', '_create_buffer_context', '_get_task_list',
                 '_run_main_buffer', '_available_operations', '_provide_feedback'
             ]

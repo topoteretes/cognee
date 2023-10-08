@@ -196,7 +196,9 @@ class WeaviateVectorDB(VectorDB):
 
         return query_output
 
-    async def delete_memories(self, params: dict = None):
+    async def delete_memories(self, namespace:str, params: dict = None):
+        if namespace is None:
+            namespace = self.namespace
         client = self.init_weaviate_client(self.namespace)
         if params:
             where_filter = {
@@ -213,7 +215,7 @@ class WeaviateVectorDB(VectorDB):
             # Delete all objects
             print("HERE IS THE USER ID", self.user_id)
             return client.batch.delete_objects(
-                class_name=self.namespace,
+                class_name=namespace,
                 where={
                     "path": ["user_id"],
                     "operator": "Equal",
