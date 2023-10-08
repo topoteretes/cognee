@@ -1,7 +1,7 @@
 from langchain.document_loaders import PyPDFLoader
 import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from shared.chunk_strategy import ChunkStrategy
+from level_3.shared.chunk_strategy import ChunkStrategy
 import re
 def chunk_data(chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
 

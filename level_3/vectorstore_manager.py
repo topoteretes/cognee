@@ -8,8 +8,8 @@ from database.database import engine  # Ensure you have database engine defined 
 from models.user import User
 from models.memory import MemoryModel
 from models.sessions import Session
-from models.test_set import TestSet
-from models.test_output import TestOutput
+from models.testset import TestSet
+from models.testoutput import TestOutput
 from models.metadatas import MetaDatas
 from models.operation import Operation
 load_dotenv()
@@ -103,6 +103,13 @@ class Memory:
 
         return cls(user_id=user_id, session=session, memory_id=memory_id, **kwargs)
 
+    def list_memory_classes(self):
+        """
+        Lists all available memory classes in the memory instance.
+        """
+        # Use a list comprehension to filter attributes that end with '_class'
+        return [attr for attr in dir(self) if attr.endswith("_class")]
+
     @staticmethod
     def check_existing_user(user_id: str, session):
         """Check if a user exists in the DB and return it."""
@@ -141,8 +148,11 @@ class Memory:
             print(f"ID before query: {self.memory_id}, type: {type(self.memory_id)}")
             attributes_list = self.session.query(MemoryModel.attributes_list).filter_by(id=self.memory_id[0]).scalar()
             logging.info(f"Attributes list: {attributes_list}")
-            attributes_list = ast.literal_eval(attributes_list)
-            self.handle_attributes(attributes_list)
+            if attributes_list is not None:
+                attributes_list = ast.literal_eval(attributes_list)
+                self.handle_attributes(attributes_list)
+            else:
+                logging.warning("attributes_list is None!")
         else:
             attributes_list = ['user_id', 'index_name', 'db_type',
                                'knowledge_source', 'knowledge_type',

@@ -12,11 +12,14 @@ class Operation(Base):
     __tablename__ = 'operations'
 
     id = Column(String, primary_key=True)
-    session_id = Column(String, ForeignKey('sessions.id'), index=True)
+    user_id = Column(String, ForeignKey('users.id'), index=True)  # Link to User
+    test_set_id = Column(String, ForeignKey('test_sets.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
-    session = relationship("Session", back_populates="operations")
+    # Relationships
+    user = relationship("User", back_populates="operations")
+    test_set = relationship("TestSet", back_populates="operations")
 
     def __repr__(self):
-        return f"<Operation(id={self.id}, session_id={self.session_id}, created_at={self.created_at}, updated_at={self.updated_at})>"
+        return f"<Operation(id={self.id}, user_id={self.user_id}, created_at={self.created_at}, updated_at={self.updated_at})>"

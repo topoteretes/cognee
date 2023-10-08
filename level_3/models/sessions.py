@@ -14,10 +14,12 @@ class Session(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime,  onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
+    # Corrected relationship name
     user = relationship("User", back_populates="sessions")
-    operations = relationship("Operation", back_populates="session", cascade="all, delete-orphan")
+
+    # operations = relationship("Operation", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Session(id={self.id}, user_id={self.user_id}, created_at={self.created_at}, updated_at={self.updated_at})>"

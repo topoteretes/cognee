@@ -14,8 +14,8 @@ from langchain.document_loaders import PyPDFLoader
 from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
 from models.sessions import Session
-from models.test_set import TestSet
-from models.test_output import TestOutput
+from models.testset import TestSet
+from models.testoutput import TestOutput
 from models.metadatas import MetaDatas
 from models.operation import Operation
 from sqlalchemy.orm import sessionmaker

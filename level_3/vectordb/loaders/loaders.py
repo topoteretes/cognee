@@ -1,23 +1,22 @@
-import os
 from io import BytesIO
-import sys, os
 import fitz
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from chunkers.chunkers import chunk_data
+from level_3.vectordb.chunkers.chunkers import chunk_data
 from llama_hub.file.base import SimpleDirectoryReader
-from langchain.document_loaders import PyPDFLoader
 
 import requests
 def _document_loader( observation: str, loader_settings: dict):
     # Check the format of the document
     document_format = loader_settings.get("format", "text")
     loader_strategy = loader_settings.get("strategy", "VANILLA")
-    chunk_size = loader_settings.get("chunk_size", 100)
+    chunk_size = loader_settings.get("chunk_size", 500)
     chunk_overlap = loader_settings.get("chunk_overlap", 20)
 
+    print("LOADER SETTINGS", loader_settings)
+
     if document_format == "PDF":
-        if loader_settings.get("source") == "url":
+        if loader_settings.get("source") == "URL":
             pdf_response = requests.get(loader_settings["path"])
             pdf_stream = BytesIO(pdf_response.content)
             with fitz.open(stream=pdf_stream, filetype='pdf') as doc:

@@ -12,8 +12,8 @@ import models.memory
 import models.metadatas
 import models.operation
 import models.sessions
-import models.test_output
-import models.test_set
+import models.testoutput
+import models.testset
 import models.user
 from sqlalchemy import create_engine, text
 import psycopg2

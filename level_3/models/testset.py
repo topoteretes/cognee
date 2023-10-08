@@ -12,12 +12,15 @@ class TestSet(Base):
     __tablename__ = 'test_sets'
 
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey('users.id'), index=True)
-    content = Column(String, ForeignKey('users.id'), index=True)
+    user_id = Column(String, ForeignKey('users.id'), index=True) # Ensure uniqueness
+
+    content = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime,  onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="test_sets")
+    operations = relationship("Operation", back_populates="test_set")
+
     test_outputs = relationship("TestOutput", back_populates="test_set", cascade="all, delete-orphan")
 
     def __repr__(self):

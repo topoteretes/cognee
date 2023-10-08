@@ -1,29 +1,20 @@
 
 # Make sure to install the following packages: dlt, langchain, duckdb, python-dotenv, openai, weaviate-client
 import logging
-from io import BytesIO
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from marshmallow import Schema, fields
 from loaders.loaders import _document_loader
 # Add the parent directory to sys.path
 
 
 logging.basicConfig(level=logging.INFO)
-import marvin
-import requests
-from langchain.document_loaders import PyPDFLoader
 from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
 import tracemalloc
 tracemalloc.start()
 import os
-from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
 from dotenv import load_dotenv
-from schema.semantic.semantic_schema import DocumentSchema, SCHEMA_VERSIONS, DocumentMetadataSchemaV1
 from langchain.schema import Document
 import weaviate
 
@@ -125,10 +116,11 @@ class WeaviateVectorDB(VectorDB):
         # Update Weaviate memories here
         if namespace is None:
             namespace = self.namespace
-        retriever = self.init_weaviate(namespace)  # Assuming `init_weaviate` is a method of the class
+        retriever = self.init_weaviate(namespace)
         if loader_settings:
             # Assuming _document_loader returns a list of documents
             documents = _document_loader(observation, loader_settings)
+            logging.info("here are the docs %s", str(documents))
             for doc in documents:
                 document_to_load = self._stuct(doc.page_content, params, metadata_schema_class)
                 print("here is the doc to load1", document_to_load)
