@@ -5,12 +5,12 @@
 ### Description
 
 
-Initial code lets you do three operations:
+RAG test manager can be used via API (inprogress) or via the CLI
 
-1. Add to memory
-2. Retrieve from memory
-3. Structure the data to schema 
-4. Load to a database
+Make sure to run scripts/create_database.py
+
+
+
 
 #How to use
 

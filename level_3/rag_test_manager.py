@@ -383,7 +383,7 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         print(test_result_collection)
 
-        add_entity(session, TestOutput(id=test_id, user_id=user_id, content=str(test_result_collection)))
+        add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(test_result_collection)))
 
 async def main():
 
