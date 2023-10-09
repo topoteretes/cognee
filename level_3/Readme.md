@@ -5,14 +5,21 @@
 ### Description
 
 
-RAG test manager can be used via API (inprogress) or via the CLI
+RAG test manager can be used via API (in progress) or via the CLI
 
 Make sure to run scripts/create_database.py
 
+After that, you can run: 
+
+``` python test_runner.py \
+    --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
+    --test_set "path/to/test_set.json" \
+    --user_id "666" \
+    --metadata "path/to/metadata.json" 
+```
 
 
-
-#How to use
+#How to start 
 
 ## Installation
 
@@ -22,6 +29,22 @@ Make sure to run scripts/create_database.py
 
 ```docker compose up promethai_mem   ```
 
+Make sure to run 
+
+``` python scripts/create_database.py ```
+
+After that, you can run: 
+
+``` python test_runner.py \
+    --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
+    --test_set "example_data/test_set.json" \
+    --user_id "666" \
+    --metadata "example_data/metadata.json"
+
+```
+
+To see example of test_set.json and metadata.json, check the files in the folder "example_data"
+
 
 ## Clean database
 
@@ -30,7 +53,7 @@ Make sure to run scripts/create_database.py
 
 ```docker volume prune  ```
 
-docker compose up --force-recreate --build promethai_mem
+``` docker compose up --force-recreate --build promethai_mem ```
 
 
 ## Usage
