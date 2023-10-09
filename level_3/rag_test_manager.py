@@ -466,7 +466,7 @@ async def main():
     else:
         params = None
     #clean up params here
-    await start_test(args.url, test_set, args.user_id, params=None, metadata=params)
+    await start_test(args.url, test_set, args.user_id, params=None, metadata=metadata)
 if __name__ == "__main__":
     import asyncio
 
