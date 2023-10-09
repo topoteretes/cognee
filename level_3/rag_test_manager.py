@@ -145,7 +145,8 @@ def generate_param_variants(base_params=None, increments=None, ranges=None, incl
         'chunk_size': 500,
         'chunk_overlap': 20,
         'similarity_score': 0.5,
-        'metadata_variation': 0
+        'metadata_variation': 0,
+        'search_type': 'hybrid'
     }
 
     # Update defaults with provided base parameters
@@ -178,8 +179,10 @@ def generate_param_variants(base_params=None, increments=None, ranges=None, incl
         for key in ['chunk_size', 'chunk_overlap', 'similarity_score', 'metadata_variation']
     }
 
+
     param_ranges['cognitive_architecture'] = ["simple_index", "cognitive_architecture"]
-    param_ranges['search_strategy'] = ["similarity_score", "fusion_score"]
+    # Add search_type with possible values
+    param_ranges['search_type'] = ['text', 'hybrid', 'bm25', 'generate', 'generate_grouped']
 
     # Filter param_ranges based on included_params
     if included_params is not None:
@@ -279,8 +282,8 @@ def fetch_test_set_id(session, user_id, id):
         return (
             session.query(TestSet.id)
             .filter_by(user_id=user_id, id=id)
-            .order_by(TestSet.created_at.desc())
-            .first()
+            .order_by(TestSet.created_at)
+            .desc().first()
         )
     except Exception as e:
         logger.error(f"An error occurred while retrieving the job: {str(e)}")
@@ -291,6 +294,9 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
     Session = sessionmaker(bind=engine)
     session = Session()
+
+
+    memory = Memory.create_memory(user_id, session, namespace="SEMANTICMEMORY")
 
     job_id = fetch_job_id(session, user_id = user_id,job_id =job_id)
     test_set_id = fetch_test_set_id(session, user_id=user_id, id=job_id)
@@ -320,13 +326,6 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
     for test in test_params:
         test_id = str(generate_letter_uuid()) + "_" + "SEMANTICEMEMORY"
-
-
-        #handle test data here
-
-        Session = sessionmaker(bind=engine)
-        session = Session()
-        memory = Memory.create_memory(user_id, session, namespace=test_id)
 
         # Adding a memory instance
         memory.add_memory_instance("ExampleMemory")
@@ -379,10 +378,8 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
             memory.add_method_to_class(dynamic_memory_class, 'delete_memories')
         else:
             print(f"No attribute named {test_class.lower()} in memory.")
-        load_action = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
-                                                       namespace ='some_observation', params=metadata,
-                                                       loader_settings=loader_settings)
-        memory.delete_memories(namespace=test_id)
+        delete_mems = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
+                                                       namespace =test_id)
 
         print(test_result_collection)
 

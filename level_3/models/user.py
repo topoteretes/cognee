@@ -12,8 +12,7 @@ from database.database import Base
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False, unique=True, index=True)
+    id = Column(String, primary_key=True, index=True)
     session_id = Column(String, nullable=True, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
@@ -27,4 +26,4 @@ class User(Base):
     metadatas = relationship("MetaDatas", back_populates="user")
 
     def __repr__(self):
-        return f"<User(id={self.id}, name={self.name}, created_at={self.created_at}, updated_at={self.updated_at})>"
+        return f"<User(id={self.id},  created_at={self.created_at}, updated_at={self.updated_at})>"

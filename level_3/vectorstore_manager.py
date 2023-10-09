@@ -30,13 +30,23 @@ from vectordb.basevectordb import  BaseMemory
 
 
 class DynamicBaseMemory(BaseMemory):
-    def __init__(self, name, user_id, memory_id, index_name, db_type, namespace):
-        super().__init__(user_id, memory_id, index_name, db_type, namespace)
+    def __init__(
+        self,
+        name: str,
+        user_id: str,
+        memory_id: str,
+        index_name: str,
+        db_type: str,
+        namespace: str,
+        embeddings=None
+    ):
+        super().__init__(user_id, memory_id, index_name, db_type, namespace, embeddings)
         self.name = name
         self.attributes = set()
         self.methods = set()
         self.inheritance = None
         self.associations = []
+
 
     def add_method(self, method_name):
         """
@@ -178,7 +188,7 @@ class Memory:
     def handle_new_user(user_id: str, session):
         """Handle new user creation in the DB and return the new memory ID."""
         memory_id = str(uuid.uuid4())
-        new_user = User(id=user_id, name="john doe")
+        new_user = User(id=user_id)
         session.add(new_user)
         session.commit()
 
@@ -310,9 +320,9 @@ async def main():
     sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
                                                     observation='some_observation', params=params)
 
-    # susu = await memory.dynamic_method_call(memory.semanticmemory_class, 'fetch_memories',
-    #                                                 observation='some_observation')
-    # print(susu)
+    susu = await memory.dynamic_method_call(memory.semanticmemory_class, 'fetch_memories',
+                                                    observation='some_observation')
+    print(susu)
 
     # Adding a dynamic memory class
     # dynamic_memory = memory.add_dynamic_memory_class("DynamicMemory", "ExampleNamespace")
