@@ -142,6 +142,7 @@ class Memory:
         self.short_term_memory = None
         self.namespace = namespace
         self.memory_instances = []
+        #inspect and fix this
         self.memory_class = DynamicBaseMemory('Memory', user_id, str(self.memory_id), index_name, db_type, namespace)
     def load_environment_variables(self) -> None:
         load_dotenv()
@@ -187,6 +188,8 @@ class Memory:
     @staticmethod
     def handle_new_user(user_id: str, session):
         """Handle new user creation in the DB and return the new memory ID."""
+
+        #handle these better in terms of retry and error handling
         memory_id = str(uuid.uuid4())
         new_user = User(id=user_id)
         session.add(new_user)

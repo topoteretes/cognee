@@ -298,6 +298,7 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
     session = Session()
 
 
+    #do i need namespace in memory instance, fix it
     memory = Memory.create_memory(user_id, session, namespace="SEMANTICMEMORY")
 
     job_id = fetch_job_id(session, user_id = user_id,job_id =job_id)
@@ -464,8 +465,8 @@ async def main():
             return
     else:
         params = None
-
-    await start_test(args.url, test_set, args.user_id, params, metadata)
+    #clean up params here
+    await start_test(args.url, test_set, args.user_id, params=None, metadata=params)
 if __name__ == "__main__":
     import asyncio
 
