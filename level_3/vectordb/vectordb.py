@@ -248,9 +248,9 @@ class WeaviateVectorDB(VectorDB):
             return client.batch.delete_objects(
                 class_name=namespace,
                 where={
-                    "path": ["user_id"],
+                    "path": ["version"],
                     "operator": "Equal",
-                    "valueText": self.user_id,
+                    "valueText": "1.0",
                 },
             )
 

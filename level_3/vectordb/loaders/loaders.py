@@ -1,8 +1,10 @@
 from io import BytesIO
 import fitz
-# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from level_3.vectordb.chunkers.chunkers import chunk_data
+from vectordb.chunkers.chunkers import chunk_data
 from llama_hub.file.base import SimpleDirectoryReader
 
 import requests

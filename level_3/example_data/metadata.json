@@ -1,0 +1,13 @@
+{
+        "version": "1.0",
+        "agreement_id": "AG123456",
+        "privacy_policy": "https://example.com/privacy",
+        "terms_of_service": "https://example.com/terms",
+        "format": "json",
+        "schema_version": "1.1",
+        "checksum": "a1b2c3d4e5f6",
+        "owner": "John Doe",
+        "license": "MIT",
+        "validity_start": "2023-08-01",
+        "validity_end": "2024-07-31"
+    }

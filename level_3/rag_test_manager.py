@@ -1,3 +1,5 @@
+import argparse
+import json
 from enum import Enum
 import sys
 import os
@@ -383,49 +385,87 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         print(test_result_collection)
 
-        add_entity(session, TestOutput(id=test_id, user_id=user_id, content=str(test_result_collection)))
+        add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(test_result_collection)))
 
 async def main():
+    #
+    # params = {
+    #     "version": "1.0",
+    #     "agreement_id": "AG123456",
+    #     "privacy_policy": "https://example.com/privacy",
+    #     "terms_of_service": "https://example.com/terms",
+    #     "format": "json",
+    #     "schema_version": "1.1",
+    #     "checksum": "a1b2c3d4e5f6",
+    #     "owner": "John Doe",
+    #     "license": "MIT",
+    #     "validity_start": "2023-08-01",
+    #     "validity_end": "2024-07-31",
+    # }
+    #
+    # test_set = [
+    #     {
+    #         "question": "Who is the main character in 'The Call of the Wild'?",
+    #         "answer": "Buck"
+    #     },
+    #     {
+    #         "question": "Who wrote 'The Call of the Wild'?",
+    #         "answer": "Jack London"
+    #     },
+    #     {
+    #         "question": "Where does Buck live at the start of the book?",
+    #         "answer": "In the Santa Clara Valley, at Judge Miller’s place."
+    #     },
+    #     {
+    #         "question": "Why is Buck kidnapped?",
+    #         "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush."
+    #     },
+    #     {
+    #         "question": "How does Buck become the leader of the sled dog team?",
+    #         "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight."
+    #     }
+    # ]
+    # result = await start_test("https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf", test_set=test_set, user_id="666", params=None, metadata=params)
+    #
+    parser = argparse.ArgumentParser(description="Run tests against a document.")
+    parser.add_argument("--url", required=True, help="URL of the document to test.")
+    parser.add_argument("--test_set", required=True, help="Path to JSON file containing the test set.")
+    parser.add_argument("--user_id", required=True, help="User ID.")
+    parser.add_argument("--params", help="Additional parameters in JSON format.")
+    parser.add_argument("--metadata", required=True, help="Path to JSON file containing metadata.")
 
-    params = {
-        "version": "1.0",
-        "agreement_id": "AG123456",
-        "privacy_policy": "https://example.com/privacy",
-        "terms_of_service": "https://example.com/terms",
-        "format": "json",
-        "schema_version": "1.1",
-        "checksum": "a1b2c3d4e5f6",
-        "owner": "John Doe",
-        "license": "MIT",
-        "validity_start": "2023-08-01",
-        "validity_end": "2024-07-31",
-    }
+    args = parser.parse_args()
 
-    test_set = [
-        {
-            "question": "Who is the main character in 'The Call of the Wild'?",
-            "answer": "Buck"
-        },
-        {
-            "question": "Who wrote 'The Call of the Wild'?",
-            "answer": "Jack London"
-        },
-        {
-            "question": "Where does Buck live at the start of the book?",
-            "answer": "In the Santa Clara Valley, at Judge Miller’s place."
-        },
-        {
-            "question": "Why is Buck kidnapped?",
-            "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush."
-        },
-        {
-            "question": "How does Buck become the leader of the sled dog team?",
-            "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight."
-        }
-    ]
-    result = await start_test("https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf", test_set=test_set, user_id="666", params=None, metadata=params)
+    try:
+        with open(args.test_set, "r") as file:
+            test_set = json.load(file)
+            if not isinstance(test_set, list):  # Expecting a list
+                raise TypeError("Parsed test_set JSON is not a list.")
+    except Exception as e:
+        print(f"Error loading test_set: {str(e)}")
+        return
 
+    try:
+        with open(args.metadata, "r") as file:
+            metadata = json.load(file)
+            if not isinstance(metadata, dict):
+                raise TypeError("Parsed metadata JSON is not a dictionary.")
+    except Exception as e:
+        print(f"Error loading metadata: {str(e)}")
+        return
 
+    if args.params:
+        try:
+            params = json.loads(args.params)
+            if not isinstance(params, dict):
+                raise TypeError("Parsed params JSON is not a dictionary.")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing params: {str(e)}")
+            return
+    else:
+        params = None
+
+    await start_test(args.url, test_set, args.user_id, params, metadata)
 if __name__ == "__main__":
     import asyncio
 
