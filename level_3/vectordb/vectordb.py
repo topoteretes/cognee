@@ -36,6 +36,7 @@ class VectorDB:
         st_memory_id: str = ST_MEMORY_ID_DEFAULT,
         buffer_id: str = BUFFER_ID_DEFAULT,
         namespace: str = None,
+        embeddings = None,
     ):
         self.user_id = user_id
         self.index_name = index_name
@@ -44,6 +45,7 @@ class VectorDB:
         self.ltm_memory_id = ltm_memory_id
         self.st_memory_id = st_memory_id
         self.buffer_id = buffer_id
+        self.embeddings = embeddings
 
 class PineconeVectorDB(VectorDB):
     def __init__(self, *args, **kwargs):
@@ -54,15 +56,15 @@ class PineconeVectorDB(VectorDB):
         # Pinecone initialization logic
         pass
 
-
+import langchain.embeddings
 class WeaviateVectorDB(VectorDB):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.init_weaviate(self.namespace)
+        self.init_weaviate(embeddings= self.embeddings, namespace = self.namespace)
 
-    def init_weaviate(self, namespace: str):
+    def init_weaviate(self, embeddings =OpenAIEmbeddings() , namespace: str=None):
         # Weaviate initialization logic
-        embeddings = OpenAIEmbeddings()
+        # embeddings = OpenAIEmbeddings()
         auth_config = weaviate.auth.AuthApiKey(
             api_key=os.environ.get("WEAVIATE_API_KEY")
         )
@@ -112,11 +114,11 @@ class WeaviateVectorDB(VectorDB):
         CurrentDocumentSchema = get_document_schema()
         loaded_document = CurrentDocumentSchema().load(document_data)
         return [loaded_document]
-    async def add_memories(self, observation, loader_settings=None, params=None, namespace=None, metadata_schema_class=None):
+    async def add_memories(self, observation, loader_settings=None, params=None, namespace=None, metadata_schema_class=None, embeddings = 'hybrid'):
         # Update Weaviate memories here
         if namespace is None:
             namespace = self.namespace
-        retriever = self.init_weaviate(namespace)
+        retriever = self.init_weaviate(embeddings=embeddings,namespace = namespace)
         if loader_settings:
             # Assuming _document_loader returns a list of documents
             documents = _document_loader(observation, loader_settings)
@@ -133,25 +135,26 @@ class WeaviateVectorDB(VectorDB):
             retriever.add_documents([
             Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
 
-    async def fetch_memories(
-            self, observation: str, namespace: str, params: dict = None, n_of_observations: int = 2
-    ):
+    async def fetch_memories(self, observation: str, namespace: str = None, search_type: str = 'hybrid', **kwargs):
         """
         Fetch documents from weaviate.
 
         Parameters:
         - observation (str): User query.
-        - namespace (str): Type of memory accessed.
-        - params (dict, optional): Filtering parameters.
-        - n_of_observations (int, optional): For weaviate, equals to autocut. Defaults to 2. Ranges from 1 to 3.
+        - namespace (str, optional): Type of memory accessed.
+        - search_type (str, optional): Type of search ('text', 'hybrid', 'bm25', 'generate', 'generate_grouped'). Defaults to 'hybrid'.
+        - **kwargs: Additional parameters for flexibility.
 
         Returns:
-        List of documents matching the query.
+        List of documents matching the query or an empty list in case of error.
 
         Example:
-            fetch_memories(query="some query", path=['year'], operator='Equal', valueText='2017*')
+            fetch_memories(query="some query", search_type='text', additional_param='value')
         """
         client = self.init_weaviate_client(self.namespace)
+        if search_type is None:
+            search_type = 'hybrid'
+
 
         if not namespace:
             namespace = self.namespace
@@ -176,23 +179,51 @@ class WeaviateVectorDB(VectorDB):
             ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
         ).with_where(params_user_id).with_limit(10)
 
-        if params:
-            query_output = (
-                base_query
-                .with_where(params)
-                .with_near_text({"concepts": [observation]})
-                .do()
-            )
-        else:
-            query_output = (
-                base_query
-                .with_hybrid(
-                    query=observation,
-                    fusion_type=HybridFusion.RELATIVE_SCORE
+        try:
+            if search_type == 'text':
+                query_output = (
+                    base_query
+                    .with_near_text({"concepts": [observation]})
+                    .do()
                 )
-                .with_autocut(n_of_observations)
-                .do()
-            )
+            elif search_type == 'hybrid':
+                n_of_observations = kwargs.get('n_of_observations', 2)
+
+
+                query_output = (
+                    base_query
+                    .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
+                    .with_autocut(n_of_observations)
+                    .do()
+                )
+            elif search_type == 'bm25':
+                query_output = (
+                    base_query
+                    .with_bm25(query=observation)
+                    .do()
+                )
+            elif search_type == 'generate':
+                generate_prompt = kwargs.get('generate_prompt', "")
+                query_output = (
+                    base_query
+                    .with_generate(single_prompt=generate_prompt)
+                    .with_near_text({"concepts": [observation]})
+                    .do()
+                )
+            elif search_type == 'generate_grouped':
+                generate_prompt = kwargs.get('generate_prompt', "")
+                query_output = (
+                    base_query
+                    .with_generate(grouped_task=generate_prompt)
+                    .with_near_text({"concepts": [observation]})
+                    .do()
+                )
+            else:
+                logging.error(f"Invalid search_type: {search_type}")
+                return []
+        except Exception as e:
+            logging.error(f"Error executing query: {str(e)}")
+            return []
 
         return query_output
 

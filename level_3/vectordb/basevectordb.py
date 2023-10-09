@@ -56,6 +56,7 @@ class VectorDBFactory:
         buffer_id: str = BUFFER_ID_DEFAULT,
         db_type: str = "pinecone",
         namespace: str = None,
+        embeddings = None,
     ):
         db_map = {"pinecone": PineconeVectorDB, "weaviate": WeaviateVectorDB}
 
@@ -68,6 +69,7 @@ class VectorDBFactory:
                 st_memory_id,
                 buffer_id,
                 namespace,
+                embeddings
             )
 
         raise ValueError(f"Unsupported database type: {db_type}")
@@ -80,11 +82,13 @@ class BaseMemory:
         index_name: Optional[str],
         db_type: str,
         namespace: str,
+        embeddings: Optional[None],
     ):
         self.user_id = user_id
         self.memory_id = memory_id
         self.index_name = index_name
         self.namespace = namespace
+        self.embeddings = embeddings
         self.db_type = db_type
         factory = VectorDBFactory()
         self.vector_db = factory.create_vector_db(
@@ -93,11 +97,12 @@ class BaseMemory:
             self.memory_id,
             db_type=self.db_type,
             namespace=self.namespace,
+            embeddings=self.embeddings
         )
 
-    def init_client(self, namespace: str):
+    def init_client(self, embeddings, namespace: str):
 
-        return self.vector_db.init_weaviate_client(namespace)
+        return self.vector_db.init_weaviate_client(embeddings, namespace)
 
     def create_field(self, field_type, **kwargs):
         field_mapping = {
@@ -174,6 +179,7 @@ class BaseMemory:
         params: Optional[dict] = None,
         namespace: Optional[str] = None,
         custom_fields: Optional[str] = None,
+        embeddings: Optional[str] = None,
 
     ):
         from ast import literal_eval
@@ -209,20 +215,21 @@ class BaseMemory:
 
         return await self.vector_db.add_memories(
             observation=observation, loader_settings=loader_settings,
-            params=loaded_params, namespace=namespace, metadata_schema_class = schema_instance
+            params=loaded_params, namespace=namespace, metadata_schema_class = schema_instance, embeddings=embeddings
         )
         # Add other db_type conditions if necessary
 
     async def fetch_memories(
         self,
         observation: str,
+        search_type: Optional[str] = None,
         params: Optional[str] = None,
         namespace: Optional[str] = None,
         n_of_observations: Optional[int] = 2,
     ):
 
         return await self.vector_db.fetch_memories(
-            observation=observation, params=params,
+            observation=observation, search_type= search_type, params=params,
             namespace=namespace,
             n_of_observations=n_of_observations
         )
