@@ -436,14 +436,32 @@ async def main():
 
     args = parser.parse_args()
 
-    with open(args.test_set, "r") as file:
-        test_set = json.load(file)
+    try:
+        with open(args.test_set, "r") as file:
+            test_set = json.load(file)
+            if not isinstance(test_set, list):  # Expecting a list
+                raise TypeError("Parsed test_set JSON is not a list.")
+    except Exception as e:
+        print(f"Error loading test_set: {str(e)}")
+        return
 
-    with open(args.metadata, "r") as file:
-        metadata = json.load(file)
+    try:
+        with open(args.metadata, "r") as file:
+            metadata = json.load(file)
+            if not isinstance(metadata, dict):
+                raise TypeError("Parsed metadata JSON is not a dictionary.")
+    except Exception as e:
+        print(f"Error loading metadata: {str(e)}")
+        return
 
     if args.params:
-        params = json.loads(args.params)
+        try:
+            params = json.loads(args.params)
+            if not isinstance(params, dict):
+                raise TypeError("Parsed params JSON is not a dictionary.")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing params: {str(e)}")
+            return
     else:
         params = None
 

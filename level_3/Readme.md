@@ -29,13 +29,15 @@ After that, you can run:
 
 ```docker compose up promethai_mem   ```
 
+``` poetry shell ```
+
 Make sure to run 
 
 ``` python scripts/create_database.py ```
 
 After that, you can run: 
 
-``` python test_runner.py \
+``` python rag_test_manager.py \
     --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
     --test_set "example_data/test_set.json" \
     --user_id "666" \
