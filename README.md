@@ -1,5 +1,6 @@
 # PromethAI-Memory
 
+Memory management and testing for the AI Applications and RAGs
 
 
 
@@ -72,48 +73,69 @@
 
 ![Infographic Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/infographic_final.png)
 
-## The Motivation
 
-Browsing the database of theresanaiforthat.com, we can observe around [7000 new, mostly semi-finished projects](https://theresanaiforthat.com/) in the field of applied AI, whose development is fueled by new improvements in foundation models and open-source community contributions.
+## Production-ready modern data platform
 
+
+Browsing the database of theresanaiforthat.com, we can observe around [7000 new, mostly semi-finished projects](https://theresanaiforthat.com/) in the field of applied AI.
 It seems it has never been easier to create a startup, build an app, and go to market… and fail.
 
-AI apps currently being pushed out still mostly feel and perform like demos.
+Decades of technological advancements have led to small teams being able to do in 2023 what in 2015 required a team of dozens.
+Yet, the AI apps currently being pushed out still mostly feel and perform like demos.
+The rise of this new profession is perhaps signaling the need for a solution that is not yet there — a solution that in its essence represents a Large Language Model (LLM) — [a powerful general problem solver](https://lilianweng.github.io/posts/2023-06-23-agent/?fbclid=IwAR1p0W-Mg_4WtjOCeE8E6s7pJZlTDCDLmcXqHYVIrEVisz_D_S8LfN6Vv20) — available in the palm of your hand 24/7/365.
 
-To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
+To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on a productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
 
-We go on a journey and propose a new way to reason about Language Architecture for Agents based on cognitive sciences.
-
-#### Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-one)
-
-#### Or check this [Princeton paper](https://arxiv.org/abs/2309.02427) released after our demo
+## Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-on)
 
 
-## PromethAI-Memory Repo Structure
+## Project Structure
 
-The repository contains a set of folders that represent the steps in the evolution of the modern data stack from POC to production
-
-#### Level 1 - CMD script to process PDFs
-  We introduce the following concepts:
-  1. Structured output with Pydantic
-  2. CMD script to process custom PDFs
- 
-#### Level 2 - Memory Manager implemented in Python
-
+### Level 1 - OpenAI functions + Pydantic + DLTHub
+Scope: Give PDFs to the model and get the output in a structured format
 We introduce the following concepts:
-  1. Long Term Memory
-  2. Short Term Memory
-  3. Episodic Buffer
-  4. Attention Modulators
+- Structured output with Pydantic
+- CMD script to process custom PDFs
+### Level 2 - Memory Manager + Metadata management
+Scope: Give PDFs to the model and consolidate with the previous user activity and more
+We introduce the following concepts:
 
-The code at this level contains:
-  1. Simple PDF ingestion
-  2. FastAPI
-  3. Docker Image
-  4. Memory manager
-  5. Langchain-based Agent Simulator
-  6. Data schema
+- Long Term Memory -> store and format the data
+- Episodic Buffer -> isolate the working memory
+- Attention Modulators -> improve semantic search
+- Docker
+- API
 
-## How to use
+### Level 3 - Dynamic Memory Manager + DB + Rag Test Manager
+Scope: Store the data in N stores and test the retrieval with the Rag Test Manager
+- Dynamic Memory Manager -> store the data in N stores
+- Auto-generation of tests
+- Multiple file formats supported
+- Postgres DB to manage state
+- Docker
+- API
 
-Each of the folders contains a README to get started. 
+
+## Run the level 3 
+
+```docker compose up promethai_mem   ```
+
+``` poetry shell ```
+
+Make sure to run 
+
+``` python scripts/create_database.py ```
+
+After that, you can run: 
+
+``` 
+    python rag_test_manager.py \
+    --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
+    --test_set "example_data/test_set.json" \
+    --user_id "666" \
+    --metadata "example_data/metadata.json"
+
+```
+
+
+
