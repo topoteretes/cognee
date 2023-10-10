@@ -18,11 +18,24 @@ RUN poetry config virtualenvs.create false && \
     poetry install --no-root --no-dev
 
 RUN apt-get update -q && \
-    apt-get install curl zip jq netcat-traditional -y -q
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip -qq awscliv2.zip && ./aws/install && \
+    apt-get install -y -q \
+        gcc \
+        python3-dev \
+        curl \
+        zip \
+        jq \
+        netcat-traditional && \
+    pip install poetry && \
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip -qq awscliv2.zip && \
+    ./aws/install && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    rm -rf \
+        awscliv2.zip \
+        /var/lib/apt/lists/* \
+        /tmp/* \
+        /var/tmp/*
+
 
 
 #RUN playwright install
