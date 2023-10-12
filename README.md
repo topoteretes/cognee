@@ -1,5 +1,4 @@
 # PromethAI-Memory
-
 Memory management and testing for the AI Applications and RAGs
 
 
@@ -148,4 +147,3 @@ After that, you can run the RAG test manager.
 ```
 
 Examples of metadata structure and test set are in the folder "example_data"
-

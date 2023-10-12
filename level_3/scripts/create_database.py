@@ -47,9 +47,8 @@ def create_database(username, password, host, db_name):
     engine.dispose()
 
 
-def create_tables():
+def create_tables(engine):
     Base.metadata.create_all(bind=engine)
-
 
 if __name__ == "__main__":
     username = os.getenv('POSTGRES_USER')
@@ -57,9 +56,11 @@ if __name__ == "__main__":
     database_name = os.getenv('POSTGRES_DB')
     host = os.getenv('POSTGRES_HOST')
 
+    engine = create_admin_engine(username, password, host, database_name)
+
     if not database_exists(username, password, host, database_name):
         print(f"Database {database_name} does not exist. Creating...")
         create_database(username, password, host, database_name)
         print(f"Database {database_name} created successfully.")
 
-    create_tables()
+    create_tables(engine)
