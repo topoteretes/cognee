@@ -57,6 +57,18 @@ After that, you can run the RAG test manager.
 ```
 Examples of metadata structure and test set are in the folder "example_data"
 
+To analyze your data, go to your local Superset instance:
+
+``` 
+    http://localhost:8088
+```
+
+Add the  Postgres datasource to the Superset with the following connection string:
+    
+``` 
+    postgres://bla:bla@postgres:5432/bubu
+```
+
 
 ## Clean database
 
