@@ -118,15 +118,25 @@ Scope: Store the data in N stores and test the retrieval with the Rag Test Manag
 
 ## Run the level 3 
 
+Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
+
+Copy the .env.example to .env and fill the variables
+
+
+Start the docker:
+
 ```docker compose up promethai_mem   ```
+
+Use the poetry environment:
 
 ``` poetry shell ```
 
-Make sure to run 
+Make sure to run to initialize DB tables
 
 ``` python scripts/create_database.py ```
 
-After that, you can run: 
+After that, you can run the RAG test manager.
+
 
 ``` 
     python rag_test_manager.py \
@@ -137,5 +147,5 @@ After that, you can run:
 
 ```
 
-
+Examples of metadata structure and test set are in the folder "example_data"
 

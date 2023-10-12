@@ -1,10 +1,6 @@
 
 from contextlib import asynccontextmanager
-
-import asyncio
-from contextlib import asynccontextmanager
 import logging
-# from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
