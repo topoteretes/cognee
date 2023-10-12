@@ -25,27 +25,37 @@ After that, you can run:
 
 ```docker compose build promethai_mem   ```
 
-## Run
+## Run the level 3
+
+Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
+
+Copy the .env.example to .env and fill the variables
+
+
+Start the docker:
 
 ```docker compose up promethai_mem   ```
 
+Use the poetry environment:
+
 ``` poetry shell ```
 
-Make sure to run 
+Make sure to run to initialize DB tables
 
 ``` python scripts/create_database.py ```
 
-After that, you can run: 
+After that, you can run the RAG test manager.
 
-``` python rag_test_manager.py \
+
+``` 
+    python rag_test_manager.py \
     --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
     --test_set "example_data/test_set.json" \
     --user_id "666" \
     --metadata "example_data/metadata.json"
 
 ```
-
-To see example of test_set.json and metadata.json, check the files in the folder "example_data"
+Examples of metadata structure and test set are in the folder "example_data"
 
 
 ## Clean database

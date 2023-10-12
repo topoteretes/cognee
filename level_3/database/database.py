@@ -1,13 +1,14 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
-from contextlib import contextmanager
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import declarative_base, sessionmaker
+from contextlib import asynccontextmanager
 from sqlalchemy.exc import OperationalError
-from time import sleep
+import asyncio
 import sys
 from dotenv import load_dotenv
+
 load_dotenv()
+
 
 # this is needed to import classes from other modules
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,35 +26,43 @@ password = os.getenv('POSTGRES_PASSWORD')
 database_name = os.getenv('POSTGRES_DB')
 host = os.getenv('POSTGRES_HOST')
 
+# Use the asyncpg driver for async operation
+SQLALCHEMY_DATABASE_URL = f"postgresql+asyncpg://{username}:{password}@{host}:5432/{database_name}"
 
 
-SQLALCHEMY_DATABASE_URL = f"postgresql://{username}:{password}@{host}:5432/{database_name}"
-
-engine = create_engine(
+engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL,
-    pool_recycle=3600,  # recycle connections after 1 hour
-    pool_pre_ping=True  # test the connection for liveness upon each checkout
+    pool_recycle=3600,
+    echo=True  # Enable logging for tutorial purposes
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Use AsyncSession for the session
+AsyncSessionLocal = sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
 Base = declarative_base()
 
-@contextmanager
-def get_db():
-    db = SessionLocal()
+# Use asynccontextmanager to define an async context manager
+@asynccontextmanager
+async def get_db():
+    db = AsyncSessionLocal()
     try:
         yield db
     finally:
-        db.close()     
+        await db.close()
 
-def safe_db_operation(db_op, *args, **kwargs):
+# Use async/await syntax for the async function
+async def safe_db_operation(db_op, *args, **kwargs):
     for attempt in range(MAX_RETRIES):
-        with get_db() as db:
+        async with get_db() as db:
             try:
-                return db_op(db, *args, **kwargs)
+                # Ensure your db_op is also async
+                return await db_op(db, *args, **kwargs)
             except OperationalError as e:
-                db.rollback()
+                await db.rollback()
                 if "server closed the connection unexpectedly" in str(e) and attempt < MAX_RETRIES - 1:
-                    sleep(RETRY_DELAY)
+                    await asyncio.sleep(RETRY_DELAY)
                 else:
                     raise
