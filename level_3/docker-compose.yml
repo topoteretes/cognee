@@ -26,6 +26,23 @@ services:
       - promethai_mem_backend
     ports:
       - "5432:5432"
+  superset:
+    platform: linux/amd64
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    container_name: superset
+    environment:
+      - ADMIN_USERNAME=admin
+      - ADMIN_EMAIL=vasilije@topoteretes.com
+      - ADMIN_PASSWORD=admin
+      - POSTGRES_USER=bla
+      - POSTGRES_PASSWORD=bla
+      - POSTGRES_DB=bubu
+    networks:
+      - promethai_mem_backend
+    ports:
+      - '8088:8088'
 networks:
   promethai_mem_backend:
     name: promethai_mem_backend

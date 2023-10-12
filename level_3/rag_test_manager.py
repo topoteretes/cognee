@@ -29,8 +29,8 @@ import itertools
 import logging
 import dotenv
 dotenv.load_dotenv()
-import openai
 logger = logging.getLogger(__name__)
+import openai
 openai.api_key = os.getenv("OPENAI_API_KEY", "")
 
 async def retrieve_latest_test_case(session, user_id, memory_id):
