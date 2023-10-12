@@ -40,11 +40,13 @@ weaviate-client = "^3.22.1"
 python-multipart = "^0.0.6"
 deep-translator = "^1.11.4"
 humanize = "^4.8.0"
-deepeval = "^0.20.1"
+deepeval = "^0.20.6"
 pymupdf = "^1.23.3"
 psycopg2 = "^2.9.8"
 llama-index = "^0.8.39.post2"
 llama-hub = "^0.0.34"
+sqlalchemy = "^2.0.21"
+asyncpg = "^0.28.0"
 
 
 

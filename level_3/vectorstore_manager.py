@@ -1,5 +1,7 @@
 import logging
 
+from sqlalchemy.future import select
+
 logging.basicConfig(level=logging.INFO)
 import marvin
 from dotenv import load_dotenv
@@ -15,6 +17,7 @@ from models.operation import Operation
 load_dotenv()
 import ast
 import tracemalloc
+from database.database_crud import session_scope, add_entity
 
 tracemalloc.start()
 
@@ -48,7 +51,7 @@ class DynamicBaseMemory(BaseMemory):
         self.associations = []
 
 
-    def add_method(self, method_name):
+    async def add_method(self, method_name):
         """
         Add a method to the memory class.
 
@@ -60,7 +63,7 @@ class DynamicBaseMemory(BaseMemory):
         """
         self.methods.add(method_name)
 
-    def add_attribute(self, attribute_name):
+    async def add_attribute(self, attribute_name):
         """
         Add an attribute to the memory class.
 
@@ -72,7 +75,7 @@ class DynamicBaseMemory(BaseMemory):
         """
         self.attributes.add(attribute_name)
 
-    def get_attribute(self, attribute_name):
+    async def get_attribute(self, attribute_name):
         """
         Check if the attribute is in the memory class.
 
@@ -84,7 +87,7 @@ class DynamicBaseMemory(BaseMemory):
         """
         return attribute_name in self.attributes
 
-    def add_association(self, associated_memory):
+    async def add_association(self, associated_memory):
         """
         Add an association to another memory class.
 
@@ -149,26 +152,26 @@ class Memory:
         self.OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     @classmethod
-    def create_memory(cls, user_id: str, session, **kwargs):
+    async def create_memory(cls, user_id: str, session, **kwargs):
         """
         Class method that acts as a factory method for creating Memory instances.
         It performs necessary DB checks or updates before instance creation.
         """
-        existing_user = cls.check_existing_user(user_id, session)
+        existing_user = await cls.check_existing_user(user_id, session)
 
         if existing_user:
 
             # Handle existing user scenario...
-            memory_id = cls.check_existing_memory(user_id, session)
+            memory_id = await cls.check_existing_memory(user_id, session)
             logging.info(f"Existing user {user_id} found in the DB. Memory ID: {memory_id}")
         else:
             # Handle new user scenario...
-            memory_id = cls.handle_new_user(user_id, session)
+            memory_id = await cls.handle_new_user(user_id, session)
             logging.info(f"New user {user_id} created in the DB. Memory ID: {memory_id}")
 
         return cls(user_id=user_id, session=session, memory_id=memory_id, **kwargs)
 
-    def list_memory_classes(self):
+    async def list_memory_classes(self):
         """
         Lists all available memory classes in the memory instance.
         """
@@ -176,32 +179,36 @@ class Memory:
         return [attr for attr in dir(self) if attr.endswith("_class")]
 
     @staticmethod
-    def check_existing_user(user_id: str, session):
+    async def check_existing_user(user_id: str, session):
         """Check if a user exists in the DB and return it."""
-        return session.query(User).filter_by(id=user_id).first()
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
-    def check_existing_memory(user_id: str, session):
+    async def check_existing_memory(user_id: str, session):
         """Check if a user memory exists in the DB and return it."""
-        return session.query(MemoryModel.id).filter_by(user_id=user_id).first()
+        result = await session.execute(
+            select(MemoryModel.id).where(MemoryModel.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
-    def handle_new_user(user_id: str, session):
+    async def handle_new_user(user_id: str, session):
         """Handle new user creation in the DB and return the new memory ID."""
 
         #handle these better in terms of retry and error handling
         memory_id = str(uuid.uuid4())
         new_user = User(id=user_id)
-        session.add(new_user)
-        session.commit()
+        await add_entity(session, new_user)
 
         memory = MemoryModel(id=memory_id, user_id=user_id, methods_list=str(['Memory', 'SemanticMemory', 'EpisodicMemory']),
                              attributes_list=str(['user_id', 'index_name', 'db_type', 'knowledge_source', 'knowledge_type', 'memory_id', 'long_term_memory', 'short_term_memory', 'namespace']))
-        session.add(memory)
-        session.commit()
+        await add_entity(session, memory)
         return memory_id
 
-    def add_memory_instance(self, memory_class_name: str):
+    async def add_memory_instance(self, memory_class_name: str):
         """Add a new memory instance to the memory_instances list."""
         instance = DynamicBaseMemory(memory_class_name, self.user_id,
                                      self.memory_id, self.index_name,
@@ -209,15 +216,26 @@ class Memory:
         print("The following instance was defined", instance)
         self.memory_instances.append(instance)
 
-    def manage_memory_attributes(self, existing_user):
+    async def query_method(self):
+        methods_list = await self.session.execute(
+            select(MemoryModel.methods_list).where(MemoryModel.id == self.memory_id)
+        )
+        methods_list = methods_list.scalar_one_or_none()
+        return methods_list
+
+    async def manage_memory_attributes(self, existing_user):
         """Manage memory attributes based on the user existence."""
         if existing_user:
             print(f"ID before query: {self.memory_id}, type: {type(self.memory_id)}")
-            attributes_list = self.session.query(MemoryModel.attributes_list).filter_by(id=self.memory_id[0]).scalar()
+
+
+
+            # attributes_list = await self.session.query(MemoryModel.attributes_list).filter_by(id=self.memory_id[0]).scalar()
+            attributes_list = await self.query_method()
             logging.info(f"Attributes list: {attributes_list}")
             if attributes_list is not None:
                 attributes_list = ast.literal_eval(attributes_list)
-                self.handle_attributes(attributes_list)
+                await self.handle_attributes(attributes_list)
             else:
                 logging.warning("attributes_list is None!")
         else:
@@ -225,20 +243,25 @@ class Memory:
                                'knowledge_source', 'knowledge_type',
                                'memory_id', 'long_term_memory',
                                'short_term_memory', 'namespace']
-            self.handle_attributes(attributes_list)
+            await self.handle_attributes(attributes_list)
 
-    def handle_attributes(self, attributes_list):
+    async def handle_attributes(self, attributes_list):
         """Handle attributes for existing memory instances."""
         for attr in attributes_list:
-            self.memory_class.add_attribute(attr)
+            await self.memory_class.add_attribute(attr)
 
-    def manage_memory_methods(self, existing_user):
+    async def manage_memory_methods(self, existing_user):
         """
         Manage memory methods based on the user existence.
         """
         if existing_user:
             # Fetch existing methods from the database
-            methods_list = self.session.query(MemoryModel.methods_list).filter_by(id=self.memory_id).scalar()
+            # methods_list = await self.session.query(MemoryModel.methods_list).filter_by(id=self.memory_id).scalar()
+
+            methods_list = await self.session.execute(
+                select(MemoryModel.methods_list).where(MemoryModel.id == self.memory_id[0])
+            )
+            methods_list = methods_list.scalar_one_or_none()
             methods_list = ast.literal_eval(methods_list)
         else:
             # Define default methods for a new user
@@ -260,20 +283,20 @@ class Memory:
                 return await method(*args, **kwargs)
         raise AttributeError(f"{dynamic_base_memory_instance.name} object has no attribute {method_name}")
 
-    def add_dynamic_memory_class(self, class_name: str, namespace: str):
+    async def add_dynamic_memory_class(self, class_name: str, namespace: str):
         logging.info("Here is the memory id %s", self.memory_id[0])
         new_memory_class = DynamicBaseMemory(class_name, self.user_id, self.memory_id[0], self.index_name,
                                              self.db_type, namespace)
         setattr(self, f"{class_name.lower()}_class", new_memory_class)
         return new_memory_class
 
-    def add_attribute_to_class(self, class_instance, attribute_name: str):
+    async def add_attribute_to_class(self, class_instance, attribute_name: str):
         #add this to database  for a particular user  and load under memory id
-        class_instance.add_attribute(attribute_name)
+        await class_instance.add_attribute(attribute_name)
 
-    def add_method_to_class(self, class_instance, method_name: str):
+    async def add_method_to_class(self, class_instance, method_name: str):
         #add this to database for a particular user and load under memory id
-        class_instance.add_method(method_name)
+        await class_instance.add_method(method_name)
 
 
 
@@ -297,35 +320,37 @@ async def main():
     }
     loader_settings =  {
     "format": "PDF",
-    "source": "url",
+    "source": "URL",
     "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     }
     # memory_instance = Memory(namespace='SEMANTICMEMORY')
     # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
-    #
-    # Create a DB session
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    memory = Memory.create_memory("676", session, namespace='SEMANTICMEMORY')
 
-    # Adding a memory instance
-    memory.add_memory_instance("ExampleMemory")
+    from database.database_crud import session_scope
+    from database.database import AsyncSessionLocal
+
+    async with session_scope(AsyncSessionLocal()) as session:
+        memory = await Memory.create_memory("676", session, namespace='SEMANTICMEMORY')
+
+        # Adding a memory instance
+        await memory.add_memory_instance("ExampleMemory")
 
 
-    # Managing memory attributes
-    existing_user = Memory.check_existing_user("676", session)
-    print("here is the existing user", existing_user)
-    memory.manage_memory_attributes(existing_user)
+        # Managing memory attributes
+        existing_user = await Memory.check_existing_user("676", session)
+        print("here is the existing user", existing_user)
+        await memory.manage_memory_attributes(existing_user)
+        # aeehuvyq_semanticememory_class
 
-    memory.add_dynamic_memory_class('SemanticMemory', 'SEMANTICMEMORY')
-    memory.add_method_to_class(memory.semanticmemory_class, 'add_memories')
-    memory.add_method_to_class(memory.semanticmemory_class, 'fetch_memories')
-    sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
-                                                    observation='some_observation', params=params)
+        await memory.add_dynamic_memory_class('SemanticMemory', 'SEMANTICMEMORY')
+        await memory.add_method_to_class(memory.semanticmemory_class, 'add_memories')
+        await memory.add_method_to_class(memory.semanticmemory_class, 'fetch_memories')
+        sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
+                                                        observation='some_observation', params=params, loader_settings=loader_settings)
 
-    susu = await memory.dynamic_method_call(memory.semanticmemory_class, 'fetch_memories',
-                                                    observation='some_observation')
-    print(susu)
+        susu = await memory.dynamic_method_call(memory.semanticmemory_class, 'fetch_memories',
+                                                        observation='some_observation')
+        print(susu)
 
     # Adding a dynamic memory class
     # dynamic_memory = memory.add_dynamic_memory_class("DynamicMemory", "ExampleNamespace")
@@ -337,8 +362,8 @@ async def main():
 
 
     # print(sss)
-    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    # print(load_jack_london)
+    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    print(load_jack_london)
 
     modulator = {"relevance": 0.1,  "frequency": 0.1}
 

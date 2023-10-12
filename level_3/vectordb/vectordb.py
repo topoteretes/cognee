@@ -179,17 +179,17 @@ class WeaviateVectorDB(VectorDB):
             ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
         ).with_where(params_user_id).with_limit(10)
 
+        n_of_observations = kwargs.get('n_of_observations', 2)
+
         try:
             if search_type == 'text':
                 query_output = (
                     base_query
                     .with_near_text({"concepts": [observation]})
+                    .with_autocut(n_of_observations)
                     .do()
                 )
             elif search_type == 'hybrid':
-                n_of_observations = kwargs.get('n_of_observations', 2)
-
-
                 query_output = (
                     base_query
                     .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
@@ -200,6 +200,7 @@ class WeaviateVectorDB(VectorDB):
                 query_output = (
                     base_query
                     .with_bm25(query=observation)
+                    .with_autocut(n_of_observations)
                     .do()
                 )
             elif search_type == 'generate':
@@ -208,6 +209,7 @@ class WeaviateVectorDB(VectorDB):
                     base_query
                     .with_generate(single_prompt=generate_prompt)
                     .with_near_text({"concepts": [observation]})
+                    .with_autocut(n_of_observations)
                     .do()
                 )
             elif search_type == 'generate_grouped':
@@ -216,6 +218,7 @@ class WeaviateVectorDB(VectorDB):
                     base_query
                     .with_generate(grouped_task=generate_prompt)
                     .with_near_text({"concepts": [observation]})
+                    .with_autocut(n_of_observations)
                     .do()
                 )
             else:
