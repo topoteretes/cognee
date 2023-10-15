@@ -1,6 +1,18 @@
 version: "3.9"
 
 services:
+  neo4j:
+    image: neo4j:latest
+    container_name: neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/pleaseletmein
+      - NEO4J_PLUGINS=["apoc"]
+    networks:
+      - promethai_mem_backend
+
   promethai_mem:
     networks:
       - promethai_mem_backend
@@ -10,15 +22,16 @@ services:
       - "./:/app"
     environment:
       - HOST=0.0.0.0
-    profiles: ["exclude-from-up"] # Use `docker-compose run teenage-agi` to get an attached container
+    profiles: ["exclude-from-up"]
     ports:
       - 8000:8000
       - 443:443
+
   postgres:
     image: postgres
     container_name: postgres
     environment:
-      - POSTGRES_HOST_AUTH_METHOD= trust
+      - POSTGRES_HOST_AUTH_METHOD=trust
       - POSTGRES_USER=bla
       - POSTGRES_PASSWORD=bla
       - POSTGRES_DB=bubu
@@ -26,6 +39,7 @@ services:
       - promethai_mem_backend
     ports:
       - "5432:5432"
+
   superset:
     platform: linux/amd64
     build:
@@ -43,6 +57,8 @@ services:
       - promethai_mem_backend
     ports:
       - '8088:8088'
+
 networks:
   promethai_mem_backend:
     name: promethai_mem_backend
+

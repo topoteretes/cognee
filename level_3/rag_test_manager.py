@@ -437,9 +437,10 @@ async def main():
     # parser.add_argument("--user_id", required=True, help="User ID.")
     # parser.add_argument("--params", help="Additional parameters in JSON format.")
     # parser.add_argument("--metadata", required=True, help="Path to JSON file containing metadata.")
-    #
+    # parser.add_argument("--generate_test_set", required=True, help="Make a test set.")
+    # parser.add_argument("--only_llm_context", required=True, help="Do a test only within the existing LLM context")
     # args = parser.parse_args()
-    #
+
     # try:
     #     with open(args.test_set, "r") as file:
     #         test_set = json.load(file)
