@@ -8,7 +8,7 @@ from vectordb.chunkers.chunkers import chunk_data
 from llama_hub.file.base import SimpleDirectoryReader
 
 import requests
-def _document_loader( observation: str, loader_settings: dict):
+async def _document_loader( observation: str, loader_settings: dict):
     # Check the format of the document
     document_format = loader_settings.get("format", "text")
     loader_strategy = loader_settings.get("strategy", "VANILLA")

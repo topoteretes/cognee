@@ -23,5 +23,4 @@ async def session_scope(session):
 async def add_entity(session, entity):
     async with session_scope(session) as s:  # Use your async session_scope
         s.add(entity)  # No need to commit; session_scope takes care of it
-        s.commit()
         return "Successfully added entity"

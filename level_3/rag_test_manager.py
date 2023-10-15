@@ -1,37 +1,55 @@
-import argparse
-import json
-from enum import Enum
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from deepeval.metrics.overall_score import OverallScoreMetric
-from deepeval.test_case import LLMTestCase
-from deepeval.run_test import assert_test, run_test
-from gptcache.embedding import openai
-from marvin import ai_classifier
 
+import random
+import itertools
+
+
+import logging
+import string
+from enum import Enum
+
+
+import openai
+from deepeval.metrics.overall_score import OverallScoreMetric
+from deepeval.run_test import run_test
+from deepeval.test_case import LLMTestCase
+from marvin import ai_classifier
+from sqlalchemy.future import select
+
+logging.basicConfig(level=logging.INFO)
+import marvin
+from dotenv import load_dotenv
+from sqlalchemy.orm import sessionmaker
+from database.database import engine  # Ensure you have database engine defined somewhere
+from models.user import User
+from models.memory import MemoryModel
 from models.sessions import Session
 from models.testset import TestSet
 from models.testoutput import TestOutput
 from models.metadatas import MetaDatas
 from models.operation import Operation
-from sqlalchemy.orm import sessionmaker
-from database.database import engine
-from vectorstore_manager import Memory
-import uuid
-from contextlib import contextmanager
-from database.database import AsyncSessionLocal
-from database.database_crud import session_scope
+load_dotenv()
+import ast
+import tracemalloc
+from database.database_crud import session_scope, add_entity
 
-import random
-import string
-import itertools
-import logging
-import dotenv
-dotenv.load_dotenv()
-logger = logging.getLogger(__name__)
-import openai
+tracemalloc.start()
+
+import os
+from dotenv import load_dotenv
+import uuid
+
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
+from vectordb.basevectordb import  BaseMemory
+from vectorstore_manager import Memory
+import asyncio
+
+from database.database_crud import session_scope
+from database.database import AsyncSessionLocal
 openai.api_key = os.getenv("OPENAI_API_KEY", "")
+
 
 async def retrieve_latest_test_case(session, user_id, memory_id):
     try:
@@ -43,13 +61,14 @@ async def retrieve_latest_test_case(session, user_id, memory_id):
         )
         return result.scalar_one_or_none()  # scalar_one_or_none() is a non-blocking call
     except Exception as e:
-        logger.error(f"An error occurred while retrieving the latest test case: {str(e)}")
+        logging.error(f"An error occurred while retrieving the latest test case: {str(e)}")
         return None
 
 async def add_entity(session, entity):
     async with session_scope(session) as s:  # Use your async session_scope
         s.add(entity)  # No need to commit; session_scope takes care of it
         s.commit()
+
         return "Successfully added entity"
 
 async def retrieve_job_by_id(session, user_id, job_id):
@@ -61,7 +80,7 @@ async def retrieve_job_by_id(session, user_id, job_id):
         )
         return result.scalar_one_or_none()
     except Exception as e:
-        logger.error(f"An error occurred while retrieving the job: {str(e)}")
+        logging.error(f"An error occurred while retrieving the job: {str(e)}")
         return None
 
 async def fetch_job_id(session, user_id=None, memory_id=None, job_id=None):
@@ -73,7 +92,7 @@ async def fetch_job_id(session, user_id=None, memory_id=None, job_id=None):
         )
         return result.scalar_one_or_none()
     except Exception as e:
-        logger.error(f"An error occurred: {str(e)}")
+        logging.error(f"An error occurred: {str(e)}")
         return None
 
 
@@ -87,7 +106,7 @@ async def fetch_test_set_id(session, user_id, id):
         )
         return result.scalar_one_or_none()  # scalar_one_or_none() is a non-blocking call
     except Exception as e:
-        logger.error(f"An error occurred while retrieving the test set: {str(e)}")
+        logging.error(f"An error occurred while retrieving the test set: {str(e)}")
         return None
 
 # Adding "embeddings" to the parameter variants function
@@ -178,20 +197,20 @@ async def generate_chatgpt_output(query:str, context:str=None):
     # print(llm_output)
     return llm_output
 
-async def eval_test(query=None, output=None, expected_output=None, context=None):
-    # query = "How does photosynthesis work?"
-    # output = "Photosynthesis is the process by which green plants and some other organisms use sunlight to synthesize foods with the help of chlorophyll pigment."
-    # expected_output = "Photosynthesis is the process by which green plants and some other organisms use sunlight to synthesize food with the help of chlorophyll pigment."
-    # context = "Biology"
+async def eval_test(query=None, output=None, expected_output=None, context=None, synthetic_test_set=False):
+
     result_output = await generate_chatgpt_output(query, context)
 
-    test_case = LLMTestCase(
-        query=query,
-        output=result_output,
-        expected_output=expected_output,
-        context=context,
+    if synthetic_test_set:
+        test_case = synthetic_test_set
+    else:
 
-    )
+        test_case = LLMTestCase(
+            query=query,
+            output=result_output,
+            expected_output=expected_output,
+            context=context,
+        )
     metric = OverallScoreMetric()
 
     # If you want to run the test
@@ -230,12 +249,11 @@ def data_location_route(data_string: str):
     return LocationRoute(data_string).name
 
 
-def dynamic_test_manager(data, test_set=None, user=None, params=None):
+def dynamic_test_manager(context=None):
     from deepeval.dataset import create_evaluation_query_answer_pairs
     # fetch random chunks from the document
     #feed them to the evaluation pipeline
-    dataset = create_evaluation_query_answer_pairs(
-        "Python is a great language for mathematical expression and machine learning.")
+    dataset = create_evaluation_query_answer_pairs(openai_api_key=os.environ.get("OPENAI_API_KEY"), context= context ,n=10)
 
     return dataset
 
@@ -246,11 +264,12 @@ def generate_letter_uuid(length=8):
     letters = string.ascii_uppercase  # A-Z
     return ''.join(random.choice(letters) for _ in range(length))
 
-async def start_test(data, test_set=None, user_id=None, params=None, job_id=None, metadata=None):
+async def start_test(data, test_set=None, user_id=None, params=None, job_id=None, metadata=None, generate_test_set=False, only_llm_context=False):
 
 
     async with session_scope(session=AsyncSessionLocal()) as session:
-        memory = await Memory.create_memory(user_id, session, namespace="SEMANTICMEMORY")
+
+
         job_id = await fetch_job_id(session, user_id=user_id, job_id=job_id)
         test_set_id = await fetch_test_set_id(session, user_id=user_id, id=job_id)
 
@@ -266,104 +285,113 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
             data_format = data_format_route(data)  # Assume data_format_route is predefined
             data_location = data_location_route(data)  # Assume data_location_route is predefined
             test_params = generate_param_variants(
-                included_params=['chunk_size', 'chunk_overlap', 'search_type'])
+                included_params=['chunk_size'])
 
         print("Here are the test params", str(test_params))
 
         loader_settings = {
             "format": f"{data_format}",
             "source": f"{data_location}",
-            "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
+            "path": data
         }
 
-        async def run_test(test, loader_settings, metadata):
-            test_id = str(generate_letter_uuid()) + "_" + "SEMANTICEMEMORY"
+
+        async def run_test(test, loader_settings, metadata, test_id=None,only_llm_context=False):
+
+            if test_id is None:
+                test_id = str(generate_letter_uuid()) + "_" +"SEMANTICMEMORY"
+            memory = await Memory.create_memory(user_id, session, namespace="SEMANTICMEMORY")
             await memory.add_memory_instance("ExampleMemory")
             existing_user = await Memory.check_existing_user(user_id, session)
             await memory.manage_memory_attributes(existing_user)
             test_class = test_id + "_class"
             await memory.add_dynamic_memory_class(test_id.lower(), test_id)
             dynamic_memory_class = getattr(memory, test_class.lower(), None)
-
-            # Assuming add_method_to_class and dynamic_method_call are predefined methods in Memory class
-
-            if dynamic_memory_class is not None:
-                await memory.add_method_to_class(dynamic_memory_class, 'add_memories')
-            else:
-                print(f"No attribute named {test_class.lower()} in memory.")
+            methods_to_add = ['add_memories', 'fetch_memories', 'delete_memories']
 
             if dynamic_memory_class is not None:
-                await memory.add_method_to_class(dynamic_memory_class, 'fetch_memories')
+                for method_name in methods_to_add:
+                    await memory.add_method_to_class(dynamic_memory_class, method_name)
+                    print(f"Memory method {method_name} has been added")
             else:
                 print(f"No attribute named {test_class.lower()} in memory.")
 
             print(f"Trying to access: {test_class.lower()}")
             print("Available memory classes:", await memory.list_memory_classes())
-
-            print(f"Trying to check: ", test)
-            loader_settings.update(test)
-
-
-            async def run_load_test_element(test, loader_settings, metadata, test_id):
-
-                test_class = test_id + "_class"
-                # memory.test_class
-
-                await memory.add_dynamic_memory_class(test_id.lower(), test_id)
-                dynamic_memory_class = getattr(memory, test_class.lower(), None)
-                if dynamic_memory_class is not None:
-                    await memory.add_method_to_class(dynamic_memory_class, 'add_memories')
-                else:
-                    print(f"No attribute named {test_class.lower()} in memory.")
-
-                if dynamic_memory_class is not None:
-                    await memory.add_method_to_class(dynamic_memory_class, 'fetch_memories')
-                else:
-                    print(f"No attribute named {test_class.lower()} in memory.")
+            if test:
+                loader_settings.update(test)
+            test_class = test_id + "_class"
+            dynamic_memory_class = getattr(memory, test_class.lower(), None)
+            async def run_load_test_element( loader_settings=loader_settings, metadata=metadata, test_id=test_id, test_set=test_set):
 
                 print(f"Trying to access: {test_class.lower()}")
-                print("Available memory classes:", await memory.list_memory_classes())
-
-                print(f"Trying to check: ", test)
-                # print("Here is the loader settings", str(loader_settings))
-                # print("Here is the medatadata", str(metadata))
-                load_action = await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
-                                                               observation='some_observation', params=metadata,
+                await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
+                                                               observation='Observation loaded', params=metadata,
                                                                loader_settings=loader_settings)
-            async def run_search_eval_element(test_item, test_id):
+                return "Loaded test element"
+            async def run_search_element(test_item, test_id):
+                retrieve_action = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
+                                                                   observation=str(test_item["question"]))
+                print("Here is the test result", str(retrieve_action["data"]['Get'][test_id][0]["text"]))
+                return retrieve_action["data"]['Get'][test_id][0]["text"]
+
+            async def run_eval(test_item, search_result):
+                test_eval= await eval_test(query=test_item["question"], expected_output=test_item["answer"],
+                                              context=str(search_result))
+                return test_eval
+            async def run_generate_test_set( test_id):
 
                 test_class = test_id + "_class"
-                await memory.add_dynamic_memory_class(test_id.lower(), test_id)
+                # await memory.add_dynamic_memory_class(test_id.lower(), test_id)
                 dynamic_memory_class = getattr(memory, test_class.lower(), None)
-
+                print(dynamic_memory_class)
                 retrieve_action = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
-                                                                   observation=test_item["question"],
-                                                                   search_type=test_item["search_type"])
-                test_result = await eval_test(query=test_item["question"], expected_output=test_item["answer"],
-                                              context=str(retrieve_action))
-                print(test_result)
-                delete_mems = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
-                                                               namespace=test_id)
-                return test_result
-            test_load_pipeline = await asyncio.gather(
-                *(run_load_test_element(test_item,loader_settings, metadata, test_id) for test_item in test_set)
-            )
+                                                                   observation="Generate a short summary of this document",
+                                                                   search_type="generative")
+                return dynamic_test_manager(retrieve_action)
+            test_eval_pipeline =[]
 
-            test_eval_pipeline = await asyncio.gather(
-                *(run_search_eval_element(test_item, test_id) for test_item in test_set)
-            )
-            logging.info("Results of the eval pipeline %s", str(test_eval_pipeline))
-            await add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(test_eval_pipeline)))
 
-        # # Gather and run all tests in parallel
-        results = await asyncio.gather(
-            *(run_test(test, loader_settings, metadata) for test in test_params)
-        )
+            if only_llm_context:
+                for test_qa in test_set:
+                    context=""
+                    test_result = await run_eval(test_qa, context)
+                    test_eval_pipeline.append(test_result)
+            if generate_test_set is True:
+                synthetic_test_set = run_generate_test_set(test_id)
+            else:
+                pass
+            if test_set:
+                logging.info("Loading and evaluating test set")
+                await run_load_test_element(loader_settings, metadata, test_id, test_set)
+                for test_qa in test_set:
+                    result = await run_search_element(test_qa, test_id)
+                    test_result = await run_eval(test_qa, result)
+                    test_eval_pipeline.append( test_result)
+
+            else:
+                pass
+
+            await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
+                                                           namespace=test_id)
+
+            return test_eval_pipeline
+
+        results = []
+        if only_llm_context:
+            result = await run_test(test= None, loader_settings=loader_settings, metadata=metadata, only_llm_context=only_llm_context)
+            results.append(result)
+        for param in test_params:
+            result = await run_test(param, loader_settings, metadata,only_llm_context=only_llm_context)
+            results.append(result)
+
+        print(results)
+
         return results
 
 async def main():
 
-    params = {
+    metadata = {
         "version": "1.0",
         "agreement_id": "AG123456",
         "privacy_policy": "https://example.com/privacy",
@@ -399,7 +427,9 @@ async def main():
             "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight."
         }
     ]
-    result = await start_test("https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf", test_set=test_set, user_id="666", params=None, metadata=params)
+    # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
+    #http://public-library.uk/ebooks/59/83.pdf
+    result = await start_test("http://public-library.uk/ebooks/59/83.pdf", test_set=test_set, user_id="676", params=None, metadata=metadata)
     #
     # parser = argparse.ArgumentParser(description="Run tests against a document.")
     # parser.add_argument("--url", required=True, help="URL of the document to test.")
@@ -441,10 +471,24 @@ async def main():
     # #clean up params here
     # await start_test(args.url, test_set, args.user_id, params=None, metadata=metadata)
 if __name__ == "__main__":
-    import asyncio
 
     asyncio.run(main())
 
+    # delete_mems = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
+    #                                                namespace=test_id)
+    # test_load_pipeline = await asyncio.gather(
+    #     *(run_load_test_element(test_item,loader_settings, metadata, test_id) for test_item in test_set)
+    # )
+    #
+    # test_eval_pipeline = await asyncio.gather(
+    #     *(run_search_eval_element(test_item, test_id) for test_item in test_set)
+    # )
+    # logging.info("Results of the eval pipeline %s", str(test_eval_pipeline))
+    # await add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(test_eval_pipeline)))
+    # return test_eval_pipeline
 
-
-
+# # Gather and run all tests in parallel
+# results = await asyncio.gather(
+#     *(run_testo(test, loader_settings, metadata) for test in test_params)
+# )
+# return results

@@ -121,17 +121,18 @@ class WeaviateVectorDB(VectorDB):
         retriever = self.init_weaviate(embeddings=embeddings,namespace = namespace)
         if loader_settings:
             # Assuming _document_loader returns a list of documents
-            documents = _document_loader(observation, loader_settings)
+            documents = await _document_loader(observation, loader_settings)
             logging.info("here are the docs %s", str(documents))
             for doc in documents:
                 document_to_load = self._stuct(doc.page_content, params, metadata_schema_class)
-                print("here is the doc to load1", document_to_load)
+
+                logging.info("Loading document with provided loader settings %s", str(document_to_load))
                 retriever.add_documents([
             Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
         else:
             document_to_load = self._stuct(observation, params, metadata_schema_class)
 
-            print("here is the doc to load2", document_to_load)
+            logging.info("Loading document with defautl loader settings %s", str(document_to_load))
             retriever.add_documents([
             Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
 
@@ -159,6 +160,8 @@ class WeaviateVectorDB(VectorDB):
         if not namespace:
             namespace = self.namespace
 
+        logging.info("Query on namespace %s", namespace)
+
         params_user_id = {
             "path": ["user_id"],
             "operator": "Like",
@@ -181,52 +184,52 @@ class WeaviateVectorDB(VectorDB):
 
         n_of_observations = kwargs.get('n_of_observations', 2)
 
-        try:
-            if search_type == 'text':
-                query_output = (
-                    base_query
-                    .with_near_text({"concepts": [observation]})
-                    .with_autocut(n_of_observations)
-                    .do()
-                )
-            elif search_type == 'hybrid':
-                query_output = (
-                    base_query
-                    .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
-                    .with_autocut(n_of_observations)
-                    .do()
-                )
-            elif search_type == 'bm25':
-                query_output = (
-                    base_query
-                    .with_bm25(query=observation)
-                    .with_autocut(n_of_observations)
-                    .do()
-                )
-            elif search_type == 'generate':
-                generate_prompt = kwargs.get('generate_prompt', "")
-                query_output = (
-                    base_query
-                    .with_generate(single_prompt=generate_prompt)
-                    .with_near_text({"concepts": [observation]})
-                    .with_autocut(n_of_observations)
-                    .do()
-                )
-            elif search_type == 'generate_grouped':
-                generate_prompt = kwargs.get('generate_prompt', "")
-                query_output = (
-                    base_query
-                    .with_generate(grouped_task=generate_prompt)
-                    .with_near_text({"concepts": [observation]})
-                    .with_autocut(n_of_observations)
-                    .do()
-                )
-            else:
-                logging.error(f"Invalid search_type: {search_type}")
-                return []
-        except Exception as e:
-            logging.error(f"Error executing query: {str(e)}")
+        # try:
+        if search_type == 'text':
+            query_output = (
+                base_query
+                .with_near_text({"concepts": [observation]})
+                .with_autocut(n_of_observations)
+                .do()
+            )
+        elif search_type == 'hybrid':
+            query_output = (
+                base_query
+                .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
+                .with_autocut(n_of_observations)
+                .do()
+            )
+        elif search_type == 'bm25':
+            query_output = (
+                base_query
+                .with_bm25(query=observation)
+                .with_autocut(n_of_observations)
+                .do()
+            )
+        elif search_type == 'generate':
+            generate_prompt = kwargs.get('generate_prompt', "")
+            query_output = (
+                base_query
+                .with_generate(single_prompt=observation)
+                .with_near_text({"concepts": [observation]})
+                .with_autocut(n_of_observations)
+                .do()
+            )
+        elif search_type == 'generate_grouped':
+            generate_prompt = kwargs.get('generate_prompt', "")
+            query_output = (
+                base_query
+                .with_generate(grouped_task=observation)
+                .with_near_text({"concepts": [observation]})
+                .with_autocut(n_of_observations)
+                .do()
+            )
+        else:
+            logging.error(f"Invalid search_type: {search_type}")
             return []
+        # except Exception as e:
+        #     logging.error(f"Error executing query: {str(e)}")
+        #     return []
 
         return query_output
 
