@@ -342,11 +342,11 @@ async def main():
         await memory.manage_memory_attributes(existing_user)
         # aeehuvyq_semanticememory_class
 
-        await memory.add_dynamic_memory_class('SemanticMemory', 'SEMANTICMEMORY')
+        await memory.add_dynamic_memory_class('semanticmemory', 'SEMANTICMEMORY')
         await memory.add_method_to_class(memory.semanticmemory_class, 'add_memories')
         await memory.add_method_to_class(memory.semanticmemory_class, 'fetch_memories')
-        sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
-                                                        observation='some_observation', params=params, loader_settings=loader_settings)
+        # sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
+        #                                                 observation='some_observation', params=params, loader_settings=loader_settings)
 
         susu = await memory.dynamic_method_call(memory.semanticmemory_class, 'fetch_memories',
                                                         observation='some_observation')
@@ -362,8 +362,8 @@ async def main():
 
 
     # print(sss)
-    load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
-    print(load_jack_london)
+    # load_jack_london = await memory._add_semantic_memory(observation = "bla", loader_settings=loader_settings, params=params)
+    # print(load_jack_london)
 
     modulator = {"relevance": 0.1,  "frequency": 0.1}
 

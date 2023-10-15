@@ -202,6 +202,7 @@ class BaseMemory:
             return field_mapping[field_type](**kwargs)
 
         # Dynamic Schema Creation
+        params['user_id'] = self.user_id
 
 
         schema_instance = self.create_dynamic_schema(params)  # Always creating Str field, adjust as needed
@@ -227,6 +228,10 @@ class BaseMemory:
         namespace: Optional[str] = None,
         n_of_observations: Optional[int] = 2,
     ):
+        logging.info(namespace)
+        logging.info(search_type)
+        logging.info(params)
+        logging.info(observation)
 
         return await self.vector_db.fetch_memories(
             observation=observation, search_type= search_type, params=params,
