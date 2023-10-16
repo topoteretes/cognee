@@ -1,6 +1,7 @@
 # PromethAI-Memory
 Memory management and testing for the AI Applications and RAGs
 
+Dynamic Graph Memory Manager + DB + Rag Test Manager
 
 
 <p align="center">
@@ -105,12 +106,12 @@ We introduce the following concepts:
 - Docker
 - API
 
-### Level 3 - Dynamic Memory Manager + DB + Rag Test Manager
-Scope: Store the data in N stores and test the retrieval with the Rag Test Manager
-- Dynamic Memory Manager -> store the data in N stores
+### Level 3 - Dynamic Graph Memory Manager + DB + Rag Test Manager
+Scope: Store the data in N-related stores and test the retrieval with the Rag Test Manager
+- Dynamic Memory Manager -> store the data in N hierarchical stores
 - Auto-generation of tests
 - Multiple file formats supported
-- Postgres DB to manage state
+- Postgres DB to store metadata
 - Docker
 - API
 
