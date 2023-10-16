@@ -7,6 +7,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from vectordb.chunkers.chunkers import chunk_data
 from llama_hub.file.base import SimpleDirectoryReader
 
+from langchain.document_loaders import DirectoryLoader
+
 import requests
 async def _document_loader( observation: str, loader_settings: dict):
     # Check the format of the document
@@ -28,12 +30,20 @@ async def _document_loader( observation: str, loader_settings: dict):
             pages = chunk_data(chunk_strategy= loader_strategy, source_data=file_content, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
             return pages
-        elif loader_settings.get("source") == "file":
+        elif loader_settings.get("source") == "DEVICE":
+            import os
 
-            loader = SimpleDirectoryReader('./data', recursive=True, exclude_hidden=True)
-            documents = loader.load_data()
-            pages = documents.load_and_split()
-            return pages
+            current_directory = os.getcwd()
+            import logging
+            logging.info("Current Directory: %s", current_directory)
+
+            loader = DirectoryLoader(".data", recursive=True)
+
+            # loader = SimpleDirectoryReader(".data", recursive=True, exclude_hidden=True)
+            documents = loader.load()
+            logging.info("Documents: %s", documents)
+            # pages = documents.load_and_split()
+            return documents
 
     elif document_format == "text":
         pages = chunk_data(chunk_strategy= loader_strategy, source_data=observation, chunk_size=chunk_size, chunk_overlap=chunk_overlap)

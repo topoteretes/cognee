@@ -1,4 +1,5 @@
-
+import argparse
+import json
 import random
 import itertools
 
@@ -242,9 +243,9 @@ def data_location_route(data_string: str):
     class LocationRoute(Enum):
         """Represents classifier for the data location"""
 
-        DEVICE = "DEVICE"
-        URL = "URL"
-        DATABASE = "DATABASE"
+        DEVICE = "file_path_starting_with_.data_or_containing_it"
+        # URL = "url starting with http or https"
+        DATABASE = "database_name_like_postgres_or_mysql"
 
     return LocationRoute(data_string).name
 
@@ -283,7 +284,9 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         if params is None:
             data_format = data_format_route(data)  # Assume data_format_route is predefined
-            data_location = data_location_route(data)  # Assume data_location_route is predefined
+            logging.info("Data format is %s", data_format)
+            data_location = data_location_route(data)
+            logging.info("Data location is %s",data_location)# Assume data_location_route is predefined
             test_params = generate_param_variants(
                 included_params=['chunk_size'])
 
@@ -429,7 +432,7 @@ async def main():
     ]
     # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     #http://public-library.uk/ebooks/59/83.pdf
-    result = await start_test("http://public-library.uk/ebooks/59/83.pdf", test_set=test_set, user_id="676", params=None, metadata=metadata)
+    result = await start_test(".data/3ZCCCW.pdf", test_set=test_set, user_id="676", params=None, metadata=metadata)
     #
     # parser = argparse.ArgumentParser(description="Run tests against a document.")
     # parser.add_argument("--url", required=True, help="URL of the document to test.")
@@ -440,7 +443,7 @@ async def main():
     # parser.add_argument("--generate_test_set", required=True, help="Make a test set.")
     # parser.add_argument("--only_llm_context", required=True, help="Do a test only within the existing LLM context")
     # args = parser.parse_args()
-
+    #
     # try:
     #     with open(args.test_set, "r") as file:
     #         test_set = json.load(file)

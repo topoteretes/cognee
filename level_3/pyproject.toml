@@ -48,6 +48,7 @@ llama-hub = "^0.0.34"
 sqlalchemy = "^2.0.21"
 asyncpg = "^0.28.0"
 dash = "^2.14.0"
+unstructured = {extras = ["pdf"], version = "^0.10.23"}
 
 
 
