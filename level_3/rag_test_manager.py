@@ -241,7 +241,7 @@ def data_format_route( data_string: str):
 def data_location_route(data_string: str):
     @ai_classifier
     class LocationRoute(Enum):
-        """Represents classifier for the data location"""
+        """Represents classifier for the data location, if it is device, or database connections string or URL """
 
         DEVICE = "file_path_starting_with_.data_or_containing_it"
         # URL = "url starting with http or https"
@@ -273,6 +273,9 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         job_id = await fetch_job_id(session, user_id=user_id, job_id=job_id)
         test_set_id = await fetch_test_set_id(session, user_id=user_id, id=job_id)
+        memory = await Memory.create_memory(user_id, session, namespace="SEMANTICMEMORY")
+        await memory.add_memory_instance("ExampleMemory")
+        existing_user = await Memory.check_existing_user(user_id, session)
 
         if job_id is None:
             job_id = str(uuid.uuid4())
@@ -303,9 +306,6 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
             if test_id is None:
                 test_id = str(generate_letter_uuid()) + "_" +"SEMANTICMEMORY"
-            memory = await Memory.create_memory(user_id, session, namespace="SEMANTICMEMORY")
-            await memory.add_memory_instance("ExampleMemory")
-            existing_user = await Memory.check_existing_user(user_id, session)
             await memory.manage_memory_attributes(existing_user)
             test_class = test_id + "_class"
             await memory.add_dynamic_memory_class(test_id.lower(), test_id)
@@ -378,15 +378,20 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
             await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
                                                            namespace=test_id)
 
-            return test_eval_pipeline
+            return test_id, test_eval_pipeline
 
         results = []
+
         if only_llm_context:
-            result = await run_test(test= None, loader_settings=loader_settings, metadata=metadata, only_llm_context=only_llm_context)
+            test_id, result = await run_test(test=None, loader_settings=loader_settings, metadata=metadata,
+                                             only_llm_context=only_llm_context)
             results.append(result)
+
         for param in test_params:
-            result = await run_test(param, loader_settings, metadata,only_llm_context=only_llm_context)
+            test_id, result = await run_test(param, loader_settings, metadata, only_llm_context=only_llm_context)
             results.append(result)
+
+        await add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(json.dumps(results))))
 
         print(results)
 
@@ -432,7 +437,7 @@ async def main():
     ]
     # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     #http://public-library.uk/ebooks/59/83.pdf
-    result = await start_test(".data/3ZCCCW.pdf", test_set=test_set, user_id="676", params=None, metadata=metadata)
+    result = await start_test(".data/3ZCCCW.pdf", test_set=test_set, user_id="677", params=None, metadata=metadata)
     #
     # parser = argparse.ArgumentParser(description="Run tests against a document.")
     # parser.add_argument("--url", required=True, help="URL of the document to test.")

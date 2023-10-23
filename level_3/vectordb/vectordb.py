@@ -95,6 +95,34 @@ class WeaviateVectorDB(VectorDB):
         )
         return client
 
+    from marshmallow import Schema, fields
+
+    def create_document_structure(observation, params, metadata_schema_class=None):
+        """
+        Create and validate a document structure with optional custom fields.
+
+        :param observation: Content of the document.
+        :param params: Metadata information.
+        :param metadata_schema_class: Custom metadata schema class (optional).
+        :return: A list containing the validated document data.
+        """
+        document_data = {
+            "metadata": params,
+            "page_content": observation
+        }
+
+        def get_document_schema():
+            class DynamicDocumentSchema(Schema):
+                metadata = fields.Nested(metadata_schema_class, required=True)
+                page_content = fields.Str(required=True)
+
+            return DynamicDocumentSchema
+
+        # Validate and deserialize, defaulting to "1.0" if not provided
+        CurrentDocumentSchema = get_document_schema()
+        loaded_document = CurrentDocumentSchema().load(document_data)
+        return [loaded_document]
+
     def _stuct(self, observation, params, metadata_schema_class =None):
         """Utility function to create the document structure with optional custom fields."""
 

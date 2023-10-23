@@ -9,7 +9,7 @@ from database.database import Base
 
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey
+from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 import os
 import sys
@@ -27,7 +27,7 @@ class TestOutput(Base):
     user_id = Column(String, ForeignKey('users.id'), index=True)  # Added user_id field
     test_set_id = Column(String, ForeignKey('test_sets.id'), index=True)
     operation_id = Column(String, ForeignKey('operations.id'), index=True)
-    test_results = Column(String, nullable=True)
+    test_results = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
