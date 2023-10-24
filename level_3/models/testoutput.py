@@ -23,7 +23,8 @@ class TestOutput(Base):
     """
     __tablename__ = 'test_outputs'
 
-    id = Column(String, primary_key=True)
+    set_id = Column(String, primary_key=True)
+    id = Column(String, nullable=True)
     user_id = Column(String, ForeignKey('users.id'), index=True)  # Added user_id field
     test_set_id = Column(String, ForeignKey('test_sets.id'), index=True)
     operation_id = Column(String, ForeignKey('operations.id'), index=True)
