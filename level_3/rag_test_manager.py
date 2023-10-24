@@ -216,7 +216,24 @@ async def eval_test(query=None, output=None, expected_output=None, context=None,
 
     # If you want to run the test
     test_result = run_test(test_case, metrics=[metric], raise_error=False)
-    return test_result
+
+    def test_result_to_dict(test_result):
+        return {
+            "success": test_result.success,
+            "score": test_result.score,
+            "metric_name": test_result.metric_name,
+            "query": test_result.query,
+            "output": test_result.output,
+            "expected_output": test_result.expected_output,
+            "metadata": test_result.metadata,
+            "context": test_result.context
+        }
+
+    test_result_dict =[]
+    for test in test_result:
+        test_result_it = test_result_to_dict(test)
+        test_result_dict.append(test_result_it)
+    return test_result_dict
     # You can also inspect the test result class
     # print(test_result)
 
