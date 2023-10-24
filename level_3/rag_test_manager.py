@@ -300,7 +300,7 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         if test_set_id is None:
             test_set_id = str(uuid.uuid4())
-            await add_entity(session, TestSet(id=test_set_id, user_id=user_id, content=str(test_set)))
+            await add_entity(session, TestSet(id=test_set_id, user_id=user_id,  content=str(test_set)))
 
         if params is None:
             data_format = data_format_route(data)  # Assume data_format_route is predefined
@@ -412,7 +412,7 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
         for result_list in results[0]:
             for result in result_list:
                 print("Here is one result", result)
-                await add_entity(session, TestOutput(id=test_id ,set_id=str(uuid.uuid4()), user_id=user_id, test_results=result['success'], test_score=str(result['score']), test_metric_name=result['metric_name'], test_query=result['query'], test_output=result['output'], test_expected_output=str(['expected_output']), test_context=result['context'][0]))
+                await add_entity(session, TestOutput(id=test_id , test_set_id=test_set_id, operation_id=job_id,  set_id=str(uuid.uuid4()), user_id=user_id, test_results=result['success'], test_score=str(result['score']), test_metric_name=result['metric_name'], test_query=result['query'], test_output=result['output'], test_expected_output=str(['expected_output']), test_context=result['context'][0]))
 
         print(results)
 

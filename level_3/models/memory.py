@@ -12,12 +12,14 @@ class MemoryModel(Base):
 
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey('users.id'), index=True)
+    operation_id = Column(String, ForeignKey('operations.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
     methods_list = Column(String , nullable=True)
     attributes_list = Column(String, nullable=True)
 
     user = relationship("User", back_populates="memories")
+    operation = relationship("Operation", back_populates="memories")
     metadatas = relationship("MetaDatas", back_populates="memory", cascade="all, delete-orphan")
 
     def __repr__(self):
