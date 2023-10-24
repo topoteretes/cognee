@@ -32,9 +32,6 @@ class VectorDB:
         user_id: str,
         index_name: str,
         memory_id: str,
-        ltm_memory_id: str = LTM_MEMORY_ID_DEFAULT,
-        st_memory_id: str = ST_MEMORY_ID_DEFAULT,
-        buffer_id: str = BUFFER_ID_DEFAULT,
         namespace: str = None,
         embeddings = None,
     ):
@@ -42,9 +39,6 @@ class VectorDB:
         self.index_name = index_name
         self.namespace = namespace
         self.memory_id = memory_id
-        self.ltm_memory_id = ltm_memory_id
-        self.st_memory_id = st_memory_id
-        self.buffer_id = buffer_id
         self.embeddings = embeddings
 
 class PineconeVectorDB(VectorDB):
@@ -81,7 +75,7 @@ class WeaviateVectorDB(VectorDB):
             embedding=embeddings,
             create_schema_if_missing=True,
         )
-        return retriever  # If this is part of the initialization, call it here.
+        return retriever
 
     def init_weaviate_client(self, namespace: str):
         # Weaviate client initialization logic
@@ -94,6 +88,34 @@ class WeaviateVectorDB(VectorDB):
             additional_headers={"X-OpenAI-Api-Key": os.environ.get("OPENAI_API_KEY")},
         )
         return client
+
+    from marshmallow import Schema, fields
+
+    def create_document_structure(observation, params, metadata_schema_class=None):
+        """
+        Create and validate a document structure with optional custom fields.
+
+        :param observation: Content of the document.
+        :param params: Metadata information.
+        :param metadata_schema_class: Custom metadata schema class (optional).
+        :return: A list containing the validated document data.
+        """
+        document_data = {
+            "metadata": params,
+            "page_content": observation
+        }
+
+        def get_document_schema():
+            class DynamicDocumentSchema(Schema):
+                metadata = fields.Nested(metadata_schema_class, required=True)
+                page_content = fields.Str(required=True)
+
+            return DynamicDocumentSchema
+
+        # Validate and deserialize, defaulting to "1.0" if not provided
+        CurrentDocumentSchema = get_document_schema()
+        loaded_document = CurrentDocumentSchema().load(document_data)
+        return [loaded_document]
 
     def _stuct(self, observation, params, metadata_schema_class =None):
         """Utility function to create the document structure with optional custom fields."""
@@ -267,9 +289,6 @@ class WeaviateVectorDB(VectorDB):
             data_object={
                 # "text": observation,
                 "user_id": str(self.user_id),
-                "memory_id": str(self.memory_id),
-                "ltm_memory_id": str(self.ltm_memory_id),
-                "st_memory_id": str(self.st_memory_id),
                 "buffer_id": str(self.buffer_id),
                 "version": params.get("version", None) or "",
                 "agreement_id": params.get("agreement_id", None) or "",
