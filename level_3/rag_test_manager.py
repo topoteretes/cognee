@@ -408,7 +408,11 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
             test_id, result = await run_test(param, loader_settings, metadata, only_llm_context=only_llm_context)
             results.append(result)
 
-        await add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(json.dumps(results))))
+
+        for result_list in results[0]:
+            for result in result_list:
+                print("Here is one result", result)
+                await add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=result['success'], test_score=str(result['score']), test_metric_name=result['metric_name'], test_query=result['query'], test_output=result['output'], test_expected_output=str(['expected_output']), test_context=result['context'][0]))
 
         print(results)
 
