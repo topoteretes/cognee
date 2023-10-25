@@ -405,24 +405,20 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         results = []
 
-        if retriever_type:
+        if retriever_type == "llm_context":
             test_id, result = await run_test(test=None, loader_settings=loader_settings, metadata=metadata,
                                              retriever_type=retriever_type) # No params for this case
             results.append([result, "No params"])
 
-        for param in test_params:
-            test_id, result = await run_test(param, loader_settings, metadata, retriever_type=retriever_type) # Add the params to the result
-            results.append([result, param])
+        elif retriever_type == "single_document_context":
+            for param in test_params:
+                test_id, result = await run_test(param, loader_settings, metadata, retriever_type=retriever_type) # Add the params to the result
+                results.append([result, param])
 
         for b, r in results:
             print("Here is the result", r)
             for result_list in b:
                 for result in result_list:
-                    print("here is the result", result)
-
-        # for result_list in results[0]:
-        #     for result in result_list:
-
                     print("Here is one result", result)
                     await add_entity(session, TestOutput(
                         id=test_id,
