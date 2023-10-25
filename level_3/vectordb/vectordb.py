@@ -2,13 +2,14 @@
 # Make sure to install the following packages: dlt, langchain, duckdb, python-dotenv, openai, weaviate-client
 import logging
 
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from marshmallow import Schema, fields
 from loaders.loaders import _document_loader
 # Add the parent directory to sys.path
 
 
 logging.basicConfig(level=logging.INFO)
-from langchain.retrievers import WeaviateHybridSearchRetriever
+from langchain.retrievers import WeaviateHybridSearchRetriever, ParentDocumentRetriever
 from weaviate.gql.get import HybridFusion
 import tracemalloc
 tracemalloc.start()
@@ -56,9 +57,8 @@ class WeaviateVectorDB(VectorDB):
         super().__init__(*args, **kwargs)
         self.init_weaviate(embeddings= self.embeddings, namespace = self.namespace)
 
-    def init_weaviate(self, embeddings =OpenAIEmbeddings() , namespace: str=None):
+    def init_weaviate(self,  embeddings=OpenAIEmbeddings(), namespace=None,retriever_type="",):
         # Weaviate initialization logic
-        # embeddings = OpenAIEmbeddings()
         auth_config = weaviate.auth.AuthApiKey(
             api_key=os.environ.get("WEAVIATE_API_KEY")
         )
@@ -67,28 +67,36 @@ class WeaviateVectorDB(VectorDB):
             auth_client_secret=auth_config,
             additional_headers={"X-OpenAI-Api-Key": os.environ.get("OPENAI_API_KEY")},
         )
-        retriever = WeaviateHybridSearchRetriever(
-            client=client,
-            index_name=namespace,
-            text_key="text",
-            attributes=[],
-            embedding=embeddings,
-            create_schema_if_missing=True,
-        )
-        return retriever
 
-    def init_weaviate_client(self, namespace: str):
-        # Weaviate client initialization logic
-        auth_config = weaviate.auth.AuthApiKey(
-            api_key=os.environ.get("WEAVIATE_API_KEY")
-        )
-        client = weaviate.Client(
-            url=os.environ.get("WEAVIATE_URL"),
-            auth_client_secret=auth_config,
-            additional_headers={"X-OpenAI-Api-Key": os.environ.get("OPENAI_API_KEY")},
-        )
-        return client
-
+        if retriever_type == "single_document_context":
+            retriever = WeaviateHybridSearchRetriever(
+                client=client,
+                index_name=namespace,
+                text_key="text",
+                attributes=[],
+                embedding=embeddings,
+                create_schema_if_missing=True,
+            )
+            return retriever
+        elif retriever_type == "multi_document_context":
+            retriever = WeaviateHybridSearchRetriever(
+                client=client,
+                index_name=namespace,
+                text_key="text",
+                attributes=[],
+                embedding=embeddings,
+                create_schema_if_missing=True,
+            )
+            return retriever
+        else :
+            return client
+                # child_splitter = RecursiveCharacterTextSplitter(chunk_size=400)
+                # store = InMemoryStore()
+                # retriever = ParentDocumentRetriever(
+                #     vectorstore=vectorstore,
+                #     docstore=store,
+                #     child_splitter=child_splitter,
+                # )
     from marshmallow import Schema, fields
 
     def create_document_structure(observation, params, metadata_schema_class=None):
@@ -140,7 +148,7 @@ class WeaviateVectorDB(VectorDB):
         # Update Weaviate memories here
         if namespace is None:
             namespace = self.namespace
-        retriever = self.init_weaviate(embeddings=embeddings,namespace = namespace)
+        retriever = self.init_weaviate(embeddings=embeddings,namespace = namespace, retriever_type="single_document_context")
         if loader_settings:
             # Assuming _document_loader returns a list of documents
             documents = await _document_loader(observation, loader_settings)
@@ -174,7 +182,7 @@ class WeaviateVectorDB(VectorDB):
         Example:
             fetch_memories(query="some query", search_type='text', additional_param='value')
         """
-        client = self.init_weaviate_client(self.namespace)
+        client = self.init_weaviate(namespace =self.namespace)
         if search_type is None:
             search_type = 'hybrid'
 
@@ -258,7 +266,7 @@ class WeaviateVectorDB(VectorDB):
     async def delete_memories(self, namespace:str, params: dict = None):
         if namespace is None:
             namespace = self.namespace
-        client = self.init_weaviate_client(self.namespace)
+        client = self.init_weaviate(namespace = self.namespace)
         if params:
             where_filter = {
                 "path": ["id"],
@@ -283,13 +291,12 @@ class WeaviateVectorDB(VectorDB):
             )
 
     def update_memories(self, observation, namespace: str, params: dict = None):
-        client = self.init_weaviate_client(self.namespace)
+        client = self.init_weaviate(namespace = self.namespace)
 
         client.data_object.update(
             data_object={
                 # "text": observation,
                 "user_id": str(self.user_id),
-                "buffer_id": str(self.buffer_id),
                 "version": params.get("version", None) or "",
                 "agreement_id": params.get("agreement_id", None) or "",
                 "privacy_policy": params.get("privacy_policy", None) or "",

@@ -282,7 +282,10 @@ def generate_letter_uuid(length=8):
     letters = string.ascii_uppercase  # A-Z
     return ''.join(random.choice(letters) for _ in range(length))
 
-async def start_test(data, test_set=None, user_id=None, params=None, job_id=None, metadata=None, generate_test_set=False, only_llm_context=False):
+async def start_test(data, test_set=None, user_id=None, params=None, job_id=None, metadata=None, generate_test_set=False, retriever_type:str=None):
+
+
+    """retriever_type = "llm_context, single_document_context, multi_document_context, "cognitive_architecture"""""
 
 
     async with session_scope(session=AsyncSessionLocal()) as session:
@@ -294,9 +297,7 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
         await memory.add_memory_instance("ExampleMemory")
         existing_user = await Memory.check_existing_user(user_id, session)
 
-        if job_id is None:
-            job_id = str(uuid.uuid4())
-            await add_entity(session, Operation(id=job_id, user_id=user_id))
+
 
         if test_set_id is None:
             test_set_id = str(uuid.uuid4())
@@ -318,8 +319,13 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
             "path": data
         }
 
+        if job_id is None:
+            job_id = str(uuid.uuid4())
 
-        async def run_test(test, loader_settings, metadata, test_id=None,only_llm_context=False):
+            await add_entity(session, Operation(id=job_id, user_id=user_id, operation_params =str(test_params), operation_type=retriever_type, test_set_id=test_set_id))
+
+
+        async def run_test(test, loader_settings, metadata, test_id=None,retriever_type=False):
 
             if test_id is None:
                 test_id = str(generate_letter_uuid()) + "_" +"SEMANTICMEMORY"
@@ -372,7 +378,7 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
             test_eval_pipeline =[]
 
 
-            if only_llm_context:
+            if retriever_type == "llm_context":
                 for test_qa in test_set:
                     context=""
                     test_result = await run_eval(test_qa, context)
@@ -399,13 +405,13 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         results = []
 
-        if only_llm_context:
+        if retriever_type:
             test_id, result = await run_test(test=None, loader_settings=loader_settings, metadata=metadata,
-                                             only_llm_context=only_llm_context)
+                                             retriever_type=retriever_type)
             results.append(result)
 
         for param in test_params:
-            test_id, result = await run_test(param, loader_settings, metadata, only_llm_context=only_llm_context)
+            test_id, result = await run_test(param, loader_settings, metadata, retriever_type=retriever_type)
             results.append(result)
 
 
@@ -458,7 +464,7 @@ async def main():
     ]
     # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
     #http://public-library.uk/ebooks/59/83.pdf
-    result = await start_test(".data/3ZCCCW.pdf", test_set=test_set, user_id="677", params=None, metadata=metadata)
+    result = await start_test(".data/3ZCCCW.pdf", test_set=test_set, user_id="677", params=None, metadata=metadata, retriever_type='llm_context')
     #
     # parser = argparse.ArgumentParser(description="Run tests against a document.")
     # parser.add_argument("--url", required=True, help="URL of the document to test.")
