@@ -28,6 +28,7 @@ class TestOutput(Base):
     user_id = Column(String, ForeignKey('users.id'), index=True)  # Added user_id field
     test_set_id = Column(String, ForeignKey('test_sets.id'), index=True)
     operation_id = Column(String, ForeignKey('operations.id'), index=True)
+    test_params= Column(String, nullable=True)
     test_result = Column(String, nullable=True)
     test_score = Column(String, nullable=True)
     test_metric_name = Column(String, nullable=True)

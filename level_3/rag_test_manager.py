@@ -407,22 +407,40 @@ async def start_test(data, test_set=None, user_id=None, params=None, job_id=None
 
         if retriever_type:
             test_id, result = await run_test(test=None, loader_settings=loader_settings, metadata=metadata,
-                                             retriever_type=retriever_type)
-            results.append(result)
+                                             retriever_type=retriever_type) # No params for this case
+            results.append([result, "No params"])
 
         for param in test_params:
-            test_id, result = await run_test(param, loader_settings, metadata, retriever_type=retriever_type)
-            results.append(result)
+            test_id, result = await run_test(param, loader_settings, metadata, retriever_type=retriever_type) # Add the params to the result
+            results.append([result, param])
 
+        for b, r in results:
+            print("Here is the result", r)
+            for result_list in b:
+                for result in result_list:
+                    print("here is the result", result)
 
-        for result_list in results[0]:
-            for result in result_list:
-                print("Here is one result", result)
-                await add_entity(session, TestOutput(id=test_id , test_set_id=test_set_id, operation_id=job_id,  set_id=str(uuid.uuid4()), user_id=user_id, test_results=result['success'], test_score=str(result['score']), test_metric_name=result['metric_name'], test_query=result['query'], test_output=result['output'], test_expected_output=str(['expected_output']), test_context=result['context'][0]))
+        # for result_list in results[0]:
+        #     for result in result_list:
 
-        print(results)
+                    print("Here is one result", result)
+                    await add_entity(session, TestOutput(
+                        id=test_id,
+                        test_set_id=test_set_id,
+                        operation_id=job_id,
+                        set_id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        test_results=result['success'],
+                        test_score=str(result['score']),
+                        test_metric_name=result['metric_name'],
+                        test_query=result['query'],
+                        test_output=result['output'],
+                        test_expected_output=str(['expected_output']),
+                        test_context=result['context'][0],
+                        test_params=str(r)  # Add params to the database table
+                    ))
 
-        return results
+            return results
 
 async def main():
 
