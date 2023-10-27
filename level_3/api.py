@@ -11,6 +11,7 @@ from level_3.database.database import AsyncSessionLocal
 from level_3.database.database_crud import session_scope
 from vectorstore_manager import Memory
 from dotenv import load_dotenv
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -20,19 +21,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 app = FastAPI(debug=True)
 
 from auth.cognito.JWTBearer import JWTBearer
 from auth.auth import jwks
+
 auth = JWTBearer(jwks)
 
 from fastapi import Depends
+
+
 class ImageResponse(BaseModel):
     success: bool
     message: str
+
 
 @app.get(
     "/",
@@ -43,14 +47,18 @@ async def root():
     """
     return {"message": "Hello, World, I am alive!"}
 
+
 @app.get("/health")
 def health_check():
     """
     Health check endpoint that returns the server status.
     """
     return {"status": "OK"}
+
+
 class Payload(BaseModel):
     payload: Dict[str, Any]
+
 
 def memory_factory(memory_type):
     load_dotenv()
@@ -67,24 +75,34 @@ def memory_factory(memory_type):
             logging.info(" Adding to Memory ")
             decoded_payload = payload.payload
             async with session_scope(session=AsyncSessionLocal()) as session:
-
-                memory = await Memory.create_memory(decoded_payload["user_id"], session, namespace='SEMANTICMEMORY')
+                memory = await Memory.create_memory(
+                    decoded_payload["user_id"], session, namespace="SEMANTICMEMORY"
+                )
 
                 # Adding a memory instance
                 await memory.add_memory_instance(decoded_payload["memory_object"])
 
                 # Managing memory attributes
-                existing_user = await Memory.check_existing_user(decoded_payload["user_id"], session)
+                existing_user = await Memory.check_existing_user(
+                    decoded_payload["user_id"], session
+                )
                 await memory.manage_memory_attributes(existing_user)
-                await memory.add_dynamic_memory_class(decoded_payload["memory_object"], decoded_payload["memory_object"].upper())
+                await memory.add_dynamic_memory_class(
+                    decoded_payload["memory_object"],
+                    decoded_payload["memory_object"].upper(),
+                )
                 memory_class = decoded_payload["memory_object"] + "_class"
                 dynamic_memory_class = getattr(memory, memory_class.lower(), None)
 
-                await memory.add_method_to_class(dynamic_memory_class, 'add_memories')
+                await memory.add_method_to_class(dynamic_memory_class, "add_memories")
                 # await memory.add_method_to_class(memory.semanticmemory_class, 'fetch_memories')
-                output = await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
-                                                       observation='some_observation', params=decoded_payload["params"],
-                                                       loader_settings=decoded_payload["loader_settings"])
+                output = await memory.dynamic_method_call(
+                    dynamic_memory_class,
+                    "add_memories",
+                    observation="some_observation",
+                    params=decoded_payload["params"],
+                    loader_settings=decoded_payload["loader_settings"],
+                )
                 return JSONResponse(content={"response": output}, status_code=200)
 
         except Exception as e:
@@ -101,23 +119,32 @@ def memory_factory(memory_type):
             logging.info(" Adding to Memory ")
             decoded_payload = payload.payload
             async with session_scope(session=AsyncSessionLocal()) as session:
-
-                memory = await Memory.create_memory(decoded_payload["user_id"], session, namespace='SEMANTICMEMORY')
+                memory = await Memory.create_memory(
+                    decoded_payload["user_id"], session, namespace="SEMANTICMEMORY"
+                )
 
                 # Adding a memory instance
                 await memory.add_memory_instance(decoded_payload["memory_object"])
 
                 # Managing memory attributes
-                existing_user = await Memory.check_existing_user(decoded_payload["user_id"], session)
+                existing_user = await Memory.check_existing_user(
+                    decoded_payload["user_id"], session
+                )
                 await memory.manage_memory_attributes(existing_user)
-                await memory.add_dynamic_memory_class(decoded_payload["memory_object"], decoded_payload["memory_object"].upper())
+                await memory.add_dynamic_memory_class(
+                    decoded_payload["memory_object"],
+                    decoded_payload["memory_object"].upper(),
+                )
                 memory_class = decoded_payload["memory_object"] + "_class"
                 dynamic_memory_class = getattr(memory, memory_class.lower(), None)
 
-                await memory.add_method_to_class(dynamic_memory_class, 'add_memories')
+                await memory.add_method_to_class(dynamic_memory_class, "add_memories")
                 # await memory.add_method_to_class(memory.semanticmemory_class, 'fetch_memories')
-                output = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
-                                                       observation=decoded_payload['observation'])
+                output = await memory.dynamic_method_call(
+                    dynamic_memory_class,
+                    "fetch_memories",
+                    observation=decoded_payload["observation"],
+                )
                 return JSONResponse(content={"response": output}, status_code=200)
 
         except Exception as e:
@@ -134,29 +161,41 @@ def memory_factory(memory_type):
             logging.info(" Adding to Memory ")
             decoded_payload = payload.payload
             async with session_scope(session=AsyncSessionLocal()) as session:
-
-                memory = await Memory.create_memory(decoded_payload["user_id"], session, namespace='SEMANTICMEMORY')
+                memory = await Memory.create_memory(
+                    decoded_payload["user_id"], session, namespace="SEMANTICMEMORY"
+                )
 
                 # Adding a memory instance
                 await memory.add_memory_instance(decoded_payload["memory_object"])
 
                 # Managing memory attributes
-                existing_user = await Memory.check_existing_user(decoded_payload["user_id"], session)
+                existing_user = await Memory.check_existing_user(
+                    decoded_payload["user_id"], session
+                )
                 await memory.manage_memory_attributes(existing_user)
-                await memory.add_dynamic_memory_class(decoded_payload["memory_object"], decoded_payload["memory_object"].upper())
+                await memory.add_dynamic_memory_class(
+                    decoded_payload["memory_object"],
+                    decoded_payload["memory_object"].upper(),
+                )
                 memory_class = decoded_payload["memory_object"] + "_class"
                 dynamic_memory_class = getattr(memory, memory_class.lower(), None)
 
-                await memory.add_method_to_class(dynamic_memory_class, 'delete_memories')
+                await memory.add_method_to_class(
+                    dynamic_memory_class, "delete_memories"
+                )
                 # await memory.add_method_to_class(memory.semanticmemory_class, 'fetch_memories')
-                output = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
-                                                       namespace=decoded_payload["memory_object"].upper())
+                output = await memory.dynamic_method_call(
+                    dynamic_memory_class,
+                    "delete_memories",
+                    namespace=decoded_payload["memory_object"].upper(),
+                )
                 return JSONResponse(content={"response": output}, status_code=200)
 
         except Exception as e:
             return JSONResponse(
                 content={"response": {"error": str(e)}}, status_code=503
             )
+
 
 memory_list = ["episodic", "buffer", "semantic"]
 for memory_type in memory_list:
