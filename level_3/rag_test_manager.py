@@ -110,15 +110,13 @@ async def fetch_job_id(session, user_id=None, memory_id=None, job_id=None):
         return None
 
 
-async def fetch_test_set_id(session, user_id, id):
+async def fetch_test_set_id(session, user_id, content):
     try:
         # Await the execution of the query and fetching of the result
-        result = await session.execute(
-            session.query(TestSet.id)
-            .filter_by(user_id=user_id, id=id)
+        result = await session.execute(select(TestSet.id)
+            .filter_by(user_id=user_id, content=content)
             .order_by(TestSet.created_at)
-            .desc()
-            .first()
+
         )
         return (
             result.scalar_one_or_none()
@@ -221,11 +219,9 @@ def generate_param_variants(
         dict(zip(keys, combination)) for combination in itertools.product(*values)
     ]
 
+    logging.info("Param combinations for testing", str(param_variants))
+
     return param_variants
-
-
-# Generate parameter variants and display a sample of the generated combinations
-
 
 
 
@@ -372,7 +368,7 @@ async def start_test(
 
     async with session_scope(session=AsyncSessionLocal()) as session:
         job_id = await fetch_job_id(session, user_id=user_id, job_id=job_id)
-        test_set_id = await fetch_test_set_id(session, user_id=user_id, id=job_id)
+        test_set_id = await fetch_test_set_id(session, user_id=user_id, content=str(test_set))
         memory = await Memory.create_memory(
             user_id, session, namespace="SEMANTICMEMORY"
         )
@@ -395,6 +391,16 @@ async def start_test(
                 "Data location is %s", data_location
             )  # Assume data_location_route is predefined
             test_params = generate_param_variants(included_params=["chunk_size"])
+        if params:
+            data_format = data_format_route(
+                data
+            )  # Assume data_format_route is predefined
+            logging.info("Data format is %s", data_format)
+            data_location = data_location_route(data)
+            logging.info(
+                "Data location is %s", data_location
+            )
+            test_params = generate_param_variants(included_params=params)
 
         print("Here are the test params", str(test_params))
 
@@ -499,6 +505,7 @@ async def start_test(
                     context = ""
                     logging.info("Loading and evaluating test set for LLM context")
                     test_result = await run_eval(test_qa, context)
+
                     test_eval_pipeline.append(test_result)
             elif retriever_type == "single_document_context":
                 if test_set:
@@ -511,6 +518,7 @@ async def start_test(
                     for test_qa in test_set:
                         result = await run_search_element(test_qa, test_id)
                         test_result = await run_eval(test_qa, result)
+                        test_result.append(test)
                         test_eval_pipeline.append(test_result)
                     await memory.dynamic_method_call(
                         dynamic_memory_class, "delete_memories", namespace=test_id
@@ -537,34 +545,37 @@ async def start_test(
 
         elif retriever_type == "single_document_context":
             for param in test_params:
+                logging.info("Running for chunk size %s", param["chunk_size"])
                 test_id, result = await run_test(
                     param, loader_settings, metadata, retriever_type=retriever_type
                 )  # Add the params to the result
-                results.append([result, param])
+                # result.append(param)
+                results.append(result)
 
-        for b, r in results:
-            for result_list in b:
-                for result in result_list:
-                    await add_entity(
-                        session,
-                        TestOutput(
-                            id=test_id,
-                            test_set_id=test_set_id,
-                            operation_id=job_id,
-                            set_id=str(uuid.uuid4()),
-                            user_id=user_id,
-                            test_results=result["success"],
-                            test_score=str(result["score"]),
-                            test_metric_name=result["metric_name"],
-                            test_query=result["query"],
-                            test_output=result["output"],
-                            test_expected_output=str(["expected_output"]),
-                            test_context=result["context"][0],
-                            test_params=str(r),  # Add params to the database table
-                        ),
-                    )
+        for b in results:
+            logging.info("Loading  %s", str(b))
+            for result, chunk in b:
+                logging.info("Loading  %s", str(result))
+                await add_entity(
+                    session,
+                    TestOutput(
+                        id=test_id,
+                        test_set_id=test_set_id,
+                        operation_id=job_id,
+                        set_id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        test_results=result["success"],
+                        test_score=str(result["score"]),
+                        test_metric_name=result["metric_name"],
+                        test_query=result["query"],
+                        test_output=result["output"],
+                        test_expected_output=str(["expected_output"]),
+                        test_context=result["context"][0],
+                        test_params=str(chunk),  # Add params to the database table
+                    ),
+                )
 
-            return results
+        return results
 
 
 async def main():
@@ -607,9 +618,9 @@ async def main():
         ".data/3ZCCCW.pdf",
         test_set=test_set,
         user_id="677",
-        params=None,
+        params=["chunk_size", "search_type"],
         metadata=metadata,
-        retriever_type="llm_context",
+        retriever_type="single_document_context",
     )
     #
     # parser = argparse.ArgumentParser(description="Run tests against a document.")
