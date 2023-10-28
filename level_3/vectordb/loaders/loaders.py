@@ -45,7 +45,7 @@ async def _document_loader( observation: str, loader_settings: dict):
             # pages = documents.load_and_split()
             return documents
 
-    elif document_format == "text":
+    elif document_format == "TEXT":
         pages = chunk_data(chunk_strategy= loader_strategy, source_data=observation, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return pages
 

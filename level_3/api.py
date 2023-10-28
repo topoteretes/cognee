@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from level_3.database.database import AsyncSessionLocal
-from level_3.database.database_crud import session_scope
+from database.database import AsyncSessionLocal
+from database.database_crud import session_scope
 from vectorstore_manager import Memory
 from dotenv import load_dotenv
 
@@ -200,6 +200,24 @@ def memory_factory(memory_type):
 memory_list = ["episodic", "buffer", "semantic"]
 for memory_type in memory_list:
     memory_factory(memory_type)
+
+
+@app.post("/rag-test/rag_test_run", response_model=dict)
+async def rag_test_run(
+    payload: Payload,
+    # files: List[UploadFile] = File(...),
+):
+    try:
+        from rag_test_manager import start_test
+        logging.info(" Running RAG Test ")
+        decoded_payload = payload.payload
+        output = await start_test(data=decoded_payload['data'], test_set=decoded_payload['test_set'], user_id=decoded_payload['user_id'], params=decoded_payload['params'], metadata=decoded_payload['metadata'],
+                         retriever_type=decoded_payload['retriever_type'])
+        return JSONResponse(content={"response": output}, status_code=200)
+    except Exception as e:
+        return JSONResponse(
+            content={"response": {"error": str(e)}}, status_code=503
+        )
 
 
 # @app.get("/available-buffer-actions", response_model=dict)
