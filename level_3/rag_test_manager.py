@@ -73,7 +73,41 @@ async def retrieve_latest_test_case(session, user_id, memory_id):
             f"An error occurred while retrieving the latest test case: {str(e)}"
         )
         return None
+def get_document_names(doc_input):
+    """
+    Get a list of document names.
 
+    This function takes doc_input, which can be a folder path, a single document file path, or a document name as a string.
+    It returns a list of document names based on the doc_input.
+
+    Args:
+        doc_input (str): The doc_input can be a folder path, a single document file path, or a document name as a string.
+
+    Returns:
+        list: A list of document names.
+
+    Example usage:
+        - Folder path: get_document_names(".data")
+        - Single document file path: get_document_names(".data/example.pdf")
+        - Document name provided as a string: get_document_names("example.docx")
+    """
+    if os.path.isdir(doc_input):
+        # doc_input is a folder
+        folder_path = doc_input
+        document_names = []
+        for filename in os.listdir(folder_path):
+            if os.path.isfile(os.path.join(folder_path, filename)):
+                document_names.append(filename)
+        return document_names
+    elif os.path.isfile(doc_input):
+        # doc_input is a single document file
+        return [os.path.basename(doc_input)]
+    elif isinstance(doc_input, str):
+        # doc_input is a document name provided as a string
+        return [doc_input]
+    else:
+        # doc_input is not valid
+        return []
 
 async def add_entity(session, entity):
     async with session_scope(session) as s:  # Use your async session_scope
@@ -369,17 +403,6 @@ def data_format_route(data_string: str):
     # Return a default category if no match is found
     return FormatRoute.PDF.name
 
-
-# def data_location_route(data_string: str):
-#     @ai_classifier
-#     class LocationRoute(Enum):
-#         """Represents classifier for the data location, if it is device, or database connections string or URL"""
-#
-#         DEVICE = "file_path_starting_with_.data_or_containing_it"
-#         URL = "url starting with http or https"
-#         DATABASE = "database_name_like_postgres_or_mysql"
-#
-#     return LocationRoute(data_string).name
 def data_location_route(data_string: str):
     class LocationRoute(Enum):
         """Represents classifier for the data location, if it is device, or database connection string or URL"""
@@ -489,6 +512,17 @@ async def start_test(
                     test_set_id=test_set_id,
                 ),
             )
+            doc_names = get_document_names(data)
+            for doc in doc_names:
+
+                await add_entity(
+                    session,
+                    Docs(
+                        id=str(uuid.uuid4()),
+                        operation_id=job_id,
+                        doc_name = doc
+                    )
+                )
 
         async def run_test(
             test, loader_settings, metadata, test_id=None, retriever_type=False
