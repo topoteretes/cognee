@@ -140,10 +140,11 @@ After that, you can run the RAG test manager.
 
 ``` 
     python rag_test_manager.py \
-    --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
+    --file ".data" \
     --test_set "example_data/test_set.json" \
     --user_id "666" \
-    --metadata "example_data/metadata.json"
+    --metadata "example_data/metadata.json" \
+    --retriever_type "single_document_context"
 
 ```
 
