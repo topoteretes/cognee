@@ -1,0 +1,116 @@
+dashboard_title: Overview Dashboard
+description: null
+css: ''
+slug: null
+certified_by: ''
+certification_details: ''
+published: false
+uuid: f39f8c41-5347-48c4-a309-6943ee31a160
+position:
+  CHART-_kJTo2qbWQ:
+    children: []
+    id: CHART-_kJTo2qbWQ
+    meta:
+      chartId: 2
+      height: 50
+      sliceName: Best performing output
+      uuid: c2e6a932-b70b-4c8a-840f-fb0588b1c684
+      width: 12
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-9iwNFB20D8
+    type: CHART
+  DASHBOARD_VERSION_KEY: v2
+  GRID_ID:
+    children:
+    - ROW-9iwNFB20D8
+    - ROW-N-OC7SJNF7
+    id: GRID_ID
+    parents:
+    - ROOT_ID
+    type: GRID
+  HEADER_ID:
+    id: HEADER_ID
+    meta:
+      text: Overview Dashboard
+    type: HEADER
+  ROOT_ID:
+    children:
+    - GRID_ID
+    id: ROOT_ID
+    type: ROOT
+  ROW-9iwNFB20D8:
+    children:
+    - CHART-_kJTo2qbWQ
+    id: ROW-9iwNFB20D8
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  ROW-N-OC7SJNF7:
+    children:
+    - CHART-V7Z2TPFG
+    - CHART-1EB1EWUY
+    id: ROW-N-OC7SJNF7
+    meta:
+      '0': ROOT_ID
+      background: BACKGROUND_TRANSPARENT
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  CHART-V7Z2TPFG:
+    children: []
+    id: CHART-V7Z2TPFG
+    meta:
+      chartId: 4
+      height: 50
+      sliceName: Worst and best Questions
+      uuid: 1489e576-ad83-402e-ba08-2613cb145ddd
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-OC7SJNF7
+  CHART-1EB1EWUY:
+    children: []
+    id: CHART-1EB1EWUY
+    meta:
+      chartId: 3
+      height: 50
+      sliceName: Count of tests done
+      uuid: e9a83273-19d2-4336-ab74-8b672f0a740f
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-OC7SJNF7
+metadata:
+  chart_configuration:
+    '2':
+      id: 2
+      crossFilters:
+        scope: global
+        chartsInScope: []
+  global_chart_configuration:
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    chartsInScope:
+    - 2
+  color_scheme: ''
+  refresh_frequency: 0
+  expanded_slices: {}
+  label_colors: {}
+  timed_refresh_immune_slices: []
+  cross_filters_enabled: true
+  default_filters: '{}'
+  shared_label_colors: {}
+  color_scheme_domain: []
+version: 1.0.0

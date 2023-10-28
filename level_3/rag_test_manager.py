@@ -197,8 +197,8 @@ def generate_param_variants(
         "text",
         "hybrid",
         "bm25",
-        "generate",
-        "generate_grouped",
+        # "generate",
+        # "generate_grouped",
     ]
     param_ranges["embeddings"] = [
         "openai",
@@ -309,6 +309,20 @@ async def eval_test(
     # print(test_result)
 
 
+def count_files_in_data_folder(data_folder_path=".data"):
+    try:
+        # Get the list of files in the specified folder
+        files = os.listdir(data_folder_path)
+
+        # Count the number of files
+        file_count = len(files)
+
+        return file_count
+    except FileNotFoundError:
+        return 0  # Return 0 if the folder does not exist
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        return -1  # Return -1 to indicate an error
 def data_format_route(data_string: str):
     @ai_classifier
     class FormatRoute(Enum):
@@ -409,7 +423,6 @@ async def start_test(
             "source": f"{data_location}",
             "path": data,
         }
-
         if job_id is None:
             job_id = str(uuid.uuid4())
 
@@ -419,6 +432,7 @@ async def start_test(
                     id=job_id,
                     user_id=user_id,
                     operation_params=str(test_params),
+                    number_of_files=count_files_in_data_folder(),
                     operation_type=retriever_type,
                     test_set_id=test_set_id,
                 ),
@@ -446,6 +460,11 @@ async def start_test(
             print("Available memory classes:", await memory.list_memory_classes())
             if test:
                 loader_settings.update(test)
+            # Check if the search_type is 'none'
+            if loader_settings.get('search_type') == 'none':
+                # Change it to 'hybrid'
+                loader_settings['search_type'] = 'hybrid'
+
             test_class = test_id + "_class"
             dynamic_memory_class = getattr(memory, test_class.lower(), None)
 
@@ -465,17 +484,20 @@ async def start_test(
                 )
                 return "Loaded test element"
 
-            async def run_search_element(test_item, test_id):
+            async def run_search_element(test_item, test_id, search_type="text"):
                 retrieve_action = await memory.dynamic_method_call(
                     dynamic_memory_class,
                     "fetch_memories",
-                    observation=str(test_item["question"]),
+                    observation=str(test_item["question"]), search_type=loader_settings.get('search_type'),
                 )
                 print(
                     "Here is the test result",
-                    str(retrieve_action["data"]["Get"][test_id][0]["text"]),
+                    str(retrieve_action),
                 )
-                return retrieve_action["data"]["Get"][test_id][0]["text"]
+                if loader_settings.get('search_type') == 'bm25':
+                    return retrieve_action["data"]["Get"][test_id]
+                else:
+                    return retrieve_action["data"]["Get"][test_id][0]["text"]
 
             async def run_eval(test_item, search_result):
                 test_eval = await eval_test(
