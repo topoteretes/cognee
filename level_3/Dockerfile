@@ -43,6 +43,7 @@ RUN apt-get update -q && \
 
 WORKDIR /app
 COPY . /app
+COPY scripts/ /app
 COPY entrypoint.sh /app/entrypoint.sh
 COPY scripts/create_database.py /app/create_database.py
 RUN chmod +x /app/entrypoint.sh

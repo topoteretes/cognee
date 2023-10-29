@@ -289,3 +289,9 @@ class BaseMemory:
     async def delete_memories(self, namespace:str, params: Optional[str] = None):
         return await self.vector_db.delete_memories(namespace,params)
 
+
+    async def count_memories(self, namespace:str, params: Optional[str] = None):
+        return await self.vector_db.count_memories(namespace,params)
+
+
+

@@ -20,6 +20,11 @@ from sqlalchemy import create_engine, text
 import psycopg2
 from dotenv import load_dotenv
 load_dotenv()
+import os
+
+
+
+
 
 
 def create_admin_engine(username, password, host, database_name):
@@ -55,7 +60,15 @@ if __name__ == "__main__":
     username = os.getenv('POSTGRES_USER')
     password = os.getenv('POSTGRES_PASSWORD')
     database_name = os.getenv('POSTGRES_DB')
-    host = os.getenv('POSTGRES_HOST')
+    environment = os.environ.get("ENVIRONMENT")
+
+    if environment == "local":
+        host = os.getenv('POSTGRES_HOST')
+
+    elif environment == "docker":
+        host = os.getenv('POSTGRES_HOST_DOCKER')
+    else:
+        host = os.getenv('POSTGRES_HOST_DOCKER')
 
     engine = create_admin_engine(username, password, host, database_name)
 

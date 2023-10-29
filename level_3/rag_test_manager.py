@@ -30,6 +30,7 @@ from models.testset import TestSet
 from models.testoutput import TestOutput
 from models.metadatas import MetaDatas
 from models.operation import Operation
+from models.docs import DocsModel
 
 load_dotenv()
 import ast
@@ -90,7 +91,10 @@ def get_document_names(doc_input):
         - Folder path: get_document_names(".data")
         - Single document file path: get_document_names(".data/example.pdf")
         - Document name provided as a string: get_document_names("example.docx")
+
     """
+    if isinstance(doc_input, list):
+        return doc_input
     if os.path.isdir(doc_input):
         # doc_input is a folder
         folder_path = doc_input
@@ -114,7 +118,17 @@ async def add_entity(session, entity):
         s.add(entity)  # No need to commit; session_scope takes care of it
 
         return "Successfully added entity"
+async def update_entity(session, model, entity_id, new_value):
+    async with session_scope(session) as s:
+        # Retrieve the entity from the database
+        entity = await s.get(model, entity_id)
 
+        if entity:
+            # Update the relevant column and 'updated_at' will be automatically updated
+            entity.operation_status = new_value
+            return "Successfully updated entity"
+        else:
+            return "Entity not found"
 
 async def retrieve_job_by_id(session, user_id, job_id):
     try:
@@ -313,8 +327,8 @@ async def eval_test(
         test_case = LLMTestCase(
             input=query,
             actual_output=result_output,
-            expected_output=expected_output,
-            context=context,
+            expected_output=[expected_output],
+            context=[context],
         )
     metric = OverallScoreMetric()
 
@@ -472,20 +486,20 @@ async def start_test(
 
         if params is None:
             data_format = data_format_route(
-                data
+                data[0]
             )  # Assume data_format_route is predefined
             logging.info("Data format is %s", data_format)
-            data_location = data_location_route(data)
+            data_location = data_location_route(data[0])
             logging.info(
                 "Data location is %s", data_location
             )  # Assume data_location_route is predefined
             test_params = generate_param_variants(included_params=["chunk_size"])
         if params:
             data_format = data_format_route(
-                data
+                data[0]
             )  # Assume data_format_route is predefined
             logging.info("Data format is %s", data_format)
-            data_location = data_location_route(data)
+            data_location = data_location_route(data[0])
             logging.info(
                 "Data location is %s", data_location
             )
@@ -508,6 +522,7 @@ async def start_test(
                     user_id=user_id,
                     operation_params=str(test_params),
                     number_of_files=count_files_in_data_folder(),
+                    operation_status = "RUNNING",
                     operation_type=retriever_type,
                     test_set_id=test_set_id,
                 ),
@@ -517,7 +532,7 @@ async def start_test(
 
                 await add_entity(
                     session,
-                    Docs(
+                    DocsModel(
                         id=str(uuid.uuid4()),
                         operation_id=job_id,
                         doc_name = doc
@@ -586,11 +601,13 @@ async def start_test(
                     return retrieve_action["data"]["Get"][test_id][0]["text"]
 
             async def run_eval(test_item, search_result):
+                logging.info("Initiated test set evaluation")
                 test_eval = await eval_test(
-                    query=test_item["question"],
-                    expected_output=test_item["answer"],
+                    query=str(test_item["question"]),
+                    expected_output=str(test_item["answer"]),
                     context=str(search_result),
                 )
+                logging.info("Successfully evaluated test set")
                 return test_eval
 
             async def run_generate_test_set(test_id):
@@ -607,9 +624,6 @@ async def start_test(
                 return dynamic_test_manager(retrieve_action)
 
             test_eval_pipeline = []
-
-
-
             if retriever_type == "llm_context":
                 for test_qa in test_set:
                     context = ""
@@ -690,47 +704,49 @@ async def start_test(
                     ),
                 )
 
+        await update_entity(session, Operation, job_id, "COMPLETED")
+
         return results
 
 
 async def main():
-    metadata = {
-        "version": "1.0",
-        "agreement_id": "AG123456",
-        "privacy_policy": "https://example.com/privacy",
-        "terms_of_service": "https://example.com/terms",
-        "format": "json",
-        "schema_version": "1.1",
-        "checksum": "a1b2c3d4e5f6",
-        "owner": "John Doe",
-        "license": "MIT",
-        "validity_start": "2023-08-01",
-        "validity_end": "2024-07-31",
-    }
-
-    test_set = [
-        {
-            "question": "Who is the main character in 'The Call of the Wild'?",
-            "answer": "Buck",
-        },
-        {"question": "Who wrote 'The Call of the Wild'?", "answer": "Jack London"},
-        {
-            "question": "Where does Buck live at the start of the book?",
-            "answer": "In the Santa Clara Valley, at Judge Miller’s place.",
-        },
-        {
-            "question": "Why is Buck kidnapped?",
-            "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush.",
-        },
-        {
-            "question": "How does Buck become the leader of the sled dog team?",
-            "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight.",
-        },
-    ]
+    # metadata = {
+    #     "version": "1.0",
+    #     "agreement_id": "AG123456",
+    #     "privacy_policy": "https://example.com/privacy",
+    #     "terms_of_service": "https://example.com/terms",
+    #     "format": "json",
+    #     "schema_version": "1.1",
+    #     "checksum": "a1b2c3d4e5f6",
+    #     "owner": "John Doe",
+    #     "license": "MIT",
+    #     "validity_start": "2023-08-01",
+    #     "validity_end": "2024-07-31",
+    # }
+    #
+    # test_set = [
+    #     {
+    #         "question": "Who is the main character in 'The Call of the Wild'?",
+    #         "answer": "Buck",
+    #     },
+    #     {"question": "Who wrote 'The Call of the Wild'?", "answer": "Jack London"},
+    #     {
+    #         "question": "Where does Buck live at the start of the book?",
+    #         "answer": "In the Santa Clara Valley, at Judge Miller’s place.",
+    #     },
+    #     {
+    #         "question": "Why is Buck kidnapped?",
+    #         "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush.",
+    #     },
+    #     {
+    #         "question": "How does Buck become the leader of the sled dog team?",
+    #         "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight.",
+    #     },
+    # ]
     # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
-    # http://public-library.uk/ebooks/59/83.pdf
+    # # http://public-library.uk/ebooks/59/83.pdf
     # result = await start_test(
-    #     ".data/3ZCCCW.pdf",
+    #     [".data/3ZCCCW.pdf"],
     #     test_set=test_set,
     #     user_id="677",
     #     params=["chunk_size", "search_type"],
@@ -739,7 +755,7 @@ async def main():
     # )
 
     parser = argparse.ArgumentParser(description="Run tests against a document.")
-    parser.add_argument("--file", required=True, help="URL or location of the document to test.")
+    parser.add_argument("--file", nargs="+", required=True, help="List of file paths to test.")
     parser.add_argument("--test_set", required=True, help="Path to JSON file containing the test set.")
     parser.add_argument("--user_id", required=True, help="User ID.")
     parser.add_argument("--params", help="Additional parameters in JSON format.")
@@ -776,6 +792,7 @@ async def main():
             return
     else:
         params = None
+        logging.info("Args datatype is", type(args.file))
     #clean up params here
     await start_test(data=args.file, test_set=test_set, user_id= args.user_id, params= params, metadata =metadata, retriever_type=args.retriever_type)
 

@@ -15,4 +15,5 @@ class DocsModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
-    operation = relationship("Operation", back_populates="docs")
+
+    operations = relationship("Operation", back_populates="docs")
