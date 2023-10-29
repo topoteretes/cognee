@@ -153,7 +153,7 @@ class WeaviateVectorDB(VectorDB):
             # Assuming _document_loader returns a list of documents
             documents = await _document_loader(observation, loader_settings)
             logging.info("here are the docs %s", str(documents))
-            for doc in documents:
+            for doc in documents[0]:
                 document_to_load = self._stuct(doc.page_content, params, metadata_schema_class)
 
                 logging.info("Loading document with provided loader settings %s", str(document_to_load))
@@ -289,6 +289,30 @@ class WeaviateVectorDB(VectorDB):
                     "valueText": "1.0",
                 },
             )
+
+
+    async def count_memories(self, namespace: str = None, params: dict = None) -> int:
+        """
+        Count memories in a Weaviate database.
+
+        Args:
+            namespace (str, optional): The Weaviate namespace to count memories in. If not provided, uses the default namespace.
+
+        Returns:
+            int: The number of memories in the specified namespace.
+        """
+        if namespace is None:
+            namespace = self.namespace
+
+        client = self.init_weaviate(namespace =namespace)
+
+        try:
+            object_count = client.query.aggregate(namespace).with_meta_count().do()
+            return object_count
+        except Exception as e:
+            logging.info(f"Error counting memories: {str(e)}")
+            # Handle the error or log it
+            return 0
 
     def update_memories(self, observation, namespace: str, params: dict = None):
         client = self.init_weaviate(namespace = self.namespace)
