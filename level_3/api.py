@@ -1,9 +1,11 @@
+import json
 import logging
 import os
+from enum import Enum
 from typing import Dict, Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -11,6 +13,7 @@ from database.database import AsyncSessionLocal
 from database.database_crud import session_scope
 from vectorstore_manager import Memory
 from dotenv import load_dotenv
+from rag_test_manager import start_test
 
 # Set up logging
 logging.basicConfig(
@@ -200,7 +203,100 @@ def memory_factory(memory_type):
 memory_list = ["episodic", "buffer", "semantic"]
 for memory_type in memory_list:
     memory_factory(memory_type)
+class TestSetType(Enum):
+    SAMPLE = "sample"
+    MANUAL = "manual"
 
+def get_test_set(test_set_type, folder_path="example_data", payload=None):
+    if test_set_type == TestSetType.SAMPLE:
+        file_path = os.path.join(folder_path, "test_set.json")
+        if os.path.isfile(file_path):
+            with open(file_path, "r") as file:
+                return json.load(file)
+    elif test_set_type == TestSetType.MANUAL:
+        # Check if the manual test set is provided in the payload
+        if payload and "manual_test_set" in payload:
+            return payload["manual_test_set"]
+        else:
+            # Attempt to load the manual test set from a file
+            pass
+
+    return None
+
+
+class MetadataType(Enum):
+    SAMPLE = "sample"
+    MANUAL = "manual"
+
+def get_metadata(metadata_type, folder_path="example_data", payload=None):
+    if metadata_type == MetadataType.SAMPLE:
+        file_path = os.path.join(folder_path, "metadata.json")
+        if os.path.isfile(file_path):
+            with open(file_path, "r") as file:
+                return json.load(file)
+    elif metadata_type == MetadataType.MANUAL:
+        # Check if the manual metadata is provided in the payload
+        if payload and "manual_metadata" in payload:
+            return payload["manual_metadata"]
+        else:
+            pass
+
+    return None
+
+@app.post("/rag-test/rag_test_run", response_model=dict)
+async def rag_test_run(
+    payload: Payload,
+    background_tasks: BackgroundTasks,
+):
+    try:
+        logging.info("Starting RAG Test")
+        decoded_payload = payload.payload
+        test_set_type = TestSetType(decoded_payload['test_set'])
+
+        metadata_type = MetadataType(decoded_payload['metadata'])
+
+        metadata = get_metadata(metadata_type, payload=decoded_payload)
+        if metadata is None:
+            return JSONResponse(content={"response": "Invalid metadata value"}, status_code=400)
+
+        test_set = get_test_set(test_set_type, payload=decoded_payload)
+        if test_set is None:
+            return JSONResponse(content={"response": "Invalid test_set value"}, status_code=400)
+
+        async def run_start_test(data, test_set, user_id, params, metadata, retriever_type):
+            result = await start_test(data = data, test_set = test_set, user_id =user_id, params =params, metadata =metadata, retriever_type=retriever_type)
+
+        logging.info("Retriever DATA type", type(decoded_payload['data']))
+
+        background_tasks.add_task(
+            run_start_test,
+            decoded_payload['data'],
+            test_set,
+            decoded_payload['user_id'],
+            decoded_payload['params'],
+            metadata,
+            decoded_payload['retriever_type']
+        )
+
+        logging.info("Retriever type", decoded_payload['retriever_type'])
+        return JSONResponse(content={"response": "Task has been started"}, status_code=200)
+
+    except Exception as e:
+        return JSONResponse(
+
+            content={"response": {"error": str(e)}}, status_code=503
+
+        )
+
+
+# @app.get("/rag-test/{task_id}")
+# async def check_task_status(task_id: int):
+#     task_status = task_status_db.get(task_id, "not_found")
+#
+#     if task_status == "not_found":
+#         return {"status": "Task not found"}
+#
+#     return {"status": task_status}
 
 # @app.get("/available-buffer-actions", response_model=dict)
 # async def available_buffer_actions(

@@ -36,6 +36,7 @@ class TestOutput(Base):
     test_output = Column(String, nullable=True)
     test_expected_output = Column(String, nullable=True)
     test_context = Column(String, nullable=True)
+    number_of_memories = Column(String, nullable=True)
 
     test_results = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

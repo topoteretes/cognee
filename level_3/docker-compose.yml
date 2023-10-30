@@ -20,12 +20,22 @@ services:
       context: ./
     volumes:
       - "./:/app"
+      - ./.data:/app/.data
+
     environment:
       - HOST=0.0.0.0
     profiles: ["exclude-from-up"]
     ports:
       - 8000:8000
       - 443:443
+    depends_on:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8GB
+
 
   postgres:
     image: postgres
@@ -40,23 +50,23 @@ services:
     ports:
       - "5432:5432"
 
-  superset:
-    platform: linux/amd64
-    build:
-      context: ./superset
-      dockerfile: Dockerfile
-    container_name: superset
-    environment:
-      - ADMIN_USERNAME=admin
-      - ADMIN_EMAIL=vasilije@topoteretes.com
-      - ADMIN_PASSWORD=admin
-      - POSTGRES_USER=bla
-      - POSTGRES_PASSWORD=bla
-      - POSTGRES_DB=bubu
-    networks:
-      - promethai_mem_backend
-    ports:
-      - '8088:8088'
+#  superset:
+#    platform: linux/amd64
+#    build:
+#      context: ./superset
+#      dockerfile: Dockerfile
+#    container_name: superset
+#    environment:
+#      - ADMIN_USERNAME=admin
+#      - ADMIN_EMAIL=vasilije@topoteretes.com
+#      - ADMIN_PASSWORD=admin
+#      - POSTGRES_USER=bla
+#      - POSTGRES_PASSWORD=bla
+#      - POSTGRES_DB=bubu
+#    networks:
+#      - promethai_mem_backend
+#    ports:
+#      - '8088:8088'
 
 networks:
   promethai_mem_backend:

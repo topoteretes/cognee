@@ -24,7 +24,19 @@ RETRY_DELAY = 5
 username = os.getenv('POSTGRES_USER')
 password = os.getenv('POSTGRES_PASSWORD')
 database_name = os.getenv('POSTGRES_DB')
-host = os.getenv('POSTGRES_HOST')
+import os
+
+environment = os.environ.get("ENVIRONMENT")
+
+if environment == "local":
+    host= os.getenv('POSTGRES_HOST')
+
+elif environment == "docker":
+    host= os.getenv('POSTGRES_HOST_DOCKER')
+else:
+    host= os.getenv('POSTGRES_HOST_DOCKER')
+
+
 
 # Use the asyncpg driver for async operation
 SQLALCHEMY_DATABASE_URL = f"postgresql+asyncpg://{username}:{password}@{host}:5432/{database_name}"

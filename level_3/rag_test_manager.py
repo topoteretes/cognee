@@ -30,6 +30,7 @@ from models.testset import TestSet
 from models.testoutput import TestOutput
 from models.metadatas import MetaDatas
 from models.operation import Operation
+from models.docs import DocsModel
 
 load_dotenv()
 import ast
@@ -73,15 +74,61 @@ async def retrieve_latest_test_case(session, user_id, memory_id):
             f"An error occurred while retrieving the latest test case: {str(e)}"
         )
         return None
+def get_document_names(doc_input):
+    """
+    Get a list of document names.
 
+    This function takes doc_input, which can be a folder path, a single document file path, or a document name as a string.
+    It returns a list of document names based on the doc_input.
+
+    Args:
+        doc_input (str): The doc_input can be a folder path, a single document file path, or a document name as a string.
+
+    Returns:
+        list: A list of document names.
+
+    Example usage:
+        - Folder path: get_document_names(".data")
+        - Single document file path: get_document_names(".data/example.pdf")
+        - Document name provided as a string: get_document_names("example.docx")
+
+    """
+    if isinstance(doc_input, list):
+        return doc_input
+    if os.path.isdir(doc_input):
+        # doc_input is a folder
+        folder_path = doc_input
+        document_names = []
+        for filename in os.listdir(folder_path):
+            if os.path.isfile(os.path.join(folder_path, filename)):
+                document_names.append(filename)
+        return document_names
+    elif os.path.isfile(doc_input):
+        # doc_input is a single document file
+        return [os.path.basename(doc_input)]
+    elif isinstance(doc_input, str):
+        # doc_input is a document name provided as a string
+        return [doc_input]
+    else:
+        # doc_input is not valid
+        return []
 
 async def add_entity(session, entity):
     async with session_scope(session) as s:  # Use your async session_scope
         s.add(entity)  # No need to commit; session_scope takes care of it
-        s.commit()
 
         return "Successfully added entity"
+async def update_entity(session, model, entity_id, new_value):
+    async with session_scope(session) as s:
+        # Retrieve the entity from the database
+        entity = await s.get(model, entity_id)
 
+        if entity:
+            # Update the relevant column and 'updated_at' will be automatically updated
+            entity.operation_status = new_value
+            return "Successfully updated entity"
+        else:
+            return "Entity not found"
 
 async def retrieve_job_by_id(session, user_id, job_id):
     try:
@@ -278,10 +325,10 @@ async def eval_test(
         test_case = synthetic_test_set
     else:
         test_case = LLMTestCase(
-            query=query,
-            output=result_output,
-            expected_output=expected_output,
-            context=context,
+            input=query,
+            actual_output=result_output,
+            expected_output=[expected_output],
+            context=[context],
         )
     metric = OverallScoreMetric()
 
@@ -323,8 +370,22 @@ def count_files_in_data_folder(data_folder_path=".data"):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return -1  # Return -1 to indicate an error
+# def data_format_route(data_string: str):
+#     @ai_classifier
+#     class FormatRoute(Enum):
+#         """Represents classifier for the data format"""
+#
+#         PDF = "PDF"
+#         UNSTRUCTURED_WEB = "UNSTRUCTURED_WEB"
+#         GITHUB = "GITHUB"
+#         TEXT = "TEXT"
+#         CSV = "CSV"
+#         WIKIPEDIA = "WIKIPEDIA"
+#
+#     return FormatRoute(data_string).name
+
+
 def data_format_route(data_string: str):
-    @ai_classifier
     class FormatRoute(Enum):
         """Represents classifier for the data format"""
 
@@ -335,20 +396,48 @@ def data_format_route(data_string: str):
         CSV = "CSV"
         WIKIPEDIA = "WIKIPEDIA"
 
-    return FormatRoute(data_string).name
+    # Convert the input string to lowercase for case-insensitive matching
+    data_string = data_string.lower()
 
+    # Mapping of keywords to categories
+    keyword_mapping = {
+        "pdf": FormatRoute.PDF,
+        "web": FormatRoute.UNSTRUCTURED_WEB,
+        "github": FormatRoute.GITHUB,
+        "text": FormatRoute.TEXT,
+        "csv": FormatRoute.CSV,
+        "wikipedia": FormatRoute.WIKIPEDIA
+    }
+
+    # Try to match keywords in the data string
+    for keyword, category in keyword_mapping.items():
+        if keyword in data_string:
+            return category.name
+
+    # Return a default category if no match is found
+    return FormatRoute.PDF.name
 
 def data_location_route(data_string: str):
-    @ai_classifier
     class LocationRoute(Enum):
-        """Represents classifier for the data location, if it is device, or database connections string or URL"""
+        """Represents classifier for the data location, if it is device, or database connection string or URL"""
 
-        DEVICE = "file_path_starting_with_.data_or_containing_it"
-        # URL = "url starting with http or https"
-        DATABASE = "database_name_like_postgres_or_mysql"
+        DEVICE = "DEVICE"
+        URL = "URL"
+        DATABASE = "DATABASE"
 
-    return LocationRoute(data_string).name
+    # Convert the input string to lowercase for case-insensitive matching
+    data_string = data_string.lower()
 
+    # Check for specific patterns in the data string
+    if data_string.startswith(".data") or "data" in data_string:
+        return LocationRoute.DEVICE.name
+    elif data_string.startswith("http://") or data_string.startswith("https://"):
+        return LocationRoute.URL.name
+    elif "postgres" in data_string or "mysql" in data_string:
+        return LocationRoute.DATABASE.name
+
+    # Return a default category if no match is found
+    return "Unknown"
 
 def dynamic_test_manager(context=None):
     from deepeval.dataset import create_evaluation_query_answer_pairs
@@ -373,7 +462,6 @@ async def start_test(
     test_set=None,
     user_id=None,
     params=None,
-    job_id=None,
     metadata=None,
     generate_test_set=False,
     retriever_type: str = None,
@@ -381,6 +469,7 @@ async def start_test(
     """retriever_type = "llm_context, single_document_context, multi_document_context, "cognitive_architecture""" ""
 
     async with session_scope(session=AsyncSessionLocal()) as session:
+        job_id = ""
         job_id = await fetch_job_id(session, user_id=user_id, job_id=job_id)
         test_set_id = await fetch_test_set_id(session, user_id=user_id, content=str(test_set))
         memory = await Memory.create_memory(
@@ -397,26 +486,26 @@ async def start_test(
 
         if params is None:
             data_format = data_format_route(
-                data
+                data[0]
             )  # Assume data_format_route is predefined
             logging.info("Data format is %s", data_format)
-            data_location = data_location_route(data)
+            data_location = data_location_route(data[0])
             logging.info(
                 "Data location is %s", data_location
             )  # Assume data_location_route is predefined
             test_params = generate_param_variants(included_params=["chunk_size"])
         if params:
             data_format = data_format_route(
-                data
+                data[0]
             )  # Assume data_format_route is predefined
             logging.info("Data format is %s", data_format)
-            data_location = data_location_route(data)
+            data_location = data_location_route(data[0])
             logging.info(
                 "Data location is %s", data_location
             )
             test_params = generate_param_variants(included_params=params)
 
-        print("Here are the test params", str(test_params))
+        logging.info("Here are the test params %s", str(test_params))
 
         loader_settings = {
             "format": f"{data_format}",
@@ -433,10 +522,22 @@ async def start_test(
                     user_id=user_id,
                     operation_params=str(test_params),
                     number_of_files=count_files_in_data_folder(),
+                    operation_status = "RUNNING",
                     operation_type=retriever_type,
                     test_set_id=test_set_id,
                 ),
             )
+            doc_names = get_document_names(data)
+            for doc in doc_names:
+
+                await add_entity(
+                    session,
+                    DocsModel(
+                        id=str(uuid.uuid4()),
+                        operation_id=job_id,
+                        doc_name = doc
+                    )
+                )
 
         async def run_test(
             test, loader_settings, metadata, test_id=None, retriever_type=False
@@ -500,11 +601,13 @@ async def start_test(
                     return retrieve_action["data"]["Get"][test_id][0]["text"]
 
             async def run_eval(test_item, search_result):
+                logging.info("Initiated test set evaluation")
                 test_eval = await eval_test(
-                    query=test_item["question"],
-                    expected_output=test_item["answer"],
+                    query=str(test_item["question"]),
+                    expected_output=str(test_item["answer"]),
                     context=str(search_result),
                 )
+                logging.info("Successfully evaluated test set")
                 return test_eval
 
             async def run_generate_test_set(test_id):
@@ -521,13 +624,11 @@ async def start_test(
                 return dynamic_test_manager(retrieve_action)
 
             test_eval_pipeline = []
-
             if retriever_type == "llm_context":
                 for test_qa in test_set:
                     context = ""
                     logging.info("Loading and evaluating test set for LLM context")
                     test_result = await run_eval(test_qa, context)
-
                     test_eval_pipeline.append(test_result)
             elif retriever_type == "single_document_context":
                 if test_set:
@@ -556,7 +657,12 @@ async def start_test(
 
         results = []
 
+        logging.info("Validating the retriever type")
+
+        logging.info("Retriever type: %s", retriever_type)
+
         if retriever_type == "llm_context":
+            logging.info("Retriever type: llm_context")
             test_id, result = await run_test(
                 test=None,
                 loader_settings=loader_settings,
@@ -566,6 +672,7 @@ async def start_test(
             results.append([result, "No params"])
 
         elif retriever_type == "single_document_context":
+            logging.info("Retriever type: single document context")
             for param in test_params:
                 logging.info("Running for chunk size %s", param["chunk_size"])
                 test_id, result = await run_test(
@@ -597,94 +704,97 @@ async def start_test(
                     ),
                 )
 
+        await update_entity(session, Operation, job_id, "COMPLETED")
+
         return results
 
 
 async def main():
-    metadata = {
-        "version": "1.0",
-        "agreement_id": "AG123456",
-        "privacy_policy": "https://example.com/privacy",
-        "terms_of_service": "https://example.com/terms",
-        "format": "json",
-        "schema_version": "1.1",
-        "checksum": "a1b2c3d4e5f6",
-        "owner": "John Doe",
-        "license": "MIT",
-        "validity_start": "2023-08-01",
-        "validity_end": "2024-07-31",
-    }
-
-    test_set = [
-        {
-            "question": "Who is the main character in 'The Call of the Wild'?",
-            "answer": "Buck",
-        },
-        {"question": "Who wrote 'The Call of the Wild'?", "answer": "Jack London"},
-        {
-            "question": "Where does Buck live at the start of the book?",
-            "answer": "In the Santa Clara Valley, at Judge Miller’s place.",
-        },
-        {
-            "question": "Why is Buck kidnapped?",
-            "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush.",
-        },
-        {
-            "question": "How does Buck become the leader of the sled dog team?",
-            "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight.",
-        },
-    ]
+    # metadata = {
+    #     "version": "1.0",
+    #     "agreement_id": "AG123456",
+    #     "privacy_policy": "https://example.com/privacy",
+    #     "terms_of_service": "https://example.com/terms",
+    #     "format": "json",
+    #     "schema_version": "1.1",
+    #     "checksum": "a1b2c3d4e5f6",
+    #     "owner": "John Doe",
+    #     "license": "MIT",
+    #     "validity_start": "2023-08-01",
+    #     "validity_end": "2024-07-31",
+    # }
+    #
+    # test_set = [
+    #     {
+    #         "question": "Who is the main character in 'The Call of the Wild'?",
+    #         "answer": "Buck",
+    #     },
+    #     {"question": "Who wrote 'The Call of the Wild'?", "answer": "Jack London"},
+    #     {
+    #         "question": "Where does Buck live at the start of the book?",
+    #         "answer": "In the Santa Clara Valley, at Judge Miller’s place.",
+    #     },
+    #     {
+    #         "question": "Why is Buck kidnapped?",
+    #         "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush.",
+    #     },
+    #     {
+    #         "question": "How does Buck become the leader of the sled dog team?",
+    #         "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight.",
+    #     },
+    # ]
     # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
-    # http://public-library.uk/ebooks/59/83.pdf
-    result = await start_test(
-        ".data/3ZCCCW.pdf",
-        test_set=test_set,
-        user_id="677",
-        params=["chunk_size", "search_type"],
-        metadata=metadata,
-        retriever_type="single_document_context",
-    )
-    #
-    # parser = argparse.ArgumentParser(description="Run tests against a document.")
-    # parser.add_argument("--url", required=True, help="URL of the document to test.")
-    # parser.add_argument("--test_set", required=True, help="Path to JSON file containing the test set.")
-    # parser.add_argument("--user_id", required=True, help="User ID.")
-    # parser.add_argument("--params", help="Additional parameters in JSON format.")
-    # parser.add_argument("--metadata", required=True, help="Path to JSON file containing metadata.")
-    # parser.add_argument("--generate_test_set", required=True, help="Make a test set.")
-    # parser.add_argument("--only_llm_context", required=True, help="Do a test only within the existing LLM context")
-    # args = parser.parse_args()
-    #
-    # try:
-    #     with open(args.test_set, "r") as file:
-    #         test_set = json.load(file)
-    #         if not isinstance(test_set, list):  # Expecting a list
-    #             raise TypeError("Parsed test_set JSON is not a list.")
-    # except Exception as e:
-    #     print(f"Error loading test_set: {str(e)}")
-    #     return
-    #
-    # try:
-    #     with open(args.metadata, "r") as file:
-    #         metadata = json.load(file)
-    #         if not isinstance(metadata, dict):
-    #             raise TypeError("Parsed metadata JSON is not a dictionary.")
-    # except Exception as e:
-    #     print(f"Error loading metadata: {str(e)}")
-    #     return
-    #
-    # if args.params:
-    #     try:
-    #         params = json.loads(args.params)
-    #         if not isinstance(params, dict):
-    #             raise TypeError("Parsed params JSON is not a dictionary.")
-    #     except json.JSONDecodeError as e:
-    #         print(f"Error parsing params: {str(e)}")
-    #         return
-    # else:
-    #     params = None
-    # #clean up params here
-    # await start_test(args.url, test_set, args.user_id, params=None, metadata=metadata)
+    # # http://public-library.uk/ebooks/59/83.pdf
+    # result = await start_test(
+    #     [".data/3ZCCCW.pdf"],
+    #     test_set=test_set,
+    #     user_id="677",
+    #     params=["chunk_size", "search_type"],
+    #     metadata=metadata,
+    #     retriever_type="single_document_context",
+    # )
+
+    parser = argparse.ArgumentParser(description="Run tests against a document.")
+    parser.add_argument("--file", nargs="+", required=True, help="List of file paths to test.")
+    parser.add_argument("--test_set", required=True, help="Path to JSON file containing the test set.")
+    parser.add_argument("--user_id", required=True, help="User ID.")
+    parser.add_argument("--params", help="Additional parameters in JSON format.")
+    parser.add_argument("--metadata", required=True, help="Path to JSON file containing metadata.")
+    # parser.add_argument("--generate_test_set", required=False, help="Make a test set.")
+    parser.add_argument("--retriever_type", required=False, help="Do a test only within the existing LLM context")
+    args = parser.parse_args()
+
+    try:
+        with open(args.test_set, "r") as file:
+            test_set = json.load(file)
+            if not isinstance(test_set, list):  # Expecting a list
+                raise TypeError("Parsed test_set JSON is not a list.")
+    except Exception as e:
+        print(f"Error loading test_set: {str(e)}")
+        return
+
+    try:
+        with open(args.metadata, "r") as file:
+            metadata = json.load(file)
+            if not isinstance(metadata, dict):
+                raise TypeError("Parsed metadata JSON is not a dictionary.")
+    except Exception as e:
+        print(f"Error loading metadata: {str(e)}")
+        return
+
+    if args.params:
+        try:
+            params = json.loads(args.params)
+            if not isinstance(params, dict):
+                raise TypeError("Parsed params JSON is not a dictionary.")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing params: {str(e)}")
+            return
+    else:
+        params = None
+        logging.info("Args datatype is", type(args.file))
+    #clean up params here
+    await start_test(data=args.file, test_set=test_set, user_id= args.user_id, params= params, metadata =metadata, retriever_type=args.retriever_type)
 
 
 if __name__ == "__main__":

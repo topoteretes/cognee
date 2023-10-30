@@ -1,20 +1,20 @@
 # PromethAI-Memory
-Memory management and testing for the AI Applications and RAGs
 
-Dynamic Graph Memory Manager + DB + Rag Test Manager
+AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps
 
 
-<p align="center">
+
+<p align="left">
   <a href="https://prometh.ai//#gh-light-mode-only">
-    <img src="assets/topoteretes_logo.png" width="10%" alt="promethAI logo" />
+    <img src="assets/topoteretes_logo.png" width="5%" alt="promethAI logo" />
   </a>
 
   
 </p>
 
-<p align="center"><i>Open-source framework that manages memory for AI Agents and LLM apps </i></p>
+<p align="left"><i>Open-source framework for building and testing RAGs and Cognitive Architectures, designed for accuracy, transparency, and control.</i></p>
 
-<p align="center">
+<p align="left">
 <a href="https://github.com/topoteretes/PromethAI-Memory/fork" target="blank">
 <img src="https://img.shields.io/github/forks/topoteretes/PromethAI-Memory?style=for-the-badge" alt="promethAI forks"/>
 </a>
@@ -52,9 +52,9 @@ Dynamic Graph Memory Manager + DB + Rag Test Manager
 [//]: # (</p>)
 
 
-<p align="center"><b>Share promethAI Repository</b></p>
+<p align="left"><b>Share promethAI Repository</b></p>
 
-<p align="center">
+<p align="left">
 
 <a href="https://twitter.com/intent/tweet?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/PromethAI-Backend-Backend&hashtags=promethAI,AGI,Autonomics,future" target="blank">
 <img src="https://img.shields.io/twitter/follow/_promethAI?label=Share Repo on Twitter&style=social" alt="Follow _promethAI"/></a> 
@@ -71,33 +71,40 @@ Dynamic Graph Memory Manager + DB + Rag Test Manager
 
 
 
-![Infographic Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/infographic_final.png)
+
+This repo is built to test and evolve RAG architecture, inspired by human cognitive processes, using Python. It's aims to be production ready, testable, but give great visibility in how we build RAG applications.
+
+This project is a part of the [PromethAI](https://prometh.ai/) ecosystem.
+
+It runs in iterations, with each iteration building on the previous one.
+
+_Keep Ithaka always in your mind.
+Arriving there is what you’re destined for.
+But don’t hurry the journey at all.
+Better if it lasts for years_
 
 
-## Production-ready modern data platform
+### Installation
 
+To get started with PromethAI Memory, start with the latest iteration, and follow the instructions in the README.md file
 
-Browsing the database of theresanaiforthat.com, we can observe around [7000 new, mostly semi-finished projects](https://theresanaiforthat.com/) in the field of applied AI.
-It seems it has never been easier to create a startup, build an app, and go to market… and fail.
+### Current Focus
 
-Decades of technological advancements have led to small teams being able to do in 2023 what in 2015 required a team of dozens.
-Yet, the AI apps currently being pushed out still mostly feel and perform like demos.
-The rise of this new profession is perhaps signaling the need for a solution that is not yet there — a solution that in its essence represents a Large Language Model (LLM) — [a powerful general problem solver](https://lilianweng.github.io/posts/2023-06-23-agent/?fbclid=IwAR1p0W-Mg_4WtjOCeE8E6s7pJZlTDCDLmcXqHYVIrEVisz_D_S8LfN6Vv20) — available in the palm of your hand 24/7/365.
+RAG test manager can be used via API or via the CLI
 
-To address this issue, [dlthub](https://dlthub.com/) and [prometh.ai](http://prometh.ai/) will collaborate on a productionizing a common use-case, progressing step by step. We will utilize the LLMs, frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.
+![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/infographic_final.png)
 
-## Read more on our blog post [prometh.ai](http://prometh.ai/promethai-memory-blog-post-on)
+### Project Structure
 
-
-## Project Structure
-
-### Level 1 - OpenAI functions + Pydantic + DLTHub
+#### Level 1 - OpenAI functions + Pydantic + DLTHub
 Scope: Give PDFs to the model and get the output in a structured format
+Blog post: https://prometh.ai/promethai-memory-blog-post-one
 We introduce the following concepts:
 - Structured output with Pydantic
 - CMD script to process custom PDFs
-### Level 2 - Memory Manager + Metadata management
+#### Level 2 - Memory Manager + Metadata management
 Scope: Give PDFs to the model and consolidate with the previous user activity and more
+Blog post: https://prometh.ai/promethai-memory-blog-post-two
 We introduce the following concepts:
 
 - Long Term Memory -> store and format the data
@@ -106,8 +113,9 @@ We introduce the following concepts:
 - Docker
 - API
 
-### Level 3 - Dynamic Graph Memory Manager + DB + Rag Test Manager
+#### Level 3 - Dynamic Graph Memory Manager + DB + Rag Test Manager
 Scope: Store the data in N-related stores and test the retrieval with the Rag Test Manager
+Blog post: https://prometh.ai/promethai-memory-blog-post-three
 - Dynamic Memory Manager -> store the data in N hierarchical stores
 - Auto-generation of tests
 - Multiple file formats supported
@@ -116,35 +124,103 @@ Scope: Store the data in N-related stores and test the retrieval with the Rag Te
 - API
 
 
-## Run the level 3 
+### Run the level 3 
 
 Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
 
-Copy the .env.example to .env and fill the variables
+Copy the .env.example to .env and fill in the variables
 
 
-Start the docker:
+Two ways to run the level 3:
 
-```docker compose up promethai_mem   ```
+#### Docker: 
+
+Copy the .env.template to .env and fill in the variables
+Specify the environment variable in the .env file to "docker"
+
+
+Launch the docker image:
+
+```docker compose up promethai_mem  ```
+
+Send the request to the API:
+
+```
+curl -X POST -H "Content-Type: application/json" -d '{
+  "payload": {
+    "user_id": "681",
+    "data": [".data/3ZCCCW.pdf"],
+    "test_set": "sample",
+    "params": ["chunk_size"],
+    "metadata": "sample",
+    "retriever_type": "single_document_context"
+  }
+}' http://0.0.0.0:8000/rag-test/rag_test_run
+ 
+```
+Params:
+
+data -> list of URLs or path to the file, located in the .data folder (pdf, docx, txt, html)
+test_set -> sample, manual (list of questions and answers)
+metadata -> sample,  manual (json) or version (in progress)
+params -> chunk_size, chunk_overlap, search_type (hybrid, bm25), embeddings
+retriever_type -> llm_context, single_document_context, multi_document_context, cognitive_architecture(coming soon)
+
+Inspect the results in the DB:
+
+``` docker exec -it postgres psql -U bla ```
+
+``` \c bubu ```
+
+``` select * from test_outputs; ```
+
+Or set up the superset to visualize the results:
+
+
+
+#### Poetry environment: 
+
+
+Copy the .env.template to .env and fill in the variables
+Specify the environment variable in the .env file to "local"
 
 Use the poetry environment:
 
 ``` poetry shell ```
 
+Change the .env file Environment variable to "local"
+
+Launch the postgres DB
+
+``` docker compose up postgres ```
+
+Launch the superset
+
+``` docker compose up superset ```
+
+Open the superset in your browser
+
+``` http://localhost:8088 ```
+Add the  Postgres datasource to the Superset with the following connection string:
+    
+``` postgres://bla:bla@postgres:5432/bubu ```
+
 Make sure to run to initialize DB tables
 
 ``` python scripts/create_database.py ```
 
-After that, you can run the RAG test manager.
+After that, you can run the RAG test manager from your command line.
 
 
 ``` 
     python rag_test_manager.py \
-    --url "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf" \
+    --file ".data" \
     --test_set "example_data/test_set.json" \
     --user_id "666" \
-    --metadata "example_data/metadata.json"
+    --metadata "example_data/metadata.json" \
+    --retriever_type "single_document_context"
 
 ```
 
 Examples of metadata structure and test set are in the folder "example_data"
+
