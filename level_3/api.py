@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from level_3.database.database import AsyncSessionLocal
-from level_3.database.database_crud import session_scope
+from database.database import AsyncSessionLocal
+from database.database_crud import session_scope
 from vectorstore_manager import Memory
 from dotenv import load_dotenv
 
