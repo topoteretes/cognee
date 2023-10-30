@@ -218,6 +218,7 @@ After that, you can run the RAG test manager from your command line.
     --file ".data" \
     --test_set "example_data/test_set.json" \
     --user_id "666" \
+    --params "chunk_size" "search_type" \
     --metadata "example_data/metadata.json" \
     --retriever_type "single_document_context"
 
