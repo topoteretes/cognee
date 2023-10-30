@@ -204,7 +204,7 @@ def generate_param_variants(
 
     # Default values
     defaults = {
-        "chunk_size": 250,
+        "chunk_size": 750,
         "chunk_overlap": 20,
         "similarity_score": 0.5,
         "metadata_variation": 0,
@@ -216,7 +216,7 @@ def generate_param_variants(
     params = {**defaults, **(base_params or {})}
 
     default_increments = {
-        "chunk_size": 150,
+        "chunk_size": 250,
         "chunk_overlap": 10,
         "similarity_score": 0.1,
         "metadata_variation": 1,
@@ -615,7 +615,10 @@ async def start_test(
                 if loader_settings.get('search_type') == 'bm25':
                     return retrieve_action["data"]["Get"][test_id]
                 else:
-                    return retrieve_action["data"]["Get"][test_id][0]["text"]
+                    try:
+                        return retrieve_action["data"]["Get"][test_id][0]["text"]
+                    except:
+                        return retrieve_action["data"]["Get"][test_id]
 
             async def run_eval(test_item, search_result):
                 logging.info("Initiated test set evaluation")
@@ -686,7 +689,7 @@ async def start_test(
                 metadata=metadata,
                 retriever_type=retriever_type,
             )  # No params for this case
-            results.append([result, "No params"])
+            results.append(result)
 
         elif retriever_type == "single_document_context":
             logging.info("Retriever type: single document context")
@@ -697,43 +700,80 @@ async def start_test(
                 )  # Add the params to the result
                 # result.append(param)
                 results.append(result)
-
         for b in results:
             logging.info("Loading  %s", str(b))
-            for result, chunk in b:
-                logging.info("Loading  %s", str(result))
-                await add_entity(
-                    session,
-                    TestOutput(
-                        id=test_id,
-                        test_set_id=test_set_id,
-                        operation_id=job_id,
-                        set_id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        test_results=result["success"],
-                        test_score=str(result["score"]),
-                        test_metric_name=result["metric_name"],
-                        test_query=result["query"],
-                        test_output=result["output"],
-                        test_expected_output=str(["expected_output"]),
-                        test_context=result["context"][0],
-                        test_params=str(chunk),  # Add params to the database table
-                    ),
-                )
-                analytics.track(user_id, 'TestOutput', {
-                    'test_set_id': test_set_id,
-                    'operation_id': job_id,
-                    'set_id' : str(uuid.uuid4()),
-                    'test_results' : result["success"],
-                    'test_score' : str(result["score"]),
-                    'test_metric_name' : result["metric_name"],
-                    'test_query' : result["query"],
-                    'test_output' : result["output"],
-                    'test_expected_output' : str(["expected_output"]),
-                    'test_context' : result["context"][0],
-                    'test_params' : str(chunk),
-                })
-                analytics.flush()
+            if retriever_type == "single_document_context":
+                for result, chunk in b:
+                    logging.info("Loading  %s", str(result))
+                    await add_entity(
+                        session,
+                        TestOutput(
+                            id=test_id,
+                            test_set_id=test_set_id,
+                            operation_id=job_id,
+                            set_id=str(uuid.uuid4()),
+                            user_id=user_id,
+                            test_results=result["success"],
+                            test_score=str(result["score"]),
+                            test_metric_name=result["metric_name"],
+                            test_query=result["query"],
+                            test_output=result["output"],
+                            test_expected_output=str(["expected_output"]),
+                            test_context=result["context"][0],
+                            test_params=str(chunk),  # Add params to the database table
+                        ),
+                    )
+                    analytics.track(user_id, 'TestOutput', {
+                        'test_set_id': test_set_id,
+                        'operation_id': job_id,
+                        'set_id' : str(uuid.uuid4()),
+                        'test_results' : result["success"],
+                        'test_score' : str(result["score"]),
+                        'test_metric_name' : result["metric_name"],
+                        'test_query' : result["query"],
+                        'test_output' : result["output"],
+                        'test_expected_output' : str(["expected_output"]),
+                        'test_context' : result["context"][0],
+                        'test_params' : str(chunk),
+                    })
+                    analytics.flush()
+            else:
+                chunk="None"
+                for result in b:
+                    logging.info("Loading  %s", str(result))
+                    await add_entity(
+                        session,
+                        TestOutput(
+                            id=test_id,
+                            test_set_id=test_set_id,
+                            operation_id=job_id,
+                            set_id=str(uuid.uuid4()),
+                            user_id=user_id,
+                            test_results=result[0]["success"],
+                            test_score=str(result[0]["score"]),
+                            test_metric_name=result[0]["metric_name"],
+                            test_query=result[0]["query"],
+                            test_output=result[0]["output"],
+                            test_expected_output=str(["expected_output"]),
+                            test_context=result[0]["context"][0],
+                            test_params=str(chunk),  # Add params to the database table
+                        ),
+                    )
+                    analytics.track(user_id, 'TestOutput', {
+                        'test_set_id': test_set_id,
+                        'operation_id': job_id,
+                        'set_id' : str(uuid.uuid4()),
+                        'test_results' : result[0]["success"],
+                        'test_score' : str(result[0]["score"]),
+                        'test_metric_name' : result[0]["metric_name"],
+                        'test_query' : result[0]["query"],
+                        'test_output' : result[0]["output"],
+                        'test_expected_output' : str(["expected_output"]),
+                        'test_context' : result[0]["context"][0],
+                        'test_params' : str(chunk),
+                    })
+                    analytics.flush()
+
 
         await update_entity(session, Operation, job_id, "COMPLETED")
 

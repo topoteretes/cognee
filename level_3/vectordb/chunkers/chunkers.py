@@ -29,7 +29,10 @@ def vanilla_chunker(source_data, chunk_size=100, chunk_overlap=20):
         chunk_overlap=chunk_overlap,
         length_function=len
     )
-    pages = text_splitter.create_documents([source_data])
+    try:
+        pages = text_splitter.create_documents([source_data])
+    except:
+        pages = text_splitter.create_documents(source_data.content)
     # pages = source_data.load_and_split()
     return pages
 def chunk_data_exact(data_chunks, chunk_size, chunk_overlap):

@@ -13,7 +13,7 @@ Send the request to the API:
 ```
 curl -X POST -H "Content-Type: application/json" -d '{
   "payload": {
-    "user_id": "681",
+    "user_id": "97980cfea0067",
     "data": [".data/3ZCCCW.pdf"],
     "test_set": "sample",
     "params": ["chunk_size"],
@@ -81,7 +81,7 @@ After that, you can run the RAG test manager from your command line.
     python rag_test_manager.py \
     --file ".data" \
     --test_set "example_data/test_set.json" \
-    --user_id "666" \
+    --user_id "97980cfea0067" \
     --params "chunk_size" "search_type" \
     --metadata "example_data/metadata.json" \
     --retriever_type "single_document_context"
@@ -89,3 +89,21 @@ After that, you can run the RAG test manager from your command line.
 ```
 
 Examples of metadata structure and test set are in the folder "example_data"
+
+
+    python rag_test_manager.py \
+    --file ".data" \
+    --test_set "example_data/test_set.json" \
+    --user_id "97980cfea0067" \
+    --params "chunk_size" "search_type" \
+    --metadata "example_data/metadata.json" \
+    --retriever_type "llm_context"
+
+
+    python rag_test_manager.py \
+    --file ".data" \
+    --test_set "example_data/test_set.json" \
+    --user_id "97980cfea0068" \
+    --params "chunk_size" "search_type", "overlap" \
+    --metadata "example_data/metadata.json" \
+    --retriever_type "single_document_context"

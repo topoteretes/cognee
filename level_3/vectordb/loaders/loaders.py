@@ -56,16 +56,20 @@ async def _document_loader( observation: str, loader_settings: dict):
         if document_format == "PDF":
             # loader = SimpleDirectoryReader(".data", recursive=True, exclude_hidden=True)
             documents = loader.load()
+            pages = chunk_data(chunk_strategy=loader_strategy, source_data=str(documents), chunk_size=chunk_size,
+                               chunk_overlap=chunk_overlap)
             logging.info("Documents: %s", documents)
             # pages = documents.load_and_split()
-            chunked_doc.append(documents)
+            chunked_doc.append(pages)
 
 
         elif document_format == "TEXT":
             documents = loader.load()
+            pages = chunk_data(chunk_strategy=loader_strategy, source_data=str(documents), chunk_size=chunk_size,
+                               chunk_overlap=chunk_overlap)
             logging.info("Documents: %s", documents)
             # pages = documents.load_and_split()
-            chunked_doc.append(documents)
+            chunked_doc.append(pages)
 
     else:
         raise ValueError(f"Error: ")
