@@ -40,6 +40,7 @@ dash = "^2.14.0"
 unstructured = {extras = ["pdf"], version = "^0.10.23"}
 sentence-transformers = "2.2.2"
 torch = "2.0.*"
+segment-analytics-python = "^2.2.3"
 
 
 

@@ -32,6 +32,8 @@ from models.metadatas import MetaDatas
 from models.operation import Operation
 from models.docs import DocsModel
 
+import segment.analytics as analytics
+
 load_dotenv()
 import ast
 import tracemalloc
@@ -55,7 +57,15 @@ from database.database_crud import session_scope
 from database.database import AsyncSessionLocal
 
 openai.api_key = os.getenv("OPENAI_API_KEY", "")
+analytics.write_key =  os.getenv("SEGMENT_KEY", "")
 
+
+def on_error(error, items):
+    print("An error occurred:", error)
+
+
+analytics.debug = True
+analytics.on_error = on_error
 
 async def retrieve_latest_test_case(session, user_id, memory_id):
     try:
@@ -476,6 +486,10 @@ async def start_test(
             await add_entity(
                 session, TestSet(id=test_set_id, user_id=user_id, content=str(test_set))
             )
+            analytics.track(user_id, 'TestSet', {
+                'id': test_set_id,
+                'content': str(test_set)
+            })
 
         if params is None:
             data_format = data_format_route(
@@ -521,6 +535,15 @@ async def start_test(
                     test_set_id=test_set_id,
                 ),
             )
+            analytics.track(user_id, 'Operation', {
+                'id': job_id,
+                'operation_params': str(test_params),
+                'number_of_files': count_files_in_data_folder(),
+                'operation_status': "RUNNING",
+                'operation_type': retriever_type,
+                'test_set_id': test_set_id,
+            })
+
             doc_names = get_document_names(data)
             for doc in doc_names:
 
@@ -697,6 +720,20 @@ async def start_test(
                         test_params=str(chunk),  # Add params to the database table
                     ),
                 )
+                analytics.track(user_id, 'TestOutput', {
+                    'test_set_id': test_set_id,
+                    'operation_id': job_id,
+                    'set_id' : str(uuid.uuid4()),
+                    'test_results' : result["success"],
+                    'test_score' : str(result["score"]),
+                    'test_metric_name' : result["metric_name"],
+                    'test_query' : result["query"],
+                    'test_output' : result["output"],
+                    'test_expected_output' : str(["expected_output"]),
+                    'test_context' : result["context"][0],
+                    'test_params' : str(chunk),
+                })
+                analytics.flush()
 
         await update_entity(session, Operation, job_id, "COMPLETED")
 
@@ -704,49 +741,6 @@ async def start_test(
 
 
 async def main():
-    # metadata = {
-    #     "version": "1.0",
-    #     "agreement_id": "AG123456",
-    #     "privacy_policy": "https://example.com/privacy",
-    #     "terms_of_service": "https://example.com/terms",
-    #     "format": "json",
-    #     "schema_version": "1.1",
-    #     "checksum": "a1b2c3d4e5f6",
-    #     "owner": "John Doe",
-    #     "license": "MIT",
-    #     "validity_start": "2023-08-01",
-    #     "validity_end": "2024-07-31",
-    # }
-    #
-    # test_set = [
-    #     {
-    #         "question": "Who is the main character in 'The Call of the Wild'?",
-    #         "answer": "Buck",
-    #     },
-    #     {"question": "Who wrote 'The Call of the Wild'?", "answer": "Jack London"},
-    #     {
-    #         "question": "Where does Buck live at the start of the book?",
-    #         "answer": "In the Santa Clara Valley, at Judge Miller’s place.",
-    #     },
-    #     {
-    #         "question": "Why is Buck kidnapped?",
-    #         "answer": "He is kidnapped to be sold as a sled dog in the Yukon during the Klondike Gold Rush.",
-    #     },
-    #     {
-    #         "question": "How does Buck become the leader of the sled dog team?",
-    #         "answer": "Buck becomes the leader after defeating the original leader, Spitz, in a fight.",
-    #     },
-    # ]
-    # "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"
-    # # http://public-library.uk/ebooks/59/83.pdf
-    # result = await start_test(
-    #     [".data/3ZCCCW.pdf"],
-    #     test_set=test_set,
-    #     user_id="677",
-    #     params=["chunk_size", "search_type"],
-    #     metadata=metadata,
-    #     retriever_type="single_document_context",
-    # )
 
     parser = argparse.ArgumentParser(description="Run tests against a document.")
     parser.add_argument("--file", nargs="+", required=True, help="List of file paths to test.")
@@ -793,21 +787,3 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-    # delete_mems = await memory.dynamic_method_call(dynamic_memory_class, 'delete_memories',
-    #                                                namespace=test_id)
-    # test_load_pipeline = await asyncio.gather(
-    #     *(run_load_test_element(test_item,loader_settings, metadata, test_id) for test_item in test_set)
-    # )
-    #
-    # test_eval_pipeline = await asyncio.gather(
-    #     *(run_search_eval_element(test_item, test_id) for test_item in test_set)
-    # )
-    # logging.info("Results of the eval pipeline %s", str(test_eval_pipeline))
-    # await add_entity(session, TestOutput(id=test_id, user_id=user_id, test_results=str(test_eval_pipeline)))
-    # return test_eval_pipeline
-
-# # Gather and run all tests in parallel
-# results = await asyncio.gather(
-#     *(run_testo(test, loader_settings, metadata) for test in test_params)
-# )
-# return results

@@ -2147,13 +2147,13 @@ six = "*"
 
 [[package]]
 name = "langsmith"
-version = "0.0.53"
+version = "0.0.54"
 description = "Client library to connect to the LangSmith LLM Tracing and Evaluation Platform."
 optional = false
 python-versions = ">=3.8.1,<4.0"
 files = [
-    {file = "langsmith-0.0.53-py3-none-any.whl", hash = "sha256:a090b1c7d7968fb8d2476ddd608a5171f0e812a82b1bca29ca136cdea375a74e"},
-    {file = "langsmith-0.0.53.tar.gz", hash = "sha256:a426a1d39843207a5dd3d72787b5304376541eb818509ee7909bbb696b072488"},
+    {file = "langsmith-0.0.54-py3-none-any.whl", hash = "sha256:55eca5967cadb661a49ad32aecda48a824fadef202ca384575209a9d6f823b74"},
+    {file = "langsmith-0.0.54.tar.gz", hash = "sha256:76c8e34b4d10ad93541107138089635829f9d60601a7f6bddf5ba582d178e521"},
 ]
 
 [package.dependencies]
@@ -2574,6 +2574,17 @@ python-versions = ">=3.7"
 files = [
     {file = "mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"},
     {file = "mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba"},
+]
+
+[[package]]
+name = "monotonic"
+version = "1.6"
+description = "An implementation of time.monotonic() for Python 2 & < 3.3"
+optional = false
+python-versions = "*"
+files = [
+    {file = "monotonic-1.6-py2.py3-none-any.whl", hash = "sha256:68687e19a14f11f26d140dd5c86f3dba4bf5df58003000ed467e0e2a69bca96c"},
+    {file = "monotonic-1.6.tar.gz", hash = "sha256:3a55207bcfed53ddd5c5bae174524062935efed17792e9de2ad0205ce9ad63f7"},
 ]
 
 [[package]]
@@ -4573,6 +4584,26 @@ doc = ["matplotlib (>2)", "numpydoc", "pydata-sphinx-theme (==0.9.0)", "sphinx (
 test = ["asv", "gmpy2", "mpmath", "pytest", "pytest-cov", "pytest-xdist", "scikit-umfpack", "threadpoolctl"]
 
 [[package]]
+name = "segment-analytics-python"
+version = "2.2.3"
+description = "The hassle-free way to integrate analytics into any python application."
+optional = false
+python-versions = ">=3.6.0"
+files = [
+    {file = "segment-analytics-python-2.2.3.tar.gz", hash = "sha256:0df5908e3df74b4482f33392fdd450df4c8351bf54974376fbe6bf33b0700865"},
+    {file = "segment_analytics_python-2.2.3-py2.py3-none-any.whl", hash = "sha256:06cc3d8e79103f02c3878ec66cb66152415473d0d2a142b98a0ee18da972e109"},
+]
+
+[package.dependencies]
+backoff = ">=2.1,<3.0"
+monotonic = ">=1.5,<2.0"
+python-dateutil = ">=2.2,<3.0"
+requests = ">=2.7,<3.0"
+
+[package.extras]
+test = ["flake8 (==3.7.9)", "mock (==2.0.0)", "pylint (==2.8.0)"]
+
+[[package]]
 name = "semver"
 version = "3.0.2"
 description = "Python helper for Semantic Versioning (https://semver.org)"
@@ -6209,4 +6240,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "9a121700fa6a5d396844af0958e72b437b5819cf30970f4176e002709feca667"
+content-hash = "1700f1cab54ed107d299a47031ad53c58e5e72e3791b9113652fb4ff7854a91a"
