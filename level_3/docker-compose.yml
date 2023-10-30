@@ -18,7 +18,6 @@ services:
       - promethai_mem_backend
     build:
       context: ./
-
     volumes:
       - "./:/app"
       - ./.data:/app/.data
