@@ -319,16 +319,19 @@ async def eval_test(
     context=None,
     synthetic_test_set=False,
 ):
-    result_output = await generate_chatgpt_output(query, context)
+    logging.info("Generating chatgpt output")
+    result_output = await generate_chatgpt_output(query, str(context))
+
+    logging.info("Moving on")
 
     if synthetic_test_set:
         test_case = synthetic_test_set
     else:
         test_case = LLMTestCase(
-            input=query,
-            actual_output=result_output,
-            expected_output=[expected_output],
-            context=[context],
+            input=str(query),
+            actual_output=str(result_output),
+            expected_output=str(expected_output),
+            context=[str(context)],
         )
     metric = OverallScoreMetric()
 

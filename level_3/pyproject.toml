@@ -29,7 +29,7 @@ marvin = "^1.3.0"
 dlt = { version ="^0.3.8",  extras = ["duckdb"]}
 weaviate-client = "^3.22.1"
 python-multipart = "^0.0.6"
-deepeval = "^0.20.4"
+deepeval = "^0.20.12"
 pymupdf = "^1.23.3"
 psycopg2 = "^2.9.8"
 llama-index = "^0.8.39.post2"
@@ -38,6 +38,8 @@ sqlalchemy = "^2.0.21"
 asyncpg = "^0.28.0"
 dash = "^2.14.0"
 unstructured = {extras = ["pdf"], version = "^0.10.23"}
+sentence-transformers = "2.2.2"
+torch = "2.0.*"
 
 
 

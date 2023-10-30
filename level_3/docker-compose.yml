@@ -28,6 +28,7 @@ services:
     ports:
       - 8000:8000
       - 443:443
+      - 80:80
     depends_on:
       - postgres
     deploy:
