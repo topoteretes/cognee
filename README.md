@@ -98,13 +98,13 @@ RAG test manager can be used via API or via the CLI
 
 #### Level 1 - OpenAI functions + Pydantic + DLTHub
 Scope: Give PDFs to the model and get the output in a structured format
-Blog post: [Link] (https://prometh.ai/promethai-memory-blog-post-one)
+Blog post: [Link](https://prometh.ai/promethai-memory-blog-post-one)
 We introduce the following concepts:
 - Structured output with Pydantic
 - CMD script to process custom PDFs
 #### Level 2 - Memory Manager + Metadata management
 Scope: Give PDFs to the model and consolidate with the previous user activity and more
-Blog post: [Link] (https://www.notion.so/topoteretes/Going-beyond-Langchain-Weaviate-Level-2-towards-Production-98ad7b915139478992c4c4386b5e5886?pvs=4)
+Blog post: [Link](https://www.notion.so/topoteretes/Going-beyond-Langchain-Weaviate-Level-2-towards-Production-98ad7b915139478992c4c4386b5e5886?pvs=4)
 We introduce the following concepts:
 
 - Long Term Memory -> store and format the data
@@ -115,7 +115,7 @@ We introduce the following concepts:
 
 #### Level 3 - Dynamic Graph Memory Manager + DB + Rag Test Manager
 Scope: Store the data in N-related stores and test the retrieval with the Rag Test Manager
-Blog post: [Link] (https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-Level-3-towards-production-e62946c272bf412584b12fbbf92d35b0?pvs=4)
+Blog post: [Link](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-Level-3-towards-production-e62946c272bf412584b12fbbf92d35b0?pvs=4)
 - Dynamic Memory Manager -> store the data in N hierarchical stores
 - Auto-generation of tests
 - Multiple file formats supported
@@ -175,7 +175,8 @@ Inspect the results in the DB:
 
 ``` select * from test_outputs; ```
 
-Or set up the superset to visualize the results:
+Or set up the superset to visualize the results.
+The base SQL query is in the example_data folder.
 
 
 
