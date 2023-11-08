@@ -124,6 +124,30 @@ Blog post: [Link](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviat
 - API
 - Superset to visualize the results
 
+#### Level 4 - Dynamic Graph Memory Manager + DB + Rag Test Manager
+Scope: Use Neo4j to map the user queries into a knowledge graph based on cognitive architecture
+Blog post: Soon!
+- Dynamic Memory Manager -> store the data in N hierarchical stores
+- Dynamic Graph -> map the user queries into a knowledge graph
+- Postgres DB to store metadata - soon
+- Docker
+- API - soon
+
+### Run the level 4
+
+Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
+
+Copy the .env.example to .env and fill in the variables
+
+``` poetry shell ```
+
+```docker compose up   ```
+
+Run 
+
+``` python main.py ``` 
+
+
 
 ### Run the level 3 
 
@@ -138,6 +162,8 @@ Two ways to run the level 3:
 
 Copy the .env.template to .env and fill in the variables
 Specify the environment variable in the .env file to "docker"
+
+
 
 
 Launch the docker image:

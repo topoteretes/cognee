@@ -86,26 +86,38 @@ def generate_graph(input) -> KnowledgeGraph:
                 "content": f"""Use the given format to extract information from the following input: {input}. """,
 
             },
-            {   "role":"system", "content": """You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
+            {   "role":"system", "content": """You are a top-tier algorithm
+                designed for extracting information in structured formats to build a knowledge graph.
                 - **Nodes** represent entities and concepts. They're akin to Wikipedia nodes.
-                - The aim is to achieve simplicity and clarity in the knowledge graph, making it accessible for a vast audience.
+                - The aim is to achieve simplicity and clarity in the 
+                knowledge graph, making it accessible for a vast audience.
                 ## 2. Labeling Nodes
                 - **Consistency**: Ensure you use basic or elementary types for node labels.
-                  - For example, when you identify an entity representing a person, always label it as **"person"**. Avoid using more specific terms like "mathematician" or "scientist".
+                  - For example, when you identify an entity representing a person,
+                   always label it as **"person"**. 
+                  Avoid using more specific terms like "mathematician" or "scientist".
                   - Include event, entity, time, or action nodes to the category.
                   - Classify the memory type as episodic or semantic.
-                - **Node IDs**: Never utilize integers as node IDs. Node IDs should be names or human-readable identifiers found in the text.
+                - **Node IDs**: Never utilize integers as node IDs. 
+                    Node IDs should be names or human-readable identifiers found in the text.
                 ## 3. Handling Numerical Data and Dates
-                - Numerical data, like age or other related information, should be incorporated as attributes or properties of the respective nodes.
-                - **No Separate Nodes for Dates/Numbers**: Do not create separate nodes for dates or numerical values. Always attach them as attributes or properties of nodes.
+                - Numerical data, like age or other related information, 
+                should be incorporated as attributes or properties of the respective nodes.
+                - **No Separate Nodes for Dates/Numbers**: 
+                Do not create separate nodes for dates or numerical values.
+                 Always attach them as attributes or properties of nodes.
                 - **Property Format**: Properties must be in a key-value format.
                 - **Quotation Marks**: Never use escaped single or double quotes within property values.
                 - **Naming Convention**: Use camelCase for property keys, e.g., `birthDate`.
                 ## 4. Coreference Resolution
-                - **Maintain Entity Consistency**: When extracting entities, it's vital to ensure consistency.
-                If an entity, such as "John Doe", is mentioned multiple times in the text but is referred to by different names or pronouns (e.g., "Joe", "he"), 
-                always use the most complete identifier for that entity throughout the knowledge graph. In this example, use "John Doe" as the entity ID.  
-                Remember, the knowledge graph should be coherent and easily understandable, so maintaining consistency in entity references is crucial. 
+                - **Maintain Entity Consistency**: 
+                When extracting entities, it's vital to ensure consistency.
+                If an entity, such as "John Doe", is mentioned multiple times 
+                in the text but is referred to by different names or pronouns (e.g., "Joe", "he"), 
+                always use the most complete identifier for that entity throughout the knowledge graph.
+                 In this example, use "John Doe" as the entity ID.  
+                Remember, the knowledge graph should be coherent and easily understandable,
+                 so maintaining consistency in entity references is crucial. 
                 ## 5. Strict Compliance
                 Adhere to the rules strictly. Non-compliance will result in termination."""}
         ],
@@ -331,27 +343,27 @@ if __name__ == "__main__":
     # out = knowledge_graph.dict()
     # print(out)
     #
-    # graph: KnowledgeGraph = generate_graph("I walked in the forest yesterday and added to my list I need to buy some milk in the store")
-    # graph_dic = graph.dict()
-    #
-    # node_variable_mapping = create_node_variable_mapping(graph_dic['nodes'])
-    # edge_variable_mapping = create_edge_variable_mapping(graph_dic['edges'])
-    # # Create unique variable names for each node
-    # unique_node_variable_mapping = append_uuid_to_variable_names(node_variable_mapping)
-    # unique_edge_variable_mapping = append_uuid_to_variable_names(edge_variable_mapping)
-    # create_nodes_statements = generate_create_statements_for_nodes_with_uuid(graph_dic['nodes'], unique_node_variable_mapping)
-    # create_edges_statements = generate_create_statements_for_edges_with_uuid(graph_dic['edges'], unique_node_variable_mapping)
-    #
-    # memory_type_statements_with_uuid_and_time_context = generate_memory_type_relationships_with_uuid_and_time_context(
-    #     graph_dic['nodes'], unique_node_variable_mapping)
-    #
-    # # # Combine all statements
-    # cypher_statements = [create_base_queries_from_user(user_id)] + create_nodes_statements + create_edges_statements + memory_type_statements_with_uuid_and_time_context
-    # cypher_statements_joined = "\n".join(cypher_statements)
-    #
-    # print(cypher_statements_joined)
-    #
-    # execute_cypher_query(cypher_statements_joined)
+    graph: KnowledgeGraph = generate_graph("I walked in the forest yesterday and added to my list I need to buy some milk in the store")
+    graph_dic = graph.dict()
+
+    node_variable_mapping = create_node_variable_mapping(graph_dic['nodes'])
+    edge_variable_mapping = create_edge_variable_mapping(graph_dic['edges'])
+    # Create unique variable names for each node
+    unique_node_variable_mapping = append_uuid_to_variable_names(node_variable_mapping)
+    unique_edge_variable_mapping = append_uuid_to_variable_names(edge_variable_mapping)
+    create_nodes_statements = generate_create_statements_for_nodes_with_uuid(graph_dic['nodes'], unique_node_variable_mapping)
+    create_edges_statements = generate_create_statements_for_edges_with_uuid(graph_dic['edges'], unique_node_variable_mapping)
+
+    memory_type_statements_with_uuid_and_time_context = generate_memory_type_relationships_with_uuid_and_time_context(
+        graph_dic['nodes'], unique_node_variable_mapping)
+
+    # # Combine all statements
+    cypher_statements = [create_base_queries_from_user(user_id)] + create_nodes_statements + create_edges_statements + memory_type_statements_with_uuid_and_time_context
+    cypher_statements_joined = "\n".join(cypher_statements)
+
+
+
+    execute_cypher_query(cypher_statements_joined)
 
 
 
