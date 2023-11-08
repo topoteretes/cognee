@@ -90,7 +90,7 @@ To get started with PromethAI Memory, start with the latest iteration, and follo
 
 ### Current Focus
 
-RAG test manager can be used via API or via the CLI
+Cogntive Architecture, RAGs, and production-ready applications
 
 ![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/Dashboard_example.png)
 
