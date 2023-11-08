@@ -2,6 +2,7 @@ from enum import Enum
 
 import typer
 import os
+import uuid
 # import marvin
 # from pydantic_settings import BaseSettings
 from langchain.chains import GraphCypherQAChain
@@ -36,6 +37,9 @@ from langchain.vectorstores import Neo4jVector
 import os
 from dotenv import load_dotenv
 import uuid
+
+from graphviz import Digraph
+
 
 load_dotenv()
 
@@ -185,9 +189,6 @@ def execute_cypher_query(query: str):
 
 
 
-from graphviz import Digraph
-
-
 class Node:
     def __init__(self, id, description, color):
         self.id = id
@@ -213,9 +214,6 @@ def visualize_knowledge_graph(kg: KnowledgeGraph):
 
     # Render the graph
     dot.render("knowledge_graph.gv", view=True)
-
-
-import uuid
 
 
 def create_base_queries_from_user( user_id: str):
@@ -368,6 +366,16 @@ if __name__ == "__main__":
 
 
     # Translate the KnowledgeGraph into Cypher queries
+
+
+
+    # Make document summary in Semantic Memory
+    # Document summary links to a Namespace in Vector Store
+    # Categorize document types in Semantic Memory
+    # Make a spine classifier that retrieves the relevant document namespaces from Vector Store
+    #
+    # Connect document summary to chunks in Weaviate vector store
+
 
 
     # print(cypher_query)

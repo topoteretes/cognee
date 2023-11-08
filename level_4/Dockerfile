@@ -42,10 +42,10 @@ RUN apt-get update -q && \
 #RUN playwright install-deps
 
 WORKDIR /app
-COPY . /app
-COPY scripts/ /app
-COPY entrypoint.sh /app/entrypoint.sh
-COPY scripts/create_database.py /app/create_database.py
+COPY cognitive_architecture/ /app
+COPY cognitive_architecture/scripts/ /app
+COPY cognitive_architecture/entrypoint.sh /app/entrypoint.sh
+COPY cognitive_architecture/scripts/create_database.py /app/create_database.py
 RUN chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
