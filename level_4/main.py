@@ -43,7 +43,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 txt_path =  "dune.txt"
 
-graph = Neo4jGraph(url="bolt://localhost:7687", username="neo4j", password="pleaseletmein")
+
 
 import openai
 import instructor
@@ -61,20 +61,6 @@ class Node(BaseModel):
     color: str ="blue"
     memory_type: str
 
-#
-# class EntityNode(BaseModel):
-#     id: int
-#     description: str
-#
-#
-# class TimeContextNode(BaseModel):
-#     id: int
-#     description: str
-#
-#
-# class ActionNode(BaseModel):
-#     id: int
-#     description: str
 
 
 class Edge(BaseModel):
@@ -129,28 +115,10 @@ def generate_graph(input) -> KnowledgeGraph:
 
 
 
-# async def memory_route(self, memory_type: str):
-#     @ai_classifier
-#     class MemoryRoute(Enum):
-#         """Represents classifer for type of memories"""
-#
-#         semantic_memory = "semantic_memory"
-#         episodic_memory = "episodic_memory"
-#
-#
-#     namespace = MemoryRoute(str(memory_type))
-#
-#     return namespace
-
-#
-# graph = generate_graph("I went to a walk in the forest in the afternoon and got information from a book.")
-# # print("got here")
-# #
-# print(graph)
-
 
 def execute_cypher_query(query: str):
-    graph.query(query)
+    graph_ = Neo4jGraph(url="bolt://localhost:7687", username="neo4j", password="pleaseletmein")
+    graph_.query(query)
     # This is a placeholder for the logic that will execute the Cypher query
     # You would replace this with the actual logic to run the query in your Neo4j database
     print(query)
@@ -202,28 +170,7 @@ def execute_cypher_query(query: str):
 # )
 
 
-def create_cypher_queries_from_graph(graph:str, user_id: str):
-    # Create nodes
 
-
-    # Create the user and memory components if they don't exist
-    user_memory_cypher = f"""
-    MERGE (user:User {{userId: '{user_id}'}})
-    MERGE (semantic:SemanticMemory {{userId: '{user_id}'}})
-    MERGE (episodic:EpisodicMemory {{userId: '{user_id}'}})
-    MERGE (buffer:Buffer {{userId: '{user_id}'}})
-    MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(semantic)
-    MERGE (user)-[:HAS_EPISODIC_MEMORY]->(episodic)
-    MERGE (user)-[:HAS_BUFFER]->(buffer)
-    """
-
-    # Combine all Cypher queries
-    combined_cypher_query = f"""
-    {user_memory_cypher}
-    {graph}
-    """
-
-    return combined_cypher_query
 
 
 from graphviz import Digraph
@@ -256,24 +203,160 @@ def visualize_knowledge_graph(kg: KnowledgeGraph):
     dot.render("knowledge_graph.gv", view=True)
 
 
+import uuid
+
+
+def create_base_queries_from_user( user_id: str):
+    # Create the user and memory components if they don't exist
+    user_memory_cypher = f"""
+    MERGE (user:User {{userId: '{user_id}'}})
+    MERGE (semantic:SemanticMemory {{userId: '{user_id}'}})
+    MERGE (episodic:EpisodicMemory {{userId: '{user_id}'}})
+    MERGE (buffer:Buffer {{userId: '{user_id}'}})
+    MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(semantic)
+    MERGE (user)-[:HAS_EPISODIC_MEMORY]->(episodic)
+    MERGE (user)-[:HAS_BUFFER]->(buffer)
+    """
+
+    return user_memory_cypher
+
+# Function to append a UUID4 to the variable names to ensure uniqueness
+def append_uuid_to_variable_names(variable_mapping):
+    unique_variable_mapping = {}
+    for original_name in variable_mapping.values():
+        unique_name = f"{original_name}_{uuid.uuid4().hex}"
+        unique_variable_mapping[original_name] = unique_name
+    return unique_variable_mapping
+
+# Update the functions to use the unique variable names
+def create_node_variable_mapping(nodes):
+    mapping = {}
+    for node in nodes:
+        variable_name = f"{node['category']}{node['id']}".lower()
+        mapping[node['id']] = variable_name
+    return mapping
+
+
+def create_edge_variable_mapping(edges):
+    mapping = {}
+    for edge in edges:
+        # Construct a unique identifier for the edge
+        variable_name = f"edge{edge['source']}to{edge['target']}".lower()
+        mapping[(edge['source'], edge['target'])] = variable_name
+    return mapping
+
+
+# Update the function to generate Cypher CREATE statements for nodes with unique variable names
+
+
+def format_dict(d):
+    # Initialize an empty list to store formatted items
+    formatted_items = []
+
+    # Iterate through all key-value pairs
+    for key, value in d.items():
+        # Format key-value pairs with a colon and space, and adding quotes for string values
+        formatted_item = f"{key}: '{value}'" if isinstance(value, str) else f"{key}: {value}"
+        formatted_items.append(formatted_item)
+
+    # Join all formatted items with a comma and a space
+    formatted_string = ", ".join(formatted_items)
+
+    # Add curly braces to mimic a dictionary
+    formatted_string = f"{{{formatted_string}}}"
+
+    return formatted_string
+def generate_create_statements_for_nodes_with_uuid(nodes, unique_mapping):
+    create_statements = []
+    for node in nodes:
+        original_variable_name = node_variable_mapping[node['id']]
+        unique_variable_name = unique_mapping[original_variable_name]
+        node_label = node['category'].capitalize()
+        properties = {k: v for k, v in node.items() if k not in ['id', 'category']}
+        try:
+            properties = format_dict(properties)
+        except:
+            pass
+        create_statements.append(f"CREATE ({unique_variable_name}:{node_label} {properties})")
+    return create_statements
+
+# Update the function to generate Cypher CREATE statements for edges with unique variable names
+def generate_create_statements_for_edges_with_uuid(edges, unique_mapping):
+    create_statements = []
+    with_statement = f"WITH {', '.join(unique_mapping.values())}, user, semantic, episodic, buffer"
+    create_statements.append(with_statement)
+
+    for edge in edges:
+        # print("HERE IS THE EDGE", edge)
+        source_variable = unique_mapping[node_variable_mapping[edge['source']]]
+        target_variable = unique_mapping[node_variable_mapping[edge['target']]]
+        relationship = edge['description'].replace(" ", "_").upper()
+        create_statements.append(f"CREATE ({source_variable})-[:{relationship}]->({target_variable})")
+    return create_statements
+
+
+# Update the function to generate Cypher CREATE statements for memory type relationships with unique variable names
+def generate_memory_type_relationships_with_uuid_and_time_context(nodes, unique_mapping):
+    create_statements = []
+    with_statement = f"WITH {', '.join(unique_mapping.values())}, user, semantic, episodic, buffer"
+    create_statements.append(with_statement)
+
+    # Loop through each node and create relationships based on memory_type
+    for node in nodes:
+        original_variable_name = node_variable_mapping[node['id']]
+        unique_variable_name = unique_mapping[original_variable_name]
+        if node['memory_type'] == 'semantic':
+            create_statements.append(f"CREATE (semantic)-[:HAS_KNOWLEDGE]->({unique_variable_name})")
+        elif node['memory_type'] == 'episodic':
+            create_statements.append(f"CREATE (episodic)-[:HAS_EVENT]->({unique_variable_name})")
+            if node['category'] == 'time':
+                create_statements.append(f"CREATE (buffer)-[:HAS_TIME_CONTEXT]->({unique_variable_name})")
+
+        # Assuming buffer holds all actions and times
+        # if node['category'] in ['action', 'time']:
+        create_statements.append(f"CREATE (buffer)-[:CURRENTLY_HOLDING]->({unique_variable_name})")
+
+    return create_statements
+
+
+
 # Main execution logic
 if __name__ == "__main__":
     user_id = "User1"
     query_input = "I walked in the forest yesterday and added to my list I need to buy some milk in the store"
 
     # Generate the knowledge graph from the user input
-    # knowledge_graph = generate_graph(query_input)
+    knowledge_graph = generate_graph(query_input)
+    visualize_knowledge_graph(knowledge_graph)
     # out = knowledge_graph.dict()
     # print(out)
-
-    graph: KnowledgeGraph = generate_graph("I walked in the forest yesterday and added to my list I need to buy some milk in the store")
-    print(graph.dict())
-    visualize_knowledge_graph(graph)
+    #
+    # graph: KnowledgeGraph = generate_graph("I walked in the forest yesterday and added to my list I need to buy some milk in the store")
+    # graph_dic = graph.dict()
+    #
+    # node_variable_mapping = create_node_variable_mapping(graph_dic['nodes'])
+    # edge_variable_mapping = create_edge_variable_mapping(graph_dic['edges'])
+    # # Create unique variable names for each node
+    # unique_node_variable_mapping = append_uuid_to_variable_names(node_variable_mapping)
+    # unique_edge_variable_mapping = append_uuid_to_variable_names(edge_variable_mapping)
+    # create_nodes_statements = generate_create_statements_for_nodes_with_uuid(graph_dic['nodes'], unique_node_variable_mapping)
+    # create_edges_statements = generate_create_statements_for_edges_with_uuid(graph_dic['edges'], unique_node_variable_mapping)
+    #
+    # memory_type_statements_with_uuid_and_time_context = generate_memory_type_relationships_with_uuid_and_time_context(
+    #     graph_dic['nodes'], unique_node_variable_mapping)
+    #
+    # # # Combine all statements
+    # cypher_statements = [create_base_queries_from_user(user_id)] + create_nodes_statements + create_edges_statements + memory_type_statements_with_uuid_and_time_context
+    # cypher_statements_joined = "\n".join(cypher_statements)
+    #
+    # print(cypher_statements_joined)
+    #
+    # execute_cypher_query(cypher_statements_joined)
 
 
 
     # Translate the KnowledgeGraph into Cypher queries
-    # cypher_query = create_cypher_queries_from_graph(out['graph_query'], user_id)
+
 
     # print(cypher_query)
 # #
