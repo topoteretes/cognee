@@ -4,7 +4,7 @@ from io import BytesIO
 import os, sys
 # Add the parent directory to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB
+from ..vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB
 import sqlalchemy as sa
 logging.basicConfig(level=logging.INFO)
 import marvin
@@ -13,13 +13,13 @@ from dotenv import load_dotenv
 from langchain.document_loaders import PyPDFLoader
 from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
-from models.sessions import Session
-from models.testset import TestSet
-from models.testoutput import TestOutput
-from models.metadatas import MetaDatas
-from models.operation import Operation
+from ..models.sessions import Session
+from ..models.testset import TestSet
+from ..models.testoutput import TestOutput
+from ..models.metadatas import MetaDatas
+from ..models.operation import Operation
 from sqlalchemy.orm import sessionmaker
-from database.database import engine
+from ..database.database import engine
 load_dotenv()
 from typing import Optional
 import time

@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from database.database import Base
+from ..database.database import Base
 
 
 class TestOutput(Base):
