@@ -11,10 +11,10 @@ load_dotenv()
 
 
 # this is needed to import classes from other modules
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# Get the parent directory of your script and add it to sys.path
-parent_dir = os.path.dirname(script_dir)
-sys.path.append(parent_dir)
+# script_dir = os.path.dirname(os.path.abspath(__file__))
+# # Get the parent directory of your script and add it to sys.path
+# parent_dir = os.path.dirname(script_dir)
+# sys.path.append(parent_dir)
 
 
 # in seconds

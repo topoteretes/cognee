@@ -1,13 +1,10 @@
 # test_set.py
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from ..database.database import Base
-
-
+from ..database  import Base
 class TestSet(Base):
     __tablename__ = 'test_sets'
 

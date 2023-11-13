@@ -1,6 +1,16 @@
 
 from contextlib import asynccontextmanager
 import logging
+from .models.sessions import Session
+from .models.memory import MemoryModel
+from .models.user import User
+from .models.operation import Operation
+from .models.testset import TestSet
+from .models.testoutput import TestOutput
+from .models.metadatas import MetaDatas
+from .models.docs import DocsModel
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,3 +48,17 @@ async def update_entity(session, model, entity_id, new_value):
             return "Successfully updated entity"
         else:
             return "Entity not found"
+
+
+async def fetch_job_id(session, user_id=None, memory_id=None, job_id=None):
+    try:
+        result = await session.execute(
+            session.query(Session.id)
+            .filter_by(user_id=user_id, id=job_id)
+            .order_by(Session.created_at)
+            .first()
+        )
+        return result.scalar_one_or_none()
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+        return None

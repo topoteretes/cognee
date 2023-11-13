@@ -3,23 +3,27 @@ import logging
 from io import BytesIO
 import os, sys
 # Add the parent directory to sys.path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from ..vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB
+# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import sqlalchemy as sa
+print(os.getcwd())
 logging.basicConfig(level=logging.INFO)
-import marvin
+# import marvin
 import requests
 from dotenv import load_dotenv
 from langchain.document_loaders import PyPDFLoader
 from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
-from ..models.sessions import Session
-from ..models.testset import TestSet
-from ..models.testoutput import TestOutput
-from ..models.metadatas import MetaDatas
-from ..models.operation import Operation
+
+
+from database.postgres.models.sessions import Session
+from database.postgres.models.testset import TestSet
+from database.postgres.models.testoutput import TestOutput
+from database.postgres.models.metadatas import MetaDatas
+from database.postgres.models.operation import Operation
+from database.postgres.models.docs import DocsModel
 from sqlalchemy.orm import sessionmaker
-from ..database.database import engine
+from database.postgres.database import engine
 load_dotenv()
 from typing import Optional
 import time
@@ -29,7 +33,7 @@ tracemalloc.start()
 
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
-
+from database.vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB
 from langchain.schema import Document
 import uuid
 import weaviate
@@ -38,7 +42,7 @@ import json
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
+# marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 class VectorDBFactory:
     def __init__(self):

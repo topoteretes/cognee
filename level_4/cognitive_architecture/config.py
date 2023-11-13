@@ -23,6 +23,7 @@ class Config:
     model: str = 'gpt-4-1106-preview'
     model_endpoint: str = 'openai'
     openai_key: Optional[str] = os.getenv('OPENAI_API_KEY')
+    openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
 
     # Embedding parameters
     embedding_model: str = 'openai'

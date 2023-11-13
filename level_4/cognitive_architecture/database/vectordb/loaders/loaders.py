@@ -2,10 +2,9 @@ from io import BytesIO
 import fitz
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from vectordb.chunkers.chunkers import chunk_data
-from llama_hub.file.base import SimpleDirectoryReader
+from database.vectordb.chunkers.chunkers import chunk_data
+
 from langchain.document_loaders import UnstructuredURLLoader
 from langchain.document_loaders import DirectoryLoader
 import logging
@@ -29,6 +28,7 @@ async def _document_loader( observation: str, loader_settings: dict):
     if loader_settings.get("source") == "URL":
         for file in list_of_docs:
             if document_format == "PDF":
+                logging.info("File is %s", file)
                 pdf_response = requests.get(file)
                 pdf_stream = BytesIO(pdf_response.content)
                 with fitz.open(stream=pdf_stream, filetype='pdf') as doc:

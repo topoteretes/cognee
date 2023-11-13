@@ -1,50 +1,22 @@
-from enum import Enum
-
-import typer
-import os
-import uuid
-# import marvin
-# from pydantic_settings import BaseSettings
-from langchain.chains import GraphCypherQAChain
-from langchain.chat_models import ChatOpenAI
 # from marvin import ai_classifier
 # marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
+from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
+from cognitive_architecture.database.postgres.models.memory import MemoryModel
 
-from cognitive_architecture.models.sessions import Session
-from cognitive_architecture.models.testset import TestSet
-from cognitive_architecture.models.testoutput import TestOutput
-from cognitive_architecture.models.metadatas import MetaDatas
-from cognitive_architecture.models.operation import Operation
-from cognitive_architecture.models.docs import DocsModel
-from cognitive_architecture.models.memory import MemoryModel
-
-from pathlib import Path
-
-from langchain.document_loaders import TextLoader
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.graphs import Neo4jGraph
-from langchain.text_splitter import TokenTextSplitter
-from langchain.vectorstores import Neo4jVector
 import os
 from dotenv import load_dotenv
-import uuid
 
-from graphviz import Digraph
+from level_4.cognitive_architecture.database.postgres.database_crud import session_scope
+from cognitive_architecture.database.postgres.database import AsyncSessionLocal
 
-from cognitive_architecture.database.database_crud import session_scope
-from cognitive_architecture.database.database import AsyncSessionLocal
-
-import openai
 import instructor
+from openai import OpenAI
 
 # Adds response_model to ChatCompletion
 # Allows the return of Pydantic model rather than raw JSON
-instructor.patch()
-from pydantic import BaseModel, Field
-from typing import List
+instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
-import questionary
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
 load_dotenv()
 
@@ -60,24 +32,15 @@ print(config.openai_key)
 
 import logging
 
-
-
-
-
-
-
-
-
-import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 async def get_vectordb_namespace(session: AsyncSession, user_id: str):
     try:
         result = await session.execute(
-            select(MemoryModel.id).where(MemoryModel.user_id == user_id).order_by(MemoryModel.created_at.desc()).limit(1)
+            select(MemoryModel.memory_name).where(MemoryModel.user_id == user_id).order_by(MemoryModel.created_at.desc())
         )
-        namespace = result.scalar_one_or_none()
+        namespace = [row[0] for row in result.fetchall()]
         return namespace
     except Exception as e:
         logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
@@ -119,10 +82,14 @@ async def update_document_vectordb_namespace(postgres_session: AsyncSession, use
         if not vectordb_namespace:
             logging.error("Vectordb_namespace could not be retrieved.")
             return None
-
-    # Update the Document node in Neo4j with the namespace
-    update_result = update_document_node_with_namespace(user_id, vectordb_namespace)
-    return update_result
+    from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
+    # Example initialization (replace with your actual connection details)
+    neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
+    results = []
+    for namespace in vectordb_namespace:
+        update_result = neo4j_graph_db.update_document_node_with_namespace(user_id, namespace)
+        results.append(update_result)
+    return results
 
 
 
@@ -185,41 +152,128 @@ async def update_document_vectordb_namespace(postgres_session: AsyncSession, use
     # }
     #
     # execute_cypher_query(rs, parameters)
-#
-# async def main():
-#     user_id = "User1"
-#
-#     async with session_scope(AsyncSessionLocal()) as session:
-#         await update_document_vectordb_namespace(session, user_id)
-#
-#     # print(rs)
-#
-# if __name__ == "__main__":
-#     import asyncio
-#
-#     asyncio.run(main())
-#
-#     # config = Config()
-#     # config.load()
-#     #
-#     # print(config.model)
-#     # print(config.openai_key)
-
-
-
+from cognitive_architecture.database.postgres.database_crud import fetch_job_id
+import uuid
+from cognitive_architecture.database.postgres.models.sessions import Session
+from cognitive_architecture.database.postgres.models.operation import Operation
+from cognitive_architecture.database.postgres.database_crud import session_scope, add_entity, update_entity, fetch_job_id
+from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
+from cognitive_architecture.database.postgres.models.testset import TestSet
+from cognitive_architecture.database.postgres.models.testoutput import TestOutput
+from cognitive_architecture.database.postgres.models.docs import DocsModel
+from cognitive_architecture.database.postgres.models.memory import MemoryModel
 async def main():
-    user_id = "User1"
-    from cognitive_architecture.graph_database.graph import Neo4jGraphDB
-    # Example initialization (replace with your actual connection details)
-    neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
-    # Generate the Cypher query for a specific user
-    user_id = 'user123'  # Replace with the actual user ID
-    cypher_query = neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id)
-    # Execute the generated Cypher query
-    result = neo4j_graph_db.query(cypher_query)
+    user_id = "user"
 
-    # async with session_scope(AsyncSessionLocal()) as session:
-    #     await update_document_vectordb_namespace(session, user_id)
+    async with session_scope(AsyncSessionLocal()) as session:
+        # out = await get_vectordb_namespace(session, user_id)
+
+
+
+
+
+
+        # print(out)
+
+        # job_id = ""
+        # job_id = await fetch_job_id(session, user_id=user_id, job_id=job_id)
+        # if job_id is None:
+        #     job_id = str(uuid.uuid4())
+        #
+        #     await add_entity(
+        #         session,
+        #         Operation(
+        #             id=job_id,
+        #             user_id=user_id,
+        #             operation_params="",
+        #             number_of_files=2,
+        #             operation_status = "RUNNING",
+        #             operation_type="",
+        #             test_set_id="",
+        #         ),
+        #     )
+
+        # await update_document_vectordb_namespace(session, user_id)
+        # from cognitive_architecture.graph_database.graph import Neo4jGraphDB
+        # # Example initialization (replace with your actual connection details)
+        neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
+        # # Generate the Cypher query for a specific user
+        # user_id = 'user123'  # Replace with the actual user ID
+        cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id,"I walked in the forest yesterday and added to my list I need to buy some milk in the store")
+        # result = neo4j_graph_db.query(cypher_query)
+        call_of_the_wild_summary = {
+            "user_id": user_id,
+            "document_category": "Classic Literature",
+            "title": "The Call of the Wild",
+            "summary": (
+                "'The Call of the Wild' is a novel by Jack London set in the Yukon during the 1890s Klondike "
+                "Gold Rush—a period when strong sled dogs were in high demand. The novel's central character "
+                "is a dog named Buck, a domesticated dog living at a ranch in the Santa Clara Valley of California "
+                "as the story opens. Stolen from his home and sold into the brutal existence of an Alaskan sled dog, "
+                "he reverts to atavistic traits. Buck is forced to adjust to, and survive, cruel treatments and fight "
+                "to dominate other dogs in a harsh climate. Eventually, he sheds the veneer of civilization, relying "
+                "on primordial instincts and lessons he learns, to emerge as a leader in the wild. London drew on his "
+                "own experiences in the Klondike, and the book provides a snapshot of the epical gold rush and the "
+                "harsh realities of life in the wilderness. The novel explores themes of morality versus instinct, "
+                "the struggle for survival in the natural world, and the intrusion of civilization on the wilderness. "
+                "As Buck's wild nature is awakened, he rises to become a respected and feared leader in the wild, "
+                "answering the primal call of nature."
+            )
+        }
+        rs = neo4j_graph_db.create_document_node_cypher(call_of_the_wild_summary, user_id)
+
+        neo4j_graph_db.query(rs, call_of_the_wild_summary)
+        print(cypher_query)
+
+        neo4j_graph_db.update_document_node_with_namespace(user_id, document_title="The Call of the Wild")
+
+
+
+        # await update_document_vectordb_namespace(session, user_id)
+        # # Execute the generated Cypher query
+        # result = neo4j_graph_db.query(cypher_query)
+
+
+
+        params = {
+            "version": "1.0",
+            "agreement_id": "AG123456",
+            "privacy_policy": "https://example.com/privacy",
+            "terms_of_service": "https://example.com/terms",
+            "format": "json",
+            "schema_version": "1.1",
+            "checksum": "a1b2c3d4e5f6",
+            "owner": "John Doe",
+            "license": "MIT",
+            "validity_start": "2023-08-01",
+            "validity_end": "2024-07-31",
+        }
+        loader_settings = {
+            "format": "PDF",
+            "source": "URL",
+            "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf",
+        }
+        # memory_instance = Memory(namespace='SEMANTICMEMORY')
+        # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
+        # from cognitive_architecture.vectorstore_manager import Memory
+        #
+        #
+        # memory = await Memory.create_memory("676", session, namespace="SEMANTICMEMORY")
+        #
+        # # Adding a memory instance
+        # await memory.add_memory_instance("ExampleMemory")
+        #
+        # # Managing memory attributes
+        # existing_user = await Memory.check_existing_user("676", session)
+        # print("here is the existing user", existing_user)
+        # await memory.manage_memory_attributes(existing_user)
+        # # aeehuvyq_semanticememory_class
+        #
+        # await memory.add_dynamic_memory_class("semanticmemory", "SEMANTICMEMORY")
+        # await memory.add_method_to_class(memory.semanticmemory_class, "add_memories")
+        # # await memory.add_method_to_class(memory.semanticmemory_class, "fetch_memories")
+        # sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
+        #                                                 observation='some_observation', params=params, loader_settings=loader_settings)
 
     # print(rs)
 
@@ -227,3 +281,5 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(main())
+
+

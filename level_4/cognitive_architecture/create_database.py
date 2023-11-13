@@ -1,25 +1,20 @@
-import sys
-import os
-
 # this is needed to import classes from other modules
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# Get the parent directory of your script and add it to sys.path
-parent_dir = os.path.dirname(script_dir)
-sys.path.append(parent_dir)
+# script_dir = os.path.dirname(os.path.abspath(__file__))
+# # Get the parent directory of your script and add it to sys.path
+# parent_dir = os.path.dirname(script_dir)
+# sys.path.append(parent_dir)
 
-from database.database import Base, engine
-import models.memory
-import models.metadatas
-import models.operation
-import models.sessions
-import models.testoutput
-import models.testset
-import models.user
-import models.docs
+from database.postgres.database import Base
+
 from sqlalchemy import create_engine, text
 import psycopg2
 from dotenv import load_dotenv
 load_dotenv()
+import os
+
+
+
+
 
 
 def create_admin_engine(username, password, host, database_name):
@@ -55,7 +50,15 @@ if __name__ == "__main__":
     username = os.getenv('POSTGRES_USER')
     password = os.getenv('POSTGRES_PASSWORD')
     database_name = os.getenv('POSTGRES_DB')
-    host = os.getenv('POSTGRES_HOST')
+    environment = os.environ.get("ENVIRONMENT")
+
+    if environment == "local":
+        host = os.getenv('POSTGRES_HOST')
+
+    elif environment == "docker":
+        host = os.getenv('POSTGRES_HOST_DOCKER')
+    else:
+        host = os.getenv('POSTGRES_HOST_DOCKER')
 
     engine = create_admin_engine(username, password, host, database_name)
 

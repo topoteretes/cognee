@@ -1,13 +1,5 @@
-from pydantic import BaseModel
-from enum import Enum
-
-import typer
-import os
-import uuid
 # import marvin
 # from pydantic_settings import BaseSettings
-from langchain.chains import GraphCypherQAChain
-from langchain.chat_models import ChatOpenAI
 # from marvin import ai_classifier
 # marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
 
@@ -15,54 +7,33 @@ import os
 
 print(os.getcwd())
 
-
-from ..models.sessions import (Session)
-from ..models.testset import TestSet
-from ..models.testoutput import TestOutput
-from ..models.metadatas import MetaDatas
-from ..models.operation import Operation
-from ..models.docs import DocsModel
-from ..models.memory import MemoryModel
-
-from pathlib import Path
 import networkx as nx
 
-from langchain.document_loaders import TextLoader
-from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.graphs import Neo4jGraph
-from langchain.text_splitter import TokenTextSplitter
-from langchain.vectorstores import Neo4jVector
 import os
 from dotenv import load_dotenv
-import uuid
-
-from graphviz import Digraph
-
-from ..database.database_crud import session_scope
-from ..database.database import AsyncSessionLocal
 
 import openai
 import instructor
-
+from openai import OpenAI
+from openai import AsyncOpenAI
 
 
 from abc import ABC, abstractmethod
-from typing import List
 
 # Adds response_model to ChatCompletion
 # Allows the return of Pydantic model rather than raw JSON
-instructor.patch()
+
 from pydantic import BaseModel, Field
 from typing import List
-from ..utils import format_dict, append_uuid_to_variable_names, create_edge_variable_mapping, create_node_variable_mapping
+from ...utils import format_dict, append_uuid_to_variable_names, create_edge_variable_mapping, create_node_variable_mapping
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
-import questionary
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-from ..config import Config
+from ...config import Config
 
 config = Config()
 config.load()
@@ -70,8 +41,10 @@ config.load()
 print(config.model)
 print(config.openai_key)
 
+OPENAI_API_KEY = config.openai_key
 
-import logging
+aclient = instructor.patch(OpenAI())
+
 
 #Execute Cypher queries to create the user and memory components if they don't exist
 #
@@ -144,7 +117,7 @@ class KnowledgeGraph(BaseModel):
 #
 
 def generate_graph(input) -> KnowledgeGraph:
-    return openai.ChatCompletion.create(
+    out =  aclient.chat.completions.create(
         model="gpt-4-1106-preview",
         messages=[
             {
@@ -189,6 +162,7 @@ def generate_graph(input) -> KnowledgeGraph:
         ],
         response_model=KnowledgeGraph,
     )
+    return out
 
 class AbstractGraphDB(ABC):
 
@@ -297,9 +271,9 @@ class Neo4jGraphDB(AbstractGraphDB):
         return create_statements
 
     # Update the function to generate Cypher CREATE statements for edges with unique variable names
-    def generate_create_statements_for_edges_with_uuid(self, edges, unique_mapping, base_node_mapping):
+    def generate_create_statements_for_edges_with_uuid(self, user_id, edges, unique_mapping, base_node_mapping):
         create_statements = []
-        with_statement = f"WITH {', '.join(unique_mapping.values())}, user, semantic, episodic, buffer"
+        with_statement = f"WITH {', '.join(unique_mapping.values())}, {user_id}, semantic, episodic, buffer"
         create_statements.append(with_statement)
 
         for edge in edges:
@@ -310,9 +284,9 @@ class Neo4jGraphDB(AbstractGraphDB):
             create_statements.append(f"CREATE ({source_variable})-[:{relationship}]->({target_variable})")
         return create_statements
 
-    def generate_memory_type_relationships_with_uuid_and_time_context(self, nodes, unique_mapping, base_node_mapping):
+    def generate_memory_type_relationships_with_uuid_and_time_context(self, user_id, nodes, unique_mapping, base_node_mapping):
         create_statements = []
-        with_statement = f"WITH {', '.join(unique_mapping.values())}, user, semantic, episodic, buffer"
+        with_statement = f"WITH {', '.join(unique_mapping.values())}, {user_id}, semantic, episodic, buffer"
         create_statements.append(with_statement)
 
         # Loop through each node and create relationships based on memory_type
@@ -332,9 +306,9 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return create_statements
 
-    def generate_cypher_query_for_user_prompt_decomposition(self, user_id):
+    async def generate_cypher_query_for_user_prompt_decomposition(self, user_id:str, query:str):
 
-        graph: KnowledgeGraph = generate_graph("I walked in the forest yesterday and added to my list I need to buy some milk in the store")
+        graph: KnowledgeGraph = generate_graph(query)
         graph_dic = graph.dict()
 
         node_variable_mapping = create_node_variable_mapping(graph_dic['nodes'])
@@ -343,9 +317,9 @@ class Neo4jGraphDB(AbstractGraphDB):
         unique_node_variable_mapping = append_uuid_to_variable_names(node_variable_mapping)
         unique_edge_variable_mapping = append_uuid_to_variable_names(edge_variable_mapping)
         create_nodes_statements = self.generate_create_statements_for_nodes_with_uuid(graph_dic['nodes'], unique_node_variable_mapping, node_variable_mapping)
-        create_edges_statements =self.generate_create_statements_for_edges_with_uuid(graph_dic['edges'], unique_node_variable_mapping, node_variable_mapping)
+        create_edges_statements =self.generate_create_statements_for_edges_with_uuid(user_id, graph_dic['edges'], unique_node_variable_mapping, node_variable_mapping)
 
-        memory_type_statements_with_uuid_and_time_context = self.generate_memory_type_relationships_with_uuid_and_time_context(
+        memory_type_statements_with_uuid_and_time_context = self.generate_memory_type_relationships_with_uuid_and_time_context(user_id,
             graph_dic['nodes'], unique_node_variable_mapping, node_variable_mapping)
 
         # # Combine all statements
@@ -401,8 +375,8 @@ class Neo4jGraphDB(AbstractGraphDB):
         except Exception as e:
             return f"An error occurred: {str(e)}"
     def retrieve_semantic_memory(self, user_id: str):
-        query = """
-        MATCH (user:User {userId: $user_id})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
+        query = f"""
+        MATCH (user:User {{userId: {user_id} }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
         MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
         RETURN knowledge
         """
@@ -509,12 +483,10 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
-
-
-    def update_document_node_with_namespace(self, user_id: str, vectordb_namespace: str):
+    def update_document_node_with_namespace(self, user_id: str, vectordb_namespace: str, document_title: str):
         # Generate the Cypher query
-        cypher_query = f'''
-        MATCH (user:User {{userId: $user_id}})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
+        cypher_query = '''
+        MATCH (user:User {userId: $user_id})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {title: $document_title})
         SET document.vectordbNamespace = $vectordb_namespace
         RETURN document
         '''
@@ -522,7 +494,8 @@ class Neo4jGraphDB(AbstractGraphDB):
         # Parameters for the query
         parameters = {
             'user_id': user_id,
-            'vectordb_namespace': vectordb_namespace
+            'vectordb_namespace': vectordb_namespace,
+            'document_title': document_title
         }
 
         # Execute the query with the provided parameters

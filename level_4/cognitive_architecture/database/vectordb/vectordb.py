@@ -4,7 +4,7 @@ import logging
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from marshmallow import Schema, fields
-from loaders.loaders import _document_loader
+from database.vectordb.loaders.loaders import _document_loader
 # Add the parent directory to sys.path
 
 
