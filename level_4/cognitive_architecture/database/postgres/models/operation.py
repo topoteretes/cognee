@@ -13,8 +13,6 @@ class Operation(Base):
     user_id = Column(String, ForeignKey('users.id'), index=True)  # Link to User
     operation_type = Column(String, nullable=True)
     operation_status = Column(String, nullable=True)
-    operation_params = Column(String, nullable=True)
-    number_of_files = Column(Integer, nullable=True)
     test_set_id = Column(String, ForeignKey('test_sets.id'), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)

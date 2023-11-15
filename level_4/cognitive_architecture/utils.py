@@ -1,3 +1,6 @@
+import os
+import random
+import string
 import uuid
 
 from graphviz import Digraph
@@ -32,7 +35,44 @@ class Edge:
 #     dot.render("knowledge_graph.gv", view=True)
 #
 #
+def get_document_names(doc_input):
+    """
+    Get a list of document names.
 
+    This function takes doc_input, which can be a folder path, a single document file path, or a document name as a string.
+    It returns a list of document names based on the doc_input.
+
+    Args:
+        doc_input (str): The doc_input can be a folder path, a single document file path, or a document name as a string.
+
+    Returns:
+        list: A list of document names.
+
+    Example usage:
+        - Folder path: get_document_names(".data")
+        - Single document file path: get_document_names(".data/example.pdf")
+        - Document name provided as a string: get_document_names("example.docx")
+
+    """
+    if isinstance(doc_input, list):
+        return doc_input
+    if os.path.isdir(doc_input):
+        # doc_input is a folder
+        folder_path = doc_input
+        document_names = []
+        for filename in os.listdir(folder_path):
+            if os.path.isfile(os.path.join(folder_path, filename)):
+                document_names.append(filename)
+        return document_names
+    elif os.path.isfile(doc_input):
+        # doc_input is a single document file
+        return [os.path.basename(doc_input)]
+    elif isinstance(doc_input, str):
+        # doc_input is a document name provided as a string
+        return [doc_input]
+    else:
+        # doc_input is not valid
+        return []
 
 def format_dict(d):
     # Initialize an empty list to store formatted items
@@ -77,3 +117,12 @@ def create_edge_variable_mapping(edges):
         variable_name = f"edge{edge['source']}to{edge['target']}".lower()
         mapping[(edge['source'], edge['target'])] = variable_name
     return mapping
+
+
+
+def generate_letter_uuid(length=8):
+    """Generate a random string of uppercase letters with the specified length."""
+    letters = string.ascii_uppercase  # A-Z
+    return "".join(random.choice(letters) for _ in range(length))
+
+

@@ -485,23 +485,14 @@ class Neo4jGraphDB(AbstractGraphDB):
 
     def update_document_node_with_namespace(self, user_id: str, vectordb_namespace: str, document_title: str):
         # Generate the Cypher query
-        cypher_query = '''
-        MATCH (user:User {userId: $user_id})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {title: $document_title})
-        SET document.vectordbNamespace = $vectordb_namespace
+        cypher_query = f'''
+        MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{title: '{document_title}'}})
+        SET document.vectordbNamespace = '{vectordb_namespace}'
         RETURN document
         '''
 
-        # Parameters for the query
-        parameters = {
-            'user_id': user_id,
-            'vectordb_namespace': vectordb_namespace,
-            'document_title': document_title
-        }
 
-        # Execute the query with the provided parameters
-        result = self.query(cypher_query, parameters)
-
-        return result
+        return cypher_query
 
 
 
