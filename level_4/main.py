@@ -517,11 +517,11 @@ async def main():
         }
         loader_settings = {
             "format": "PDF",
-            "source": "URL",
-            "path": ["https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"],
+            "source": "DEVICE",
+            "path": [".data"],
         }
-        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-        # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store")
+        # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+        await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
         # await add_documents_to_graph_db(session, user_id)
         # memory_instance = Memory(namespace='SEMANTICMEMORY')
         # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
