@@ -146,6 +146,7 @@ class Memory:
         namespace: str = None,
         memory_id: str = None,
         memory_class = None,
+        job_id:str = None
     ) -> None:
         self.load_environment_variables()
         self.memory_id = memory_id
@@ -156,6 +157,7 @@ class Memory:
         self.namespace = namespace
         self.memory_instances = []
         self.memory_class = memory_class
+        self.job_id=job_id
         # self.memory_class = DynamicBaseMemory(
         #     "Memory", user_id, str(self.memory_id), index_name, db_type, namespace
         # )
@@ -194,10 +196,10 @@ class Memory:
             )
 
         memory_class = DynamicBaseMemory(
-            memory_label, user_id, str(memory_id), index_name=memory_label, db_type='weaviate', **kwargs
+            memory_label, user_id, str(memory_id), index_name=memory_label , db_type='weaviate', **kwargs
         )
 
-        return cls(user_id=user_id, session=session, memory_id=memory_id, memory_class=memory_class, **kwargs)
+        return cls(user_id=user_id, session=session, memory_id=memory_id, job_id =job_id, memory_class=memory_class, **kwargs)
 
     async def list_memory_classes(self):
         """
@@ -267,6 +269,7 @@ class Memory:
         """
         try:
             memory_id = str(uuid.uuid4())
+            logging.info("Job id %s", job_id)
             memory = MemoryModel(
                 id=memory_id,
                 user_id=user_id,
@@ -458,15 +461,15 @@ async def main():
         await memory.add_dynamic_memory_class("semanticmemory", "SEMANTICMEMORY")
         await memory.add_method_to_class(memory.semanticmemory_class, "add_memories")
         await memory.add_method_to_class(memory.semanticmemory_class, "fetch_memories")
-        # sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
-        #                                                 observation='some_observation', params=params, loader_settings=loader_settings)
+        sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
+                                                        observation='some_observation', params=params, loader_settings=loader_settings)
 
-        susu = await memory.dynamic_method_call(
-            memory.semanticmemory_class,
-            "fetch_memories",
-            observation="document summary",
-        )
-        print(susu)
+        # susu = await memory.dynamic_method_call(
+        #     memory.semanticmemory_class,
+        #     "fetch_memories",
+        #     observation="document summary",
+        # )
+        # print(susu)
 
     # Adding a dynamic memory class
     # dynamic_memory = memory.add_dynamic_memory_class("DynamicMemory", "ExampleNamespace")
