@@ -2,7 +2,7 @@
 # from pydantic_settings import BaseSettings
 # from marvin import ai_classifier
 # marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
-
+import logging
 import os
 
 print(os.getcwd())
@@ -430,8 +430,34 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return create_statements
 
+    async def get_document_categories(self, user_id: str):
+        """
+        Retrieve a list of categories for all documents associated with a given user.
 
+        This function executes a Cypher query in a Neo4j database to fetch the categories
+        of all 'Document' nodes that are linked to the 'SemanticMemory' node of the specified user.
 
+        Parameters:
+        - session (AsyncSession): The database session for executing the query.
+        - user_id (str): The unique identifier of the user.
+
+        Returns:
+        - List[str]: A list of document categories associated with the user.
+
+        Raises:
+        - Exception: If an error occurs during the database query execution.
+        """
+        try:
+            query = f'''
+            MATCH (user:User {{userId: {user_id} }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
+            RETURN document.documentCategory AS category
+            '''
+            result =  self.query(query)
+            categories = [record["category"] for record in result]
+            return categories
+        except Exception as e:
+            logging.error(f"An error occurred while retrieving document categories: {str(e)}")
+            return None
 
     def create_document_node_cypher(self, document_summary: dict, user_id: str) -> str:
         """
@@ -483,10 +509,10 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
-    def update_document_node_with_namespace(self, user_id: str, vectordb_namespace: str, document_title: str):
+    def update_document_node_with_namespace(self, user_id: str, vectordb_namespace: str, document_id: str):
         # Generate the Cypher query
         cypher_query = f'''
-        MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{title: '{document_title}'}})
+        MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{d_id: '{document_id}'}})
         SET document.vectordbNamespace = '{vectordb_namespace}'
         RETURN document
         '''
@@ -494,9 +520,35 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
+    def get_namespaces_by_document_category(self, user_id: str, category: str):
+        """
+        Retrieve a list of Vectordb namespaces for documents of a specified category associated with a given user.
 
+        This function executes a Cypher query in a Neo4j database to fetch the 'vectordbNamespace' of all 'Document' nodes
+        that are linked to the 'SemanticMemory' node of the specified user and belong to the specified category.
 
+        Parameters:
+        - user_id (str): The unique identifier of the user.
+        - category (str): The category to filter the documents by.
 
+        Returns:
+        - List[str]: A list of Vectordb namespaces for documents in the specified category.
+
+        Raises:
+        - Exception: If an error occurs during the database query execution.
+        """
+        try:
+            query = f'''
+            MATCH (user:User {{userId: '{user_id}'}})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
+            WHERE document.documentCategory = '{category}'
+            RETURN document.vectordbNamespace AS namespace
+            '''
+            result = self.query(query)
+            namespaces = [record["namespace"] for record in result]
+            return namespaces
+        except Exception as e:
+            logging.error(f"An error occurred while retrieving namespaces by document category: {str(e)}")
+            return None
 
 
 class NetworkXGraphDB(AbstractGraphDB):

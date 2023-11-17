@@ -20,8 +20,6 @@ class User(Base):
     memories = relationship("MemoryModel", back_populates="user", cascade="all, delete-orphan")
     operations = relationship("Operation", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
-    test_sets = relationship("TestSet", back_populates="user", cascade="all, delete-orphan")
-    test_outputs = relationship("TestOutput", back_populates="user", cascade="all, delete-orphan")
     metadatas = relationship("MetaDatas", back_populates="user")
 
     def __repr__(self):

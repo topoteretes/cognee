@@ -42,9 +42,12 @@ RUN apt-get update -q && \
 #RUN playwright install-deps
 
 WORKDIR /app
-COPY cognitive_architecture/ /app
+COPY cognitive_architecture/ /app/cognitive_architecture
+COPY main.py /app
+COPY api.py /app
 
-COPY cognitive_architecture/entrypoint.sh /app/entrypoint.sh
+
+COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/app/cognitive_architecture/entrypoint.sh"]

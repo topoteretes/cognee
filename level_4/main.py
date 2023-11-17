@@ -1,5 +1,7 @@
 # from marvin import ai_classifier
 # marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
+from pydantic import BaseModel
+
 from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
 from cognitive_architecture.database.postgres.models.memory import MemoryModel
 
@@ -12,7 +14,16 @@ from cognitive_architecture.utils import generate_letter_uuid
 import instructor
 from openai import OpenAI
 
-from level_4.cognitive_architecture.vectorstore_manager import Memory
+from cognitive_architecture.vectorstore_manager import Memory
+from cognitive_architecture.database.postgres.database_crud import fetch_job_id
+import uuid
+from cognitive_architecture.database.postgres.models.sessions import Session
+from cognitive_architecture.database.postgres.models.operation import Operation
+from cognitive_architecture.database.postgres.database_crud import session_scope, add_entity, update_entity, fetch_job_id
+from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
+
+from cognitive_architecture.database.postgres.models.docs import DocsModel
+from cognitive_architecture.database.postgres.models.memory import MemoryModel
 
 # Adds response_model to ChatCompletion
 # Allows the return of Pydantic model rather than raw JSON
@@ -59,6 +70,29 @@ async def get_vectordb_document_name(session: AsyncSession, user_id: str):
         logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
         return None
 
+from sqlalchemy.orm import selectinload
+
+async def get_vectordb_data(session: AsyncSession, user_id: str):
+    try:
+        # Query to join Operations with MemoryModel and DocsModel
+        result = await session.execute(
+            select(Operation)
+            .options(selectinload(Operation.memories), selectinload(Operation.docs))
+            .where((Operation.user_id == user_id) & (Operation.operation_status == 'SUCCESS'))
+            .order_by(Operation.created_at.desc())
+        )
+        operations = result.scalars().all()
+
+        # Extract memory names and document names and IDs
+        memory_names = [memory.memory_name for op in operations for memory in op.memories]
+        docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
+
+        return memory_names, docs
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving Vectordb data: {str(e)}")
+        return None, None
+
+
 # async def retrieve_job_by_id(session, user_id, job_id):
 #     try:
 #         result = await session.execute(
@@ -74,39 +108,44 @@ async def get_vectordb_document_name(session: AsyncSession, user_id: str):
 
 
 
-async def update_document_vectordb_namespace(postgres_session: AsyncSession, user_id: str, namespace: str = None, job_id:str=None):
-    """
-    Update the Document node with the Vectordb_namespace for the given user. If the namespace is not provided,
-    it will be retrieved from the PostgreSQL database.
-
-    Args:
-    postgres_session (AsyncSession): The async session for connecting to the PostgreSQL database.
-    user_id (str): The user's unique identifier.
-    namespace (str, optional): The Vectordb_namespace. If None, it will be retrieved from the database.
-
-    Returns:
-    The result of the update operation or None if an error occurred.
-    """
-    vectordb_namespace = namespace
-
-    # Retrieve namespace from the database if not provided
-    if vectordb_namespace is None:
-        vectordb_namespace = await get_vectordb_namespace(postgres_session, user_id)
-        if not vectordb_namespace:
-            logging.error("Vectordb_namespace could not be retrieved.")
-            return None
-    from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
-    # Example initialization (replace with your actual connection details)
-    neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
-    results = []
-    for namespace in vectordb_namespace:
-        update_result = neo4j_graph_db.update_document_node_with_namespace(user_id, namespace)
-        results.append(update_result)
-    return results
+# async def update_document_vectordb_namespace(postgres_session: AsyncSession, user_id: str, namespace: str = None, job_id:str=None):
+#     """
+#     Update the Document node with the Vectordb_namespace for the given user. If the namespace is not provided,
+#     it will be retrieved from the PostgreSQL database.
+#
+#     Args:
+#     postgres_session (AsyncSession): The async session for connecting to the PostgreSQL database.
+#     user_id (str): The user's unique identifier.
+#     namespace (str, optional): The Vectordb_namespace. If None, it will be retrieved from the database.
+#
+#     Returns:
+#     The result of the update operation or None if an error occurred.
+#     """
+#     vectordb_namespace = namespace
+#
+#     # Retrieve namespace from the database if not provided
+#     if vectordb_namespace is None:
+#         vectordb_namespace = await get_vectordb_namespace(postgres_session, user_id)
+#         if not vectordb_namespace:
+#             logging.error("Vectordb_namespace could not be retrieved.")
+#             return None
+#     from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
+#     # Example initialization (replace with your actual connection details)
+#     neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
+#     results = []
+#     for namespace in vectordb_namespace:
+#         update_result = neo4j_graph_db.update_document_node_with_namespace(user_id, namespace)
+#         results.append(update_result)
+#     return results
 
 
 
 async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job_id:str=None, loader_settings:dict=None):
+    namespace_id = str(generate_letter_uuid()) + "_" + "SEMANTICMEMORY"
+    namespace_class = namespace_id + "_class"
+
+    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, memory_label=namespace_id)
+
     if job_id is None:
         job_id = str(uuid.uuid4())
 
@@ -117,7 +156,6 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
                 user_id=user_id,
                 operation_status="RUNNING",
                 operation_type="DATA_LOAD",
-                test_set_id="none",
             ),
         )
 
@@ -131,14 +169,13 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
                 doc_name=doc
             )
         )
-        namespace_id = str(generate_letter_uuid()) + "_" + "SEMANTICMEMORY"
-        namespace_class = namespace_id + "_class"
-        memory = await Memory.create_memory(user_id, session, namespace=namespace_class)
+
 
         # Managing memory attributes
         existing_user = await Memory.check_existing_user(user_id, session)
         print("here is the existing user", existing_user)
         await memory.manage_memory_attributes(existing_user)
+
 
         params = {
             "version": "1.0",
@@ -153,11 +190,23 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
             "validity_start": "2023-08-01",
             "validity_end": "2024-07-31",
         }
+        print("Namespace id is %s", namespace_id)
+        await memory.add_dynamic_memory_class(namespace_id.lower(), namespace_id)
 
         dynamic_memory_class = getattr(memory, namespace_class.lower(), None)
 
-        await memory.add_dynamic_memory_class(dynamic_memory_class, namespace_class)
-        await memory.add_method_to_class(dynamic_memory_class, "add_memories")
+        methods_to_add = ["add_memories", "fetch_memories", "delete_memories"]
+
+        if dynamic_memory_class is not None:
+            for method_name in methods_to_add:
+                await memory.add_method_to_class(dynamic_memory_class, method_name)
+                print(f"Memory method {method_name} has been added")
+        else:
+            print(f"No attribute named  in memory.")
+
+        print("Available memory classes:", await memory.list_memory_classes())
+
+        # await memory.add_method_to_class(dynamic_memory_class, "add_memories")
         # await memory.add_method_to_class(memory.semanticmemory_class, "fetch_memories")
         sss = await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
                                                         observation='some_observation', params=params, loader_settings=loader_settings)
@@ -166,9 +215,8 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
             Operation(
                 id=job_id,
                 user_id=user_id,
-                operation_status="FINISHED",
+                operation_status="SUCCESS",
                 operation_type="DATA_LOAD",
-                test_set_id="none",
             ),
         )
 
@@ -183,7 +231,6 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
             user_id=user_id,
             operation_status="RUNNING",
             operation_type="USER_QUERY_TO_GRAPH_DB",
-            test_set_id="none",
         ),
     )
 
@@ -199,7 +246,6 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
             user_id=user_id,
             operation_status="SUCCESS",
             operation_type="USER_QUERY_TO_GRAPH_DB",
-            test_set_id="none",
         ),
     )
     return result
@@ -210,20 +256,103 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
 async def add_documents_to_graph_db(postgres_session: AsyncSession, user_id: str):
     """"""
     try:
-        await update_document_vectordb_namespace(postgres_session, user_id)
+        # await update_document_vectordb_namespace(postgres_session, user_id)
         from cognitive_architecture.classifiers.classifier import classify_documents
 
+        memory_names, docs = await get_vectordb_data(postgres_session, user_id)
 
-        classification = await classify_documents("Lord of the Rings")
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                      password=config.graph_database_password)
-        rs = neo4j_graph_db.create_document_node_cypher(classification, user_id)
-        neo4j_graph_db.query(rs, classification)
-        namespace_title_dict = get_vectordb_namespace #fix this
-        neo4j_graph_db.update_document_node_with_namespace(user_id, namespace=, document_title="Lord of the Rings")
+        for doc, memory_name in zip(docs, memory_names):
+
+
+            doc_name, doc_id = doc
+
+
+            classification = await classify_documents(doc_name, document_id=doc_id)
+            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                          password=config.graph_database_password)
+            rs = neo4j_graph_db.create_document_node_cypher(classification, user_id)
+            neo4j_graph_db.query(rs, classification)
+
+            # select doc from the store
+            neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name, document_id=doc_id)
 
     except:
         pass
+
+
+async def user_context_enrichment(session, user_id, query):
+    """"""
+    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                  password=config.graph_database_password)
+
+    semantic_mem = neo4j_graph_db.retrieve_semantic_memory(user_id=user_id)
+    episodic_mem = neo4j_graph_db.retrieve_episodic_memory(user_id=user_id)
+    context = f""" You are a memory system that uses cognitive architecture to enrich the user context.
+    You have access to the following information:
+    EPISODIC MEMORY: {episodic_mem}
+    SEMANTIC MEMORY: {semantic_mem}
+    PROCEDURAL MEMORY: NULL
+    The original user query: {query}
+    """
+
+    classifier_prompt = """ Your task is to determine if any of the following document categories are relevant to the user query and context: {query} Context is: {context}
+    Document categories: {document_categories}"""
+    from cognitive_architecture.classifiers.classifier import classify_call
+
+    document_categories = neo4j_graph_db.get_document_categories(user_id=user_id)
+    relevant_categories = await classify_call( query, context, document_types=document_categories)
+    fetch_namespace_from_graph = neo4j_graph_db.get_namespaces_by_document_category(user_id=user_id, category=relevant_categories)
+
+    results = []
+
+    for namespace in fetch_namespace_from_graph:
+        memory = await Memory.create_memory(user_id, session, namespace=namespace)
+
+        # Managing memory attributes
+        existing_user = await Memory.check_existing_user(user_id, session)
+        print("here is the existing user", existing_user)
+        await memory.manage_memory_attributes(existing_user)
+        namespace_class = namespace
+        memory = await Memory.create_memory(user_id, session, namespace=namespace_class)
+
+        # Managing memory attributes
+        existing_user = await Memory.check_existing_user(user_id, session)
+        print("here is the existing user", existing_user)
+        await memory.manage_memory_attributes(existing_user)
+
+
+        dynamic_memory_class = getattr(memory, namespace_class.lower(), None)
+
+        await memory.add_dynamic_memory_class(dynamic_memory_class, namespace_class)
+        await memory.add_method_to_class(dynamic_memory_class, "fetch_memories")
+        raw_document_output = await memory.dynamic_method_call(
+            memory.semanticmemory_class,
+            "fetch_memories",
+            observation=context,
+        )
+        from openai import OpenAI
+        import instructor
+
+        # Enables `response_model`
+        client = instructor.patch(OpenAI())
+
+        format_query_via_gpt = f""" Provide an answer to the user query: {query} Context is: {context}, Document store information is {raw_document_output} """
+
+        class UserResponse(BaseModel):
+            response: str
+
+
+        user = client.chat.completions.create(
+            model=config.model,
+            response_model=UserResponse,
+            messages=[
+                {"role": "user", "content": format_query_via_gpt},
+            ]
+        )
+
+        results.append(user.response)
+
+    return results
 
     # query_input = "I walked in the forest yesterday and added to my list I need to buy some milk in the store"
     #
@@ -283,16 +412,7 @@ async def add_documents_to_graph_db(postgres_session: AsyncSession, user_id: str
     # }
     #
     # execute_cypher_query(rs, parameters)
-from cognitive_architecture.database.postgres.database_crud import fetch_job_id
-import uuid
-from cognitive_architecture.database.postgres.models.sessions import Session
-from cognitive_architecture.database.postgres.models.operation import Operation
-from cognitive_architecture.database.postgres.database_crud import session_scope, add_entity, update_entity, fetch_job_id
-from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
-from cognitive_architecture.database.postgres.models.testset import TestSet
-from cognitive_architecture.database.postgres.models.testoutput import TestOutput
-from cognitive_architecture.database.postgres.models.docs import DocsModel
-from cognitive_architecture.database.postgres.models.memory import MemoryModel
+
 async def main():
     user_id = "user"
 
@@ -327,7 +447,7 @@ async def main():
         # await update_document_vectordb_namespace(session, user_id)
         # from cognitive_architecture.graph_database.graph import Neo4jGraphDB
         # # Example initialization (replace with your actual connection details)
-        neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
+        # neo4j_graph_db = Neo4jGraphDB(url='bolt://localhost:7687', username='neo4j', password='pleaseletmein')
         # # Generate the Cypher query for a specific user
         # user_id = 'user123'  # Replace with the actual user ID
         #cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id,"I walked in the forest yesterday and added to my list I need to buy some milk in the store")
@@ -356,11 +476,11 @@ async def main():
         # neo4j_graph_db.query(rs, call_of_the_wild_summary)
         # print(cypher_query)
 
-        from cognitive_architecture.classifiers.classifier import classify_documents
-
-        ff = await classify_documents("Lord of the Rings")
-
-        print(ff)
+        # from cognitive_architecture.classifiers.classifier import classify_documents
+        #
+        # ff = await classify_documents("Lord of the Rings")
+        #
+        # print(ff)
 
         # vector_db_namespaces = await get_vectordb_namespace(session, user_id)
         #
@@ -400,8 +520,9 @@ async def main():
         loader_settings = {
             "format": "PDF",
             "source": "URL",
-            "path": "https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf",
+            "path": ["https://www.ibiblio.org/ebooks/London/Call%20of%20Wild.pdf"],
         }
+        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
         # memory_instance = Memory(namespace='SEMANTICMEMORY')
         # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
         # from cognitive_architecture.vectorstore_manager import Memory

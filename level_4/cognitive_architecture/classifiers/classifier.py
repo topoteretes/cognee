@@ -21,11 +21,11 @@ from langchain.document_loaders import TextLoader
 from langchain.document_loaders import DirectoryLoader
 
 
-async def classify_documents(query):
+async def classify_documents(query, document_id):
 
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a summarizer and classifier. Determine what book this is and where does it belong in the output : {query}"""
+        """You are a summarizer and classifier. Determine what book this is and where does it belong in the output : {query}, Id: {d_id}"""
     )
     json_structure = [{
         "name": "summarizer",
@@ -44,13 +44,17 @@ async def classify_documents(query):
                 "Summary": {
                     "type": "string",
                     "description": "The summary of the document"
+                },
+                "d_id": {
+                    "type": "string",
+                    "description": "The id of the document"
                 }
 
 
-            }, "required": ["DocumentCategory", "Title", "Summary"] }
+            }, "required": ["DocumentCategory", "Title", "Summary","d_id"] }
     }]
     chain_filter = prompt_classify | llm.bind(function_call={"name": "summarizer"}, functions=json_structure)
-    classifier_output = await chain_filter.ainvoke({"query": query})
+    classifier_output = await chain_filter.ainvoke({"query": query, "d_id": document_id})
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
@@ -68,5 +72,33 @@ def classify_retrieval():
 
 
 # classify documents according to type of document
-def classify_call():
-    pass
+async def classify_call(query, context, document_types):
+
+    llm = ChatOpenAI(temperature=0, model=config.model)
+    prompt_classify = ChatPromptTemplate.from_template(
+        """You are a  classifier. Determine what document types are relevant : {query}, Context: {context}, Book_types:{document_types}"""
+    )
+    json_structure = [{
+        "name": "classifier",
+        "description": "Classification",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "DocumentCategory": {
+                    "type": "string",
+                    "description": "The classification of documents in groups such as legal, medical, etc."
+                }
+
+
+            }, "required": ["DocumentCategory"] }
+    }]
+    chain_filter = prompt_classify | llm.bind(function_call={"name": "classifier"}, functions=json_structure)
+    classifier_output = await chain_filter.ainvoke({"query": query, "context": context, "document_types": document_types})
+    arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
+    print("This is the arguments string", arguments_str)
+    arguments_dict = json.loads(arguments_str)
+    classfier_value = arguments_dict.get('summarizer', None)
+
+    print("This is the classifier value", classfier_value)
+
+    return classfier_value

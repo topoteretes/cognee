@@ -16,14 +16,12 @@ from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
 
 
-from database.postgres.models.sessions import Session
-from database.postgres.models.testset import TestSet
-from database.postgres.models.testoutput import TestOutput
-from database.postgres.models.metadatas import MetaDatas
-from database.postgres.models.operation import Operation
-from database.postgres.models.docs import DocsModel
+from cognitive_architecture.database.postgres.models.sessions import Session
+from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
+from cognitive_architecture.database.postgres.models.operation import Operation
+from cognitive_architecture.database.postgres.models.docs import DocsModel
 from sqlalchemy.orm import sessionmaker
-from database.postgres.database import engine
+from cognitive_architecture.database.postgres.database import engine
 load_dotenv()
 from typing import Optional
 import time
@@ -33,7 +31,7 @@ tracemalloc.start()
 
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
-from database.vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB
+from cognitive_architecture.database.vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB
 from langchain.schema import Document
 import uuid
 import weaviate

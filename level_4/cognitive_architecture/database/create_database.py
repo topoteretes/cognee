@@ -3,8 +3,15 @@
 # # Get the parent directory of your script and add it to sys.path
 # parent_dir = os.path.dirname(script_dir)
 # sys.path.append(parent_dir)
+from postgres.models import memory
+from postgres.models import metadatas
+from postgres.models import operation
+from postgres.models import sessions
+from postgres.models import user
+from postgres.models import docs
 
-from database.postgres.database import Base
+
+from postgres.database import Base
 
 from sqlalchemy import create_engine, text
 import psycopg2
@@ -61,6 +68,8 @@ if __name__ == "__main__":
         host = os.getenv('POSTGRES_HOST_DOCKER')
 
     engine = create_admin_engine(username, password, host, database_name)
+
+    print(Base.metadata.tables)
 
     if not database_exists(username, password, host, database_name):
         print(f"Database {database_name} does not exist. Creating...")

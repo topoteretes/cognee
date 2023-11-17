@@ -3,7 +3,7 @@ import fitz
 import os
 import sys
 
-from database.vectordb.chunkers.chunkers import chunk_data
+from cognitive_architecture.database.vectordb.chunkers.chunkers import chunk_data
 
 from langchain.document_loaders import UnstructuredURLLoader
 from langchain.document_loaders import DirectoryLoader
@@ -17,8 +17,7 @@ async def _document_loader( observation: str, loader_settings: dict):
     loader_strategy = loader_settings.get("strategy", "VANILLA")
     chunk_size = loader_settings.get("chunk_size", 500)
     chunk_overlap = loader_settings.get("chunk_overlap", 20)
-    import logging
-    import os
+
 
     logging.info("LOADER SETTINGS %s", loader_settings)
 

@@ -5,8 +5,6 @@ from .models.sessions import Session
 from .models.memory import MemoryModel
 from .models.user import User
 from .models.operation import Operation
-from .models.testset import TestSet
-from .models.testoutput import TestOutput
 from .models.metadatas import MetaDatas
 from .models.docs import DocsModel
 

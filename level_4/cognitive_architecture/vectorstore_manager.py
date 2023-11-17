@@ -9,12 +9,14 @@ import os
 print(os.getcwd())
 
 
-from database.postgres.models.user import User
-from database.postgres.models.memory import MemoryModel
+
+
+from cognitive_architecture.database.postgres.models.user import User
+from cognitive_architecture.database.postgres.models.memory import MemoryModel
 
 import ast
 import tracemalloc
-from database.postgres.database_crud import add_entity
+from cognitive_architecture.database.postgres.database_crud import add_entity
 
 tracemalloc.start()
 
@@ -26,9 +28,9 @@ load_dotenv()
 
 
 
-from database.vectordb.basevectordb import BaseMemory
+from cognitive_architecture.database.vectordb.basevectordb import BaseMemory
 
-from config import Config
+from cognitive_architecture.config import Config
 
 config = Config()
 config.load()

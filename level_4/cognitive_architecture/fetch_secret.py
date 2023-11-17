@@ -1,6 +1,17 @@
 import os
 from dotenv import load_dotenv
-from api import start_api_server
+import os
+import sys
+
+# Get the directory that contains your script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Get the parent directory
+parent_dir = os.path.dirname(current_dir)
+
+# Add the parent directory to sys.path
+sys.path.insert(0, parent_dir)
+
 
 # API_ENABLED = os.environ.get("API_ENABLED", "False").lower() == "true"
 import boto3

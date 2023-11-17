@@ -1,7 +1,7 @@
 from langchain.document_loaders import PyPDFLoader
 import sys, os
 
-from shared.chunk_strategy import ChunkStrategy
+from cognitive_architecture.shared.chunk_strategy import ChunkStrategy
 import re
 def chunk_data(chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
 
