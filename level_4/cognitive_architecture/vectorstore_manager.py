@@ -168,7 +168,7 @@ class Memory:
         self.OPENAI_API_KEY = config.openai_key
 
     @classmethod
-    async def create_memory(cls, user_id: str,  session, memory_label:str, **kwargs):
+    async def create_memory(cls, user_id: str,  session, job_id, memory_label:str, **kwargs):
         """
         Class method that acts as a factory method for creating Memory instances.
         It performs necessary DB checks or updates before instance creation.
@@ -180,7 +180,7 @@ class Memory:
             # Handle existing user scenario...
             memory_id = await cls.check_existing_memory(user_id,memory_label, session)
             if memory_id is None:
-                memory_id = await cls.handle_new_memory(user_id, session, memory_name= memory_label)
+                memory_id = await cls.handle_new_memory(user_id = user_id, session= session,job_id=job_id, memory_name= memory_label)
             logging.info(
                 f"Existing user {user_id} found in the DB. Memory ID: {memory_id}"
             )
@@ -188,7 +188,7 @@ class Memory:
             # Handle new user scenario...
             await cls.handle_new_user(user_id, session)
 
-            memory_id = await cls.handle_new_memory(user_id, session, memory_name= memory_label)
+            memory_id = await cls.handle_new_memory(user_id =user_id, session=session, job_id=job_id, memory_name= memory_label)
             logging.info(
                 f"New user {user_id} created in the DB. Memory ID: {memory_id}"
             )

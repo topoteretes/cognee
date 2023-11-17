@@ -87,21 +87,15 @@ async def add_memory(
             content={"response": {"error": str(e)}}, status_code=503
         )
 
-@app.post("/user-to-graph-query")
-async def generate_cypher_query(payload: Payload):
+@app.post("/user-query-to-graph")
+async def user_query_to_graph(payload: Payload):
     try:
-
-
-        from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
-        neo4j_graph_db = Neo4jGraphDB(config.graph_database_url, config.graph_database_username, config.graph_database_password)
+        from main import user_query_to_graph_db
         decoded_payload = payload.payload
-        cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(decoded_payload['user_id'],
-                                                                                                decoded_payload['prompt'])
-
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await neo4j_graph_db.query(cypher_query, session)
+            result = await user_query_to_graph_db(decoded_payload['user_id'], decoded_payload['query'], session)
 
         return result
 
