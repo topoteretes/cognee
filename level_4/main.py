@@ -24,6 +24,7 @@ from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
 
 from cognitive_architecture.database.postgres.models.docs import DocsModel
 from cognitive_architecture.database.postgres.models.memory import MemoryModel
+from level_4.cognitive_architecture.database.postgres.models.user import User
 
 # Adds response_model to ChatCompletion
 # Allows the return of Pydantic model rather than raw JSON
@@ -150,10 +151,15 @@ async def get_vectordb_data(session: AsyncSession, user_id: str):
 async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job_id:str=None, loader_settings:dict=None):
     namespace_id = str(generate_letter_uuid()) + "_" + "SEMANTICMEMORY"
     namespace_class = namespace_id + "_class"
+
+    try:
+        new_user = User(id=user_id)
+        await add_entity(session, new_user)
+    except:
+        pass
+
     if job_id is None:
         job_id = str(uuid.uuid4())
-
-    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id=job_id, memory_label=namespace_id)
 
     await add_entity(
         session,
@@ -164,6 +170,10 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
             operation_type="DATA_LOAD",
         ),
     )
+
+    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id=job_id, memory_label=namespace_id)
+
+
 
 
     document_names = get_document_names(loader_settings.get("path", "None"))
@@ -216,6 +226,12 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
 
 
 async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_input: str):
+
+    try:
+        new_user = User(id=user_id)
+        await add_entity(session, new_user)
+    except:
+        pass
 
     job_id = str(uuid.uuid4())
 
