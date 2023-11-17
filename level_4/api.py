@@ -88,7 +88,7 @@ async def add_memory(
         )
 
 @app.post("/user-to-graph-query")
-async def generate_cypher_query(payload: Payload,):
+async def generate_cypher_query(payload: Payload):
     try:
 
 

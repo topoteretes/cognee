@@ -44,6 +44,7 @@ segment-analytics-python = "^2.2.3"
 pdf2image = "^1.16.3"
 instructor = "^0.3.4"
 networkx = "^3.2.1"
+graphviz = "^0.20.1"
 
 
 

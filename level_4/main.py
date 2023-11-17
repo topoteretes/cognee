@@ -8,7 +8,7 @@ from cognitive_architecture.database.postgres.models.memory import MemoryModel
 import os
 from dotenv import load_dotenv
 
-from level_4.cognitive_architecture.database.postgres.database_crud import session_scope
+from cognitive_architecture.database.postgres.database_crud import session_scope
 from cognitive_architecture.database.postgres.database import AsyncSessionLocal
 from cognitive_architecture.utils import generate_letter_uuid
 import instructor
