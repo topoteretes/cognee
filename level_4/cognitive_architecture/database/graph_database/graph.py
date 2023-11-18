@@ -192,21 +192,20 @@ class Neo4jGraphDB(AbstractGraphDB):
 
     def query(self, query, params=None):
         return self.graph.query(query, params)
-        # Initialize the Neo4j connection here
+
 
 
     def create_base_cognitive_architecture(self, user_id: str):
         # Create the user and memory components if they don't exist
         user_memory_cypher = f"""
         MERGE (user:User {{userId: '{user_id}'}})
-        MERGE (semantic:SemanticMemory {{userId: '{user_id}'}})
-        MERGE (episodic:EpisodicMemory {{userId: '{user_id}'}})
-        MERGE (buffer:Buffer {{userId: '{user_id}'}})
+        MERGE (semantic:SemanticMemory {{userId: '{user_id}', name: 'SemanticMemory}}')
+        MERGE (episodic:EpisodicMemory {{userId: '{user_id}', name: 'EpisodicMemory'}})
+        MERGE (buffer:Buffer {{userId: '{user_id}', name: 'Buffer}})
         MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(semantic)
         MERGE (user)-[:HAS_EPISODIC_MEMORY]->(episodic)
         MERGE (user)-[:HAS_BUFFER]->(buffer)
         """
-
         return user_memory_cypher
 
     def user_query_to_edges_and_nodes(self, input: str) ->KnowledgeGraph:
@@ -457,6 +456,35 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         except Exception as e:
             logging.error(f"An error occurred while retrieving document categories: {str(e)}")
+            return None
+
+    async def get_document_ids(self, user_id: str, category: str):
+        """
+        Retrieve a list of document IDs for a specific category associated with a given user.
+
+        This function executes a Cypher query in a Neo4j database to fetch the IDs
+        of all 'Document' nodes in a specific category that are linked to the 'SemanticMemory' node of the specified user.
+
+        Parameters:
+        - user_id (str): The unique identifier of the user.
+        - category (str): The specific document category to filter by.
+
+        Returns:
+        - List[str]: A list of document IDs in the specified category associated with the user.
+
+        Raises:
+        - Exception: If an error occurs during the database query execution.
+        """
+        try:
+            query = f'''
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{documentCategory: '{category}'}})
+            RETURN document.d_id AS d_id
+            '''
+            logging.info(f"Generated Cypher query: {query}")
+            return query
+
+        except Exception as e:
+            logging.error(f"An error occurred while retrieving document IDs: {str(e)}")
             return None
 
     def create_document_node_cypher(self, document_summary: dict, user_id: str) -> str:
