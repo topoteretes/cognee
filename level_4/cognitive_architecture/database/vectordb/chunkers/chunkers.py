@@ -15,8 +15,11 @@ def chunk_data(chunk_strategy=None, source_data=None, chunk_size=None, chunk_ove
         chunked_data = chunk_by_sentence(source_data, chunk_size, chunk_overlap)
     elif chunk_strategy == ChunkStrategy.EXACT:
         chunked_data = chunk_data_exact(source_data, chunk_size, chunk_overlap)
+    elif chunk_strategy == ChunkStrategy.SUMMARY:
+        chunked_data = summary_chunker(source_data, chunk_size, chunk_overlap)
     else:
         chunked_data = vanilla_chunker(source_data, chunk_size, chunk_overlap)
+
     return chunked_data
 
 
@@ -35,6 +38,37 @@ def vanilla_chunker(source_data, chunk_size=100, chunk_overlap=20):
         pages = text_splitter.create_documents(source_data.content)
     # pages = source_data.load_and_split()
     return pages
+
+def summary_chunker(source_data, chunk_size=400, chunk_overlap=20):
+    """
+    Chunk the given source data into smaller parts, returning the first five and last five chunks.
+
+    Parameters:
+    - source_data (str): The source data to be chunked.
+    - chunk_size (int): The size of each chunk.
+    - chunk_overlap (int): The overlap between consecutive chunks.
+
+    Returns:
+    - List: A list containing the first five and last five chunks of the chunked source data.
+    """
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len
+    )
+
+    try:
+        pages = text_splitter.create_documents([source_data])
+    except:
+        pages = text_splitter.create_documents(source_data.content)
+
+    # Return the first 5 and last 5 chunks
+    if len(pages) > 10:
+        return pages[:5] + pages[-5:]
+    else:
+        return pages  # Return all chunks if there are 10 or fewer
+
 def chunk_data_exact(data_chunks, chunk_size, chunk_overlap):
     data = "".join(data_chunks)
     chunks = []

@@ -5,3 +5,4 @@ class ChunkStrategy(Enum):
     PARAGRAPH = 'paragraph'
     SENTENCE = 'sentence'
     VANILLA = 'vanilla'
+    SUMMARY = 'summary'

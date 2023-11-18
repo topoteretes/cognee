@@ -1,3 +1,5 @@
+import logging
+
 from langchain.prompts import ChatPromptTemplate
 import json
 
@@ -21,11 +23,17 @@ from langchain.document_loaders import TextLoader
 from langchain.document_loaders import DirectoryLoader
 
 
-async def classify_documents(query, document_id):
+async def classify_documents(query:str, document_id:str, loader_settings:dict):
+    from ..database.vectordb.loaders.loaders import _document_loader
+
+
+
+    document_context  = await _document_loader(query, loader_settings)
+    logging.info("This is the document context", document_context)
 
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a summarizer and classifier. Determine what book this is and where does it belong in the output : {query}, Id: {d_id}"""
+        """You are a summarizer and classifier. Determine what book this is and where does it belong in the output : {query}, Id: {d_id} Document context is: {context}"""
     )
     json_structure = [{
         "name": "summarizer",
@@ -54,7 +62,7 @@ async def classify_documents(query, document_id):
             }, "required": ["DocumentCategory", "Title", "Summary","d_id"] }
     }]
     chain_filter = prompt_classify | llm.bind(function_call={"name": "summarizer"}, functions=json_structure)
-    classifier_output = await chain_filter.ainvoke({"query": query, "d_id": document_id})
+    classifier_output = await chain_filter.ainvoke({"query": query, "d_id": document_id, "context": str(document_context)})
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
@@ -97,7 +105,7 @@ async def classify_call(query, context, document_types):
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
-    classfier_value = arguments_dict.get('summarizer', None)
+    classfier_value = arguments_dict.get('DocumentCategory', None)
 
     print("This is the classifier value", classfier_value)
 

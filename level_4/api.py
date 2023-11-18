@@ -13,7 +13,7 @@ from cognitive_architecture.database.postgres.database import AsyncSessionLocal
 from cognitive_architecture.database.postgres.database_crud import session_scope
 from cognitive_architecture.vectorstore_manager import Memory
 from dotenv import load_dotenv
-
+from main import add_documents_to_graph_db
 from cognitive_architecture.config import Config
 
 # Set up logging
@@ -101,65 +101,42 @@ async def user_query_to_graph(payload: Payload):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-@app.post("/user-to-document-summary")
-async def generate_document_summary(payload: Payload,):
-    try:
-        from database.graph_database.graph import Neo4jGraphDB
-        neo4j_graph_db = Neo4jGraphDB(config.graph_database_url, config.graph_database_username, config.graph_database_password)
-        decoded_payload = payload.payload
-        call_of_the_wild_summary = {
-            "user_id": decoded_payload["user_id"],
-            "document_category": "Classic Literature",
-            "title": "The Call of the Wild",
-            "summary": (
-                "'The Call of the Wild' is a novel by Jack London set in the Yukon during the 1890s Klondike "
-                "Gold Rush—a period when strong sled dogs were in high demand. The novel's central character "
-                "is a dog named Buck, a domesticated dog living at a ranch in the Santa Clara Valley of California "
-                "as the story opens. Stolen from his home and sold into the brutal existence of an Alaskan sled dog, "
-                "he reverts to atavistic traits. Buck is forced to adjust to, and survive, cruel treatments and fight "
-                "to dominate other dogs in a harsh climate. Eventually, he sheds the veneer of civilization, relying "
-                "on primordial instincts and lessons he learns, to emerge as a leader in the wild. London drew on his "
-                "own experiences in the Klondike, and the book provides a snapshot of the epical gold rush and the "
-                "harsh realities of life in the wilderness. The novel explores themes of morality versus instinct, "
-                "the struggle for survival in the natural world, and the intrusion of civilization on the wilderness. "
-                "As Buck's wild nature is awakened, he rises to become a respected and feared leader in the wild, "
-                "answering the primal call of nature."
-            )
-        }
-        cypher_query = neo4j_graph_db.create_document_node_cypher(call_of_the_wild_summary, decoded_payload['user_id'])
 
-        neo4j_graph_db.query(cypher_query, call_of_the_wild_summary)
+
+@app.post("/document_to_graph_db")
+async def document_to_graph_db(payload: Payload):
+    try:
+        decoded_payload = payload.payload
 
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await neo4j_graph_db.query(cypher_query, session)
-
+            result = await add_documents_to_graph_db(session, decoded_payload['user_id'], decoded_payload['settings'])
         return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/user-document-vectordb")
-async def generate_document_to_vector_db(payload: Payload, ):
-    try:
-        from database.graph_database.graph import Neo4jGraphDB
-        neo4j_graph_db = Neo4jGraphDB(config.graph_database_url, config.graph_database_username,
-                                      config.graph_database_password)
-        decoded_payload = payload.payload
-
-
-        neo4j_graph_db.update_document_node_with_namespace(decoded_payload['user_id'], document_title="The Call of the Wild")
-
-        # Execute the query - replace this with the actual execution method
-        # async with session_scope(session=AsyncSessionLocal()) as session:
-        #     # Assuming you have a method in Neo4jGraphDB to execute the query
-        #     result = await neo4j_graph_db.query(cypher_query, session)
-        #
-        # return result
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# @app.post("/user-document-vectordb")
+# async def generate_document_to_vector_db(payload: Payload, ):
+#     try:
+#         from database.graph_database.graph import Neo4jGraphDB
+#         neo4j_graph_db = Neo4jGraphDB(config.graph_database_url, config.graph_database_username,
+#                                       config.graph_database_password)
+#         decoded_payload = payload.payload
+#
+#
+#         neo4j_graph_db.update_document_node_with_namespace(decoded_payload['user_id'], document_title="The Call of the Wild")
+#
+#         # Execute the query - replace this with the actual execution method
+#         # async with session_scope(session=AsyncSessionLocal()) as session:
+#         #     # Assuming you have a method in Neo4jGraphDB to execute the query
+#         #     result = await neo4j_graph_db.query(cypher_query, session)
+#         #
+#         # return result
+#
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 

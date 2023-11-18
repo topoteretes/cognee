@@ -4,6 +4,11 @@ from sqlalchemy import Column, String, DateTime
 from sqlalchemy.orm import relationship
 import os
 import sys
+from .memory import  MemoryModel
+from .operation import Operation
+from .sessions import Session
+from .metadatas import MetaDatas
+from .docs import DocsModel
 
 from ..database  import Base
 

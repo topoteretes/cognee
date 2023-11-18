@@ -376,7 +376,7 @@ class Neo4jGraphDB(AbstractGraphDB):
             return f"An error occurred: {str(e)}"
     def retrieve_semantic_memory(self, user_id: str):
         query = f"""
-        MATCH (user:User {{userId: {user_id} }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
+        MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
         MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
         RETURN knowledge
         """
@@ -449,12 +449,12 @@ class Neo4jGraphDB(AbstractGraphDB):
         """
         try:
             query = f'''
-            MATCH (user:User {{userId: {user_id} }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
             RETURN document.documentCategory AS category
             '''
-            result =  self.query(query)
-            categories = [record["category"] for record in result]
-            return categories
+            logging.info(f"Generated Cypher query: {query}")
+            return query
+
         except Exception as e:
             logging.error(f"An error occurred while retrieving document categories: {str(e)}")
             return None
@@ -477,35 +477,38 @@ class Neo4jGraphDB(AbstractGraphDB):
         # Validate the input parameters
         if not isinstance(document_summary, dict):
             raise ValueError("The document_summary must be a dictionary.")
-        if not all(key in document_summary for key in ['document_category', 'title', 'summary']):
+        if not all(key in document_summary for key in ['DocumentCategory', 'Title', 'Summary', 'd_id']):
             raise ValueError("The document_summary dictionary is missing required keys.")
         if not isinstance(user_id, str) or not user_id:
             raise ValueError("The user_id must be a non-empty string.")
 
         # Escape single quotes in the document summary data (if not using parameters)
-        # title = document_summary['title'].replace("'", "\\'")
-        # summary = document_summary['summary'].replace("'", "\\'")
-        # document_category = document_summary['document_category'].replace("'", "\\'")
+        title = document_summary['Title'].replace("'", "\\'")
+        summary = document_summary['Summary'].replace("'", "\\'")
+        document_category = document_summary['DocumentCategory'].replace("'", "\\'")
+        d_id = document_summary['d_id'].replace("'", "\\'")
 
         # Generate the Cypher query using parameters
         cypher_query = f'''
         // Ensure the User node exists
-        MERGE (user:User {{ userId: $user_id }})
+        MERGE (user:User {{ userId: '{user_id}' }})
     
         // Ensure the SemanticMemory node exists and is connected to the User
-        MERGE (semantic:SemanticMemory {{ userId: $user_id }})
+        MERGE (semantic:SemanticMemory {{ userId: '{user_id}' }})
         MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(semantic)
     
         // Create the Document node with its properties
         CREATE (document:Document {{
-            title: $title,
-            summary: $summary,
-            documentCategory: $document_category
+            title: '{title}',
+            summary: '{summary}',
+            documentCategory: '{document_category}',
+            d_id: '{d_id}'
         }})
     
         // Link the Document node to the SemanticMemory node
         CREATE (semantic)-[:HAS_DOCUMENT]->(document)
         '''
+        logging.info(f"Generated Cypher query: {cypher_query}")
 
         return cypher_query
 
