@@ -161,9 +161,11 @@ Scope: Use Neo4j to map the user queries into a knowledge graph based on cogniti
 Blog post: Soon!
 - Dynamic Memory Manager -> store the data in N hierarchical stores
 - Dynamic Graph -> map the user queries into a knowledge graph
-- Postgres DB to store metadata - soon
+- Classification -> classify the user queries and choose relevant graph nodes
+- Context manager -> generate context for LLM to process containing Semantic, Episodic and Vector store data
+- Postgres DB to store metadata 
 - Docker
-- API - soon
+- API 
 
 
 
