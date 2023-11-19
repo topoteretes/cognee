@@ -95,7 +95,7 @@ async def user_query_to_graph(payload: Payload):
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await user_query_to_graph_db(decoded_payload['user_id'], decoded_payload['query'], session)
+            result = await user_query_to_graph_db(session= session, user_id= decoded_payload['user_id'],query_input =decoded_payload['query'])
 
         return result
 
