@@ -395,6 +395,7 @@ async def user_context_enrichment(session, user_id:str, query:str)->str:
     The original user query: {query}
     """
 
+
     logging.info("Context from graphdb is %s", context)
     document_categories_query = await neo4j_graph_db.get_document_categories(user_id=user_id)
     result = neo4j_graph_db.query(document_categories_query)
