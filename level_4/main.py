@@ -19,7 +19,7 @@ from cognitive_architecture.database.postgres.database_crud import session_scope
 from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
 from cognitive_architecture.database.postgres.models.docs import DocsModel
 from cognitive_architecture.database.postgres.models.memory import MemoryModel
-from level_4.cognitive_architecture.database.postgres.models.user import User
+from cognitive_architecture.database.postgres.models.user import User
 from cognitive_architecture.classifiers.classifier import classify_call
 aclient = instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"
@@ -470,15 +470,11 @@ async def main():
             "strategy": "SUMMARY",
         }
         # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-        # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
-        # await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
+        await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
+        await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
 
         ee = await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
-        # memory_instance = Memory(namespace='SEMANTICMEMORY')
-        # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
 
-
-    # print(rs)
 
 if __name__ == "__main__":
     import asyncio

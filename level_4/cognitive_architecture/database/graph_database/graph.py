@@ -199,9 +199,9 @@ class Neo4jGraphDB(AbstractGraphDB):
         # Create the user and memory components if they don't exist
         user_memory_cypher = f"""
         MERGE (user:User {{userId: '{user_id}'}})
-        MERGE (semantic:SemanticMemory {{userId: '{user_id}', name: 'SemanticMemory}}')
+        MERGE (semantic:SemanticMemory {{userId: '{user_id}', name: 'SemanticMemory' }})
         MERGE (episodic:EpisodicMemory {{userId: '{user_id}', name: 'EpisodicMemory'}})
-        MERGE (buffer:Buffer {{userId: '{user_id}', name: 'Buffer}})
+        MERGE (buffer:Buffer {{userId: '{user_id}', name: 'Buffer' }})
         MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(semantic)
         MERGE (user)-[:HAS_EPISODIC_MEMORY]->(episodic)
         MERGE (user)-[:HAS_BUFFER]->(buffer)
