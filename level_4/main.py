@@ -183,9 +183,6 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
             operation_type="DATA_LOAD",
         ),
     )
-
-
-
     memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id=job_id, memory_label=namespace_id)
     document_names = get_document_names(loader_settings.get("path", "None"))
     for doc in document_names:

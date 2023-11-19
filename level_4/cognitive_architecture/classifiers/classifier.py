@@ -15,7 +15,7 @@ from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 
 from ..config import Config
-
+from ..database.vectordb.loaders.loaders import _document_loader
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
@@ -24,9 +24,6 @@ from langchain.document_loaders import DirectoryLoader
 
 
 async def classify_documents(query:str, document_id:str, loader_settings:dict):
-    from ..database.vectordb.loaders.loaders import _document_loader
-
-
 
     document_context  = await _document_loader(query, loader_settings)
     logging.info("This is the document context", document_context)
@@ -66,10 +63,6 @@ async def classify_documents(query:str, document_id:str, loader_settings:dict):
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
-    # classfier_value = arguments_dict.get('summarizer', None)
-
-    # print("This is the classifier value", classfier_value)
-
     return arguments_dict
 
 
