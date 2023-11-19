@@ -473,11 +473,10 @@ async def main():
             "path": [".data"],
             "strategy": "SUMMARY",
         }
-        # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-        # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
+        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+        await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
         await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
-
-        # ee = await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
+        await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
 
 
 if __name__ == "__main__":
