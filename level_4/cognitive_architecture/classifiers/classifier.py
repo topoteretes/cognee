@@ -66,11 +66,11 @@ async def classify_documents(query:str, document_id:str, loader_settings:dict):
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
-    classfier_value = arguments_dict.get('summarizer', None)
+    # classfier_value = arguments_dict.get('summarizer', None)
 
-    print("This is the classifier value", classfier_value)
+    # print("This is the classifier value", classfier_value)
 
-    return classfier_value
+    return arguments_dict
 
 
 

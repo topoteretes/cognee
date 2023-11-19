@@ -320,6 +320,8 @@ async def add_documents_to_graph_db(postgres_session: AsyncSession, user_id: str
                     neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name, document_id=doc_id)
             else:
                 classification = await classify_documents(doc_name, document_id =doc_id, loader_settings=loader_settings)
+
+                logging.info("Classification is", str(classification))
                 neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
                                               password=config.graph_database_password)
                 rs = neo4j_graph_db.create_document_node_cypher(classification, user_id)
@@ -471,11 +473,11 @@ async def main():
             "path": [".data"],
             "strategy": "SUMMARY",
         }
-        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-        await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
+        # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+        # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
         await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
 
-        ee = await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
+        # ee = await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
 
 
 if __name__ == "__main__":
