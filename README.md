@@ -92,7 +92,7 @@ To get started with PromethAI Memory, start with the latest iteration, and follo
 
 Cogntive Architecture, RAGs, and production-ready applications
 
-![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/Dashboard_example.png)
+![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/level_4/User_graph.png)
 
 ### Project Structure
 
