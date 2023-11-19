@@ -165,9 +165,11 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
     namespace_class = namespace_id + "_class"
 
     logging.info("Namespace created with id %s", namespace_id)
-
-    new_user = User(id=user_id)
-    await add_entity(session, new_user)
+    try:
+        new_user = User(id=user_id)
+        await add_entity(session, new_user)
+    except:
+        pass
 
     if job_id is None:
         job_id = str(uuid.uuid4())
@@ -469,7 +471,7 @@ async def main():
             "path": [".data"],
             "strategy": "SUMMARY",
         }
-        # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
         await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
         await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
 
