@@ -86,11 +86,43 @@ Better if it lasts for years_
 
 ### Installation
 
-To get started with PromethAI Memory, start with the latest iteration, and follow the instructions in the README.md file
+### Run the level 4
+
+Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
+
+Copy the .env.example to .env and fill in the variables
+
+``` poetry shell ```
+
+```docker compose up   ```
+
+Run 
+
+``` python main.py ``` 
+
+If you are running natively, change ENVIRONMENT to local in the .env file
+If you are running in docker, change ENVIRONMENT to postgres in the .env file
+
+Run
+
+``` python main.py ``` 
+
+Or run
+    
+    ``` docker compose up promethai-mem ```
+
+And send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000
+
+
 
 ### Current Focus
 
-Cogntive Architecture, RAGs, and production-ready applications
+Cognitive Architecture manager :
+
+- stores data in Vector Database
+- uses Graph database to create connection between the terms nad objects
+- uses classifiers to pick the right document
+- generates context for LLM to process
 
 ![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/level_4/User_graph.png)
 
@@ -133,28 +165,6 @@ Blog post: Soon!
 - Docker
 - API - soon
 
-### Run the level 4
-
-Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
-
-Copy the .env.example to .env and fill in the variables
-
-``` poetry shell ```
-
-```docker compose up   ```
-
-Run 
-
-``` python main.py ``` 
-
-If you are running natively, change ENVIRONMENT to local in the .env file
-If you are running in docker, change ENVIRONMENT to postgres in the .env file
-
-Run 
-
-
-
-``` python main.py ``` 
 
 
 
