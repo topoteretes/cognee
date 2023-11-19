@@ -147,6 +147,14 @@ Run
 
 ``` python main.py ``` 
 
+If you are running natively, change ENVIRONMENT to local in the .env file
+If you are running in docker, change ENVIRONMENT to postgres in the .env file
+
+Run 
+
+
+
+``` python main.py ``` 
 
 
 
