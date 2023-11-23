@@ -111,7 +111,7 @@ async def document_to_graph_db(payload: Payload):
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await add_documents_to_graph_db(session, decoded_payload['user_id'], decoded_payload['settings'])
+            result = await add_documents_to_graph_db(postgres_session =session, user_id = decoded_payload['user_id'], loader_settins =decoded_payload['settings'])
         return result
 
     except Exception as e:

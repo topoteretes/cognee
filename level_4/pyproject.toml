@@ -1,9 +1,20 @@
 [tool.poetry]
 name = "PromethAI_memory"
 version = "0.1.0"
-description = "PromethAI memory manager"
+description = "PromethAI cognitive architecture is a library for enriching LLM context by managing AI cognitive architecture"
 authors = ["Vasilije Markovic"]
 readme = "README.md"
+license = "Apache-2.0"
+homepage = "https://github.com/topoteretes/PromethAI-Memory"
+repository = "https://www.prometh.ai"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Software Development :: Libraries",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",]
 
 [tool.poetry.dependencies]
 python = "^3.10"
