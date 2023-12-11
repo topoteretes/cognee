@@ -131,6 +131,22 @@ async def user_query_processor(payload: Payload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/user-query-classifier")
+async def user_query_classfier(payload: Payload):
+    try:
+        decoded_payload = payload.payload
+
+        # Execute the query - replace this with the actual execution method
+        async with session_scope(session=AsyncSessionLocal()) as session:
+            from cognitive_architecture.classifiers.classifier import classify_user_query
+            # Assuming you have a method in Neo4jGraphDB to execute the query
+            result = await classify_user_query(session, decoded_payload['user_id'], decoded_payload['query'])
+        return JSONResponse(content={"response": result}, status_code=200)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
     Start the API server using uvicorn.
