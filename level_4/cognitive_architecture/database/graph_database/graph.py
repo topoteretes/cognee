@@ -272,7 +272,7 @@ class Neo4jGraphDB(AbstractGraphDB):
     # Update the function to generate Cypher CREATE statements for edges with unique variable names
     def generate_create_statements_for_edges_with_uuid(self, user_id, edges, unique_mapping, base_node_mapping):
         create_statements = []
-        with_statement = f"WITH {', '.join(unique_mapping.values())}, {user_id}, semantic, episodic, buffer"
+        with_statement = f"WITH {', '.join(unique_mapping.values())}, user , semantic, episodic, buffer"
         create_statements.append(with_statement)
 
         for edge in edges:
@@ -285,7 +285,7 @@ class Neo4jGraphDB(AbstractGraphDB):
 
     def generate_memory_type_relationships_with_uuid_and_time_context(self, user_id, nodes, unique_mapping, base_node_mapping):
         create_statements = []
-        with_statement = f"WITH {', '.join(unique_mapping.values())}, {user_id}, semantic, episodic, buffer"
+        with_statement = f"WITH {', '.join(unique_mapping.values())}, user, semantic, episodic, buffer"
         create_statements.append(with_statement)
 
         # Loop through each node and create relationships based on memory_type

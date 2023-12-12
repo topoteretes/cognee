@@ -38,9 +38,6 @@ RUN apt-get update -q && \
 
 
 
-#RUN playwright install
-#RUN playwright install-deps
-
 WORKDIR /app
 COPY cognitive_architecture/ /app/cognitive_architecture
 COPY main.py /app
