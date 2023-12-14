@@ -76,12 +76,29 @@ This repo is built to test and evolve RAG architecture, inspired by human cognit
 
 This project is a part of the [PromethAI](https://prometh.ai/) ecosystem.
 
-It runs in iterations, with each iteration building on the previous one.
+The iterations are numbered from 0 to 7, with 0 being the simplest iteration and 7 being the most complex one.
+To run a specific iteration, navigate to the iteration's folder and follow the instructions in the README file.
 
 _Keep Ithaka always in your mind.
 Arriving there is what you’re destined for.
 But don’t hurry the journey at all.
 Better if it lasts for years_
+
+
+### Current Focus
+
+#### Level 4 - Dynamic Graph Memory Manager + DB + Rag Test Manager
+Scope: Use Neo4j to map the user queries into a knowledge graph based on cognitive architecture
+Blog post: Soon!
+- Dynamic Memory Manager -> store the data in N hierarchical stores
+- Dynamic Graph -> map the user queries into a knowledge graph
+- Classification -> classify the user queries and choose relevant graph nodes
+- Context manager -> generate context for LLM to process containing Semantic, Episodic and Vector store data
+- Postgres DB to store metadata 
+- Docker
+- API 
+
+![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/level_4/User_graph.png)
 
 
 ### Installation
@@ -115,57 +132,11 @@ And send API requests add-memory, user-query-to-graph, document-to-graph-db, use
 
 
 
-### Current Focus
 
-Cognitive Architecture manager :
 
-- stores data in Vector Database
-- uses Graph database to create connection between the terms nad objects
-- uses classifiers to pick the right document
-- generates context for LLM to process
 
-![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/level_4/User_graph.png)
 
-### Project Structure
 
-#### Level 1 - OpenAI functions + Pydantic + DLTHub
-Scope: Give PDFs to the model and get the output in a structured format
-Blog post: [Link](https://prometh.ai/promethai-memory-blog-post-one)
-We introduce the following concepts:
-- Structured output with Pydantic
-- CMD script to process custom PDFs
-#### Level 2 - Memory Manager + Metadata management
-Scope: Give PDFs to the model and consolidate with the previous user activity and more
-Blog post: [Link](https://www.notion.so/topoteretes/Going-beyond-Langchain-Weaviate-Level-2-towards-Production-98ad7b915139478992c4c4386b5e5886?pvs=4)
-We introduce the following concepts:
-
-- Long Term Memory -> store and format the data
-- Episodic Buffer -> isolate the working memory
-- Attention Modulators -> improve semantic search
-- Docker
-- API
-
-#### Level 3 - Dynamic Graph Memory Manager + DB + Rag Test Manager
-Scope: Store the data in N-related stores and test the retrieval with the Rag Test Manager
-Blog post: [Link](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-Level-3-towards-production-e62946c272bf412584b12fbbf92d35b0?pvs=4)
-- Dynamic Memory Manager -> store the data in N hierarchical stores
-- Auto-generation of tests
-- Multiple file formats supported
-- Postgres DB to store metadata
-- Docker
-- API
-- Superset to visualize the results
-
-#### Level 4 - Dynamic Graph Memory Manager + DB + Rag Test Manager
-Scope: Use Neo4j to map the user queries into a knowledge graph based on cognitive architecture
-Blog post: Soon!
-- Dynamic Memory Manager -> store the data in N hierarchical stores
-- Dynamic Graph -> map the user queries into a knowledge graph
-- Classification -> classify the user queries and choose relevant graph nodes
-- Context manager -> generate context for LLM to process containing Semantic, Episodic and Vector store data
-- Postgres DB to store metadata 
-- Docker
-- API 
 
 
 
