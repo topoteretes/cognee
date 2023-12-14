@@ -76,8 +76,10 @@ This repo is built to test and evolve RAG architecture, inspired by human cognit
 
 This project is a part of the [PromethAI](https://prometh.ai/) ecosystem.
 
+The project run in iterations, from POC towards production ready code.
 The iterations are numbered from 0 to 7, with 0 being the simplest iteration and 7 being the most complex one.
 To run a specific iteration, navigate to the iteration's folder and follow the instructions in the README file.
+To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)
 
 _Keep Ithaka always in your mind.
 Arriving there is what you’re destined for.
