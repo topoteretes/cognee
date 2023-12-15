@@ -79,7 +79,17 @@ async def add_memory(
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import load_documents_to_vectorstore
 
-            output = await load_documents_to_vectorstore(session, decoded_payload['user_id'], loader_settings=decoded_payload['settings'])
+            if 'settings' in decoded_payload and decoded_payload['settings'] is not None:
+                settings_for_loader = decoded_payload['settings']
+            else:
+                settings_for_loader = None
+
+            if 'content' in decoded_payload and decoded_payload['content'] is not None:
+                content = decoded_payload['content']
+            else:
+                content = None
+
+            output = await load_documents_to_vectorstore(session, decoded_payload['user_id'], content=content, loader_settings=settings_for_loader)
             return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
@@ -107,11 +117,8 @@ async def user_query_to_graph(payload: Payload):
 async def document_to_graph_db(payload: Payload):
     try:
         decoded_payload = payload.payload
-
-        # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
-            # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await add_documents_to_graph_db(postgres_session =session, user_id = decoded_payload['user_id'], loader_settins =decoded_payload['settings'])
+            result = await add_documents_to_graph_db(session =session, user_id = decoded_payload['user_id'], loader_settings =decoded_payload['settings'])
         return result
 
     except Exception as e:

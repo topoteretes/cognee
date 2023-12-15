@@ -231,41 +231,41 @@ class BaseMemory:
         embeddings: Optional[str] = None,
 
     ):
-        from ast import literal_eval
-        class DynamicSchema(Schema):
-            pass
-
-        default_version = 'current_timestamp'
-        version_in_params = params.get("version", default_version)
-
-        # Check and update metadata version in DB.
-        schema_fields = params
-
-        def create_field(field_type, **kwargs):
-            field_mapping = {
-                "Str": fields.Str,
-                "Int": fields.Int,
-                "Float": fields.Float,
-                "Bool": fields.Bool,
-            }
-            return field_mapping[field_type](**kwargs)
-
-        # Dynamic Schema Creation
-        params['user_id'] = self.user_id
-
-
-        schema_instance = self.create_dynamic_schema(params)  # Always creating Str field, adjust as needed
-
-        logging.info(f"params : {params}")
-
-        # Schema Validation
-        schema_instance = schema_instance
-        print("Schema fields: ", [field for field in schema_instance._declared_fields])
-        loaded_params = schema_instance.load(params)
+        # from ast import literal_eval
+        # class DynamicSchema(Schema):
+        #     pass
+        #
+        # default_version = 'current_timestamp'
+        # version_in_params = params.get("version", default_version)
+        #
+        # # Check and update metadata version in DB.
+        # schema_fields = params
+        #
+        # def create_field(field_type, **kwargs):
+        #     field_mapping = {
+        #         "Str": fields.Str,
+        #         "Int": fields.Int,
+        #         "Float": fields.Float,
+        #         "Bool": fields.Bool,
+        #     }
+        #     return field_mapping[field_type](**kwargs)
+        #
+        # # Dynamic Schema Creation
+        # params['user_id'] = self.user_id
+        #
+        #
+        # schema_instance = self.create_dynamic_schema(params)  # Always creating Str field, adjust as needed
+        #
+        # logging.info(f"params : {params}")
+        #
+        # # Schema Validation
+        # schema_instance = schema_instance
+        # print("Schema fields: ", [field for field in schema_instance._declared_fields])
+        # loaded_params = schema_instance.load(params)
 
         return await self.vector_db.add_memories(
             observation=observation, loader_settings=loader_settings,
-            params=loaded_params, namespace=namespace, metadata_schema_class = schema_instance, embeddings=embeddings
+            params=params, namespace=namespace, metadata_schema_class = None, embeddings=embeddings
         )
         # Add other db_type conditions if necessary
 

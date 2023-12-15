@@ -23,9 +23,9 @@ from langchain.document_loaders import TextLoader
 from langchain.document_loaders import DirectoryLoader
 
 
-async def classify_documents(query:str, document_id:str, loader_settings:dict):
+async def classify_documents(query:str, document_id:str, content:str):
 
-    document_context  = await _document_loader(query, loader_settings)
+    document_context  = content
     logging.info("This is the document context", document_context)
 
     llm = ChatOpenAI(temperature=0, model=config.model)

@@ -20,7 +20,10 @@ from langchain.schema import Document
 import weaviate
 
 load_dotenv()
+from ...config import Config
 
+config = Config()
+config.load()
 
 LTM_MEMORY_ID_DEFAULT = "00000"
 ST_MEMORY_ID_DEFAULT = "0000"
@@ -153,18 +156,26 @@ class WeaviateVectorDB(VectorDB):
             # Assuming _document_loader returns a list of documents
             documents = await _document_loader(observation, loader_settings)
             logging.info("here are the docs %s", str(documents))
+            chunk_count = 0
             for doc in documents[0]:
-                document_to_load = self._stuct(doc.page_content, params, metadata_schema_class)
+                chunk_count += 1
+                params['chunk_order'] = chunk_count
+                # document_to_load = self._stuct(doc.page_content, params, metadata_schema_class)
 
-                logging.info("Loading document with provided loader settings %s", str(document_to_load))
+                # logging.info("Loading document with provided loader settings %s", str(document_to_load))
                 retriever.add_documents([
-            Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
+            Document(metadata=params, page_content=doc.page_content)])
         else:
-            document_to_load = self._stuct(observation, params, metadata_schema_class)
+            chunk_count = 0
+            documents = await _document_loader(observation, loader_settings)
+            for doc in documents[0]:
+                chunk_count += 1
+                params['chunk_order'] = chunk_count
+                # document_to_load = self._stuct(observation, params, metadata_schema_class)
 
-            logging.info("Loading document with defautl loader settings %s", str(document_to_load))
-            retriever.add_documents([
-            Document(metadata=document_to_load[0]['metadata'], page_content=document_to_load[0]['page_content'])])
+                # logging.info("Loading document with defautl loader settings %s", str(document_to_load))
+                retriever.add_documents([
+                Document(metadata=params, page_content=doc)])
 
     async def fetch_memories(self, observation: str, namespace: str = None, search_type: str = 'hybrid', **kwargs):
         """
@@ -185,7 +196,22 @@ class WeaviateVectorDB(VectorDB):
         client = self.init_weaviate(namespace =self.namespace)
         if search_type is None:
             search_type = 'hybrid'
-        logging.info("The search type is 2 %", search_type)
+        logging.info("The search type is s%", search_type)
+
+        if search_type == 'summary':
+            from weaviate.classes import Filter
+            client = weaviate.connect_to_wcs(
+                cluster_url=config.weaviate_url,
+                auth_credentials=weaviate.AuthApiKey(config.weaviate_api_key)
+            )
+
+            summary_collection = client.collections.get(self.namespace)
+            response = summary_collection.query.fetch_objects(
+                filters=Filter("user_id").equal(self.user_id) &
+                        Filter("chunk_order").less_than(25),
+                limit=15
+            )
+            return response
 
         if not namespace:
             namespace = self.namespace
@@ -280,7 +306,6 @@ class WeaviateVectorDB(VectorDB):
             )
         else:
             # Delete all objects
-            print("HERE IS THE USER ID", self.user_id)
             return client.batch.delete_objects(
                 class_name=namespace,
                 where={

@@ -34,6 +34,9 @@ class Config:
     graph_database_url: str = os.getenv('GRAPH_DB_URL')
     graph_database_username: str = os.getenv('GRAPH_DB_USER')
     graph_database_password: str = os.getenv('GRAPH_DB_PW')
+    weaviate_url: str = os.getenv('WEAVIATE_URL')
+    weaviate_api_key: str = os.getenv('WEAVIATE_API_KEY')
+
 
 
     # Client ID

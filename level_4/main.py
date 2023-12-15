@@ -35,132 +35,37 @@ from sqlalchemy.orm import selectinload, joinedload, contains_eager
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from cognitive_architecture.utils import get_document_names, generate_letter_uuid, get_memory_name_by_doc_id, get_unsumarized_vector_db_namespace, get_vectordb_namespace, get_vectordb_document_name
 
-async def get_vectordb_namespace(session: AsyncSession, user_id: str):
-    try:
-        result = await session.execute(
-            select(MemoryModel.memory_name).where(MemoryModel.user_id == user_id).order_by(MemoryModel.created_at.desc())
-        )
-        namespace = [row[0] for row in result.fetchall()]
-        return namespace
-    except Exception as e:
-        logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
-        return None
-
-async def get_vectordb_document_name(session: AsyncSession, user_id: str):
-    try:
-        result = await session.execute(
-            select(DocsModel.doc_name).where(DocsModel.user_id == user_id).order_by(DocsModel.created_at.desc())
-        )
-        doc_names = [row[0] for row in result.fetchall()]
-        return doc_names
-    except Exception as e:
-        logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
-        return None
+async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str, namespace_id:str):
+    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, memory_label=namespace_id)
 
 
-async def get_model_id_name(session: AsyncSession, id: str):
-    try:
-        result = await session.execute(
-            select(MemoryModel.memory_name).where(MemoryModel.id == id).order_by(MemoryModel.created_at.desc())
-        )
-        doc_names = [row[0] for row in result.fetchall()]
-        return doc_names
-    except Exception as e:
-        logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
-        return None
+    # Managing memory attributes
+    existing_user = await Memory.check_existing_user(user_id, session)
+    print("here is the existing user", existing_user)
+    await memory.manage_memory_attributes(existing_user)
+    print("Namespace id is %s", namespace_id)
+    await memory.add_dynamic_memory_class(namespace_id.lower(), namespace_id)
 
+    dynamic_memory_class = getattr(memory, namespace_id.lower(), None)
 
+    methods_to_add = ["add_memories", "fetch_memories", "delete_memories"]
 
-async def get_vectordb_data(session: AsyncSession, user_id: str):
-    """
-    Asynchronously retrieves the latest memory names and document details for a given user.
+    if dynamic_memory_class is not None:
+        for method_name in methods_to_add:
+            await memory.add_method_to_class(dynamic_memory_class, method_name)
+            print(f"Memory method {method_name} has been added")
+    else:
+        print(f"No attribute named  in memory.")
 
-    This function executes a database query to fetch memory names and document details
-    associated with operations performed by a specific user. It leverages explicit joins
-    with the 'docs' and 'memories' tables and applies eager loading to optimize performance.
+    print("Available memory classes:", await memory.list_memory_classes())
+    result = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
+                                                    observation="placeholder", search_type="summary")
 
-    Parameters:
-    - session (AsyncSession): The database session for executing the query.
-    - user_id (str): The unique identifier of the user.
+    return result, namespace_id
 
-    Returns:
-    - Tuple[List[str], List[Tuple[str, str]]]: A tuple containing a list of memory names and
-      a list of tuples with document names and their corresponding IDs.
-      Returns None if an exception occurs.
-
-    Raises:
-    - Exception: Propagates any exceptions that occur during query execution.
-
-    Example Usage:
-    """
-    try:
-        result = await session.execute(
-            select(Operation)
-            .join(Operation.docs)  # Explicit join with docs table
-            .join(Operation.memories)  # Explicit join with memories table
-            .options(
-                contains_eager(Operation.docs),  # Informs ORM of the join for docs
-                contains_eager(Operation.memories)  # Informs ORM of the join for memories
-            )
-            .where(
-                (Operation.user_id == user_id)  # Filter by user_id
-                # Optionally, you can add more filters here
-            )
-            .order_by(Operation.created_at.desc())  # Order by creation date
-        )
-
-        operations = result.unique().scalars().all()
-
-        # Extract memory names and document names and IDs
-        memory_names = [memory.memory_name for op in operations for memory in op.memories]
-        docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
-
-        return memory_names, docs
-
-    except Exception as e:
-        # Handle the exception as needed
-        print(f"An error occurred: {e}")
-        return None
-async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
-    """
-    Asynchronously retrieves memory names associated with a specific document ID.
-
-    This function executes a database query to fetch memory names linked to a document
-    through operations. The query is filtered based on a given document ID and retrieves
-    only the memory names without loading the entire Operation entity.
-
-    Parameters:
-    - session (AsyncSession): The database session for executing the query.
-    - docs_id (str): The unique identifier of the document.
-
-    Returns:
-    - List[str]: A list of memory names associated with the given document ID.
-      Returns None if an exception occurs.
-
-    Raises:
-    - Exception: Propagates any exceptions that occur during query execution.
-    """
-    try:
-        result = await session.execute(
-            select(MemoryModel.memory_name)
-            .join(Operation, Operation.id == MemoryModel.operation_id)  # Join with Operation
-            .join(DocsModel, DocsModel.operation_id == Operation.id)  # Join with DocsModel
-            .where(DocsModel.id == docs_id)  # Filtering based on the passed document ID
-            .distinct()  # To avoid duplicate memory names
-        )
-
-        memory_names = [row[0] for row in result.fetchall()]
-        return memory_names
-
-    except Exception as e:
-        # Handle the exception as needed
-        print(f"An error occurred: {e}")
-        return None
-
-
-
-async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job_id:str=None, loader_settings:dict=None):
+async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, content:str=None, job_id:str=None, loader_settings:dict=None):
     namespace_id = str(generate_letter_uuid()) + "_" + "SEMANTICMEMORY"
     namespace_class = namespace_id + "_class"
 
@@ -184,7 +89,11 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
         ),
     )
     memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id=job_id, memory_label=namespace_id)
-    document_names = get_document_names(loader_settings.get("path", "None"))
+
+    if content is not None:
+        document_names = [content[:30]]
+    if loader_settings is not None:
+        document_names = get_document_names(loader_settings.get("path", "None"))
     for doc in document_names:
         await add_entity(
             session,
@@ -227,10 +136,10 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, job
 
         print("Available memory classes:", await memory.list_memory_classes())
         result = await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
-                                                        observation='some_observation', params=params, loader_settings=loader_settings)
+                                                        observation=content, params=params, loader_settings=loader_settings)
 
         await update_entity(session, Operation, job_id, "SUCCESS")
-        return result
+        return result, namespace_id
 
 
 async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_input: str):
@@ -264,16 +173,15 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
 
 
 
-async def add_documents_to_graph_db(postgres_session: AsyncSession, user_id: str, loader_settings:dict=None, stupid_local_testing_flag=False): #clean this up Vasilije, don't be sloppy
+async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, loader_settings:dict=None, stupid_local_testing_flag=False): #clean this up Vasilije, don't be sloppy
     """"""
     try:
         # await update_document_vectordb_namespace(postgres_session, user_id)
-        memory_names, docs = await get_vectordb_data(postgres_session, user_id)
+        memory_names, docs = await get_unsumarized_vector_db_namespace(session, user_id)
         logging.info("Memory names are", memory_names)
         logging.info("Docs are", docs)
         for doc, memory_name in zip(docs, memory_names):
             doc_name, doc_id = doc
-            logging.info("hereee %s", doc_name)
             if stupid_local_testing_flag:
                 classification = [{
                   "DocumentCategory": "Literature",
@@ -316,7 +224,12 @@ async def add_documents_to_graph_db(postgres_session: AsyncSession, user_id: str
                     # select doc from the store
                     neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name, document_id=doc_id)
             else:
-                classification = await classify_documents(doc_name, document_id =doc_id, loader_settings=loader_settings)
+                try:
+                    classification_content = fetch_document_vectordb_namespace(session, user_id, memory_name)
+                except:
+                    classification_content = "None"
+
+                classification = await classify_documents(doc_name, document_id =doc_id, content=classification_content)
 
                 logging.info("Classification is", str(classification))
                 neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
@@ -327,6 +240,7 @@ async def add_documents_to_graph_db(postgres_session: AsyncSession, user_id: str
                 # select doc from the store
                 neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name,
                                                                    document_id=doc_id)
+                await update_entity(session, DocsModel, doc_id, True)
     except:
         pass
 

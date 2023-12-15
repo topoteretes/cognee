@@ -4,6 +4,8 @@ import string
 import uuid
 
 from graphviz import Digraph
+from sqlalchemy.orm import contains_eager
+
 
 # from graph_database.graph import KnowledgeGraph
 
@@ -124,5 +126,138 @@ def generate_letter_uuid(length=8):
     """Generate a random string of uppercase letters with the specified length."""
     letters = string.ascii_uppercase  # A-Z
     return "".join(random.choice(letters) for _ in range(length))
+
+from cognitive_architecture.database.postgres.models.operation import Operation
+from cognitive_architecture.database.postgres.database_crud import session_scope, add_entity, update_entity, fetch_job_id
+from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
+from cognitive_architecture.database.postgres.models.docs import DocsModel
+from cognitive_architecture.database.postgres.models.memory import MemoryModel
+from cognitive_architecture.database.postgres.models.user import User
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+import logging
+async def get_vectordb_namespace(session: AsyncSession, user_id: str):
+    try:
+        result = await session.execute(
+            select(MemoryModel.memory_name).where(MemoryModel.user_id == user_id).order_by(MemoryModel.created_at.desc())
+        )
+        namespace = [row[0] for row in result.fetchall()]
+        return namespace
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
+        return None
+
+async def get_vectordb_document_name(session: AsyncSession, user_id: str):
+    try:
+        result = await session.execute(
+            select(DocsModel.doc_name).where(DocsModel.user_id == user_id).order_by(DocsModel.created_at.desc())
+        )
+        doc_names = [row[0] for row in result.fetchall()]
+        return doc_names
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
+        return None
+
+
+async def get_model_id_name(session: AsyncSession, id: str):
+    try:
+        result = await session.execute(
+            select(MemoryModel.memory_name).where(MemoryModel.id == id).order_by(MemoryModel.created_at.desc())
+        )
+        doc_names = [row[0] for row in result.fetchall()]
+        return doc_names
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving the Vectordb_namespace: {str(e)}")
+        return None
+
+
+
+async def get_unsumarized_vector_db_namespace(session: AsyncSession, user_id: str):
+    """
+    Asynchronously retrieves the latest memory names and document details for a given user.
+
+    This function executes a database query to fetch memory names and document details
+    associated with operations performed by a specific user. It leverages explicit joins
+    with the 'docs' and 'memories' tables and applies eager loading to optimize performance.
+
+    Parameters:
+    - session (AsyncSession): The database session for executing the query.
+    - user_id (str): The unique identifier of the user.
+
+    Returns:
+    - Tuple[List[str], List[Tuple[str, str]]]: A tuple containing a list of memory names and
+      a list of tuples with document names and their corresponding IDs.
+      Returns None if an exception occurs.
+
+    Raises:
+    - Exception: Propagates any exceptions that occur during query execution.
+
+    Example Usage:
+    """
+    try:
+        result = await session.execute(
+            select(Operation)
+            .join(Operation.docs)  # Explicit join with docs table
+            .join(Operation.memories)  # Explicit join with memories table
+            .options(
+                contains_eager(Operation.docs),  # Informs ORM of the join for docs
+                contains_eager(Operation.memories)  # Informs ORM of the join for memories
+            )
+            .where(
+                (Operation.user_id == user_id) &  # Filter by user_id
+                (Operation.docs.graph_summary == False)  # Filter by user_id
+            )
+            .order_by(Operation.created_at.desc())  # Order by creation date
+        )
+
+        operations = result.unique().scalars().all()
+
+        # Extract memory names and document names and IDs
+        memory_names = [memory.memory_name for op in operations for memory in op.memories]
+        docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
+
+        return memory_names, docs
+
+    except Exception as e:
+        # Handle the exception as needed
+        print(f"An error occurred: {e}")
+        return None
+async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
+    """
+    Asynchronously retrieves memory names associated with a specific document ID.
+
+    This function executes a database query to fetch memory names linked to a document
+    through operations. The query is filtered based on a given document ID and retrieves
+    only the memory names without loading the entire Operation entity.
+
+    Parameters:
+    - session (AsyncSession): The database session for executing the query.
+    - docs_id (str): The unique identifier of the document.
+
+    Returns:
+    - List[str]: A list of memory names associated with the given document ID.
+      Returns None if an exception occurs.
+
+    Raises:
+    - Exception: Propagates any exceptions that occur during query execution.
+    """
+    try:
+        result = await session.execute(
+            select(MemoryModel.memory_name)
+            .join(Operation, Operation.id == MemoryModel.operation_id)  # Join with Operation
+            .join(DocsModel, DocsModel.operation_id == Operation.id)  # Join with DocsModel
+            .where(DocsModel.id == docs_id)  # Filtering based on the passed document ID
+            .distinct()  # To avoid duplicate memory names
+        )
+
+        memory_names = [row[0] for row in result.fetchall()]
+        return memory_names
+
+    except Exception as e:
+        # Handle the exception as needed
+        print(f"An error occurred: {e}")
+        return None
+
+
 
 

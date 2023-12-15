@@ -29,6 +29,7 @@ services:
       - 8000:8000
       - 443:443
       - 80:80
+      - 50051:50051
     depends_on:
       - postgres
       - neo4j
