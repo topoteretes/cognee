@@ -115,10 +115,15 @@ async def user_query_to_graph(payload: Payload):
 
 @app.post("/document-to-graph-db")
 async def document_to_graph_db(payload: Payload):
+    logging.info("Adding documents to graph db")
     try:
         decoded_payload = payload.payload
+        if 'settings' in decoded_payload and decoded_payload['settings'] is not None:
+            settings_for_loader = decoded_payload['settings']
+        else:
+            settings_for_loader = None
         async with session_scope(session=AsyncSessionLocal()) as session:
-            result = await add_documents_to_graph_db(session =session, user_id = decoded_payload['user_id'], loader_settings =decoded_payload['settings'])
+            result = await add_documents_to_graph_db(session =session, user_id = decoded_payload['user_id'], loader_settings =settings_for_loader)
         return result
 
     except Exception as e:

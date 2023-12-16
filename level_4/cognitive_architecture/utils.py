@@ -4,6 +4,7 @@ import string
 import uuid
 
 from graphviz import Digraph
+from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager
 
 
@@ -194,34 +195,37 @@ async def get_unsumarized_vector_db_namespace(session: AsyncSession, user_id: st
 
     Example Usage:
     """
-    try:
-        result = await session.execute(
-            select(Operation)
-            .join(Operation.docs)  # Explicit join with docs table
-            .join(Operation.memories)  # Explicit join with memories table
-            .options(
-                contains_eager(Operation.docs),  # Informs ORM of the join for docs
-                contains_eager(Operation.memories)  # Informs ORM of the join for memories
-            )
-            .where(
-                (Operation.user_id == user_id) &  # Filter by user_id
-                (Operation.docs.graph_summary == False)  # Filter by user_id
-            )
-            .order_by(Operation.created_at.desc())  # Order by creation date
+    # try:
+    result = await session.execute(
+        select(Operation)
+        .join(Operation.docs)  # Explicit join with docs table
+        .join(Operation.memories)  # Explicit join with memories table
+        .options(
+            contains_eager(Operation.docs),  # Informs ORM of the join for docs
+            contains_eager(Operation.memories)  # Informs ORM of the join for memories
         )
+        .where(
+            (Operation.user_id == user_id) &  # Filter by user_id
+            or_(
+                DocsModel.graph_summary == False,  # Condition 1: graph_summary is False
+                DocsModel.graph_summary == None  # Condition 3: graph_summary is None
+            )  # Filter by user_id
+        )
+        .order_by(Operation.created_at.desc())  # Order by creation date
+    )
 
-        operations = result.unique().scalars().all()
+    operations = result.unique().scalars().all()
 
-        # Extract memory names and document names and IDs
-        memory_names = [memory.memory_name for op in operations for memory in op.memories]
-        docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
+    # Extract memory names and document names and IDs
+    memory_names = [memory.memory_name for op in operations for memory in op.memories]
+    docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
 
-        return memory_names, docs
+    return memory_names, docs
 
-    except Exception as e:
-        # Handle the exception as needed
-        print(f"An error occurred: {e}")
-        return None
+    # except Exception as e:
+    #     # Handle the exception as needed
+    #     print(f"An error occurred: {e}")
+    #     return None
 async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
     """
     Asynchronously retrieves memory names associated with a specific document ID.

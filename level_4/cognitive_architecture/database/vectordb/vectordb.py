@@ -151,7 +151,7 @@ class WeaviateVectorDB(VectorDB):
         # Update Weaviate memories here
         if namespace is None:
             namespace = self.namespace
-        retriever = self.init_weaviate(embeddings=embeddings,namespace = namespace, retriever_type="single_document_context")
+        retriever = self.init_weaviate(embeddings=OpenAIEmbeddings(),namespace = namespace, retriever_type="single_document_context")
         if loader_settings:
             # Assuming _document_loader returns a list of documents
             documents = await _document_loader(observation, loader_settings)
@@ -167,15 +167,19 @@ class WeaviateVectorDB(VectorDB):
             Document(metadata=params, page_content=doc.page_content)])
         else:
             chunk_count = 0
-            documents = await _document_loader(observation, loader_settings)
+            from cognitive_architecture.database.vectordb.chunkers.chunkers import chunk_data
+            documents = [chunk_data(chunk_strategy="VANILLA", source_data=observation, chunk_size=50,
+                       chunk_overlap=20)]
             for doc in documents[0]:
                 chunk_count += 1
                 params['chunk_order'] = chunk_count
                 # document_to_load = self._stuct(observation, params, metadata_schema_class)
 
+                logging.info("Loading document with defautl loader settings %s", str(doc))
+
                 # logging.info("Loading document with defautl loader settings %s", str(document_to_load))
                 retriever.add_documents([
-                Document(metadata=params, page_content=doc)])
+                Document(metadata=params, page_content=doc.page_content)])
 
     async def fetch_memories(self, observation: str, namespace: str = None, search_type: str = 'hybrid', **kwargs):
         """
