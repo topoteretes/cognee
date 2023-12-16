@@ -23,38 +23,38 @@ jobs:
     steps:
       - name: Take code from repo
         uses: actions/checkout@v3
-#      - name: Set environment variable for stage
-#        id: set-env
-#        run: |
-#          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-#            echo "STAGE=prd" >> $GITHUB_ENV
-#            echo "::set-output name=stage::prd"
-#          else
-#            echo "STAGE=dev" >> $GITHUB_ENV
-#            echo "::set-output name=stage::dev"
-#          fi
-#      - name: Use output
-#        run: echo "The stage is ${{ steps.set-env.outputs.stage }}"
-#      - name: Configure AWS credentials
-#        uses: aws-actions/configure-aws-credentials@v1
-#        with:
-#          role-to-assume: ${{ env.AWS_ROLE_DEV_CICD }}
-#          aws-region: eu-west-1
-#      - name: Create Docker image and push to ECR
-#        uses: ./.github/actions/image_builder
-#        id: generate-promethai-docker
-#        with:
-#          stage: prd
-#          aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
-#          should_publish: true
-#          ecr_image_repo_name: promethai-prd-backend-promethai-backend-memory
-#          dockerfile_location: ./level_2
-#      - name: Export Docker image tag
-#        id: export-promethai-docker-tag
-#        run: |
-#          export DOCKER_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
-#          echo "Docker tag is: $DOCKER_TAG"
-#          echo "promethai_docker_tag_backend=$DOCKER_TAG" >> $GITHUB_OUTPUT
+      - name: Set environment variable for stage
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "STAGE=prd" >> $GITHUB_ENV
+            echo "::set-output name=stage::prd"
+          else
+            echo "STAGE=dev" >> $GITHUB_ENV
+            echo "::set-output name=stage::dev"
+          fi
+      - name: Use output
+        run: echo "The stage is ${{ steps.set-env.outputs.stage }}"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_DEV_CICD }}
+          aws-region: eu-west-1
+      - name: Create Docker image and push to ECR
+        uses: ./.github/actions/image_builder
+        id: generate-promethai-docker
+        with:
+          stage: prd
+          aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
+          should_publish: true
+          ecr_image_repo_name: promethai-prd-backend-promethai-backend
+          dockerfile_location: ./
+      - name: Export Docker image tag
+        id: export-promethai-docker-tag
+        run: |
+          export DOCKER_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
+          echo "Docker tag is: $DOCKER_TAG"
+          echo "promethai_docker_tag_backend=$DOCKER_TAG" >> $GITHUB_OUTPUT
 
 #      - name: Create Tag and Release
 #        runs-on: ubuntu-latest
@@ -78,22 +78,22 @@ jobs:
 #            with:
 #              tag_name: ${{ steps.bump_version_and_push_tag.outputs.tag }}
 #              release_name: Release ${{ steps.bump_version_and_push_tag.outputs.tag }}
-#    outputs:
-#      promethai_docker_tag_backend: ${{ steps.export-promethai-docker-tag.outputs.promethai_docker_tag_backend }}
+    outputs:
+      promethai_docker_tag_backend: ${{ steps.export-promethai-docker-tag.outputs.promethai_docker_tag_backend }}
 
-#  apply_tf:
-#    name: Trigger terraform apply workflow
-#    runs-on: ubuntu-latest
-#    needs: publish_docker_to_ecr
-#    steps:
-#      - name: TF apply workflow triggers step
-#        uses: actions/github-script@v6
-#        with:
-#          github-token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
-#          script: |
-#            await github.rest.actions.createWorkflowDispatch({
-#              owner: 'topoteretes',
-#              repo: 'PromethAI-Infra',
-#              workflow_id: 'terraform.apply.yml',
-#              ref: 'main'
-#            })
+  apply_tf:
+    name: Trigger terraform apply workflow
+    runs-on: ubuntu-latest
+    needs: publish_docker_to_ecr
+    steps:
+      - name: TF apply workflow triggers step
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'topoteretes',
+              repo: 'PromethAI-Infra',
+              workflow_id: 'terraform.apply.yml',
+              ref: 'main'
+            })
