@@ -151,6 +151,7 @@ class WeaviateVectorDB(VectorDB):
         # Update Weaviate memories here
         if namespace is None:
             namespace = self.namespace
+        params['user_id'] = self.user_id
         retriever = self.init_weaviate(embeddings=OpenAIEmbeddings(),namespace = namespace, retriever_type="single_document_context")
         if loader_settings:
             # Assuming _document_loader returns a list of documents
@@ -173,6 +174,7 @@ class WeaviateVectorDB(VectorDB):
             for doc in documents[0]:
                 chunk_count += 1
                 params['chunk_order'] = chunk_count
+
                 # document_to_load = self._stuct(observation, params, metadata_schema_class)
 
                 logging.info("Loading document with defautl loader settings %s", str(doc))
@@ -202,20 +204,7 @@ class WeaviateVectorDB(VectorDB):
             search_type = 'hybrid'
         logging.info("The search type is s%", search_type)
 
-        if search_type == 'summary':
-            from weaviate.classes import Filter
-            client = weaviate.connect_to_wcs(
-                cluster_url=config.weaviate_url,
-                auth_credentials=weaviate.AuthApiKey(config.weaviate_api_key)
-            )
 
-            summary_collection = client.collections.get(self.namespace)
-            response = summary_collection.query.fetch_objects(
-                filters=Filter("user_id").equal(self.user_id) &
-                        Filter("chunk_order").less_than(25),
-                limit=15
-            )
-            return response
 
         if not namespace:
             namespace = self.namespace
@@ -266,6 +255,38 @@ class WeaviateVectorDB(VectorDB):
                 .with_autocut(n_of_observations)
                 .do()
             )
+        elif search_type == 'summary':
+            filter_object = {
+                "operator": "And",
+                "operands": [
+                    {
+                        "path": ["user_id"],
+                        "operator": "Equal",
+                        "valueText": self.user_id,
+                    },
+                    {
+                        "path": ["chunk_order"],
+                        "operator": "LessThan",
+                        "valueNumber": 30,
+                    },
+                ]
+            }
+            base_query = client.query.get(
+                namespace, list(list_objects_of_class(namespace, client.schema.get()))
+            ).with_additional(
+                ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
+            ).with_where(filter_object).with_limit(30)
+            query_output = (
+                base_query
+                .do()
+            )
+            # from weaviate.classes import Filter
+            # client = weaviate.connect_to_wcs(
+            #     cluster_url=config.weaviate_url,
+            #     auth_credentials=weaviate.AuthApiKey(config.weaviate_api_key)
+            # )
+
+            return query_output
         elif search_type == 'generate':
             generate_prompt = kwargs.get('generate_prompt', "")
             query_output = (
@@ -292,6 +313,8 @@ class WeaviateVectorDB(VectorDB):
         #     return []
 
         return query_output
+
+
 
     async def delete_memories(self, namespace:str, params: dict = None):
         if namespace is None:

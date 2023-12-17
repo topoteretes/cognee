@@ -5,7 +5,7 @@ from cognitive_architecture.database.postgres.models.memory import MemoryModel
 from cognitive_architecture.classifiers.classifier import classify_documents
 import os
 from dotenv import load_dotenv
-from cognitive_architecture.database.postgres.database_crud import session_scope
+from cognitive_architecture.database.postgres.database_crud import session_scope, update_entity_graph_summary
 from cognitive_architecture.database.postgres.database import AsyncSessionLocal
 from cognitive_architecture.utils import generate_letter_uuid
 import instructor
@@ -38,6 +38,7 @@ from sqlalchemy.future import select
 from cognitive_architecture.utils import get_document_names, generate_letter_uuid, get_memory_name_by_doc_id, get_unsumarized_vector_db_namespace, get_vectordb_namespace, get_vectordb_document_name
 
 async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str, namespace_id:str):
+    logging.info("user id is", user_id)
     memory = await Memory.create_memory(user_id, session, namespace=namespace_id, memory_label=namespace_id)
 
 
@@ -47,8 +48,9 @@ async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str,
     await memory.manage_memory_attributes(existing_user)
     print("Namespace id is %s", namespace_id)
     await memory.add_dynamic_memory_class(namespace_id.lower(), namespace_id)
+    namespace_class = namespace_id + "_class"
 
-    dynamic_memory_class = getattr(memory, namespace_id.lower(), None)
+    dynamic_memory_class = getattr(memory, namespace_class.lower(), None)
 
     methods_to_add = ["add_memories", "fetch_memories", "delete_memories"]
 
@@ -62,6 +64,7 @@ async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str,
     print("Available memory classes:", await memory.list_memory_classes())
     result = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
                                                     observation="placeholder", search_type="summary")
+    logging.info("Result is", result)
 
     return result, namespace_id
 
@@ -174,78 +177,36 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
 
 
 
-async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, loader_settings:dict=None, stupid_local_testing_flag=False): #clean this up Vasilije, don't be sloppy
+async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, loader_settings:dict=None):
     """"""
+    try:
+        # await update_document_vectordb_namespace(postgres_session, user_id)
+        memory_names, docs = await get_unsumarized_vector_db_namespace(session, user_id)
 
-
-    # try:
-    # await update_document_vectordb_namespace(postgres_session, user_id)
-    memory_names, docs = await get_unsumarized_vector_db_namespace(session, user_id)
-    logging.info("Memory names are", memory_names)
-    logging.info("Docs are", docs)
-    for doc, memory_name in zip(docs, memory_names):
-        doc_name, doc_id = doc
-        # if stupid_local_testing_flag:
-        #     classification = [{
-        #       "DocumentCategory": "Literature",
-        #       "Title": "Bartleby, the Scrivener",
-        #       "Summary": "The document is a narrative about an enigmatic copyist named Bartleby who works in a law office. Despite initially being a diligent employee, Bartleby begins to refuse tasks with the phrase 'I would prefer not to' and eventually stops working altogether. His passive resistance and mysterious behavior confound the narrator, who is also his employer. Bartleby's refusal to leave the office leads to various complications, and he is eventually taken to the Tombs as a vagrant. The story ends with Bartleby's death and the revelation that he may have previously worked in the Dead Letter Office, which adds a layer of poignancy to his character.",
-        #       "d_id": "2a5c571f-bad6-4649-a4ac-36e4bb4f34cd"
-        #     },
-        #         {
-        #             "DocumentCategory": "Science",
-        #             "Title": "The Mysterious World of Quantum Mechanics",
-        #             "Summary": "This article delves into the fundamentals of quantum mechanics, exploring its paradoxical nature where particles can exist in multiple states simultaneously. It discusses key experiments and theories that have shaped our understanding of the quantum world, such as the double-slit experiment, Schrödinger's cat, and quantum entanglement. The piece also touches upon the implications of quantum mechanics for future technology, including quantum computing and cryptography.",
-        #             "d_id": "f4e2c3b1-4567-8910-11a2-b3c4d5e6f7g8"
-        #         },
-        #         {
-        #             "DocumentCategory": "History",
-        #             "Title": "The Rise and Fall of the Roman Empire",
-        #             "Summary": "This essay provides an overview of the Roman Empire's history, from its foundation to its eventual decline. It examines the political, social, and economic factors that contributed to the empire's expansion and success, as well as those that led to its downfall. Key events and figures such as Julius Caesar, the Punic Wars, and the transition from republic to empire are discussed. The essay concludes with an analysis of the empire's lasting impact on Western civilization.",
-        #             "d_id": "8h7g6f5e-4d3c-2b1a-09e8-d7c6b5a4f3e2"
-        #         },
-        #         {
-        #             "DocumentCategory": "Technology",
-        #             "Title": "The Future of Artificial Intelligence",
-        #             "Summary": "This report explores the current state and future prospects of artificial intelligence (AI). It covers the evolution of AI from simple algorithms to advanced neural networks capable of deep learning. The document discusses various applications of AI in industries such as healthcare, finance, and transportation, as well as ethical considerations and potential risks associated with AI development. Predictions for future advancements and their societal impact are also presented.",
-        #             "d_id": "3c2b1a09-d8e7-f6g5-h4i3-j1k2l3m4n5o6"
-        #         },
-        #         {
-        #             "DocumentCategory": "Economics",
-        #             "Title": "Global Economic Trends and Predictions",
-        #             "Summary": "This analysis examines major trends in the global economy, including the rise of emerging markets, the impact of technology on job markets, and shifts in international trade. It delves into the economic effects of recent global events, such as pandemics and geopolitical conflicts, and discusses how these might shape future economic policies and practices. The document provides predictions for economic growth, inflation rates, and currency fluctuations in the coming years.",
-        #             "d_id": "7k6j5h4g-3f2e-1d0c-b8a9-m7n6o5p4q3r2"
-        #         }
-        #     ]
-        #     for classification in classification:
-        #
-        #         neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-        #                                       password=config.graph_database_password)
-        #         rs = neo4j_graph_db.create_document_node_cypher(classification, user_id)
-        #         neo4j_graph_db.query(rs, classification)
-        #
-        #         # select doc from the store
-        #         neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name, document_id=doc_id)
-        # else:
-        try:
+        logging.info("Docs are", docs)
+        for doc, memory_name in zip(docs, memory_names):
+            logging.info("Memory names are", memory_name)
             classification_content = await fetch_document_vectordb_namespace(session, user_id, memory_name)
-        except:
-            classification_content = "None"
-        #
-        # classification = await classify_documents(doc_name, document_id =doc_id, content=classification_content)
-        #
-        # logging.info("Classification is", str(classification))
-        # neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-        #                               password=config.graph_database_password)
-        # rs = neo4j_graph_db.create_document_node_cypher(classification, user_id)
-        # neo4j_graph_db.query(rs, classification)
-        #
-        # # select doc from the store
-        # neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name,
-        #                                                    document_id=doc_id)
-        await update_entity(session, DocsModel, doc_id, True)
-    # except:
-    #     pass
+            logging.info("Classification content is", classification_content)
+
+            retrieval_chunks = [item['text'] for item in classification_content[0]['data']['Get'][memory_name]]
+            # Concatenating the extracted text values
+            concatenated_retrievals = ' '.join(retrieval_chunks)
+            print(concatenated_retrievals)
+            doc_name, doc_id = doc
+            classification = await classify_documents(doc_name, document_id =doc_id, content=concatenated_retrievals)
+
+            logging.info("Classification is", str(classification))
+            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                          password=config.graph_database_password)
+            rs = neo4j_graph_db.create_document_node_cypher(classification, user_id)
+            neo4j_graph_db.query(rs, classification)
+            neo4j_graph_db.update_document_node_with_namespace(user_id, vectordb_namespace=memory_name,
+                                                               document_id=doc_id)
+            logging.info("hERE IS THE OUT2323", doc_id)
+            await update_entity_graph_summary(session, DocsModel, doc_id, True)
+    except Exception as e:
+        return e
 
 class ResponseString(BaseModel):
     response: str = Field(..., default_factory=list)
@@ -368,30 +329,31 @@ async def main():
     user_id = "user"
 
     async with session_scope(AsyncSessionLocal()) as session:
+        await update_entity(session, DocsModel, "8cd9a022-5a7a-4af5-815a-f988415536ae", True)
         # out = await get_vectordb_namespace(session, user_id)
-        params = {
-            "version": "1.0",
-            "agreement_id": "AG123456",
-            "privacy_policy": "https://example.com/privacy",
-            "terms_of_service": "https://example.com/terms",
-            "format": "json",
-            "schema_version": "1.1",
-            "checksum": "a1b2c3d4e5f6",
-            "owner": "John Doe",
-            "license": "MIT",
-            "validity_start": "2023-08-01",
-            "validity_end": "2024-07-31",
-        }
-        loader_settings = {
-            "format": "PDF",
-            "source": "DEVICE",
-            "path": [".data"],
-            "strategy": "SUMMARY",
-        }
-        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-        await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
-        await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
-        await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
+        # params = {
+        #     "version": "1.0",
+        #     "agreement_id": "AG123456",
+        #     "privacy_policy": "https://example.com/privacy",
+        #     "terms_of_service": "https://example.com/terms",
+        #     "format": "json",
+        #     "schema_version": "1.1",
+        #     "checksum": "a1b2c3d4e5f6",
+        #     "owner": "John Doe",
+        #     "license": "MIT",
+        #     "validity_start": "2023-08-01",
+        #     "validity_end": "2024-07-31",
+        # }
+        # loader_settings = {
+        #     "format": "PDF",
+        #     "source": "DEVICE",
+        #     "path": [".data"],
+        #     "strategy": "SUMMARY",
+        # }
+        # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+        # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
+        # await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
+        # await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
 
 
 if __name__ == "__main__":

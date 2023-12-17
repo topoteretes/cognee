@@ -170,7 +170,7 @@ class Memory:
         self.OPENAI_API_KEY = config.openai_key
 
     @classmethod
-    async def create_memory(cls, user_id: str,  session, job_id, memory_label:str, **kwargs):
+    async def create_memory(cls, user_id: str,  session, job_id:str=None, memory_label:str=None, **kwargs):
         """
         Class method that acts as a factory method for creating Memory instances.
         It performs necessary DB checks or updates before instance creation.
