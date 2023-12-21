@@ -63,8 +63,6 @@ def health_check():
     return {"status": "OK"}
 
 
-
-
 class Payload(BaseModel):
     payload: Dict[str, Any]
 
@@ -158,6 +156,18 @@ async def user_query_classfier(payload: Payload):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.post("/drop-db")
+async def drop_db(payload: Payload):
+    try:
+        decoded_payload = payload.payload
+        return JSONResponse(content={"response": "dropped"}, status_code=200)
+
+    except Exception as e:
+        return HTTPException(status_code=500, detail=str(e))
+
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
