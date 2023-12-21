@@ -41,7 +41,6 @@ class Config:
         graph_database_password: str = os.getenv('GRAPH_DB_PW')
     weaviate_url: str = os.getenv('WEAVIATE_URL')
     weaviate_api_key: str = os.getenv('WEAVIATE_API_KEY')
-
     postgres_user: str = os.getenv('POSTGRES_USER')
     postgres_password: str = os.getenv('POSTGRES_PASSWORD')
     postgres_db: str = os.getenv('POSTGRES_DB')
