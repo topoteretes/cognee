@@ -31,11 +31,28 @@ class Config:
     embedding_chunk_size: int = 300
 
     # Database parameters
-    graph_database_url: str = os.getenv('GRAPH_DB_URL')
-    graph_database_username: str = os.getenv('GRAPH_DB_USER')
-    graph_database_password: str = os.getenv('GRAPH_DB_PW')
+    if os.getenv('ENV') == 'prod' or os.getenv('ENV') == 'dev' or os.getenv('AWS_ENV') == 'dev' or   os.getenv('AWS_ENV') == 'prd':
+        graph_database_url: str = os.getenv('GRAPH_DB_URL_PROD')
+        graph_database_username: str = os.getenv('GRAPH_DB_USER')
+        graph_database_password: str = os.getenv('GRAPH_DB_PW_PROD')
+    else:
+        graph_database_url: str = os.getenv('GRAPH_DB_URL')
+        graph_database_username: str = os.getenv('GRAPH_DB_USER')
+        graph_database_password: str = os.getenv('GRAPH_DB_PW')
     weaviate_url: str = os.getenv('WEAVIATE_URL')
     weaviate_api_key: str = os.getenv('WEAVIATE_API_KEY')
+
+    postgres_user: str = os.getenv('POSTGRES_USER')
+    postgres_password: str = os.getenv('POSTGRES_PASSWORD')
+    postgres_db: str = os.getenv('POSTGRES_DB')
+    if os.getenv('ENV') == 'prod' or os.getenv('ENV') == 'dev' or os.getenv('AWS_ENV') == 'dev' or os.getenv('AWS_ENV') == 'prd':
+        postgres_host: str = os.getenv('POSTGRES_PROD_HOST')
+    elif os.getenv('ENV') == 'docker':
+        postgres_host: str = os.getenv('POSTGRES_HOST_DOCKER')
+    elif os.getenv('ENV') == 'local':
+        postgres_host: str = os.getenv('POSTGRES_HOST_LOCAL')
+
+
 
 
 

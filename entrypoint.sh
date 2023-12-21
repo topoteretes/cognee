@@ -1,5 +1,6 @@
 #!/bin/bash
 export ENVIRONMENT
+export ENV
 # Run Python scripts with error handling
 echo "Running fetch_secret.py"
 python cognitive_architecture/fetch_secret.py

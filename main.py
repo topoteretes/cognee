@@ -320,7 +320,7 @@ async def user_context_enrichment(session, user_id:str, query:str)->str:
     final_result = generate_graph(entire_context)
     logging.info("Final result is %s", final_result)
 
-    return final_result
+    return final_result.response
 
 
 

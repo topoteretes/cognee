@@ -9,6 +9,10 @@ from postgres.models import operation
 from postgres.models import sessions
 from postgres.models import user
 from postgres.models import docs
+from cognitive_architecture.config import Config
+config = Config()
+config.load()
+
 
 
 from postgres.database import Base
@@ -54,18 +58,15 @@ def create_tables(engine):
     Base.metadata.create_all(bind=engine)
 
 if __name__ == "__main__":
-    username = os.getenv('POSTGRES_USER')
-    password = os.getenv('POSTGRES_PASSWORD')
-    database_name = os.getenv('POSTGRES_DB')
-    environment = os.environ.get("ENVIRONMENT")
-
-    if environment == "local":
-        host = os.getenv('POSTGRES_HOST')
-
-    elif environment == "docker":
-        host = os.getenv('POSTGRES_HOST_DOCKER')
-    else:
-        host = os.getenv('POSTGRES_HOST_DOCKER')
+    #
+    # username = os.getenv('POSTGRES_USER')
+    # password = os.getenv('POSTGRES_PASSWORD')
+    # database_name = os.getenv('POSTGRES_DB')
+    # environment = os.environ.get("ENV")
+    host  = config.postgres_host
+    username = config.postgres_user
+    password = config.postgres_password
+    database_name = config.postgres_db
 
     engine = create_admin_engine(username, password, host, database_name)
 

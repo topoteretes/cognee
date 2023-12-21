@@ -169,7 +169,7 @@ class WeaviateVectorDB(VectorDB):
         else:
             chunk_count = 0
             from cognitive_architecture.database.vectordb.chunkers.chunkers import chunk_data
-            documents = [chunk_data(chunk_strategy="VANILLA", source_data=observation, chunk_size=50,
+            documents = [chunk_data(chunk_strategy="VANILLA", source_data=observation, chunk_size=300,
                        chunk_overlap=20)]
             for doc in documents[0]:
                 chunk_count += 1

@@ -15,26 +15,23 @@ load_dotenv()
 # # Get the parent directory of your script and add it to sys.path
 # parent_dir = os.path.dirname(script_dir)
 # sys.path.append(parent_dir)
+from cognitive_architecture.config import Config
+config = Config()
+config.load()
 
 
 # in seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5
 
-username = os.getenv('POSTGRES_USER')
-password = os.getenv('POSTGRES_PASSWORD')
-database_name = os.getenv('POSTGRES_DB')
-import os
 
-environment = os.environ.get("ENVIRONMENT")
 
-if environment == "local":
-    host= os.getenv('POSTGRES_HOST')
+host = config.postgres_host
+username = config.postgres_user
+password = config.postgres_password
+database_name = config.postgres_db
 
-elif environment == "docker":
-    host= os.getenv('POSTGRES_HOST_DOCKER')
-else:
-    host= os.getenv('POSTGRES_HOST_DOCKER')
+
 
 
 
