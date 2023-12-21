@@ -15,21 +15,38 @@ load_dotenv()
 # # Get the parent directory of your script and add it to sys.path
 # parent_dir = os.path.dirname(script_dir)
 # sys.path.append(parent_dir)
-from ...config import Config
-config = Config()
-config.load()
+# from ...config import Config
+# config = Config()
+# config.load()
 
 
 # in seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5
 
+import os
 
 
-host = config.postgres_host
-username = config.postgres_user
-password = config.postgres_password
-database_name = config.postgres_db
+if os.environ.get('AWS_ENV') == 'prd' or os.environ.get('AWS_ENV') == 'dev':
+    host = os.environ.get('POSTGRES_PROD_HOST')
+    username = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    database_name = os.environ.get('POSTGRES_DB')
+elif os.environ.get('AWS_ENV') == 'local':
+    host = os.environ.get('POSTGRES_HOST')
+    username = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    database_name = os.environ.get('POSTGRES_DB')
+else:
+    host = os.environ.get('POSTGRES_HOST')
+    username = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    database_name = os.environ.get('POSTGRES_DB')
+
+# host = config.postgres_host
+# username = config.postgres_user
+# password = config.postgres_password
+# database_name = config.postgres_db
 
 
 
