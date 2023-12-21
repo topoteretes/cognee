@@ -28,7 +28,7 @@ import os
 
 
 if os.environ.get('AWS_ENV') == 'prd' or os.environ.get('AWS_ENV') == 'dev':
-    host = os.environ.get('POSTGRES_PROD_HOST')
+    host = os.environ.get('POSTGRES_HOST')
     username = os.environ.get('POSTGRES_USER')
     password = os.environ.get('POSTGRES_PASSWORD')
     database_name = os.environ.get('POSTGRES_DB')
