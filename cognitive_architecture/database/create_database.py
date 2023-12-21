@@ -9,7 +9,7 @@ from postgres.models import operation
 from postgres.models import sessions
 from postgres.models import user
 from postgres.models import docs
-from cognitive_architecture.config import Config
+from ..config import Config
 config = Config()
 config.load()
 

@@ -15,7 +15,7 @@ load_dotenv()
 # # Get the parent directory of your script and add it to sys.path
 # parent_dir = os.path.dirname(script_dir)
 # sys.path.append(parent_dir)
-from cognitive_architecture.config import Config
+from ...config import Config
 config = Config()
 config.load()
 
