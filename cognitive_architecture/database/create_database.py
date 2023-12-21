@@ -9,9 +9,9 @@ from postgres.models import operation
 from postgres.models import sessions
 from postgres.models import user
 from postgres.models import docs
-from cognitive_architecture.config import Config
-config = Config()
-config.load()
+# from cognitive_architecture.config import Config
+# config = Config()
+# config.load()
 
 
 
@@ -24,7 +24,24 @@ load_dotenv()
 import os
 
 
+import os
 
+
+if os.environ.get('AWS_ENV') == 'prd' or os.environ.get('AWS_ENV') == 'dev':
+    host = os.environ.get('POSTGRES_HOST')
+    username = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    database_name = os.environ.get('POSTGRES_DB')
+elif os.environ.get('AWS_ENV') == 'local':
+    host = os.environ.get('POSTGRES_HOST')
+    username = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    database_name = os.environ.get('POSTGRES_DB')
+else:
+    host = os.environ.get('POSTGRES_HOST')
+    username = os.environ.get('POSTGRES_USER')
+    password = os.environ.get('POSTGRES_PASSWORD')
+    database_name = os.environ.get('POSTGRES_DB')
 
 
 
@@ -63,10 +80,10 @@ if __name__ == "__main__":
     # password = os.getenv('POSTGRES_PASSWORD')
     # database_name = os.getenv('POSTGRES_DB')
     # environment = os.environ.get("ENV")
-    host  = config.postgres_host
-    username = config.postgres_user
-    password = config.postgres_password
-    database_name = config.postgres_db
+    # host  = config.postgres_host
+    # username = config.postgres_user
+    # password = config.postgres_password
+    # database_name = config.postgres_db
 
     engine = create_admin_engine(username, password, host, database_name)
 
