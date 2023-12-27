@@ -71,6 +71,19 @@ def create_database(username, password, host, db_name):
     engine.dispose()
 
 
+def drop_database(username, password, host, db_name):
+    engine = create_admin_engine(username, password, host)
+    connection = engine.raw_connection()
+    connection.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+    cursor = connection.cursor()
+    cursor.execute(f"DROP DATABASE IF EXISTS {db_name}")
+    cursor.close()
+    connection.close()
+    engine.dispose()
+    print(f"Database {db_name} dropped successfully.")
+
+
+
 def create_tables(engine):
     Base.metadata.create_all(bind=engine)
 

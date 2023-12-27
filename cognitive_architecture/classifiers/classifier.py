@@ -73,11 +73,11 @@ def classify_retrieval():
 
 
 # classify documents according to type of document
-async def classify_call(query, context, document_types):
+async def classify_call(query, document_summaries):
 
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a  classifier. Determine what document types are relevant : {query}, Context: {context}, Book_types:{document_types}"""
+        """You are a  classifier. Determine what document  are relevant for the given query: {query}, Document summaries:{document_summaries}"""
     )
     json_structure = [{
         "name": "classifier",
@@ -85,20 +85,20 @@ async def classify_call(query, context, document_types):
         "parameters": {
             "type": "object",
             "properties": {
-                "DocumentCategory": {
+                "DocumentSummary": {
                     "type": "string",
-                    "description": "The classification of documents in groups such as legal, medical, etc."
+                    "description": "The summary of the document and the topic it deals with."
                 }
 
 
-            }, "required": ["DocumentCategory"] }
+            }, "required": ["DocumentSummary"] }
     }]
     chain_filter = prompt_classify | llm.bind(function_call={"name": "classifier"}, functions=json_structure)
-    classifier_output = await chain_filter.ainvoke({"query": query, "context": context, "document_types": document_types})
+    classifier_output = await chain_filter.ainvoke({"query": query, "document_summaries": document_summaries})
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
-    classfier_value = arguments_dict.get('DocumentCategory', None)
+    classfier_value = arguments_dict.get('DocumentSummary', None)
 
     print("This is the classifier value", classfier_value)
 

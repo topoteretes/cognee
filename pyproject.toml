@@ -59,6 +59,8 @@ graphviz = "^0.20.1"
 greenlet = "^3.0.1"
 neo4j = "^5.14.1"
 grpcio = "^1.60.0"
+langdetect = "^1.0.9"
+iso639 = "^0.1.4"
 
 
 

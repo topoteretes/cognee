@@ -130,8 +130,6 @@ class WeaviateVectorDB(VectorDB):
 
     def _stuct(self, observation, params, metadata_schema_class =None):
         """Utility function to create the document structure with optional custom fields."""
-
-
         # Construct document data
         document_data = {
             "metadata": params,
@@ -152,20 +150,22 @@ class WeaviateVectorDB(VectorDB):
         if namespace is None:
             namespace = self.namespace
         params['user_id'] = self.user_id
+        logging.info("User id is %s", self.user_id)
         retriever = self.init_weaviate(embeddings=OpenAIEmbeddings(),namespace = namespace, retriever_type="single_document_context")
         if loader_settings:
             # Assuming _document_loader returns a list of documents
             documents = await _document_loader(observation, loader_settings)
             logging.info("here are the docs %s", str(documents))
             chunk_count = 0
-            for doc in documents[0]:
-                chunk_count += 1
-                params['chunk_order'] = chunk_count
-                # document_to_load = self._stuct(doc.page_content, params, metadata_schema_class)
-
-                # logging.info("Loading document with provided loader settings %s", str(document_to_load))
-                retriever.add_documents([
-            Document(metadata=params, page_content=doc.page_content)])
+            for doc_list in documents:
+                for doc in doc_list:
+                    chunk_count += 1
+                    params['chunk_count'] = doc.metadata.get("chunk_count", "None")
+                    logging.info("Loading document with provided loader settings %s", str(doc))
+                    params['source'] = doc.metadata.get("source", "None")
+                    logging.info("Params are %s", str(params))
+                    retriever.add_documents([
+                Document(metadata=params, page_content=doc.page_content)])
         else:
             chunk_count = 0
             from cognitive_architecture.database.vectordb.chunkers.chunkers import chunk_data
@@ -174,16 +174,13 @@ class WeaviateVectorDB(VectorDB):
             for doc in documents[0]:
                 chunk_count += 1
                 params['chunk_order'] = chunk_count
-
-                # document_to_load = self._stuct(observation, params, metadata_schema_class)
-
-                logging.info("Loading document with defautl loader settings %s", str(doc))
-
-                # logging.info("Loading document with defautl loader settings %s", str(document_to_load))
+                params['source'] = "User loaded"
+                logging.info("Loading document with default loader settings %s", str(doc))
+                logging.info("Params are %s", str(params))
                 retriever.add_documents([
                 Document(metadata=params, page_content=doc.page_content)])
 
-    async def fetch_memories(self, observation: str, namespace: str = None, search_type: str = 'hybrid', **kwargs):
+    async def fetch_memories(self, observation: str, namespace: str = None, search_type: str = 'hybrid',params=None, **kwargs):
         """
         Fetch documents from weaviate.
 
@@ -276,6 +273,33 @@ class WeaviateVectorDB(VectorDB):
             ).with_additional(
                 ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
             ).with_where(filter_object).with_limit(30)
+            query_output = (
+                base_query
+                # .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
+                .do()
+            )
+
+        elif search_type == 'summary_filter_by_object_name':
+            filter_object = {
+                "operator": "And",
+                "operands": [
+                    {
+                        "path": ["user_id"],
+                        "operator": "Equal",
+                        "valueText": self.user_id,
+                    },
+                    {
+                        "path": ["doc_id"],
+                        "operator": "Equal",
+                        "valueText": params,
+                    },
+                ]
+            }
+            base_query = client.query.get(
+                namespace, list(list_objects_of_class(namespace, client.schema.get()))
+            ).with_additional(
+                ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
+            ).with_where(filter_object).with_limit(30).with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
             query_output = (
                 base_query
                 .do()

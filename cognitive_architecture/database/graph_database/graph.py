@@ -5,6 +5,9 @@
 import logging
 import os
 
+from neo4j import AsyncSession
+from neo4j.exceptions import Neo4jError
+
 print(os.getcwd())
 
 import networkx as nx
@@ -25,8 +28,10 @@ from abc import ABC, abstractmethod
 # Allows the return of Pydantic model rather than raw JSON
 
 from pydantic import BaseModel, Field
-from typing import List
-from ...utils import format_dict, append_uuid_to_variable_names, create_edge_variable_mapping, create_node_variable_mapping
+from typing import List, Dict, Optional
+from ...utils import format_dict, append_uuid_to_variable_names, create_edge_variable_mapping, \
+    create_node_variable_mapping, get_unsumarized_vector_db_namespace
+
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
@@ -113,7 +118,8 @@ class KnowledgeGraph(BaseModel):
     nodes: List[Node] = Field(..., default_factory=list)
     edges: List[Edge] = Field(..., default_factory=list)
 
-
+class GraphQLQuery(BaseModel):
+    query: str
 #
 
 def generate_graph(input) -> KnowledgeGraph:
@@ -185,13 +191,25 @@ class AbstractGraphDB(ABC):
 
 class Neo4jGraphDB(AbstractGraphDB):
     def __init__(self, url, username, password):
-        self.graph = Neo4jGraph(url=url, username=username, password=password)
+        # self.graph = Neo4jGraph(url=url, username=username, password=password)
+        from neo4j import GraphDatabase
+        self.driver = GraphDatabase.driver(url, auth=(username, password))
         self.openai_key = config.openai_key
 
 
 
+    def close(self):
+        # Method to close the Neo4j driver instance
+        self.driver.close()
+
     def query(self, query, params=None):
-        return self.graph.query(query, params)
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, params).data()
+                return result
+        except Exception as e:
+            logging.error(f"An error occurred while executing the query: {e}")
+            raise e
 
 
 
@@ -209,7 +227,7 @@ class Neo4jGraphDB(AbstractGraphDB):
         return user_memory_cypher
 
     def user_query_to_edges_and_nodes(self, input: str) ->KnowledgeGraph:
-        return openai.ChatCompletion.create(
+        return aclient.chat.completions.create(
             model=config.model,
             messages=[
                 {
@@ -253,6 +271,22 @@ class Neo4jGraphDB(AbstractGraphDB):
                     Adhere to the rules strictly. Non-compliance will result in termination."""}
             ],
             response_model=KnowledgeGraph,
+        )
+
+
+    def cypher_statement_correcting(self, input: str) ->str:
+        return aclient.chat.completions.create(
+            model=config.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Check the cypher query for syntax issues, and fix any if found and return it as is: {input}. """,
+
+                },
+                {"role": "system", "content": """You are a top-tier algorithm
+                        designed for checking cypher queries for neo4j graph databases. You have to return input provided to you as is"""}
+            ],
+            response_model=GraphQLQuery,
         )
 
     def generate_create_statements_for_nodes_with_uuid(self, nodes, unique_mapping, base_node_mapping):
@@ -324,6 +358,10 @@ class Neo4jGraphDB(AbstractGraphDB):
         # # Combine all statements
         cypher_statements = [self.create_base_cognitive_architecture(user_id)] + create_nodes_statements + create_edges_statements + memory_type_statements_with_uuid_and_time_context
         cypher_statements_joined = "\n".join(cypher_statements)
+        logging.info("User Cypher Query raw: %s", cypher_statements_joined)
+        # corrected_cypher_statements = self.cypher_statement_correcting(input = cypher_statements_joined)
+        # logging.info("User Cypher Query: %s", corrected_cypher_statements.query)
+        # return corrected_cypher_statements.query
         return cypher_statements_joined
 
 
@@ -334,7 +372,7 @@ class Neo4jGraphDB(AbstractGraphDB):
     def delete_all_user_memories(self, user_id):
         try:
             # Check if the user exists
-            user_exists = self.graph.query(f"MATCH (user:User {{userId: '{user_id}'}}) RETURN user")
+            user_exists = self.query(f"MATCH (user:User {{userId: '{user_id}'}}) RETURN user")
             if not user_exists:
                 return f"No user found with ID: {user_id}"
 
@@ -348,7 +386,7 @@ class Neo4jGraphDB(AbstractGraphDB):
             MATCH (user)-[:HAS_BUFFER]->(buffer)
             DETACH DELETE semantic, episodic, buffer
             """
-            self.graph.query(delete_query)
+            self.query(delete_query)
             return f"All memories deleted for user ID: {user_id}"
         except Exception as e:
             return f"An error occurred: {str(e)}"
@@ -356,7 +394,7 @@ class Neo4jGraphDB(AbstractGraphDB):
     def delete_specific_memory_type(self, user_id, memory_type):
         try:
             # Check if the user exists
-            user_exists = self.graph.query(f"MATCH (user:User {{userId: '{user_id}'}}) RETURN user")
+            user_exists = self.query(f"MATCH (user:User {{userId: '{user_id}'}}) RETURN user")
             if not user_exists:
                 return f"No user found with ID: {user_id}"
 
@@ -369,7 +407,7 @@ class Neo4jGraphDB(AbstractGraphDB):
             MATCH (user:User {{userId: '{user_id}'}})-[:HAS_{memory_type.upper()}]->(memory)
             DETACH DELETE memory
             """
-            self.graph.query(delete_query)
+            self.query(delete_query)
             return f"{memory_type} deleted for user ID: {user_id}"
         except Exception as e:
             return f"An error occurred: {str(e)}"
@@ -394,6 +432,15 @@ class Neo4jGraphDB(AbstractGraphDB):
         MATCH (user:User {userId: $user_id})-[:HAS_BUFFER]->(buffer:Buffer)
         MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
         RETURN item
+        """
+        return self.query(query, params={"user_id": user_id})
+
+
+    def retrieve_public_memory(self, user_id: str):
+        query = """
+        MATCH (user:User {userId: $user_id})-[:HAS_PUBLIC_MEMORY]->(public:PublicMemory)
+        MATCH (public)-[:HAS_DOCUMENT]->(document)
+        RETURN document
         """
         return self.query(query, params={"user_id": user_id})
     def generate_graph_semantic_memory_document_summary(self, document_summary : str, unique_graphdb_mapping_values: dict, document_namespace: str):
@@ -429,71 +476,142 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return create_statements
 
-    async def get_document_categories(self, user_id: str):
+
+    async def get_memory_linked_document_summaries(self, user_id: str, memory_type: str = "PublicMemory"):
         """
-        Retrieve a list of categories for all documents associated with a given user.
+        Retrieve a list of summaries for all documents associated with a given memory type for a user.
 
-        This function executes a Cypher query in a Neo4j database to fetch the categories
-        of all 'Document' nodes that are linked to the 'SemanticMemory' node of the specified user.
-
-        Parameters:
-        - session (AsyncSession): The database session for executing the query.
-        - user_id (str): The unique identifier of the user.
+        Args:
+            user_id (str): The unique identifier of the user.
+            memory_type (str): The type of memory node ('SemanticMemory' or 'PublicMemory').
 
         Returns:
-        - List[str]: A list of document categories associated with the user.
+            List[str]: A list of document categories associated with the memory type for the user.
 
         Raises:
-        - Exception: If an error occurs during the database query execution.
+            Exception: If an error occurs during the database query execution.
         """
+        if memory_type == "PublicMemory":
+            relationship = "HAS_PUBLIC_MEMORY"
+        elif memory_type == "SemanticMemory":
+            relationship = "HAS_SEMANTIC_MEMORY"
         try:
             query = f'''
-            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
-            RETURN document.documentCategory AS category
+            MATCH (user:User {{userId: '{user_id}'}})-[:{relationship}]->(memory:{memory_type})-[:HAS_DOCUMENT]->(document:Document)
+            RETURN document.summary AS summary
             '''
             logging.info(f"Generated Cypher query: {query}")
-            return query
+            result = self.query(query)
+            logging.info("Result: ", result)
+            return [record.get("summary", "No summary available") for record in result]
 
         except Exception as e:
-            logging.error(f"An error occurred while retrieving document categories: {str(e)}")
+            logging.error(f"An error occurred while retrieving document summary: {str(e)}")
             return None
 
-    async def get_document_ids(self, user_id: str, category: str):
+
+    # async def get_document_categories(self, user_id: str):
+    #     """
+    #     Retrieve a list of categories for all documents associated with a given user.
+    #
+    #     This function executes a Cypher query in a Neo4j database to fetch the categories
+    #     of all 'Document' nodes that are linked to the 'SemanticMemory' node of the specified user.
+    #
+    #     Parameters:
+    #     - session (AsyncSession): The database session for executing the query.
+    #     - user_id (str): The unique identifier of the user.
+    #
+    #     Returns:
+    #     - List[str]: A list of document categories associated with the user.
+    #
+    #     Raises:
+    #     - Exception: If an error occurs during the database query execution.
+    #     """
+    #     try:
+    #         query = f'''
+    #         MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document)
+    #         RETURN document.documentCategory AS category
+    #         '''
+    #         logging.info(f"Generated Cypher query: {query}")
+    #         return query
+    #
+    #     except Exception as e:
+    #         logging.error(f"An error occurred while retrieving document categories: {str(e)}")
+    #         return None
+
+    # async def get_document_ids(self, user_id: str, category: str):
+    #     """
+    #     Retrieve a list of document IDs for a specific category associated with a given user.
+    #
+    #     This function executes a Cypher query in a Neo4j database to fetch the IDs
+    #     of all 'Document' nodes in a specific category that are linked to the 'SemanticMemory' node of the specified user.
+    #
+    #     Parameters:
+    #     - user_id (str): The unique identifier of the user.
+    #     - category (str): The specific document category to filter by.
+    #
+    #     Returns:
+    #     - List[str]: A list of document IDs in the specified category associated with the user.
+    #
+    #     Raises:
+    #     - Exception: If an error occurs during the database query execution.
+    #     """
+    #     try:
+    #         query = f'''
+    #         MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{documentCategory: '{category}'}})
+    #         RETURN document.d_id AS d_id
+    #         '''
+    #         logging.info(f"Generated Cypher query: {query}")
+    #         return query
+    #
+    #     except Exception as e:
+    #         logging.error(f"An error occurred while retrieving document IDs: {str(e)}")
+    #         return None
+
+    async def get_memory_linked_document_ids(self, user_id: str, summary: str, memory_type: str = "PUBLIC"):
         """
-        Retrieve a list of document IDs for a specific category associated with a given user.
+        Retrieve a list of document IDs for a specific category associated with a given memory type for a user.
 
-        This function executes a Cypher query in a Neo4j database to fetch the IDs
-        of all 'Document' nodes in a specific category that are linked to the 'SemanticMemory' node of the specified user.
-
-        Parameters:
-        - user_id (str): The unique identifier of the user.
-        - category (str): The specific document category to filter by.
+        Args:
+            user_id (str): The unique identifier of the user.
+            summary (str): The specific document summary to filter by.
+            memory_type (str): The type of memory node ('SemanticMemory' or 'PublicMemory').
 
         Returns:
-        - List[str]: A list of document IDs in the specified category associated with the user.
+            List[str]: A list of document IDs in the specified category associated with the memory type for the user.
 
         Raises:
-        - Exception: If an error occurs during the database query execution.
+            Exception: If an error occurs during the database query execution.
         """
+
+        if memory_type == "PublicMemory":
+            relationship = "HAS_PUBLIC_MEMORY"
+        elif memory_type == "SemanticMemory":
+            relationship = "HAS_SEMANTIC_MEMORY"
         try:
             query = f'''
-            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{documentCategory: '{category}'}})
+            MATCH (user:User {{userId: '{user_id}'}})-[:{relationship}]->(memory:{memory_type})-[:HAS_DOCUMENT]->(document:Document {{summary: '{summary}'}})
             RETURN document.d_id AS d_id
             '''
             logging.info(f"Generated Cypher query: {query}")
-            return query
-
+            result = self.query(query)
+            return [record["d_id"] for record in result]
         except Exception as e:
             logging.error(f"An error occurred while retrieving document IDs: {str(e)}")
             return None
 
-    def create_document_node_cypher(self, document_summary: dict, user_id: str) -> str:
+
+    def create_document_node_cypher(self, document_summary: dict, user_id: str,
+                                    memory_type: str = "PublicMemory",public_memory_id:str=None) -> str:
         """
-        Generate a Cypher query to create a Document node linked to a SemanticMemory node for a user.
+        Generate a Cypher query to create a Document node. If the memory type is 'Semantic',
+        link it to a SemanticMemory node for a user. If the memory type is 'PublicMemory',
+        only link the Document node to the PublicMemory node.
 
         Parameters:
-        - document_summary (dict): A dictionary containing the document's category, title, and summary.
+        - document_summary (dict): A dictionary containing the document's category, title, summary, and document ID.
         - user_id (str): The unique identifier for the user.
+        - memory_type (str): The type of memory node to link ("Semantic" or "PublicMemory"). Default is "PublicMemory".
 
         Returns:
         - str: A Cypher query string with parameters.
@@ -509,45 +627,79 @@ class Neo4jGraphDB(AbstractGraphDB):
             raise ValueError("The document_summary dictionary is missing required keys.")
         if not isinstance(user_id, str) or not user_id:
             raise ValueError("The user_id must be a non-empty string.")
+        if memory_type not in ["SemanticMemory", "PublicMemory"]:
+            raise ValueError("The memory_type must be either 'Semantic' or 'PublicMemory'.")
 
-        # Escape single quotes in the document summary data (if not using parameters)
+        # Escape single quotes in the document summary data
         title = document_summary['Title'].replace("'", "\\'")
         summary = document_summary['Summary'].replace("'", "\\'")
         document_category = document_summary['DocumentCategory'].replace("'", "\\'")
         d_id = document_summary['d_id'].replace("'", "\\'")
 
-        # Generate the Cypher query using parameters
+        memory_node_type = "SemanticMemory" if memory_type == "SemanticMemory" else "PublicMemory"
+
+        user_memory_link = ''
+        if memory_type == "SemanticMemory":
+            user_memory_link = f'''
+               // Ensure the User node exists
+               MERGE (user:User {{ userId: '{user_id}' }})
+               MERGE (memory:SemanticMemory {{ userId: '{user_id}' }})
+               MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(memory)
+               '''
+        elif memory_type == "PublicMemory":
+            logging.info(f"Public memory id: {public_memory_id}")
+            user_memory_link = f'''
+               // Merge with the existing PublicMemory node or create a new one if it does not exist
+               MATCH (memory:PublicMemory {{ memoryId: {public_memory_id} }})
+               '''
+
         cypher_query = f'''
-        // Ensure the User node exists
-        MERGE (user:User {{ userId: '{user_id}' }})
-    
-        // Ensure the SemanticMemory node exists and is connected to the User
-        MERGE (semantic:SemanticMemory {{ userId: '{user_id}' }})
-        MERGE (user)-[:HAS_SEMANTIC_MEMORY]->(semantic)
-    
-        // Create the Document node with its properties
-        CREATE (document:Document {{
-            title: '{title}',
-            summary: '{summary}',
-            documentCategory: '{document_category}',
-            d_id: '{d_id}'
-        }})
-    
-        // Link the Document node to the SemanticMemory node
-        CREATE (semantic)-[:HAS_DOCUMENT]->(document)
-        '''
+           {user_memory_link}
+
+           // Create the Document node with its properties
+           CREATE (document:Document {{
+               title: '{title}',
+               summary: '{summary}',
+               documentCategory: '{document_category}',
+               d_id: '{d_id}'
+           }})
+
+           // Link the Document node to the {memory_node_type} node
+           MERGE (memory)-[:HAS_DOCUMENT]->(document)
+           '''
+
         logging.info(f"Generated Cypher query: {cypher_query}")
 
         return cypher_query
 
-    def update_document_node_with_namespace(self, user_id: str, vectordb_namespace: str, document_id: str):
-        # Generate the Cypher query
-        cypher_query = f'''
-        MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{d_id: '{document_id}'}})
-        SET document.vectordbNamespace = '{vectordb_namespace}'
-        RETURN document
-        '''
+    def update_document_node_with_db_ids(self, vectordb_namespace: str, document_id: str, user_id: str = None):
+        """
+        Update the namespace of a Document node in the database. The document can be linked
+        either to a SemanticMemory node (if a user ID is provided) or to a PublicMemory node.
 
+        Parameters:
+        - vectordb_namespace (str): The namespace to set for the vectordb.
+        - document_id (str): The unique identifier of the document.
+        - user_id (str, optional): The unique identifier for the user. Default is None.
+
+        Returns:
+        - str: A Cypher query string to perform the update.
+        """
+
+        if user_id:
+            # Update for a document linked to a SemanticMemory node
+            cypher_query = f'''
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(:SemanticMemory)-[:HAS_DOCUMENT]->(document:Document {{d_id: '{document_id}'}})
+            SET document.vectordbNamespace = '{vectordb_namespace}'
+            RETURN document
+            '''
+        else:
+            # Update for a document linked to a PublicMemory node
+            cypher_query = f'''
+            MATCH (:PublicMemory)-[:HAS_DOCUMENT]->(document:Document {{d_id: '{document_id}'}})
+            SET document.vectordbNamespace = '{vectordb_namespace}'
+            RETURN document
+            '''
 
         return cypher_query
 
@@ -580,6 +732,278 @@ class Neo4jGraphDB(AbstractGraphDB):
         except Exception as e:
             logging.error(f"An error occurred while retrieving namespaces by document category: {str(e)}")
             return None
+
+    async def create_memory_node(self, labels, topic=None):
+        """
+        Create or find a memory node of the specified type with labels and a description.
+
+        Args:
+            labels (List[str]): A list of labels for the node.
+            topic (str, optional): The type of memory node to create or find. Defaults to "PublicMemory".
+
+        Returns:
+            int: The ID of the created or found memory node.
+
+        Raises:
+            ValueError: If input parameters are invalid.
+            Neo4jError: If an error occurs during the database operation.
+        """
+        if topic is None:
+            topic = "PublicMemory"
+
+        # Prepare labels as a string
+        label_list = ', '.join(f"'{label}'" for label in labels)
+
+        # Cypher query to find or create the memory node with the given description and labels
+        memory_cypher = f"""
+        MERGE (memory:{topic} {{description: '{topic}', label: [{label_list}]}})
+        SET memory.memoryId = ID(memory)
+        RETURN id(memory) AS memoryId
+        """
+
+        try:
+            result = self.query(memory_cypher)
+            # Assuming the result is a list of records, where each record contains 'memoryId'
+            memory_id = result[0]['memoryId'] if result else None
+            self.close()
+            return memory_id
+        except Neo4jError as e:
+            logging.error(f"Error creating or finding memory node: {e}")
+            raise
+
+    def link_user_to_public(self, user_id: str, public_property_value: str, public_property_name: str = 'name',
+                            relationship_type: str = 'HAS_PUBLIC'):
+        if not user_id or not public_property_value:
+            raise ValueError("Valid User ID and Public property value are required for linking.")
+
+        try:
+            link_cypher = f"""
+            MATCH (user:User {{userId: '{user_id}'}})
+            MATCH (public:Public {{{public_property_name}: '{public_property_value}'}})
+            MERGE (user)-[:{relationship_type}]->(public)
+            """
+            self.query(link_cypher)
+        except Neo4jError as e:
+            logging.error(f"Error linking Public node to user: {e}")
+            raise
+
+    def delete_memory_node(self, memory_id: int, topic: str) -> None:
+        if not memory_id or not topic:
+            raise ValueError("Memory ID and Topic are required for deletion.")
+
+        try:
+            delete_cypher = f"""
+            MATCH ({topic.lower()}: {topic}) WHERE id({topic.lower()}) = {memory_id}
+            DETACH DELETE {topic.lower()}
+            """
+            logging.info("Delete Cypher Query: %s", delete_cypher)
+            self.query(delete_cypher)
+        except Neo4jError as e:
+            logging.error(f"Error deleting {topic} memory node: {e}")
+            raise
+
+    def unlink_memory_from_user(self, memory_id: int, user_id: str, topic: str='PublicMemory') -> None:
+        """
+        Unlink a memory node from a user node.
+
+        Parameters:
+        - memory_id (int): The internal ID of the memory node.
+        - user_id (str): The unique identifier for the user.
+        - memory_type (str): The type of memory node to unlink ("SemanticMemory" or "PublicMemory").
+
+        Raises:
+        - ValueError: If any required data is missing or invalid.
+        """
+
+        if not user_id or not isinstance(memory_id, int):
+            raise ValueError("Valid User ID and Memory ID are required for unlinking.")
+
+        if topic not in ["SemanticMemory", "PublicMemory"]:
+            raise ValueError("The memory_type must be either 'SemanticMemory' or 'PublicMemory'.")
+
+        relationship_type = "HAS_SEMANTIC_MEMORY" if topic == "SemanticMemory" else "HAS_PUBLIC_MEMORY"
+
+        try:
+            unlink_cypher = f"""
+            MATCH (user:User {{userId: '{user_id}'}})-[r:{relationship_type}]->(memory:{topic}) WHERE id(memory) = {memory_id}
+            DELETE r
+            """
+            self.query(unlink_cypher)
+        except Neo4jError as e:
+            logging.error(f"Error unlinking {topic} from user: {e}")
+            raise
+
+
+    def link_public_memory_to_user(self, memory_id, user_id):
+        # Link an existing Public Memory node to a User node
+        link_cypher = f"""
+        MATCH (user:User {{userId: '{user_id}'}})
+        MATCH (publicMemory:PublicMemory) WHERE id(publicMemory) = {memory_id}
+        MERGE (user)-[:HAS_PUBLIC_MEMORY]->(publicMemory)
+        """
+        self.query(link_cypher)
+
+    def retrieve_node_id_for_memory_type(self, topic: str = 'SemanticMemory'):
+        link_cypher = f""" MATCH(publicMemory: {topic})
+        RETURN
+        id(publicMemory)
+        AS
+        memoryId """
+        node_ids = self.query(link_cypher)
+        return node_ids
+
+
+    # def retrieve_linked_memory_for_user(self, user_id: str, topic: str, relationship_type: str = 'HAS_MEMORY'):
+    #     query = f"""
+    #     MATCH (user:User {{userId: $user_id}})-[:{relationship_type}]->({topic.lower()}:{topic})
+    #     RETURN {topic.lower()}
+    #     """
+    #     return self.query(query, params={"user_id": user_id})
+    #
+
+
+    #
+    # async def link_memory_to_user(self, memory_id: int, user_id: str, relationship_type: str = 'HAS_MEMORY') -> None:
+    #     """
+    #     Link a memory node to a user with a specified relationship type.
+    #
+    #     Args:
+    #         memory_id (int): The ID of the memory node.
+    #         user_id (str): The user ID to link the memory to.
+    #         relationship_type (str): The type of relationship.
+    #
+    #     Raises:
+    #         ValueError: If input parameters are invalid.
+    #         Neo4jError: If an error occurs during the database operation.
+    #     """
+    #     if not user_id or not memory_id:
+    #         raise ValueError("User ID and Memory ID are required for linking.")
+    #
+    #     try:
+    #         link_cypher = f"""
+    #         MATCH (user:User {{userId: '{user_id}'}})
+    #         MATCH (memory) WHERE id(memory) = {memory_id}
+    #         MERGE (user)-[:{relationship_type}]->(memory)
+    #         """
+    #         await self.query(link_cypher)
+    #     except Neo4jError as e:
+    #         logging.error(f"Error linking memory to user: {e}")
+    #         raise
+    #
+    # async def delete_memory_node(self, memory_id: int, memory_type: str) -> None:
+    #     """
+    #     Delete a memory node of a specified type.
+    #
+    #     Args:
+    #         memory_id (int): The ID of the memory node to delete.
+    #         memory_type (str): The type of the memory node.
+    #
+    #     Raises:
+    #         ValueError: If input parameters are invalid.
+    #         Neo4jError: If an error occurs during the database operation.
+    #     """
+    #     if not memory_id or not memory_type:
+    #         raise ValueError("Memory ID and Memory Type are required for deletion.")
+    #
+    #     try:
+    #         delete_cypher = f"""
+    #         MATCH (memory:{memory_type}) WHERE id(memory) = {memory_id}
+    #         DETACH DELETE memory
+    #         """
+    #         await self.query(delete_cypher)
+    #     except Neo4jError as e:
+    #         logging.error(f"Error deleting memory node: {e}")
+    #         raise
+    #
+    # async def unlink_memory_from_user(self, memory_id: int, user_id: str, relationship_type: str = 'HAS_MEMORY') -> None:
+    #     """
+    #     Unlink a memory node from a user.
+    #
+    #     Args:
+    #         memory_id (int): The ID of the memory node.
+    #         user_id (str): The user ID to unlink from the memory.
+    #         relationship_type (str): The type of relationship.
+    #
+    #     Raises:
+    #         ValueError: If input parameters are invalid.
+    #         Neo4jError: If an error occurs during the database operation.
+    #     """
+    #     if not user_id or not memory_id:
+    #         raise ValueError("User ID and Memory ID are required for unlinking.")
+    #
+    #     try:
+    #         unlink_cypher = f"""
+    #         MATCH (user:User {{userId: '{user_id}'}})-[r:{relationship_type}]->(memory) WHERE id(memory) = {memory_id}
+    #         DELETE r
+    #         """
+    #         await self.query(unlink_cypher)
+    #     except Neo4jError as e:
+    #         logging.error(f"Error unlinking memory from user: {e}")
+    #         raise
+    #
+
+    #
+    # def create_public_memory(self, labels, topic=None):
+    #     if topic is None:
+    #         topic = "SerbianArchitecture"
+    #         topicMemoryId = topic + "MemoryId"
+    #     # Create an independent Architecture Memory node with countries as properties
+    #     label_list = ', '.join(f"'{label}'" for label in labels)  # Prepare countries list as a string
+    #     architecture_memory_cypher = f"""
+    #        CREATE ({topic.lower()}:{topic} {{description: '{topic}', label: [{label_list}]}})
+    #        RETURN id({topic.lower()}) AS {topicMemoryId}
+    #        """
+    #     return self.query(architecture_memory_cypher)
+    #
+    # def link_public_memory_to_user(self, public_memory_id, user_id):
+    #     # Link an existing Public Memory node to a User node
+    #     link_cypher = f"""
+    #     MATCH (user:User {{userId: '{user_id}'}})
+    #     MATCH (publicMemory:PublicMemory) WHERE id(publicMemory) = {public_memory_id}
+    #     MERGE (user)-[:HAS_PUBLIC_MEMORY]->(publicMemory)
+    #     """
+    #     self.query(link_cypher)
+    #
+    # def link_public_memory_to_architecture(self, public_memory_id):
+    #     # Link the Public Memory node to the Architecture Memory node
+    #     link_cypher = f"""
+    #     MATCH (publicMemory:PublicMemory) WHERE id(publicMemory) = {public_memory_id}
+    #     MATCH (architecture:Architecture {{description: 'Architecture'}})
+    #     MERGE (publicMemory)-[:INCLUDES]->(architecture)
+    #     """
+    #     self.query(link_cypher)
+    #
+    # def delete_public_memory(self, public_memory_id):
+    #     # Delete a Public Memory node by its ID
+    #     delete_cypher = f"""
+    #     MATCH (publicMemory:PublicMemory) WHERE id(publicMemory) = {public_memory_id}
+    #     DETACH DELETE publicMemory
+    #     """
+    #     self.query(delete_cypher)
+    #
+    # def delete_architecture_memory(self, architecture_memory_id):
+    #     # Delete an Architecture Memory node by its ID
+    #     delete_cypher = f"""
+    #     MATCH (architecture:Architecture) WHERE id(architecture) = {architecture_memory_id}
+    #     DETACH DELETE architecture
+    #     """
+    #     self.query(delete_cypher)
+    #
+    # def unlink_public_memory_from_user(self, public_memory_id, user_id):
+    #     # Unlink a Public Memory node from a User node
+    #     unlink_cypher = f"""
+    #     MATCH (user:User {{userId: '{user_id}'}})-[r:HAS_PUBLIC_MEMORY]->(publicMemory:PublicMemory) WHERE id(publicMemory) = {public_memory_id}
+    #     DELETE r
+    #     """
+    #     self.query(unlink_cypher)
+    #
+    # def unlink_public_memory_from_architecture(self, public_memory_id):
+    #     # Unlink the Public Memory node from the Architecture Memory node
+    #     unlink_cypher = f"""
+    #     MATCH (publicMemory:PublicMemory)-[r:INCLUDES]->(architecture:Architecture) WHERE id(publicMemory) = {public_memory_id}
+    #     DELETE r
+    #     """
+    #     self.query(unlink_cypher)
 
 
 class NetworkXGraphDB:

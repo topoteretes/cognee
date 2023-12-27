@@ -251,7 +251,7 @@ class Memory:
             return f"Error creating user: {str(e)}"
 
     @staticmethod
-    async def handle_new_memory(user_id: str, session, job_id: str = None, memory_name: str = None):
+    async def handle_new_memory(user_id: str, session, job_id: str = None, memory_name: str = None, memory_category:str='PUBLIC'):
         """
         Handle new memory creation associated with a user.
 
@@ -275,6 +275,7 @@ class Memory:
                 user_id=user_id,
                 operation_id=job_id,
                 memory_name=memory_name,
+                memory_category=memory_category,
                 methods_list=str(["Memory", "SemanticMemory", "EpisodicMemory"]),
                 attributes_list=str(
                     [

@@ -2122,6 +2122,16 @@ typing_extensions = "*"
 aws = ["boto3"]
 
 [[package]]
+name = "iso639"
+version = "0.1.4"
+description = "ISO639-2 support for Python."
+optional = false
+python-versions = "*"
+files = [
+    {file = "iso639-0.1.4.tar.gz", hash = "sha256:88b70cf6c64ee9c2c2972292818c8beb32db9ea6f4de1f8471a9b081a3d92e98"},
+]
+
+[[package]]
 name = "itsdangerous"
 version = "2.1.2"
 description = "Safely pass data to untrusted environments and back."
@@ -6782,4 +6792,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "b32ccb9319a4411b11b4aa2fde21b354ea93488e4bd6057c62847baf47cf7db6"
+content-hash = "c3402714a133f8583fcbf06955f155d42169ffd54874d565617b2c4cdf58a227"

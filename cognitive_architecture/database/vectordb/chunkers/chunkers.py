@@ -1,7 +1,4 @@
-from langchain.document_loaders import PyPDFLoader
-import sys, os
-
-from cognitive_architecture.shared.chunk_strategy import ChunkStrategy
+from cognitive_architecture.database.vectordb.chunkers.chunk_strategy import ChunkStrategy
 import re
 def chunk_data(chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
 
@@ -32,10 +29,13 @@ def vanilla_chunker(source_data, chunk_size=100, chunk_overlap=20):
         chunk_overlap=chunk_overlap,
         length_function=len
     )
-    try:
-        pages = text_splitter.create_documents([source_data])
-    except:
-        pages = text_splitter.create_documents(source_data.content)
+    # try:
+    #     pages = text_splitter.create_documents([source_data])
+    # except:
+    # try:
+    pages = text_splitter.create_documents([source_data])
+    # except:
+    #     pages = text_splitter.create_documents(source_data.content)
     # pages = source_data.load_and_split()
     return pages
 

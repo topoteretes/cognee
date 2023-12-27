@@ -7,6 +7,11 @@ from graphviz import Digraph
 from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager
 
+from cognitive_architecture.database.postgres.database import AsyncSessionLocal
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # from graph_database.graph import KnowledgeGraph
 
@@ -217,10 +222,11 @@ async def get_unsumarized_vector_db_namespace(session: AsyncSession, user_id: st
     operations = result.unique().scalars().all()
 
     # Extract memory names and document names and IDs
-    memory_names = [memory.memory_name for op in operations for memory in op.memories]
+    # memory_names = [memory.memory_name for op in operations for memory in op.memories]
+    memory_details = [(memory.memory_name, memory.memory_category) for op in operations for memory in op.memories]
     docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
 
-    return memory_names, docs
+    return memory_details, docs
 
     # except Exception as e:
     #     # Handle the exception as needed
@@ -264,4 +270,42 @@ async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
 
 
 
-
+#
+# async def main():
+#     user_id = "user"
+#
+#     async with session_scope(AsyncSessionLocal()) as session:
+#         output = await get_unsumarized_vector_db_namespace(session, user_id)
+#
+#         print(output)
+#         # await update_entity(session, DocsModel, "8cd9a022-5a7a-4af5-815a-f988415536ae", True)
+#         # out = await get_vectordb_namespace(session, user_id)
+#         # params = {
+#         #     "version": "1.0",
+#         #     "agreement_id": "AG123456",
+#         #     "privacy_policy": "https://example.com/privacy",
+#         #     "terms_of_service": "https://example.com/terms",
+#         #     "format": "json",
+#         #     "schema_version": "1.1",
+#         #     "checksum": "a1b2c3d4e5f6",
+#         #     "owner": "John Doe",
+#         #     "license": "MIT",
+#         #     "validity_start": "2023-08-01",
+#         #     "validity_end": "2024-07-31",
+#         # }
+#         # loader_settings = {
+#         #     "format": "PDF",
+#         #     "source": "DEVICE",
+#         #     "path": [".data"],
+#         #     "strategy": "SUMMARY",
+#         # }
+#         # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+#         # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
+#         # await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
+#         # await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
+#
+#
+# if __name__ == "__main__":
+#     import asyncio
+#
+#     asyncio.run(main())
