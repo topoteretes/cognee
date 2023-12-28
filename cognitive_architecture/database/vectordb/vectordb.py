@@ -60,7 +60,7 @@ class WeaviateVectorDB(VectorDB):
         super().__init__(*args, **kwargs)
         self.init_weaviate(embeddings= self.embeddings, namespace = self.namespace)
 
-    def init_weaviate(self,  embeddings=OpenAIEmbeddings(), namespace=None,retriever_type="",):
+    def init_weaviate(self,  embeddings=OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY", "")), namespace=None,retriever_type="",):
         # Weaviate initialization logic
         auth_config = weaviate.auth.AuthApiKey(
             api_key=os.environ.get("WEAVIATE_API_KEY")
