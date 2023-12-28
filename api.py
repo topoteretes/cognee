@@ -223,7 +223,7 @@ async def drop_db(payload: Payload):
             else:
                 pass
 
-            from cognitive_architecture.database.postgres import create_database, create_admin_engine
+            from cognitive_architecture.database.create_database_tst import create_database, create_admin_engine
 
             engine = create_admin_engine(username, password, host, database_name)
             create_database(engine)
