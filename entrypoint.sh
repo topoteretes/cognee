@@ -8,12 +8,12 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Running create_database.py"
-python cognitive_architecture/database/create_database.py
-if [ $? -ne 0 ]; then
-    echo "Error: create_database.py failed"
-    exit 1
-fi
+#echo "Running create_database.py"
+#python cognitive_architecture/database/create_database.py
+#if [ $? -ne 0 ]; then
+#    echo "Error: create_database.py failed"
+#    exit 1
+#fi
 
 # Start Gunicorn
 echo "Starting Gunicorn"
