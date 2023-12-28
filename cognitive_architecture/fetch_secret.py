@@ -21,8 +21,11 @@ environment = os.getenv("AWS_ENV", "dev")
 
 
 def fetch_secret(secret_name, region_name, env_file_path):
+    print("Initializing session")
     session = boto3.session.Session()
+    print("Session initialized")
     client = session.client(service_name="secretsmanager", region_name=region_name)
+    print("Client initialized")
 
     try:
         response = client.get_secret_value(SecretId=secret_name)
@@ -53,7 +56,7 @@ env_file = ".env"
 if os.path.exists(env_file):
     # Load default environment variables (.env)
     load_dotenv()
-    print("Talk to the AI!")
+    print("cognee is running")
 
 
 else:
