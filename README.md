@@ -1,4 +1,4 @@
-# PromethAI-Memory
+# Cognee
 
 AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps
 
