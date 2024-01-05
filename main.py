@@ -184,6 +184,7 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username, password=config.graph_database_password)
     cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id,query_input)
     result = neo4j_graph_db.query(cypher_query)
+    neo4j_graph_db.close()
 
     await update_entity(session, Operation, job_id, "SUCCESS")
 
@@ -281,27 +282,41 @@ async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, d
             if document_memory_types == ['PUBLIC']:
                 await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
                 ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic="PublicMemory")
+                neo4j_graph_db.close()
                 print(ids)
             else:
                 ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic="SemanticMemory")
+                neo4j_graph_db.close()
                 print(ids)
 
             for id in ids:
                 print(id.get('memoryId'))
+                neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                              password=config.graph_database_password)
                 if document_memory_types == ['PUBLIC']:
 
                     rs = neo4j_graph_db.create_document_node_cypher(classification, user_id, public_memory_id=id.get('memoryId'))
+                    neo4j_graph_db.close()
                 else:
                     rs = neo4j_graph_db.create_document_node_cypher(classification, user_id, memory_type='SemanticMemory')
+                    neo4j_graph_db.close()
                 logging.info("Cypher query is", rs)
+                neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                              password=config.graph_database_password)
                 neo4j_graph_db.query(rs)
+                neo4j_graph_db.close()
             logging.info("WE GOT HERE")
+            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                          password=config.graph_database_password)
             if memory_details[0][1] == "PUBLIC":
+
                 neo4j_graph_db.update_document_node_with_db_ids( vectordb_namespace=memory_details[0][0],
                                                                document_id=doc_id)
+                neo4j_graph_db.close()
             else:
                 neo4j_graph_db.update_document_node_with_db_ids( vectordb_namespace=memory_details[0][0],
                                                                 document_id=doc_id, user_id=user_id)
+                neo4j_graph_db.close()
             # await update_entity_graph_summary(session, DocsModel, doc_id, True)
     except Exception as e:
         return e
@@ -366,7 +381,11 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
     await user_query_to_graph_db(session, user_id, query)
 
     semantic_mem = neo4j_graph_db.retrieve_semantic_memory(user_id=user_id)
+    neo4j_graph_db.close()
+    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                  password=config.graph_database_password)
     episodic_mem = neo4j_graph_db.retrieve_episodic_memory(user_id=user_id)
+    neo4j_graph_db.close()
     # public_mem = neo4j_graph_db.retrieve_public_memory(user_id=user_id)
 
 
@@ -485,6 +504,7 @@ async def create_public_memory(user_id: str=None, labels:list=None, topic:str=No
         # Assuming the topic for public memory is predefined, e.g., "PublicMemory"
         # Create the memory node
         memory_id = await neo4j_graph_db.create_memory_node(labels=labels, topic=topic)
+        neo4j_graph_db.close()
         return memory_id
     except Neo4jError as e:
         logging.error(f"Error creating public memory node: {e}")
@@ -522,9 +542,14 @@ async def attach_user_to_memory(user_id: str=None, labels:list=None, topic:str=N
 
         # Assuming the topic for public memory is predefined, e.g., "PublicMemory"
         ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic=topic)
+        neo4j_graph_db.close()
 
         for id in ids:
+            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
+                                          username=config.graph_database_username,
+                                          password=config.graph_database_password)
             linked_memory = neo4j_graph_db.link_public_memory_to_user(memory_id=id.get('memoryId'), user_id=user_id)
+            neo4j_graph_db.close()
         return 1
     except Neo4jError as e:
         logging.error(f"Error creating public memory node: {e}")
@@ -561,8 +586,14 @@ async def unlink_user_from_memory(user_id: str=None, labels:list=None, topic:str
 
         # Assuming the topic for public memory is predefined, e.g., "PublicMemory"
         ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic=topic)
+        neo4j_graph_db.close()
+
         for id in ids:
+            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
+                                          username=config.graph_database_username,
+                                          password=config.graph_database_password)
             linked_memory = neo4j_graph_db.unlink_memory_from_user(memory_id=id.get('memoryId'), user_id=user_id)
+            neo4j_graph_db.close()
         return 1
     except Neo4jError as e:
         logging.error(f"Error creating public memory node: {e}")
