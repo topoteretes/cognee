@@ -590,7 +590,8 @@ class Neo4jGraphDB(AbstractGraphDB):
             relationship = "HAS_SEMANTIC_MEMORY"
         try:
             query = f'''
-            MATCH (user:User {{userId: '{user_id}'}})-[:{relationship}]->(memory:{memory_type})-[:HAS_DOCUMENT]->(document:Document {{summary: '{summary}'}})
+            MATCH (user:User {{userId: '{user_id}'}})-[:{relationship}]->(memory:{memory_type})-[:HAS_DOCUMENT]->(document:Document)
+            WHERE apoc.text.fuzzyMatch(document.summary, '{summary}') > 0.8
             RETURN document.d_id AS d_id
             '''
             logging.info(f"Generated Cypher query: {query}")

@@ -394,9 +394,10 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         query = translate_text(query, "sr", "en")
     logging.info("Translated query is", query)
 
-
+    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                  password=config.graph_database_password)
     summaries = await neo4j_graph_db.get_memory_linked_document_summaries(user_id=user_id, memory_type=memory_type)
-
+    neo4j_graph_db.close()
     # logging.info("Result is %s", result)
     # logging.info("Context from graphdb is %s", context)
     # result = neo4j_graph_db.query(document_categories_query)
@@ -407,8 +408,10 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
 
 
     # logging.info("Relevant categories after the classifier are %s", relevant_categories)
+    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                  password=config.graph_database_password)
     postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(user_id, summary = relevant_summary, memory_type=memory_type)
-
+    neo4j_graph_db.close()
     # postgres_id  = neo4j_graph_db.query(get_doc_ids)
     logging.info("Postgres ids are %s", postgres_id)
     namespace_id = await get_memory_name_by_doc_id(session, postgres_id[0])
