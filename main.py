@@ -574,10 +574,10 @@ async def unlink_user_from_memory(user_id: str=None, labels:list=None, topic:str
         raise ValueError("User ID is required.")
     if not labels:
         labels = ['sr']  # Labels for the memory node
-        raise ValueError("Labels are required, default label 'sr' provided")
+
     if not topic:
         topic = "PublicMemory"
-        raise ValueError("Topic is required, default topic 'PublicMemory' provided")
+
 
     try:
         neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,

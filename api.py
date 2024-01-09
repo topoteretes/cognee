@@ -306,7 +306,7 @@ async def unlink_user_from_public_memory(payload: Payload):
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import unlink_user_from_memory
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await unlink_user_from_memory( user_id = decoded_payload['user_id'], topic=topic)
+            result = await unlink_user_from_memory( user_id = decoded_payload['user_id'], topic=topic, labels=decoded_payload['labels'])
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
