@@ -476,7 +476,6 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return create_statements
 
-
     async def get_memory_linked_document_summaries(self, user_id: str, memory_type: str = "PublicMemory"):
         """
         Retrieve a list of summaries for all documents associated with a given memory type for a user.
@@ -486,7 +485,7 @@ class Neo4jGraphDB(AbstractGraphDB):
             memory_type (str): The type of memory node ('SemanticMemory' or 'PublicMemory').
 
         Returns:
-            List[str]: A list of document categories associated with the memory type for the user.
+            List[Dict[str, Union[str, None]]]: A list of dictionaries containing document summary and d_id.
 
         Raises:
             Exception: If an error occurs during the database query execution.
@@ -498,17 +497,17 @@ class Neo4jGraphDB(AbstractGraphDB):
         try:
             query = f'''
             MATCH (user:User {{userId: '{user_id}'}})-[:{relationship}]->(memory:{memory_type})-[:HAS_DOCUMENT]->(document:Document)
-            RETURN document.summary AS summary
+            RETURN document.d_id AS d_id, document.summary AS summary
             '''
             logging.info(f"Generated Cypher query: {query}")
             result = self.query(query)
-            logging.info("Result: ", result)
-            return [record.get("summary", "No summary available") for record in result]
+            logging.info(f"Result: {result}")
+            return [{"d_id": record.get("d_id", None), "summary": record.get("summary", "No summary available")} for
+                    record in result]
 
         except Exception as e:
             logging.error(f"An error occurred while retrieving document summary: {str(e)}")
             return None
-
 
     # async def get_document_categories(self, user_id: str):
     #     """
@@ -568,13 +567,13 @@ class Neo4jGraphDB(AbstractGraphDB):
     #         logging.error(f"An error occurred while retrieving document IDs: {str(e)}")
     #         return None
 
-    async def get_memory_linked_document_ids(self, user_id: str, summary: str, memory_type: str = "PUBLIC"):
+    async def get_memory_linked_document_ids(self, user_id: str, summary_id: str, memory_type: str = "PublicMemory"):
         """
         Retrieve a list of document IDs for a specific category associated with a given memory type for a user.
 
         Args:
             user_id (str): The unique identifier of the user.
-            summary (str): The specific document summary to filter by.
+            summary_id (str): The specific document summary id to filter by.
             memory_type (str): The type of memory node ('SemanticMemory' or 'PublicMemory').
 
         Returns:
@@ -591,7 +590,7 @@ class Neo4jGraphDB(AbstractGraphDB):
         try:
             query = f'''
             MATCH (user:User {{userId: '{user_id}'}})-[:{relationship}]->(memory:{memory_type})-[:HAS_DOCUMENT]->(document:Document)
-            WHERE apoc.text.fuzzyMatch(document.summary, '{summary}') > 0.8
+            WHERE document.d_id = '{summary_id}'
             RETURN document.d_id AS d_id
             '''
             logging.info(f"Generated Cypher query: {query}")

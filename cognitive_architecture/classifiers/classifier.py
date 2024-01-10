@@ -77,7 +77,7 @@ async def classify_call(query, document_summaries):
 
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a  classifier. Determine what document  are relevant for the given query: {query}, Document summaries:{document_summaries}"""
+        """You are a  classifier. Determine what document  are relevant for the given query: {query}, Document summaries and ids:{document_summaries}"""
     )
     json_structure = [{
         "name": "classifier",
@@ -88,6 +88,10 @@ async def classify_call(query, document_summaries):
                 "DocumentSummary": {
                     "type": "string",
                     "description": "The summary of the document and the topic it deals with."
+                },
+                "d_id": {
+                    "type": "string",
+                    "description": "The id of the document"
                 }
 
 
@@ -98,11 +102,11 @@ async def classify_call(query, document_summaries):
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
-    classfier_value = arguments_dict.get('DocumentSummary', None)
+    classfier_id = arguments_dict.get('d_id', None)
 
-    print("This is the classifier value", classfier_value)
+    print("This is the classifier id ", classfier_id)
 
-    return classfier_value
+    return classfier_id
 
 
 

@@ -278,7 +278,7 @@ class BaseMemory:
         n_of_observations: Optional[int] = 2,
     ):
         logging.info(namespace)
-        logging.info("The search type is %", search_type)
+        logging.info("The search type is %", str(search_type))
         logging.info(params)
         logging.info(observation)
 
