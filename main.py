@@ -398,19 +398,19 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
                                   password=config.graph_database_password)
     summaries = await neo4j_graph_db.get_memory_linked_document_summaries(user_id=user_id, memory_type=memory_type)
     neo4j_graph_db.close()
-    # logging.info("Result is %s", result)
+    logging.info("Summaries are  is %s", summaries)
     # logging.info("Context from graphdb is %s", context)
     # result = neo4j_graph_db.query(document_categories_query)
     # summaries = [record.get("summary") for record in result]
     # logging.info('Possible document categories are', str(result))
     # logging.info('Possible document categories are', str(categories))
-    relevant_summary = await classify_call( query= query, document_summaries=str(summaries))
+    relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
 
 
     # logging.info("Relevant categories after the classifier are %s", relevant_categories)
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
                                   password=config.graph_database_password)
-    postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(user_id, summary = relevant_summary, memory_type=memory_type)
+    postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(user_id, summary_id = relevant_summary_id, memory_type=memory_type)
     neo4j_graph_db.close()
     # postgres_id  = neo4j_graph_db.query(get_doc_ids)
     logging.info("Postgres ids are %s", postgres_id)
@@ -672,7 +672,7 @@ async def main():
         # print(out)
         # load_doc_to_graph = await add_documents_to_graph_db(session, user_id)
         # print(load_doc_to_graph)
-        # user_id = 'user'
+        user_id = 'test_user'
         # loader_settings = {
         #     "format": "PDF",
         #     "source": "DEVICE",
@@ -687,9 +687,8 @@ async def main():
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
-        # return_ = await user_context_enrichment(user_id=user_id, query="Koja je minimalna visina ograde na balkonu na stambenom objektu", session=session)
-        # print(return_)
-
+        return_ = await user_context_enrichment(user_id=user_id, query="Koja je minimalna visina ograde na balkonu na stambenom objektu", session=session, memory_type="PublicMemory", generative_response=True)
+        print(return_)
         # document_summary = {
         #     'DocumentCategory': 'Science',
         #     'Title': 'The Future of AI',
@@ -707,13 +706,13 @@ async def main():
         # await add_documents_to_graph_db(session, user_id)
         # neo4j_graph_db.link_public_memory_to_user(memory_id = 17,user_id=user_id)
         #
-        ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic="Document")
-        print(ids)
-
-        for id in ids:
-            print(id.get('memoryId'))
-
-            neo4j_graph_db.delete_memory_node(memory_id = id.get('memoryId'), topic="Document")
+        # ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic="Document")
+        # print(ids)
+        #
+        # for id in ids:
+        #     print(id.get('memoryId'))
+        #
+        #     neo4j_graph_db.delete_memory_node(memory_id = id.get('memoryId'), topic="Document")
         #
         # neo4j_graph_db.delete_memory_node(memory_id=16, topic="PublicSerbianArchitecture")
         # neo4j_graph_db.unlink_memory_from_user(memory_id = 17,user_id=user_id)
