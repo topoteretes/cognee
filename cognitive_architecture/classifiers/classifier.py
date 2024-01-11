@@ -72,6 +72,35 @@ def classify_retrieval():
     pass
 
 
+async def classify_user_input(query, input_type):
+
+    llm = ChatOpenAI(temperature=0, model=config.model)
+    prompt_classify = ChatPromptTemplate.from_template(
+        """You are a  classifier. Determine with a True or False if the following input: {query}, is relevant for the following memory category: {input_type}"""
+    )
+    json_structure = [{
+        "name": "classifier",
+        "description": "Classification",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "InputClassification": {
+                    "type": "boolean",
+                    "description": "The classification of the input"
+                }
+            }, "required": ["InputClassification"] }
+    }]
+    chain_filter = prompt_classify | llm.bind(function_call={"name": "classifier"}, functions=json_structure)
+    classifier_output = await chain_filter.ainvoke({"query": query, "input_type": input_type})
+    arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
+    logging.info("This is the arguments string %s", arguments_str)
+    arguments_dict = json.loads(arguments_str)
+    logging.info("Relevant summary is %s", arguments_dict.get('DocumentSummary', None))
+    InputClassification = arguments_dict.get('InputClassification', None)
+    logging.info("This is the classification %s", InputClassification)
+    return InputClassification
+
+
 # classify documents according to type of document
 async def classify_call(query, document_summaries):
 
@@ -102,6 +131,7 @@ async def classify_call(query, document_summaries):
     arguments_str = classifier_output.additional_kwargs['function_call']['arguments']
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
+    logging.info("Relevant summary is %s", arguments_dict.get('DocumentSummary', None))
     classfier_id = arguments_dict.get('d_id', None)
 
     print("This is the classifier id ", classfier_id)

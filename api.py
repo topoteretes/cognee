@@ -165,11 +165,21 @@ async def document_to_graph_db(payload: Payload):
 async def cognitive_context_enrichment(payload: Payload):
     try:
         decoded_payload = payload.payload
-
-        # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
-            # Assuming you have a method in Neo4jGraphDB to execute the query
             result = await user_context_enrichment(session, user_id = decoded_payload['user_id'], query= decoded_payload['query'], generative_response=decoded_payload['generative_response'], memory_type= decoded_payload['memory_type'])
+        return JSONResponse(content={"response": result}, status_code=200)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/classify-user-query")
+async def classify_user_query(payload: Payload):
+    try:
+        decoded_payload = payload.payload
+        async with session_scope(session=AsyncSessionLocal()) as session:
+            from main import relevance_feedback
+            result = await relevance_feedback(  query= decoded_payload['query'], input_type=decoded_payload['knowledge_type'])
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:

@@ -392,7 +392,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
 
     if detect_language(query) != "en":
         query = translate_text(query, "sr", "en")
-    logging.info("Translated query is", query)
+    logging.info("Translated query is %s", str(query))
 
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
                                   password=config.graph_database_password)
@@ -404,8 +404,15 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
     # summaries = [record.get("summary") for record in result]
     # logging.info('Possible document categories are', str(result))
     # logging.info('Possible document categories are', str(categories))
-    relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
 
+    max_attempts = 3
+    relevant_summary_id = None
+
+    for _ in range(max_attempts):
+        relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
+
+        if relevant_summary_id is not None:
+            break
 
     # logging.info("Relevant categories after the classifier are %s", relevant_categories)
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
@@ -602,7 +609,11 @@ async def unlink_user_from_memory(user_id: str=None, labels:list=None, topic:str
         logging.error(f"Error creating public memory node: {e}")
         return None
 
+async def relevance_feedback(  query: str, input_type: str):
+    from cognitive_architecture.classifiers.classifier import classify_user_input
 
+    result = await classify_user_input( query, input_type=input_type)
+    return result
 
 async def main():
     user_id = "user"
@@ -687,8 +698,11 @@ async def main():
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
-        return_ = await user_context_enrichment(user_id=user_id, query="Koja je minimalna visina ograde na balkonu na stambenom objektu", session=session, memory_type="PublicMemory", generative_response=True)
-        print(return_)
+        # return_ = await user_context_enrichment(user_id=user_id, query="hi how are you", session=session, memory_type="PublicMemory", generative_response=True)
+        # print(return_)
+        aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
+        print(aa)
+
         # document_summary = {
         #     'DocumentCategory': 'Science',
         #     'Title': 'The Future of AI',
