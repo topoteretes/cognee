@@ -473,8 +473,8 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
     context = f""" You are a memory system that uses cognitive architecture to enrich the 
     LLM context and provide better query response.
     You have access to the following information:
-    EPISODIC MEMORY: {episodic_mem[:1000]}
-    SEMANTIC MEMORY: {semantic_mem[:1000]}
+    EPISODIC MEMORY: {episodic_mem[:200]}
+    SEMANTIC MEMORY: {semantic_mem[:200]}
     PROCEDURAL MEMORY: NULL
     SEARCH CONTEXT: The following documents provided with sources they were 
     extracted from could be used to provide an answer {search_context}
