@@ -378,7 +378,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
                                   password=config.graph_database_password)
 
-    await user_query_to_graph_db(session, user_id, query)
+    # await user_query_to_graph_db(session, user_id, query)
 
     semantic_mem = neo4j_graph_db.retrieve_semantic_memory(user_id=user_id)
     neo4j_graph_db.close()
@@ -394,74 +394,78 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         query = translate_text(query, "sr", "en")
     logging.info("Translated query is %s", str(query))
 
-    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                  password=config.graph_database_password)
-    summaries = await neo4j_graph_db.get_memory_linked_document_summaries(user_id=user_id, memory_type=memory_type)
-    neo4j_graph_db.close()
-    logging.info("Summaries are  is %s", summaries)
-    # logging.info("Context from graphdb is %s", context)
-    # result = neo4j_graph_db.query(document_categories_query)
-    # summaries = [record.get("summary") for record in result]
-    # logging.info('Possible document categories are', str(result))
-    # logging.info('Possible document categories are', str(categories))
+    try:
 
-    max_attempts = 3
-    relevant_summary_id = None
+        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                      password=config.graph_database_password)
+        summaries = await neo4j_graph_db.get_memory_linked_document_summaries(user_id=user_id, memory_type=memory_type)
+        neo4j_graph_db.close()
+        logging.info("Summaries are  is %s", summaries)
+        # logging.info("Context from graphdb is %s", context)
+        # result = neo4j_graph_db.query(document_categories_query)
+        # summaries = [record.get("summary") for record in result]
+        # logging.info('Possible document categories are', str(result))
+        # logging.info('Possible document categories are', str(categories))
 
-    for _ in range(max_attempts):
-        relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
+        max_attempts = 3
+        relevant_summary_id = None
 
-        if relevant_summary_id is not None:
-            break
+        for _ in range(max_attempts):
+            relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
 
-    # logging.info("Relevant categories after the classifier are %s", relevant_categories)
-    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                  password=config.graph_database_password)
-    postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(user_id, summary_id = relevant_summary_id, memory_type=memory_type)
-    neo4j_graph_db.close()
-    # postgres_id  = neo4j_graph_db.query(get_doc_ids)
-    logging.info("Postgres ids are %s", postgres_id)
-    namespace_id = await get_memory_name_by_doc_id(session, postgres_id[0])
-    logging.info("Namespace ids are %s", namespace_id)
-    params= {"doc_id":postgres_id[0]}
-    namespace_id = namespace_id[0]
-    namespace_class = namespace_id + "_class"
-    if memory_type =='PublicMemory':
-        user_id = 'system_user'
+            if relevant_summary_id is not None:
+                break
 
-    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id="23232",
-                                        memory_label=namespace_id)
+        # logging.info("Relevant categories after the classifier are %s", relevant_categories)
+        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                      password=config.graph_database_password)
+        postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(user_id, summary_id = relevant_summary_id, memory_type=memory_type)
+        neo4j_graph_db.close()
+        # postgres_id  = neo4j_graph_db.query(get_doc_ids)
+        logging.info("Postgres ids are %s", postgres_id)
+        namespace_id = await get_memory_name_by_doc_id(session, postgres_id[0])
+        logging.info("Namespace ids are %s", namespace_id)
+        params= {"doc_id":postgres_id[0]}
+        namespace_id = namespace_id[0]
+        namespace_class = namespace_id + "_class"
+        if memory_type =='PublicMemory':
+            user_id = 'system_user'
 
-    existing_user = await Memory.check_existing_user(user_id, session)
-    print("here is the existing user", existing_user)
-    await memory.manage_memory_attributes(existing_user)
+        memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id="23232",
+                                            memory_label=namespace_id)
 
-    print("Namespace id is %s", namespace_id)
-    await memory.add_dynamic_memory_class(namespace_id.lower(), namespace_id)
+        existing_user = await Memory.check_existing_user(user_id, session)
+        print("here is the existing user", existing_user)
+        await memory.manage_memory_attributes(existing_user)
 
-    dynamic_memory_class = getattr(memory, namespace_class.lower(), None)
+        print("Namespace id is %s", namespace_id)
+        await memory.add_dynamic_memory_class(namespace_id.lower(), namespace_id)
 
-    methods_to_add = ["add_memories", "fetch_memories", "delete_memories"]
+        dynamic_memory_class = getattr(memory, namespace_class.lower(), None)
 
-    if dynamic_memory_class is not None:
-        for method_name in methods_to_add:
-            await memory.add_method_to_class(dynamic_memory_class, method_name)
-            print(f"Memory method {method_name} has been added")
-    else:
-        print(f"No attribute named  in memory.")
+        methods_to_add = ["add_memories", "fetch_memories", "delete_memories"]
 
-    print("Available memory classes:", await memory.list_memory_classes())
-    results = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
-                                              observation=query, params=postgres_id[0], search_type="summary_filter_by_object_name")
-    logging.info("Result is", str(results))
+        if dynamic_memory_class is not None:
+            for method_name in methods_to_add:
+                await memory.add_method_to_class(dynamic_memory_class, method_name)
+                print(f"Memory method {method_name} has been added")
+        else:
+            print(f"No attribute named  in memory.")
 
-    search_context = ""
+        print("Available memory classes:", await memory.list_memory_classes())
+        results = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
+                                                  observation=query, params=postgres_id[0], search_type="summary_filter_by_object_name")
+        logging.info("Result is", str(results))
 
-    for result in results['data']['Get'][namespace_id]:
-        # Assuming 'result' is a dictionary and has keys like 'source', 'text'
-        source = result['source']
-        text = result['text']
-        search_context += f"Document source: {source}, Document text: {text} \n"
+        search_context = ""
+
+        for result in results['data']['Get'][namespace_id]:
+            # Assuming 'result' is a dictionary and has keys like 'source', 'text'
+            source = result['source']
+            text = result['text']
+            search_context += f"Document source: {source}, Document text: {text} \n"
+    except:
+        search_context = "No relevant documents found"
 
     context = f""" You are a memory system that uses cognitive architecture to enrich the 
     LLM context and provide better query response.
@@ -702,10 +706,10 @@ async def main():
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
-        # return_ = await user_context_enrichment(user_id=user_id, query="hi how are you", session=session, memory_type="PublicMemory", generative_response=True)
-        # print(return_)
-        aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
-        print(aa)
+        return_ = await user_context_enrichment(user_id=user_id, query="hi how are you", session=session, memory_type="SemanticMemory", generative_response=False)
+        print(return_)
+        # aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
+        # print(aa)
 
         # document_summary = {
         #     'DocumentCategory': 'Science',
