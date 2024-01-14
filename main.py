@@ -394,7 +394,8 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         query = translate_text(query, "sr", "en")
     logging.info("Translated query is %s", str(query))
 
-    try:
+    if memory_type=='PublicMemory':
+
 
         neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
                                       password=config.graph_database_password)
@@ -457,6 +458,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
                                                   observation=query, params=postgres_id[0], search_type="summary_filter_by_object_name")
         logging.info("Result is", str(results))
 
+
         search_context = ""
 
         for result in results['data']['Get'][namespace_id]:
@@ -464,7 +466,8 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
             source = result['source']
             text = result['text']
             search_context += f"Document source: {source}, Document text: {text} \n"
-    except:
+
+    else:
         search_context = "No relevant documents found"
 
     context = f""" You are a memory system that uses cognitive architecture to enrich the 
@@ -706,7 +709,7 @@ async def main():
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
-        return_ = await user_context_enrichment(user_id=user_id, query="hi how are you", session=session, memory_type="SemanticMemory", generative_response=False)
+        return_ = await user_context_enrichment(user_id=user_id, query="what should the size of a staircase in an apartment building be", session=session, memory_type="PublicMemory", generative_response=False)
         print(return_)
         # aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
         # print(aa)
