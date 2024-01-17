@@ -68,7 +68,7 @@ async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str,
     print("Available memory classes:", await memory.list_memory_classes())
     result = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
                                                     observation="placeholder", search_type="summary_filter_by_object_name", params=doc_id)
-    logging.info("Result is", result)
+    logging.info("Result is %s", str(result))
 
     return result, namespace_id
 
@@ -323,6 +323,7 @@ async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, d
 
 class ResponseString(BaseModel):
     response: str = Field(..., default_factory=list)
+    quotation: str = Field(..., default_factory=list)
 
 
 #
@@ -338,7 +339,7 @@ def generate_graph(input) -> ResponseString:
             },
             {   "role":"system", "content": """You are a top-tier algorithm
                 designed for using context summaries based on cognitive psychology to answer user queries, and provide a simple response. 
-                Do not mention anything explicit about cognitive architecture, but use the context to answer the query."""}
+                Do not mention anything explicit about cognitive architecture, but use the context to answer the query. If you are using a document, reference document metadata field"""}
         ],
         response_model=ResponseString,
     )
@@ -463,7 +464,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
 
         for result in results['data']['Get'][namespace_id]:
             # Assuming 'result' is a dictionary and has keys like 'source', 'text'
-            source = result['source']
+            source = result['source'].replace('-', ' ').replace('.pdf', '').replace('.data/', '')
             text = result['text']
             search_context += f"Document source: {source}, Document text: {text} \n"
 
@@ -484,8 +485,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         return context
     else:
         generative_result = generate_graph(context)
-        translation_to_srb = translate_text(generative_result.response, "en", "sr")
-        return translation_to_srb
+        return generative_result
 
 
 async def create_public_memory(user_id: str=None, labels:list=None, topic:str=None) -> Optional[int]:
@@ -709,7 +709,7 @@ async def main():
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
-        return_ = await user_context_enrichment(user_id=user_id, query="what should the size of a staircase in an apartment building be", session=session, memory_type="PublicMemory", generative_response=False)
+        return_ = await user_context_enrichment(user_id=user_id, query="what should the size of a staircase in an apartment building be", session=session, memory_type="PublicMemory", generative_response=True)
         print(return_)
         # aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
         # print(aa)
