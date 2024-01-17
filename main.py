@@ -322,9 +322,8 @@ async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, d
         return e
 
 class ResponseString(BaseModel):
-    response: str = Field(..., default_factory=list)
-    quotation: str = Field(..., default_factory=list)
-
+    response: str = Field(default=None)  # Defaulting to None or you can use a default string like ""
+    quotation: str = Field(default=None)  # Same here
 
 #
 
@@ -485,7 +484,8 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         return context
     else:
         generative_result = generate_graph(context)
-        return generative_result.response
+        logging.info("Generative result is %s", generative_result.model_dump_json())
+        return generative_result.model_dump_json()
 
 
 async def create_public_memory(user_id: str=None, labels:list=None, topic:str=None) -> Optional[int]:
