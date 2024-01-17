@@ -485,7 +485,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         return context
     else:
         generative_result = generate_graph(context)
-        return generative_result
+        return generative_result.response
 
 
 async def create_public_memory(user_id: str=None, labels:list=None, topic:str=None) -> Optional[int]:
