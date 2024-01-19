@@ -104,6 +104,8 @@ class Node(BaseModel):
     category: str
     color: str ="blue"
     memory_type: str
+    created_at: Optional[float] = None
+    summarized: Optional[bool] = None
 
 
 
@@ -112,7 +114,8 @@ class Edge(BaseModel):
     target: int
     description: str
     color: str= "blue"
-
+    created_at: Optional[float] = None
+    summarized: Optional[bool] = None
 
 class KnowledgeGraph(BaseModel):
     nodes: List[Node] = Field(..., default_factory=list)
@@ -167,6 +170,29 @@ def generate_graph(input) -> KnowledgeGraph:
                 Adhere to the rules strictly. Non-compliance will result in termination."""}
         ],
         response_model=KnowledgeGraph,
+    )
+    return out
+
+class MemorySummary(BaseModel):
+    nodes: List[Node] = Field(..., default_factory=list)
+    edges: List[Edge] = Field(..., default_factory=list)
+
+async def generate_summary(input) -> MemorySummary:
+    out =  aclient.chat.completions.create(
+        model="gpt-4-1106-preview",
+        messages=[
+            {
+                "role": "user",
+                "content": f"""Use the given format summarize and reduce the following input: {input}. """,
+
+            },
+            {   "role":"system", "content": """You are a top-tier algorithm
+                designed for summarizing existing knowledge graphs in structured formats based on a knowledge graph.
+                ## 1. Strict Compliance
+                Adhere to the rules strictly. Non-compliance will result in termination.
+                ## 2. Don't forget your main goal is to reduce the number of nodes in the knowledge graph while preserving the information contained in it."""}
+        ],
+        response_model=MemorySummary,
     )
     return out
 
@@ -225,6 +251,55 @@ class Neo4jGraphDB(AbstractGraphDB):
         MERGE (user)-[:HAS_BUFFER]->(buffer)
         """
         return user_memory_cypher
+
+    async def retrieve_memory(self, user_id: str, memory_type: str, timestamp: float = None, summarized: bool = None):
+        if memory_type == 'SemanticMemory':
+            relationship = 'SEMANTIC_MEMORY'
+            memory_rel = 'HAS_KNOWLEDGE'
+        elif memory_type == 'EpisodicMemory':
+            relationship = 'EPISODIC_MEMORY'
+            memory_rel = 'HAS_EVENT'
+        elif memory_type == 'Buffer':
+            relationship = 'BUFFER'
+            memory_rel = 'CURRENTLY_HOLDING'
+        if timestamp is not None and summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_{relationship}]->(memory:{memory_type})
+            MATCH (memory)-[:{memory_rel}]->(item)
+            WHERE item.created_at >= {timestamp} AND item.summarized = {str(summarized).lower()}
+            RETURN item
+            """
+        elif timestamp is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_{relationship}]->(memory:{memory_type})
+            MATCH (memory)-[:{memory_rel}]->(item)
+            WHERE item.created_at >= {timestamp}
+            RETURN item
+            """
+        elif summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_{relationship}]->(memory:{memory_type})
+            MATCH (memory)-[:{memory_rel}]->(item)
+            WHERE item.summarized = {str(summarized).lower()}
+            RETURN item
+            """
+            print(query)
+        else:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_{relationship}]->(memory:{memory_type})
+            MATCH (memory)-[:{memory_rel}]->(item)
+            RETURN item
+            """
+        output = self.query(query, params={"user_id": user_id})
+        print("Here is the output", output)
+
+        reduced_graph = await generate_summary(input = output)
+        return reduced_graph
+
+
+    # def add_summarized_memory(self, user_id: str, memory_type: str, timestamp: float = None, summarized: bool = None):
+    #
+
 
     def user_query_to_edges_and_nodes(self, input: str) ->KnowledgeGraph:
         return aclient.chat.completions.create(
@@ -342,6 +417,14 @@ class Neo4jGraphDB(AbstractGraphDB):
     async def generate_cypher_query_for_user_prompt_decomposition(self, user_id:str, query:str):
 
         graph: KnowledgeGraph = generate_graph(query)
+        import time
+        for node in graph.nodes:
+            node.created_at = time.time()
+            node.summarized = False
+
+        for edge in graph.edges:
+            edge.created_at = time.time()
+            edge.summarized = False
         graph_dic = graph.dict()
 
         node_variable_mapping = create_node_variable_mapping(graph_dic['nodes'])
@@ -411,29 +494,98 @@ class Neo4jGraphDB(AbstractGraphDB):
             return f"{memory_type} deleted for user ID: {user_id}"
         except Exception as e:
             return f"An error occurred: {str(e)}"
-    def retrieve_semantic_memory(self, user_id: str):
-        query = f"""
-        MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
-        MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
-        RETURN knowledge
-        """
+
+    def retrieve_semantic_memory(self, user_id: str, timestamp: float = None, summarized: bool = None):
+        if timestamp is not None and summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
+            MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
+            WHERE knowledge.created_at >= {timestamp} AND knowledge.summarized = {str(summarized).lower()}
+            RETURN knowledge
+            """
+        elif timestamp is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
+            MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
+            WHERE knowledge.created_at >= {timestamp}
+            RETURN knowledge
+            """
+        elif summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
+            MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
+            WHERE knowledge.summarized = {str(summarized).lower()}
+            RETURN knowledge
+            """
+        else:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_SEMANTIC_MEMORY]->(semantic:SemanticMemory)
+            MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
+            RETURN knowledge
+            """
         return self.query(query, params={"user_id": user_id})
 
-    def retrieve_episodic_memory(self, user_id: str):
-        query = """
-        MATCH (user:User {userId: $user_id})-[:HAS_EPISODIC_MEMORY]->(episodic:EpisodicMemory)
-        MATCH (episodic)-[:HAS_EVENT]->(event)
-        RETURN event
-        """
+    def retrieve_episodic_memory(self, user_id: str, timestamp: float = None, summarized: bool = None):
+        if timestamp is not None and summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_EPISODIC_MEMORY]->(episodic:EpisodicMemory)
+            MATCH (episodic)-[:HAS_EVENT]->(event)
+            WHERE event.created_at >= {timestamp} AND event.summarized = {str(summarized).lower()}
+            RETURN event
+            """
+        elif timestamp is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_EPISODIC_MEMORY]->(episodic:EpisodicMemory)
+            MATCH (episodic)-[:HAS_EVENT]->(event)
+            WHERE event.created_at >= {timestamp}
+            RETURN event
+            """
+        elif summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_EPISODIC_MEMORY]->(episodic:EpisodicMemory)
+            MATCH (episodic)-[:HAS_EVENT]->(event)
+            WHERE event.summarized = {str(summarized).lower()}
+            RETURN event
+            """
+        else:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_EPISODIC_MEMORY]->(episodic:EpisodicMemory)
+            MATCH (episodic)-[:HAS_EVENT]->(event)
+            RETURN event
+            """
         return self.query(query, params={"user_id": user_id})
 
-    def retrieve_buffer_memory(self, user_id: str):
-        query = """
-        MATCH (user:User {userId: $user_id})-[:HAS_BUFFER]->(buffer:Buffer)
-        MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
-        RETURN item
-        """
+
+    def retrieve_buffer_memory(self, user_id: str, timestamp: float = None, summarized: bool = None):
+        if timestamp is not None and summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_BUFFER]->(buffer:Buffer)
+            MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
+            WHERE item.created_at >= {timestamp} AND item.summarized = {str(summarized).lower()}
+            RETURN item
+            """
+        elif timestamp is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_BUFFER]->(buffer:Buffer)
+            MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
+            WHERE item.created_at >= {timestamp}
+            RETURN item
+            """
+        elif summarized is not None:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_BUFFER]->(buffer:Buffer)
+            MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
+            WHERE item.summarized = {str(summarized).lower()}
+            RETURN item
+            """
+        else:
+            query = f"""
+            MATCH (user:User {{userId: '{user_id}' }})-[:HAS_BUFFER]->(buffer:Buffer)
+            MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
+            RETURN item
+            """
         return self.query(query, params={"user_id": user_id})
+
 
 
     def retrieve_public_memory(self, user_id: str):
@@ -661,7 +813,8 @@ class Neo4jGraphDB(AbstractGraphDB):
                title: '{title}',
                summary: '{summary}',
                documentCategory: '{document_category}',
-               d_id: '{d_id}'
+               d_id: '{d_id}',
+               created_at: timestamp(),
            }})
 
            // Link the Document node to the {memory_node_type} node
