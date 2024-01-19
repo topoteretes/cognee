@@ -199,7 +199,7 @@ class WeaviateVectorDB(VectorDB):
         client = self.init_weaviate(namespace =self.namespace)
         if search_type is None:
             search_type = 'hybrid'
-        logging.info("The search type is s%", (search_type))
+
 
 
 
