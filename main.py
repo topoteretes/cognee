@@ -414,6 +414,8 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         for _ in range(max_attempts):
             relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
 
+            logging.info("Relevant summary id is %s", relevant_summary_id)
+
             if relevant_summary_id is not None:
                 break
 
@@ -456,7 +458,7 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         print("Available memory classes:", await memory.list_memory_classes())
         results = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
                                                   observation=query, params=postgres_id[0], search_type="summary_filter_by_object_name")
-        logging.info("Result is", str(results))
+        logging.info("Result is %s", str(results))
 
 
         search_context = ""
@@ -627,7 +629,7 @@ async def relevance_feedback(query: str, input_type: str):
     return result
 
 async def main():
-    user_id = "user"
+    user_id = "user_test_1_1"
 
     async with session_scope(AsyncSessionLocal()) as session:
         # await update_entity(session, DocsModel, "8cd9a022-5a7a-4af5-815a-f988415536ae", True)
@@ -637,6 +639,9 @@ async def main():
 
         class GraphQLQuery(BaseModel):
             query: str
+
+        gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
+        print(gg)
 
         # def cypher_statement_correcting( input: str) -> str:
         #     out = aclient.chat.completions.create(
@@ -704,13 +709,13 @@ async def main():
         # await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
         # await add_documents_to_graph_db(session, user_id)
         #
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                      password=config.graph_database_password)
+        # neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+        #                               password=config.graph_database_password)
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
-        return_ = await user_context_enrichment(user_id=user_id, query="what should the size of a staircase in an apartment building be", session=session, memory_type="PublicMemory", generative_response=True)
-        print(return_)
+        # return_ = await user_context_enrichment(user_id=user_id, query="Koja je minimalna širina vrata za osobe sa invaliditetom?", session=session, memory_type="PublicMemory", generative_response=True)
+        # print(return_)
         # aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
         # print(aa)
 
