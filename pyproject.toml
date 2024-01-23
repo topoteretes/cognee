@@ -1,0 +1,70 @@
+[tool.poetry]
+name = "PromethAI_memory"
+version = "0.1.0"
+description = "PromethAI cognitive architecture is a library for enriching LLM context by managing AI cognitive architecture"
+authors = ["Vasilije Markovic"]
+readme = "README.md"
+license = "Apache-2.0"
+homepage = "https://github.com/topoteretes/PromethAI-Memory"
+repository = "https://www.prometh.ai"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Software Development :: Libraries",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+langchain = "^0.0.338"
+
+nltk = "3.8.1"
+openai = "1.3.3"
+pinecone-client = "2.2.2"
+python-dotenv = "1.0.0"
+pyyaml = "6.0"
+fastapi = "0.104.1"
+uvicorn = "0.22.0"
+pexpect = "^4.8.0"
+boto3 = "^1.26.125"
+gptcache = "^0.1.22"
+gunicorn = "^20.1.0"
+tiktoken = "^0.4.0"
+spacy = "^3.5.3"
+python-jose = "^3.3.0"
+pypdf = "^3.12.0"
+fastjsonschema = "^2.18.0"
+marvin = "^1.3.0"
+dlt = { version ="^0.3.8",  extras = ["duckdb"]}
+weaviate-client = "4.4b1"
+python-multipart = "^0.0.6"
+pymupdf = "^1.23.3"
+psycopg2 = "^2.9.8"
+llama-index = "^0.8.39.post2"
+llama-hub = "^0.0.34"
+sqlalchemy = "^2.0.21"
+asyncpg = "^0.28.0"
+dash = "^2.14.0"
+unstructured = {extras = ["pdf"], version = "^0.10.23"}
+sentence-transformers = "2.2.2"
+torch = "2.0.*"
+segment-analytics-python = "^2.2.3"
+pdf2image = "^1.16.3"
+instructor = "^0.3.4"
+networkx = "^3.2.1"
+graphviz = "^0.20.1"
+greenlet = "^3.0.1"
+neo4j = "^5.14.1"
+grpcio = "^1.60.0"
+langdetect = "^1.0.9"
+iso639 = "^0.1.4"
+
+
+
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -8,11 +8,11 @@ STAGE=${stage:-"dev"}
 SHA_SHORT="$(git rev-parse --short HEAD)"
 CUR_DATE="$(date +%Y%m%d%H%M%S)"
 VERSION="$STAGE-$CUR_DATE-$SHA_SHORT"
-IMAGE_NAME=${image_name:-promethai-${STAGE}-promethai-backend-memory}
+IMAGE_NAME=${image_name:-promethai-${STAGE}-promethai-backend}
 
 REPO_NAME="${AWS_REPOSITORY}/${IMAGE_NAME}"
 FULL_IMAGE_NAME="${REPO_NAME}:${VERSION}"
-APP_DIR=${app_dir:-"level_2/"}   # Updated this line
+APP_DIR=${app_dir:-"."}
 
 PUBLISH=${publish:-false}
 

@@ -33,4 +33,3 @@ runs:
         image_name="${{ inputs.ecr_image_repo_name }}" docker_login="true" version="$VERSION" account="${{ inputs.aws_account_id }}" app_dir="$APP_DIR" publish="${{ inputs.should_publish }}" ./bin/dockerize
         echo "Docker tag is: $VERSION"
         echo $VERSION > /tmp/.DOCKER_IMAGE_VERSION
-  
