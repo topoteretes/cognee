@@ -602,6 +602,40 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
+    def construct_merge_query(self, user_id: str, relationship_type: str, memory_type: str,
+                              similarity_threshold: float) -> str:
+        """
+        Constructs a Cypher query to merge nodes in a Neo4j database based on a similarity threshold.
+
+        This method creates a Cypher query that finds pairs of nodes with a specified memory type
+        connected via a specified relationship type to the same 'Memory' node. If the Levenshtein
+        similarity between the 'description' properties of these nodes is greater than the
+        specified threshold, the nodes are merged using the apoc.refactor.mergeNodes procedure.
+
+        Parameters:
+        user_id (str): The ID of the user whose related nodes are to be merged.
+        relationship_type (str): The type of relationship between 'Memory' nodes and the nodes to be merged.
+        memory_type (str): The memory type property of the nodes to be merged.
+        similarity_threshold (float): The threshold above which nodes will be considered similar enough to be merged.
+
+        Returns:
+        str: A Cypher query string that can be executed in a Neo4j session.
+        """
+        query = f"""
+            MATCH (u:User {{userId: '{user_id}'}})-[:HAS_MEMORY]->(m:Memory)
+            MATCH (m)-[r:HAS_KNOWLEDGE]->(n1), (m)-[r2:HAS_KNOWLEDGE]->(n2)
+            WHERE id(n1) < id(n2) AND 
+                  {relationship_type} = TYPE(r) AND 
+                  {relationship_type} = TYPE(r2) AND 
+                  n1.memory_type = {memory_type} AND 
+                  n2.memory_type = {memory_type} AND 
+                  apoc.text.levenshteinSimilarity(toLower(n1.description), toLower(n2.description)) > {str(similarity_threshold)}
+            WITH n1, n2
+            CALL apoc.refactor.mergeNodes([n1, n2], {{mergeRels: true}}) YIELD node
+            RETURN node
+        """
+        return query
+
     def get_namespaces_by_document_category(self, user_id: str, category: str):
         """
         Retrieve a list of Vectordb namespaces for documents of a specified category associated with a given user.

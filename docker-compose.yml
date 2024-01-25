@@ -11,11 +11,11 @@ services:
       - NEO4J_AUTH=neo4j/pleaseletmein
       - NEO4J_PLUGINS=["apoc"]
     networks:
-      - promethai_mem_backend
+      - cognee_backend
 
-  promethai_mem:
+  cognee:
     networks:
-      - promethai_mem_backend
+      - cognee_backend
     build:
       context: ./
     volumes:
@@ -24,6 +24,7 @@ services:
 
     environment:
       - HOST=0.0.0.0
+      - ENVIRONMENT=local
     profiles: ["exclude-from-up"]
     ports:
       - 8000:8000
@@ -49,7 +50,7 @@ services:
       - POSTGRES_PASSWORD=bla
       - POSTGRES_DB=bubu
     networks:
-      - promethai_mem_backend
+      - cognee_backend
     ports:
       - "5432:5432"
 
@@ -74,6 +75,6 @@ services:
 #      - postgres
 
 networks:
-  promethai_mem_backend:
-    name: promethai_mem_backend
+  cognee_backend:
+    name: cognee_backend
 

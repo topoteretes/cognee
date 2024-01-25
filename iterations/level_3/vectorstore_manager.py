@@ -340,7 +340,7 @@ class Memory:
         )
 
     async def add_dynamic_memory_class(self, class_name: str, namespace: str):
-        logging.info("Here is the memory id %s", self.memory_id[0])
+        logging.info("Here is the memory id %s", str(self.memory_id[0]))
         new_memory_class = DynamicBaseMemory(
             class_name,
             self.user_id,

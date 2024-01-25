@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "PromethAI_memory"
+name = "cognee"
 version = "0.1.0"
-description = "PromethAI cognitive architecture is a library for enriching LLM context by managing AI cognitive architecture"
+description = "Cognee cognitive architecture is a library for enriching LLM context with a semantic layer"
 authors = ["Vasilije Markovic"]
 readme = "README.md"
 license = "Apache-2.0"
-homepage = "https://github.com/topoteretes/PromethAI-Memory"
-repository = "https://www.prometh.ai"
+homepage = "https://github.com/topoteretes/cognee"
+repository = "https://www.cognee.ai"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -50,7 +50,6 @@ dash = "^2.14.0"
 unstructured = {extras = ["pdf"], version = "^0.10.23"}
 sentence-transformers = "2.2.2"
 torch = "2.0.*"
-segment-analytics-python = "^2.2.3"
 pdf2image = "^1.16.3"
 instructor = "^0.3.4"
 networkx = "^3.2.1"
