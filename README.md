@@ -74,8 +74,10 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 
 This repo is built to test and evolve RAG architecture, inspired by human cognitive processes, using Python. 
 It's aims to be production ready, testable, and give great visibility in how we build RAG applications.
-It runs in iterations, from POC towards production ready code.
-To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)
+It runs in iterations, from POC towards production ready code.  
+
+To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)  
+
 Try it on Whatsapp with one of our partners Keepi.ai by typing /save {content} followed by /query {content}
 
 
@@ -88,7 +90,7 @@ Use the graph to answer user queries and store new information in the graph.
 
 
 
-![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/level_4/User_graph.png)
+![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/assets/User_graph.png)
 
 
 ### Installation
