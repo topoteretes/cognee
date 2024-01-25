@@ -602,7 +602,7 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
-    def construct_merge_query(self, user_id: str, relationship_type: str, memory_type: str,
+    def run_merge_query(self, user_id: str,  memory_type: str,
                               similarity_threshold: float) -> str:
         """
         Constructs a Cypher query to merge nodes in a Neo4j database based on a similarity threshold.
@@ -614,26 +614,50 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         Parameters:
         user_id (str): The ID of the user whose related nodes are to be merged.
-        relationship_type (str): The type of relationship between 'Memory' nodes and the nodes to be merged.
         memory_type (str): The memory type property of the nodes to be merged.
         similarity_threshold (float): The threshold above which nodes will be considered similar enough to be merged.
 
         Returns:
         str: A Cypher query string that can be executed in a Neo4j session.
         """
-        query = f"""
-            MATCH (u:User {{userId: '{user_id}'}})-[:HAS_MEMORY]->(m:Memory)
-            MATCH (m)-[r:HAS_KNOWLEDGE]->(n1), (m)-[r2:HAS_KNOWLEDGE]->(n2)
-            WHERE id(n1) < id(n2) AND 
-                  {relationship_type} = TYPE(r) AND 
-                  {relationship_type} = TYPE(r2) AND 
-                  n1.memory_type = {memory_type} AND 
-                  n2.memory_type = {memory_type} AND 
-                  apoc.text.levenshteinSimilarity(toLower(n1.description), toLower(n2.description)) > {str(similarity_threshold)}
-            WITH n1, n2
-            CALL apoc.refactor.mergeNodes([n1, n2], {{mergeRels: true}}) YIELD node
-            RETURN node
-        """
+        if memory_type == 'SemanticMemory':
+            relationship_base = 'HAS_SEMANTIC_MEMORY'
+            relationship_type = 'HAS_KNOWLEDGE'
+            memory_label = 'semantic'
+        elif memory_type == 'EpisodicMemory':
+            relationship_base = 'HAS_EPISODIC_MEMORY'
+            # relationship_type = 'EPISODIC_MEMORY'
+            relationship_type = 'HAS_EVENT'
+            memory_label='episodic'
+        elif memory_type == 'Buffer':
+            relationship_base = 'HAS_BUFFER_MEMORY'
+            relationship_type = 'CURRENTLY_HOLDING'
+            memory_label= 'buffer'
+
+
+        query= f"""MATCH (u:User {{userId: '{user_id}'}})-[:{relationship_base}]->(sm:{memory_type})
+                    MATCH (sm)-[:{relationship_type}]->(n)
+                    RETURN labels(n) AS NodeType, collect(n) AS Nodes
+                    """
+
+        node_results = self.query(query)
+
+        node_types = [record['NodeType'] for record in node_results]
+
+        for node in node_types:
+            query = f"""
+                MATCH (u:User {{userId: "{user_id}"}})-[:{relationship_base}]->(m:{memory_type}) 
+                 MATCH (m)-[:{relationship_type}]->(n1:{node[0]} {{memory_type: "{memory_label}"}}),
+                       (m)-[:{relationship_type}]->(n2:{node[0]} {{memory_type: "{memory_label}"}})
+                 WHERE id(n1) < id(n2) AND
+                       apoc.text.levenshteinSimilarity(toLower(n1.description), toLower(n2.description)) > {similarity_threshold}
+                 WITH n1, n2
+                 LIMIT 1
+                CALL apoc.refactor.mergeNodes([n1, n2], {{mergeRels: true}}) YIELD node
+                 RETURN node
+            """
+            self.query(query)
+            self.close()
         return query
 
     def get_namespaces_by_document_category(self, user_id: str, category: str):
@@ -788,7 +812,7 @@ class Neo4jGraphDB(AbstractGraphDB):
 
 
 
-from networkx_graph import NetworkXGraphDB
+from .networkx_graph import NetworkXGraphDB
 class GraphDBFactory:
     def create_graph_db(self, db_type, **kwargs):
         if db_type == 'neo4j':

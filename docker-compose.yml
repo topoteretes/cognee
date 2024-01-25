@@ -21,7 +21,6 @@ services:
     volumes:
       - "./:/app"
       - ./.data:/app/.data
-
     environment:
       - HOST=0.0.0.0
       - ENVIRONMENT=local
@@ -39,8 +38,6 @@ services:
         limits:
           cpus: "4.0"
           memory: 8GB
-
-
   postgres:
     image: postgres
     container_name: postgres
@@ -53,27 +50,6 @@ services:
       - cognee_backend
     ports:
       - "5432:5432"
-
-#  superset:
-#    platform: linux/amd64
-#    build:
-#      context: ./superset
-#      dockerfile: Dockerfile
-#    container_name: superset
-#    environment:
-#      - ADMIN_USERNAME=admin
-#      - ADMIN_EMAIL=vasilije@topoteretes.com
-#      - ADMIN_PASSWORD=admin
-#      - POSTGRES_USER=bla
-#      - POSTGRES_PASSWORD=bla
-#      - POSTGRES_DB=bubu
-#    networks:
-#      - promethai_mem_backend
-#    ports:
-#      - '8088:8088'
-#    depends_on:
-#      - postgres
-
 networks:
   cognee_backend:
     name: cognee_backend
