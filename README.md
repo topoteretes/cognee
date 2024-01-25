@@ -15,18 +15,18 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 <p align="left"><i>Open-source framework for building and testing RAGs and Cognitive Architectures, designed for accuracy, transparency, and control.</i></p>
 
 <p align="left">
-<a href="https://github.com/topoteretes/PromethAI-Memory/fork" target="blank">
-<img src="https://img.shields.io/github/forks/topoteretes/PromethAI-Memory?style=for-the-badge" alt="promethAI forks"/>
+<a href="https://github.com/topoteretes/cognee/fork" target="blank">
+<img src="https://img.shields.io/github/forks/topoteretes/cognee?style=for-the-badge" alt="cognee forks"/>
 </a>
 
-<a href="https://github.com/topoteretes/PromethAI-Backend/stargazers" target="blank">
-<img src="https://img.shields.io/github/stars/topoteretes/PromethAI-Memory?style=for-the-badge" alt="promethAI stars"/>
+<a href="https://github.com/topoteretes/cognee/stargazers" target="blank">
+<img src="https://img.shields.io/github/stars/topoteretes/cognee?style=for-the-badge" alt="cognee stars"/>
 </a>
-<a href="https://github.com/topoteretes/PromethAI-Backend/pulls" target="blank">
-<img src="https://img.shields.io/github/issues-pr/topoteretes/PromethAI-Memory?style=for-the-badge" alt="promethAI pull-requests"/>
+<a href="https://github.com/topoteretes/cognee/pulls" target="blank">
+<img src="https://img.shields.io/github/issues-pr/topoteretes/cognee?style=for-the-badge" alt="cognee pull-requests"/>
 </a>
-<a href='https://github.com/topoteretes/PromethAI-Backend/releases'>
-<img src='https://img.shields.io/github/release/topoteretes/PromethAI-Memory?&label=Latest&style=for-the-badge'>
+<a href='https://github.com/topoteretes/cognee/releases'>
+<img src='https://img.shields.io/github/release/topoteretes/cognee?&label=Latest&style=for-the-badge'>
 </a>
 
 </p>
@@ -72,40 +72,28 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 
 
 
-This repo is built to test and evolve RAG architecture, inspired by human cognitive processes, using Python. It's aims to be production ready, testable, but give great visibility in how we build RAG applications.
-
-This project is a part of the [PromethAI](https://prometh.ai/) ecosystem.
-
-The project run in iterations, from POC towards production ready code.
-The iterations are numbered from 0 to 7, with 0 being the simplest iteration and 7 being the most complex one.
-To run a specific iteration, navigate to the iteration's folder and follow the instructions in the README file.
+This repo is built to test and evolve RAG architecture, inspired by human cognitive processes, using Python. 
+It's aims to be production ready, testable, and give great visibility in how we build RAG applications.
+It runs in iterations, from POC towards production ready code.
 To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)
-
-_Keep Ithaka always in your mind.
-Arriving there is what you’re destined for.
-But don’t hurry the journey at all.
-Better if it lasts for years_
+Try it on Whatsapp with one of our partners Keepi.ai by typing /save {content} followed by /query {content}
 
 
 ### Current Focus
 
-#### Level 4 - Dynamic Graph Memory Manager + DB + Rag Test Manager
-Scope: Use Neo4j to map the user queries into a knowledge graph based on cognitive architecture
-Blog post: Soon!
-- Dynamic Memory Manager -> store the data in N hierarchical stores
-- Dynamic Graph -> map the user queries into a knowledge graph
-- Classification -> classify the user queries and choose relevant graph nodes
-- Context manager -> generate context for LLM to process containing Semantic, Episodic and Vector store data
-- Postgres DB to store metadata 
-- Docker
-- API 
+#### Level 5 - Integration to keepi.ai and other apps
+Scope: Use Neo4j to map user preferences into a graph structure consisting of semantic, episodic, and procedural memory. 
+Fetch information and store information and files on Whatsapp chatbot using Keepi.ai
+Use the graph to answer user queries and store new information in the graph.
+
+
 
 ![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/level_4/User_graph.png)
 
 
 ### Installation
 
-### Run the level 4
+### Run cognee
 
 Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
 
@@ -115,26 +103,11 @@ Copy the .env.example to .env and fill in the variables
 
 ```docker compose up   ```
 
-Run 
-
-``` python main.py ``` 
-
-If you are running natively, change ENVIRONMENT to local in the .env file
-If you are running in docker, change ENVIRONMENT to postgres in the .env file
-
-
-Run
-
-``` python main.py ``` 
-
-Or run
-    
-    ``` docker compose up promethai-mem ```
-
 And send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000
 
 
-
+If you are running natively, change ENVIRONMENT to local in the .env file
+If you are running in docker, change ENVIRONMENT to postgres in the .env file
 
 
 

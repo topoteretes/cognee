@@ -17,18 +17,27 @@ OPENAI_API_KEY = config.openai_key
 aclient = instructor.patch(OpenAI())
 
 load_dotenv()
+import logging
 
 
 # Function to read query prompts from files
 def read_query_prompt(filename):
-    with open(filename, 'r') as file:
-        return file.read()
+    try:
+        with open(filename, 'r') as file:
+            return file.read()
+    except FileNotFoundError:
+        logging.info(f"Error: File not found. Attempted to read: {filename}")
+        logging.info(f"Current working directory: {os.getcwd()}")
+        return None
+    except Exception as e:
+        logging.info(f"An error occurred: {e}")
+        return None
 
 
 def generate_graph(input) -> KnowledgeGraph:
-    model = "gpt-4-1106-preview"  # Define the model here
+    model = "gpt-4-1106-preview"
     user_prompt = f"Use the given format to extract information from the following input: {input}."
-    system_prompt = read_query_prompt('prompts/generate_graph_prompt.txt')
+    system_prompt = read_query_prompt('cognitive_architecture/llm/prompts/generate_graph_prompt.txt')
 
     out = aclient.chat.completions.create(
         model=model,
@@ -50,7 +59,7 @@ def generate_graph(input) -> KnowledgeGraph:
 
 async def generate_summary(input) -> MemorySummary:
     out =  aclient.chat.completions.create(
-        model="gpt-4-1106-preview",
+        model=config.model,
         messages=[
             {
                 "role": "user",
@@ -69,7 +78,7 @@ async def generate_summary(input) -> MemorySummary:
 
 
 def user_query_to_edges_and_nodes( input: str) ->KnowledgeGraph:
-    system_prompt = read_query_prompt('prompts/generate_graph_prompt.txt')
+    system_prompt = read_query_prompt('cognitive_architecture/llm/prompts/generate_graph_prompt.txt')
     return aclient.chat.completions.create(
         model=config.model,
         messages=[

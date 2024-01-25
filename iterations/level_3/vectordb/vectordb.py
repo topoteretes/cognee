@@ -185,7 +185,7 @@ class WeaviateVectorDB(VectorDB):
         client = self.init_weaviate(namespace =self.namespace)
         if search_type is None:
             search_type = 'hybrid'
-        logging.info("The search type is 2 %", search_type)
+        logging.info("The search type is %s", str(search_type))
 
         if not namespace:
             namespace = self.namespace

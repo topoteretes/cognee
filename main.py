@@ -160,6 +160,7 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, con
         result = await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
                                                         observation=content, params=params, loader_settings=loader_settings)
         await update_entity(session, Operation, job_id, "SUCCESS")
+        return 1
 
 async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_input: str):
 
@@ -181,9 +182,13 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
         ),
     )
 
+    detected_language = detect_language(query_input)
+    translated_query = translate_text(query_input, detected_language, "en")
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username, password=config.graph_database_password)
-    cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id,query_input)
+    cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id,translated_query)
     result = neo4j_graph_db.query(cypher_query)
+    neo4j_graph_db.run_merge_query(user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.8)
+    neo4j_graph_db.run_merge_query(user_id=user_id, memory_type="EpisodicMemory", similarity_threshold=0.8)
     neo4j_graph_db.close()
 
     await update_entity(session, Operation, job_id, "SUCCESS")
@@ -628,6 +633,8 @@ async def relevance_feedback(query: str, input_type: str):
             break  # Exit the loop if a result of type bool is obtained
     return result
 
+
+
 async def main():
     user_id = "user_test_1_1"
 
@@ -640,8 +647,8 @@ async def main():
         class GraphQLQuery(BaseModel):
             query: str
 
-        gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
-        print(gg)
+        # gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
+        # print(gg)
 
         # def cypher_statement_correcting( input: str) -> str:
         #     out = aclient.chat.completions.create(
@@ -709,8 +716,12 @@ async def main():
         # await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
         # await add_documents_to_graph_db(session, user_id)
         #
-        # neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-        #                               password=config.graph_database_password)
+        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
+                                      password=config.graph_database_password)
+
+        out  = neo4j_graph_db.run_merge_query(user_id = user_id,  memory_type="SemanticMemory", similarity_threshold=0.5)
+        bb = neo4j_graph_db.query(out)
+        print(bb)
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 

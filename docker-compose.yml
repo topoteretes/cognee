@@ -11,19 +11,19 @@ services:
       - NEO4J_AUTH=neo4j/pleaseletmein
       - NEO4J_PLUGINS=["apoc"]
     networks:
-      - promethai_mem_backend
+      - cognee_backend
 
-  promethai_mem:
+  cognee:
     networks:
-      - promethai_mem_backend
+      - cognee_backend
     build:
       context: ./
     volumes:
       - "./:/app"
       - ./.data:/app/.data
-
     environment:
       - HOST=0.0.0.0
+      - ENVIRONMENT=local
     profiles: ["exclude-from-up"]
     ports:
       - 8000:8000
@@ -38,8 +38,6 @@ services:
         limits:
           cpus: "4.0"
           memory: 8GB
-
-
   postgres:
     image: postgres
     container_name: postgres
@@ -49,31 +47,10 @@ services:
       - POSTGRES_PASSWORD=bla
       - POSTGRES_DB=bubu
     networks:
-      - promethai_mem_backend
+      - cognee_backend
     ports:
       - "5432:5432"
-
-#  superset:
-#    platform: linux/amd64
-#    build:
-#      context: ./superset
-#      dockerfile: Dockerfile
-#    container_name: superset
-#    environment:
-#      - ADMIN_USERNAME=admin
-#      - ADMIN_EMAIL=vasilije@topoteretes.com
-#      - ADMIN_PASSWORD=admin
-#      - POSTGRES_USER=bla
-#      - POSTGRES_PASSWORD=bla
-#      - POSTGRES_DB=bubu
-#    networks:
-#      - promethai_mem_backend
-#    ports:
-#      - '8088:8088'
-#    depends_on:
-#      - postgres
-
 networks:
-  promethai_mem_backend:
-    name: promethai_mem_backend
+  cognee_backend:
+    name: cognee_backend
 

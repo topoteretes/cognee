@@ -602,6 +602,64 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
+    def run_merge_query(self, user_id: str,  memory_type: str,
+                              similarity_threshold: float) -> str:
+        """
+        Constructs a Cypher query to merge nodes in a Neo4j database based on a similarity threshold.
+
+        This method creates a Cypher query that finds pairs of nodes with a specified memory type
+        connected via a specified relationship type to the same 'Memory' node. If the Levenshtein
+        similarity between the 'description' properties of these nodes is greater than the
+        specified threshold, the nodes are merged using the apoc.refactor.mergeNodes procedure.
+
+        Parameters:
+        user_id (str): The ID of the user whose related nodes are to be merged.
+        memory_type (str): The memory type property of the nodes to be merged.
+        similarity_threshold (float): The threshold above which nodes will be considered similar enough to be merged.
+
+        Returns:
+        str: A Cypher query string that can be executed in a Neo4j session.
+        """
+        if memory_type == 'SemanticMemory':
+            relationship_base = 'HAS_SEMANTIC_MEMORY'
+            relationship_type = 'HAS_KNOWLEDGE'
+            memory_label = 'semantic'
+        elif memory_type == 'EpisodicMemory':
+            relationship_base = 'HAS_EPISODIC_MEMORY'
+            # relationship_type = 'EPISODIC_MEMORY'
+            relationship_type = 'HAS_EVENT'
+            memory_label='episodic'
+        elif memory_type == 'Buffer':
+            relationship_base = 'HAS_BUFFER_MEMORY'
+            relationship_type = 'CURRENTLY_HOLDING'
+            memory_label= 'buffer'
+
+
+        query= f"""MATCH (u:User {{userId: '{user_id}'}})-[:{relationship_base}]->(sm:{memory_type})
+                    MATCH (sm)-[:{relationship_type}]->(n)
+                    RETURN labels(n) AS NodeType, collect(n) AS Nodes
+                    """
+
+        node_results = self.query(query)
+
+        node_types = [record['NodeType'] for record in node_results]
+
+        for node in node_types:
+            query = f"""
+                MATCH (u:User {{userId: "{user_id}"}})-[:{relationship_base}]->(m:{memory_type}) 
+                 MATCH (m)-[:{relationship_type}]->(n1:{node[0]} {{memory_type: "{memory_label}"}}),
+                       (m)-[:{relationship_type}]->(n2:{node[0]} {{memory_type: "{memory_label}"}})
+                 WHERE id(n1) < id(n2) AND
+                       apoc.text.levenshteinSimilarity(toLower(n1.description), toLower(n2.description)) > {similarity_threshold}
+                 WITH n1, n2
+                 LIMIT 1
+                CALL apoc.refactor.mergeNodes([n1, n2], {{mergeRels: true}}) YIELD node
+                 RETURN node
+            """
+            self.query(query)
+            self.close()
+        return query
+
     def get_namespaces_by_document_category(self, user_id: str, category: str):
         """
         Retrieve a list of Vectordb namespaces for documents of a specified category associated with a given user.
@@ -754,7 +812,7 @@ class Neo4jGraphDB(AbstractGraphDB):
 
 
 
-from networkx_graph import NetworkXGraphDB
+from .networkx_graph import NetworkXGraphDB
 class GraphDBFactory:
     def create_graph_db(self, db_type, **kwargs):
         if db_type == 'neo4j':
