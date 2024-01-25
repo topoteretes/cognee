@@ -301,7 +301,6 @@ async def attach_user_to_public_memory(payload: Payload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/unlink-user-from-public-memory")
 async def unlink_user_from_public_memory(payload: Payload):
     try:
