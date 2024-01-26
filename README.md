@@ -90,7 +90,7 @@ Use the graph to answer user queries and store new information in the graph.
 
 
 
-![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/assets/User_graph.png)
+![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/assets/img.png)
 
 
 ### Installation
