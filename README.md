@@ -70,46 +70,45 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 
 
 
+[Star us on Github!](https://www.github.com/topoteretes/cognee)
 
-
-This repo is built to test and evolve RAG architecture, inspired by human cognitive processes, using Python. 
-It's aims to be production ready, testable, and give great visibility in how we build RAG applications.
-It runs in iterations, from POC towards production ready code.  
+Jump into the world of RAG architecture, inspired by human cognitive processes, using Python.
+The project runs in iterations, from POC towards production ready code.  
 
 To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)  
 
-Try it on Whatsapp with one of our partners Keepi.ai by typing /save {content} followed by /query {content}
+Try it on Whatsapp with one of our partners Keepi.ai by typing /save content followed by /query content
+
+
+
+### Get Started in Moments
+
+Running cognee is a breeze. Simply run  `cp env.example .env` and `docker compose up cognee` in your terminal.
+Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000
+
 
 
 ### Current Focus
 
-#### Level 5 - Integration to keepi.ai and other apps
-Scope: Use Neo4j to map user preferences into a graph structure consisting of semantic, episodic, and procedural memory. 
+#### Integration to keepi.ai and other apps
+Use Neo4j to map user preferences into a graph structure consisting of semantic, episodic, and procedural memory. 
 Fetch information and store information and files on Whatsapp chatbot using Keepi.ai
 Use the graph to answer user queries and store new information in the graph.
 
 
+### Architecture
 
 ![Image](https://github.com/topoteretes/PromethAI-Memory/blob/main/assets/img.png)
 
 
-### Installation
 
-### Run cognee
+### How Cognee Enhances Your Contextual Memory
 
-Make sure you have Docker, Poetry, and Python 3.11 installed and postgres installed.
+Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases introduces three key enhancements:
 
-Copy the .env.example to .env and fill in the variables
-
-``` poetry shell ```
-
-```docker compose up   ```
-
-And send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000
-
-
-If you are running natively, change ENVIRONMENT to local in the .env file
-If you are running in docker, change ENVIRONMENT to postgres in the .env file
+- Query Classifiers: Navigate information graph using Pydantic OpenAI classifiers.
+- Document Topology: Structure and store documents in public and private domains.
+- Personalized Context: Provide a context object to the LLM for a better response.
 
 
 
