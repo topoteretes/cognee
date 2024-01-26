@@ -56,13 +56,13 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 
 <p align="left">
 
-<a href="https://twitter.com/intent/tweet?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/PromethAI-Backend-Backend&hashtags=promethAI,AGI,Autonomics,future" target="blank">
+<a href="https://twitter.com/intent/tweet?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee&hashtags=promethAI,AGI,Autonomics,future" target="blank">
 <img src="https://img.shields.io/twitter/follow/_promethAI?label=Share Repo on Twitter&style=social" alt="Follow _promethAI"/></a> 
-<a href="https://t.me/share/url?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/PromethAI-Backend" target="_blank"><img src="https://img.shields.io/twitter/url?label=Telegram&logo=Telegram&style=social&url=https://github.com/topoteretes/PromethAI-Backend" alt="Share on Telegram"/></a>
-<a href="https://api.whatsapp.com/send?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%20https://github.com/topoteretes/PromethAI-Backend"><img src="https://img.shields.io/twitter/url?label=whatsapp&logo=whatsapp&style=social&url=https://github.com/topoteretes/PromethAI-Backend" /></a> <a href="https://www.reddit.com/submit?url=https://github.com/topoteretes/PromethAI-Backend&title=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.
+<a href="https://t.me/share/url?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee" target="_blank"><img src="https://img.shields.io/twitter/url?label=Telegram&logo=Telegram&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Telegram"/></a>
+<a href="https://api.whatsapp.com/send?text=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%20https://github.com/topoteretes/cognee"><img src="https://img.shields.io/twitter/url?label=whatsapp&logo=whatsapp&style=social&url=https://github.com/topoteretes/cognee" /></a> <a href="https://www.reddit.com/submit?url=https://github.com/topoteretes/cognee&title=Check%20this%20GitHub%20repository%20out.%20promethAI%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.
 " target="blank">
-<img src="https://img.shields.io/twitter/url?label=Reddit&logo=Reddit&style=social&url=https://github.com/topoteretes/PromethAI-Backend" alt="Share on Reddit"/>
-</a> <a href="mailto:?subject=Check%20this%20GitHub%20repository%20out.&body=promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%3A%0Ahttps://github.com/topoteretes/PromethAI-Backend" target="_blank"><img src="https://img.shields.io/twitter/url?label=Gmail&logo=Gmail&style=social&url=https://github.com/topoteretes/PromethAI-Backend"/></a> <a href="https://www.buymeacoffee.com/promethAI" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="23" width="100" style="border-radius:1px"></a>
+<img src="https://img.shields.io/twitter/url?label=Reddit&logo=Reddit&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Reddit"/>
+</a> <a href="mailto:?subject=Check%20this%20GitHub%20repository%20out.&body=promethAI%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%3A%0Ahttps://github.com/topoteretes/cognee" target="_blank"><img src="https://img.shields.io/twitter/url?label=Gmail&logo=Gmail&style=social&url=https://github.com/topoteretes/cognee"/></a> <a href="https://www.buymeacoffee.com/promethAI" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="23" width="100" style="border-radius:1px"></a>
 
 </p>
 
@@ -73,17 +73,17 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 [Star us on Github!](https://www.github.com/topoteretes/cognee)
 
 Jump into the world of RAG architecture, inspired by human cognitive processes, using Python.
-The project runs in iterations, from POC towards production ready code.  
+[cognee](www.cognee.ai) runs in iterations, from POC towards production ready code.  
 
 To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)  
 
-Try it on Whatsapp with one of our partners Keepi.ai by typing /save content followed by /query content
+To try it yourselfon Whatsapp with one of our partners(www.keepi.ai) by typing /save content followed by /query content
 
 
 
 ### Get Started in Moments
 
-Running cognee is a breeze. Simply run  `cp env.example .env` and `docker compose up cognee` in your terminal.
+Running [cognee](www.cognee.ai) is a breeze. Simply run  `cp env.example .env` and `docker compose up cognee` in your terminal.
 Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000
 
 
