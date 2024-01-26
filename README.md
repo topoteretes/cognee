@@ -77,7 +77,7 @@ Jump into the world of RAG architecture, inspired by human cognitive processes, 
 
 To read more about the approach and details on cognitive architecture, see the blog post: [AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps](https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4)  
 
-To try it yourselfon Whatsapp with one of our partners(www.keepi.ai) by typing /save content followed by /query content
+Try it yourself on Whatsapp with one of our [partners](www.keepi.ai) by typing /save _content_ followed by /query _content_
 
 
 
@@ -91,9 +91,11 @@ Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-qu
 ### Current Focus
 
 #### Integration to keepi.ai and other apps
-Use Neo4j to map user preferences into a graph structure consisting of semantic, episodic, and procedural memory. 
-Fetch information and store information and files on Whatsapp chatbot using Keepi.ai
-Use the graph to answer user queries and store new information in the graph.
+Uses Neo4j to map user preferences into a graph structure consisting of semantic, episodic, and procedural memory.   
+
+Fetches information and stores information and files on Whatsapp chatbot using [keepi.ai](www.keepi.ai)
+
+Uses the graph to answer user queries and store new information in the graph.
 
 
 ### Architecture
