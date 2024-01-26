@@ -1,4 +1,4 @@
-# Cognee
+# cognee
 
 AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps
 
@@ -52,7 +52,7 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 [//]: # (</p>)
 
 
-<p align="left"><b>Share promethAI Repository</b></p>
+<p align="left"><b>Share cognee Repository</b></p>
 
 <p align="left">
 
