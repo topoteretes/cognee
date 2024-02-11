@@ -305,7 +305,7 @@ async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, d
                 else:
                     rs = neo4j_graph_db.create_document_node_cypher(classification, user_id, memory_type='SemanticMemory')
                     neo4j_graph_db.close()
-                logging.info("Cypher query is %s", rs)
+                logging.info("Cypher query is %s", str(rs))
                 neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
                                               password=config.graph_database_password)
                 neo4j_graph_db.query(rs)
