@@ -38,7 +38,13 @@ from fastapi import Depends
 config = Config()
 config.load()
 
-
+@app.get(
+    "/",
+)
+"""
+Root endpoint that returns a welcome message.
+"""
+async def root():
 class ImageResponse(BaseModel):
     success: bool
     message: str
