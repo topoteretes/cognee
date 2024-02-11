@@ -560,7 +560,7 @@ class Neo4jGraphDB(AbstractGraphDB):
                summary: '{summary}',
                documentCategory: '{document_category}',
                d_id: '{d_id}',
-               created_at: timestamp(),
+               created_at: timestamp()
            }})
 
            // Link the Document node to the {memory_node_type} node
