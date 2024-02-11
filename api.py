@@ -24,7 +24,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 app = FastAPI(debug=True)
@@ -36,10 +35,16 @@ app = FastAPI(debug=True)
 
 from fastapi import Depends
 
-
 config = Config()
 config.load()
 
+@app.get(
+    "/",
+)
+"""
+Root endpoint that returns a welcome message.
+"""
+async def root():
 class ImageResponse(BaseModel):
     success: bool
     message: str
@@ -66,10 +71,11 @@ def health_check():
 class Payload(BaseModel):
     payload: Dict[str, Any]
 
+
 @app.post("/add-memory", response_model=dict)
 async def add_memory(
-    payload: Payload,
-    # files: List[UploadFile] = File(...),
+        payload: Payload,
+        # files: List[UploadFile] = File(...),
 ):
     try:
         logging.info(" Adding to Memory ")
@@ -87,7 +93,8 @@ async def add_memory(
             else:
                 content = None
 
-            output = await load_documents_to_vectorstore(session, decoded_payload['user_id'], content=content, loader_settings=settings_for_loader)
+            output = await load_documents_to_vectorstore(session, decoded_payload['user_id'], content=content,
+                                                         loader_settings=settings_for_loader)
             return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
@@ -95,10 +102,11 @@ async def add_memory(
             content={"response": {"error": str(e)}}, status_code=503
         )
 
+
 @app.post("/add-architecture-public-memory", response_model=dict)
 async def add_memory(
-    payload: Payload,
-    # files: List[UploadFile] = File(...),
+        payload: Payload,
+        # files: List[UploadFile] = File(...),
 ):
     try:
         logging.info(" Adding to Memory ")
@@ -117,13 +125,15 @@ async def add_memory(
                 "path": [".data"]
             }
 
-            output = await load_documents_to_vectorstore(session, user_id=user_id, content=content, loader_settings=loader_settings)
+            output = await load_documents_to_vectorstore(session, user_id=user_id, content=content,
+                                                         loader_settings=loader_settings)
             return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
         return JSONResponse(
             content={"response": {"error": str(e)}}, status_code=503
         )
+
 
 @app.post("/user-query-to-graph")
 async def user_query_to_graph(payload: Payload):
@@ -133,7 +143,8 @@ async def user_query_to_graph(payload: Payload):
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await user_query_to_graph_db(session= session, user_id= decoded_payload['user_id'],query_input =decoded_payload['query'])
+            result = await user_query_to_graph_db(session=session, user_id=decoded_payload['user_id'],
+                                                  query_input=decoded_payload['query'])
 
         return result
 
@@ -155,18 +166,23 @@ async def document_to_graph_db(payload: Payload):
         else:
             memory_type = None
         async with session_scope(session=AsyncSessionLocal()) as session:
-            result = await add_documents_to_graph_db(session =session, user_id = decoded_payload['user_id'], document_memory_types =memory_type)
+            result = await add_documents_to_graph_db(session=session, user_id=decoded_payload['user_id'],
+                                                     document_memory_types=memory_type)
         return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/cognitive-context-enrichment")
 async def cognitive_context_enrichment(payload: Payload):
     try:
         decoded_payload = payload.payload
         async with session_scope(session=AsyncSessionLocal()) as session:
-            result = await user_context_enrichment(session, user_id = decoded_payload['user_id'], query= decoded_payload['query'], generative_response=decoded_payload['generative_response'], memory_type= decoded_payload['memory_type'])
+            result = await user_context_enrichment(session, user_id=decoded_payload['user_id'],
+                                                   query=decoded_payload['query'],
+                                                   generative_response=decoded_payload['generative_response'],
+                                                   memory_type=decoded_payload['memory_type'])
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
@@ -179,7 +195,8 @@ async def classify_user_query(payload: Payload):
         decoded_payload = payload.payload
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import relevance_feedback
-            result = await relevance_feedback(  query= decoded_payload['query'], input_type=decoded_payload['knowledge_type'])
+            result = await relevance_feedback(query=decoded_payload['query'],
+                                              input_type=decoded_payload['knowledge_type'])
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
@@ -202,7 +219,6 @@ async def user_query_classfier(payload: Payload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 @app.post("/drop-db")
 async def drop_db(payload: Payload):
     try:
@@ -210,7 +226,7 @@ async def drop_db(payload: Payload):
 
         if decoded_payload['operation'] == 'drop':
 
-            if  os.environ.get('AWS_ENV') == 'dev':
+            if os.environ.get('AWS_ENV') == 'dev':
                 host = os.environ.get('POSTGRES_HOST')
                 username = os.environ.get('POSTGRES_USER')
                 password = os.environ.get('POSTGRES_PASSWORD')
@@ -237,7 +253,7 @@ async def drop_db(payload: Payload):
 
             engine = create_admin_engine(username, password, host, database_name)
             create_database(engine)
-            return JSONResponse(content={"response": " DB created"}, status_code=200)
+            return JSONResponse(content={"response": " DB drop"}, status_code=200)
 
 
 
@@ -268,7 +284,7 @@ async def create_public_memory(payload: Payload):
         # Execute the query - replace this with the actual execution method
         # async with session_scope(session=AsyncSessionLocal()) as session:
         #     from main import create_public_memory
-            # Assuming you have a method in Neo4jGraphDB to execute the query
+        # Assuming you have a method in Neo4jGraphDB to execute the query
         result = await create_public_memory(user_id=user_id, labels=labels, topic=topic)
         return JSONResponse(content={"response": result}, status_code=200)
 
@@ -295,11 +311,12 @@ async def attach_user_to_public_memory(payload: Payload):
             from main import attach_user_to_memory, create_public_memory
             # Assuming you have a method in Neo4jGraphDB to execute the query
             await create_public_memory(user_id=decoded_payload['user_id'], topic=topic, labels=labels)
-            result = await attach_user_to_memory( user_id = decoded_payload['user_id'], topic=topic, labels=labels)
+            result = await attach_user_to_memory(user_id=decoded_payload['user_id'], topic=topic, labels=labels)
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/unlink-user-from-public-memory")
 async def unlink_user_from_public_memory(payload: Payload):
@@ -315,11 +332,13 @@ async def unlink_user_from_public_memory(payload: Payload):
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import unlink_user_from_memory
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await unlink_user_from_memory( user_id = decoded_payload['user_id'], topic=topic, labels=decoded_payload['labels'])
+            result = await unlink_user_from_memory(user_id=decoded_payload['user_id'], topic=topic,
+                                                   labels=decoded_payload['labels'])
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
