@@ -1,8 +1,8 @@
 #!/bin/bash
 # export ENVIRONMENT
 
-echo $DEBUG
-echo $ENVIRONMENT
+echo "Debug mode: $DEBUG"
+echo "Environment: $ENVIRONMENT"
 
 if [ "$ENVIRONMENT" != "local" ]; then
     echo "Running fetch_secret.py"
