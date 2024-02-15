@@ -184,7 +184,7 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
 
     detected_language = detect_language(query_input)
 
-    if detected_language is not "en":
+    if detected_language != "en":
         translated_query = translate_text(query_input, detected_language, "en")
     else:
         translated_query = query_input
