@@ -43,7 +43,7 @@ import uuid
 import weaviate
 from marshmallow import Schema, fields
 import json
-from vector_db_type import VectorDBType
+from cognitive_architecture.database.vectordb.vector_db_type import VectorDBType
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

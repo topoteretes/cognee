@@ -13,22 +13,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# this is needed to import classes from other modules
-# script_dir = os.path.dirname(os.path.abspath(__file__))
-# # Get the parent directory of your script and add it to sys.path
-# parent_dir = os.path.dirname(script_dir)
-# sys.path.append(parent_dir)
-# from ...config import Config
-# config = Config()
-# config.load()
-
 
 # in seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5
-
-import os
-
 
 class DatabaseConfig:
     def __init__(
@@ -84,12 +72,6 @@ class DatabaseConfig:
 # config = DatabaseConfig(config_file='path/to/config.json')
 # Or set them programmatically:
 config = DatabaseConfig(
-    db_type="postgresql",
-    db_name="mydatabase",
-    user="myuser",
-    password="mypassword",
-    host="myhost",
-    port="5432",
 )
 
 SQLALCHEMY_DATABASE_URL = config.get_sqlalchemy_database_url()

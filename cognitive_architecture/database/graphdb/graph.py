@@ -34,7 +34,7 @@ from ...utils import (
 )
 from ...llm.queries import generate_summary, generate_graph
 import logging
-from neo4j import AsyncGraphDatabase, Neo4jError
+from neo4j import AsyncGraphDatabase
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, List
 
@@ -106,8 +106,8 @@ class Neo4jGraphDB(AbstractGraphDB):
             async with self.get_session() as session:
                 result = await session.run(query, parameters=params)
                 return await result.data()
-        except Neo4jError as e:
-            logging.error(f"Neo4j query error: {e.message}")
+        except Exception as e:
+            logging.error(f"Neo4j query error: %s {e}")
             raise
 
     # class Neo4jGraphDB(AbstractGraphDB):

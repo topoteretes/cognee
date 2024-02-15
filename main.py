@@ -880,26 +880,26 @@ async def main():
         # load_doc_to_graph = await add_documents_to_graph_db(session, user_id)
         # print(load_doc_to_graph)
         user_id = "test_user"
-        # loader_settings = {
-        #     "format": "PDF",
-        #     "source": "DEVICE",
-        #     "path": [".data"]
-        # }
-        # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
+        loader_settings = {
+            "format": "PDF",
+            "source": "DEVICE",
+            "path": [".data"]
+        }
+        await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
         # await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
         # await add_documents_to_graph_db(session, user_id)
         #
-        neo4j_graph_db = Neo4jGraphDB(
-            url=config.graph_database_url,
-            username=config.graph_database_username,
-            password=config.graph_database_password,
-        )
-
-        out = neo4j_graph_db.run_merge_query(
-            user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.5
-        )
-        bb = neo4j_graph_db.query(out)
-        print(bb)
+        # neo4j_graph_db = Neo4jGraphDB(
+        #     url=config.graph_database_url,
+        #     username=config.graph_database_username,
+        #     password=config.graph_database_password,
+        # )
+        #
+        # out = neo4j_graph_db.run_merge_query(
+        #     user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.5
+        # )
+        # bb = neo4j_graph_db.query(out)
+        # print(bb)
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
 
