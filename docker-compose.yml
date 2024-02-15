@@ -14,6 +14,7 @@ services:
       - cognee_backend
 
   cognee:
+    container_name: cognee
     networks:
       - cognee_backend
     build:
@@ -30,6 +31,7 @@ services:
       - 443:443
       - 80:80
       - 50051:50051
+      - 5678:5678
     depends_on:
       - postgres
       - neo4j
@@ -38,6 +40,7 @@ services:
         limits:
           cpus: "4.0"
           memory: 8GB
+
   postgres:
     image: postgres
     container_name: postgres
@@ -50,6 +53,7 @@ services:
       - cognee_backend
     ports:
       - "5432:5432"
+
 networks:
   cognee_backend:
     name: cognee_backend
