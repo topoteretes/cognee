@@ -11,12 +11,12 @@ print(os.getcwd())
 
 
 
-from cognitive_architecture.database.postgres.models.user import User
-from cognitive_architecture.database.postgres.models.memory import MemoryModel
+from cognitive_architecture.database.relationaldb.models.user import User
+from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 
 import ast
 import tracemalloc
-from cognitive_architecture.database.postgres.database_crud import add_entity
+from cognitive_architecture.database.relationaldb.database_crud import add_entity
 
 tracemalloc.start()
 
@@ -142,7 +142,7 @@ class Memory:
         user_id: str = "676",
         session=None,
         index_name: str = None,
-        db_type: str = "weaviate",
+        db_type: str = None,
         namespace: str = None,
         memory_id: str = None,
         memory_class = None,
@@ -196,7 +196,7 @@ class Memory:
             )
 
         memory_class = DynamicBaseMemory(
-            memory_label, user_id, str(memory_id), index_name=memory_label , db_type='weaviate', **kwargs
+            memory_label, user_id, str(memory_id), index_name=memory_label , db_type=config.vectordb, **kwargs
         )
 
         return cls(user_id=user_id, session=session, memory_id=memory_id, job_id =job_id, memory_class=memory_class, **kwargs)
@@ -442,8 +442,8 @@ async def main():
     # memory_instance = Memory(namespace='SEMANTICMEMORY')
     # sss = await memory_instance.dynamic_method_call(memory_instance.semantic_memory_class, 'fetch_memories', observation='some_observation')
 
-    from database.postgres.database_crud import session_scope
-    from database.postgres.database import AsyncSessionLocal
+    from database.relationaldb.database_crud import session_scope
+    from database.relationaldb.database import AsyncSessionLocal
 
     async with session_scope(AsyncSessionLocal()) as session:
         memory = await Memory.create_memory("677", session, "SEMANTICMEMORY", namespace="SEMANTICMEMORY")

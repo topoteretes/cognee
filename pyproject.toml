@@ -60,6 +60,8 @@ grpcio = "^1.60.0"
 langdetect = "^1.0.9"
 iso639 = "^0.1.4"
 debugpy = "^1.8.0"
+lancedb = "^0.5.5"
+pyarrow = "^15.0.0"
 
 [build-system]
 requires = ["poetry-core"]

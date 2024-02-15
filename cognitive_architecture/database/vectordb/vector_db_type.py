@@ -11,3 +11,4 @@ class VectorDBType(Enum):
     REDIS = 'redis'
     LANCEDB = 'lancedb'
     MONGODB = 'mongodb'
+    FAISS = 'faiss'

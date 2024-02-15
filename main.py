@@ -2,26 +2,26 @@ from typing import Optional, List
 
 from neo4j.exceptions import Neo4jError
 from pydantic import BaseModel, Field
-from cognitive_architecture.database.graph_database.graph import Neo4jGraphDB
-from cognitive_architecture.database.postgres.models.memory import MemoryModel
+from cognitive_architecture.database.graphdb.graph import Neo4jGraphDB
+from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 from cognitive_architecture.classifiers.classifier import classify_documents
 import os
 from dotenv import load_dotenv
-from cognitive_architecture.database.postgres.database_crud import session_scope, update_entity_graph_summary
-from cognitive_architecture.database.postgres.database import AsyncSessionLocal
+from cognitive_architecture.database.relationaldb.database_crud import session_scope, update_entity_graph_summary
+from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
 from cognitive_architecture.utils import generate_letter_uuid
 import instructor
 from openai import OpenAI
 from cognitive_architecture.vectorstore_manager import Memory
-from cognitive_architecture.database.postgres.database_crud import fetch_job_id
+from cognitive_architecture.database.relationaldb.database_crud import fetch_job_id
 import uuid
-from cognitive_architecture.database.postgres.models.sessions import Session
-from cognitive_architecture.database.postgres.models.operation import Operation
-from cognitive_architecture.database.postgres.database_crud import session_scope, add_entity, update_entity, fetch_job_id
-from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
-from cognitive_architecture.database.postgres.models.docs import DocsModel
-from cognitive_architecture.database.postgres.models.memory import MemoryModel
-from cognitive_architecture.database.postgres.models.user import User
+from cognitive_architecture.database.relationaldb.models.sessions import Session
+from cognitive_architecture.database.relationaldb.models.operation import Operation
+from cognitive_architecture.database.relationaldb.database_crud import session_scope, add_entity, update_entity, fetch_job_id
+from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
+from cognitive_architecture.database.relationaldb.models.docs import DocsModel
+from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
+from cognitive_architecture.database.relationaldb.models.user import User
 from cognitive_architecture.classifiers.classifier import classify_call
 aclient = instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"

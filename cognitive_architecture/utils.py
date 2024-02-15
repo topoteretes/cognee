@@ -7,7 +7,7 @@ from graphviz import Digraph
 from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager
 
-from cognitive_architecture.database.postgres.database import AsyncSessionLocal
+from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -133,12 +133,12 @@ def generate_letter_uuid(length=8):
     letters = string.ascii_uppercase  # A-Z
     return "".join(random.choice(letters) for _ in range(length))
 
-from cognitive_architecture.database.postgres.models.operation import Operation
-from cognitive_architecture.database.postgres.database_crud import session_scope, add_entity, update_entity, fetch_job_id
-from cognitive_architecture.database.postgres.models.metadatas import MetaDatas
-from cognitive_architecture.database.postgres.models.docs import DocsModel
-from cognitive_architecture.database.postgres.models.memory import MemoryModel
-from cognitive_architecture.database.postgres.models.user import User
+from cognitive_architecture.database.relationaldb.models.operation import Operation
+from cognitive_architecture.database.relationaldb.database_crud import session_scope, add_entity, update_entity, fetch_job_id
+from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
+from cognitive_architecture.database.relationaldb.models.docs import DocsModel
+from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
+from cognitive_architecture.database.relationaldb.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import logging

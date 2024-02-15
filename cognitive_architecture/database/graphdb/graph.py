@@ -29,7 +29,10 @@ from typing import List, Dict, Optional
 from ...utils import format_dict, append_uuid_to_variable_names, create_edge_variable_mapping, \
     create_node_variable_mapping, get_unsumarized_vector_db_namespace
 from ...llm.queries import generate_summary, generate_graph
-
+import logging
+from neo4j import AsyncGraphDatabase, Neo4jError
+from contextlib import asynccontextmanager
+from typing import Any, Dict, Optional, List
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
@@ -70,27 +73,49 @@ class AbstractGraphDB(ABC):
 
 
 class Neo4jGraphDB(AbstractGraphDB):
-    def __init__(self, url, username, password):
-        # self.graph = Neo4jGraph(url=url, username=username, password=password)
-        from neo4j import GraphDatabase
-        self.driver = GraphDatabase.driver(url, auth=(username, password))
-        self.openai_key = config.openai_key
+    def __init__(self, url: str, username: str, password: str, driver: Optional[Any] = None):
+        self.driver = driver or AsyncGraphDatabase.driver(url, auth=(username, password))
 
+    async def close(self) -> None:
+        await self.driver.close()
 
+    @asynccontextmanager
+    async def get_session(self) -> AsyncSession:
+        async with self.driver.session() as session:
+            yield session
 
-    def close(self):
-        # Method to close the Neo4j driver instance
-        self.driver.close()
-
-    def query(self, query, params=None):
+    async def query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
-            with self.driver.session() as session:
-                result = session.run(query, params).data()
-                return result
-        except Exception as e:
-            logging.error(f"An error occurred while executing the query: {e}")
-            raise e
+            async with self.get_session() as session:
+                result = await session.run(query, parameters=params)
+                return await result.data()
+        except Neo4jError as e:
+            logging.error(f"Neo4j query error: {e.message}")
+            raise
 
+
+# class Neo4jGraphDB(AbstractGraphDB):
+#     def __init__(self, url, username, password):
+#         # self.graph = Neo4jGraph(url=url, username=username, password=password)
+#         from neo4j import GraphDatabase
+#         self.driver = GraphDatabase.driver(url, auth=(username, password))
+#         self.openai_key = config.openai_key
+#
+#
+#
+#     def close(self):
+#         # Method to close the Neo4j driver instance
+#         self.driver.close()
+#
+#     def query(self, query, params=None):
+#         try:
+#             with self.driver.session() as session:
+#                 result = session.run(query, params).data()
+#                 return result
+#         except Exception as e:
+#             logging.error(f"An error occurred while executing the query: {e}")
+#             raise e
+#
 
 
     def create_base_cognitive_architecture(self, user_id: str):

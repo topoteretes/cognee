@@ -9,8 +9,8 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from cognitive_architecture.database.postgres.database import AsyncSessionLocal
-from cognitive_architecture.database.postgres.database_crud import session_scope
+from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
+from cognitive_architecture.database.relationaldb.database_crud import session_scope
 from cognitive_architecture.vectorstore_manager import Memory
 from dotenv import load_dotenv
 from main import add_documents_to_graph_db, user_context_enrichment

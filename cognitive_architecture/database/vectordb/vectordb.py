@@ -415,3 +415,41 @@ class WeaviateVectorDB(VectorDB):
             consistency_level=weaviate.data.replication.ConsistencyLevel.ALL,  # default QUORUM
         )
         return
+
+import os
+import lancedb
+from pydantic import BaseModel
+from typing import List, Optional
+import pandas as pd
+import pyarrow as pa
+class LanceDB(VectorDB):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.db = self.init_lancedb()
+
+    def init_lancedb(self):
+        # Initialize LanceDB connection
+        # Adjust the URI as needed for your LanceDB setup
+        uri = "s3://my-bucket/lancedb" if self.namespace else "~/.lancedb"
+        db = lancedb.connect(uri, api_key=os.getenv("LANCEDB_API_KEY"))
+        return db
+
+    def create_table(self, name: str, schema: Optional[pa.Schema] = None, data: Optional[pd.DataFrame] = None):
+        # Create a table in LanceDB. If schema is not provided, it will be inferred from the data.
+        if data is not None and schema is None:
+            schema = pa.Schema.from_pandas(data)
+        table = self.db.create_table(name, schema=schema)
+        if data is not None:
+            table.add(data.to_dict('records'))
+        return table
+
+    def add_memories(self, table_name: str, data: pd.DataFrame):
+        # Add data to an existing table in LanceDB
+        table = self.db.open_table(table_name)
+        table.add(data.to_dict('records'))
+
+    def fetch_memories(self, table_name: str, query_vector: List[float], top_k: int = 10):
+        # Perform a vector search in the specified table
+        table = self.db.open_table(table_name)
+        results = table.search(query_vector).limit(top_k).to_pandas()
+        return results

@@ -19,6 +19,8 @@ class Config:
     memgpt_dir: str = field(default_factory=lambda: os.getenv('COG_ARCH_DIR', 'cognitive_achitecture'))
     config_path: str = field(default_factory=lambda: os.path.join(os.getenv('COG_ARCH_DIR', 'cognitive_achitecture'), 'config'))
 
+    vectordb:str = 'lancedb'
+
     # Model parameters
     model: str = 'gpt-4-1106-preview'
     model_endpoint: str = 'openai'
