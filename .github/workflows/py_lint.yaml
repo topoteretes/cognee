@@ -15,10 +15,17 @@ jobs:
       with:
         python-version: '3.9'  # Specify the Python version you want to use
 
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -  # Install Poetry
+
+    - name: Configure Poetry
+      run: |
+        poetry config virtualenvs.create false  # Configure poetry to not create a new virtual environment
+
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install pylint  # Install pylint
+        poetry install  # Install the dependencies specified in pyproject.toml
 
     - name: Run pylint
       run: |
