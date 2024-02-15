@@ -7,7 +7,10 @@ from cognitive_architecture.database.relationaldb.models.memory import MemoryMod
 from cognitive_architecture.classifiers.classifier import classify_documents
 import os
 from dotenv import load_dotenv
-from cognitive_architecture.database.relationaldb.database_crud import session_scope, update_entity_graph_summary
+from cognitive_architecture.database.relationaldb.database_crud import (
+    session_scope,
+    update_entity_graph_summary,
+)
 from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
 from cognitive_architecture.utils import generate_letter_uuid
 import instructor
@@ -17,12 +20,18 @@ from cognitive_architecture.database.relationaldb.database_crud import fetch_job
 import uuid
 from cognitive_architecture.database.relationaldb.models.sessions import Session
 from cognitive_architecture.database.relationaldb.models.operation import Operation
-from cognitive_architecture.database.relationaldb.database_crud import session_scope, add_entity, update_entity, fetch_job_id
+from cognitive_architecture.database.relationaldb.database_crud import (
+    session_scope,
+    add_entity,
+    update_entity,
+    fetch_job_id,
+)
 from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
 from cognitive_architecture.database.relationaldb.models.docs import DocsModel
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 from cognitive_architecture.database.relationaldb.models.user import User
 from cognitive_architecture.classifiers.classifier import classify_call
+
 aclient = instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
@@ -30,6 +39,7 @@ PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 from cognitive_architecture.config import Config
+
 config = Config()
 config.load()
 from cognitive_architecture.utils import get_document_names
@@ -37,14 +47,28 @@ from sqlalchemy.orm import selectinload, joinedload, contains_eager
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from cognitive_architecture.utils import get_document_names, generate_letter_uuid, get_memory_name_by_doc_id, get_unsumarized_vector_db_namespace, get_vectordb_namespace, get_vectordb_document_name
-from cognitive_architecture.shared.language_processing import translate_text, detect_language
+from cognitive_architecture.utils import (
+    get_document_names,
+    generate_letter_uuid,
+    get_memory_name_by_doc_id,
+    get_unsumarized_vector_db_namespace,
+    get_vectordb_namespace,
+    get_vectordb_document_name,
+)
+from cognitive_architecture.shared.language_processing import (
+    translate_text,
+    detect_language,
+)
 from cognitive_architecture.classifiers.classifier import classify_user_input
 
-async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str, namespace_id:str, doc_id:str=None):
-    logging.info("user id is", user_id)
-    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, memory_label=namespace_id)
 
+async def fetch_document_vectordb_namespace(
+    session: AsyncSession, user_id: str, namespace_id: str, doc_id: str = None
+):
+    logging.info("user id is", user_id)
+    memory = await Memory.create_memory(
+        user_id, session, namespace=namespace_id, memory_label=namespace_id
+    )
 
     # Managing memory attributes
     existing_user = await Memory.check_existing_user(user_id, session)
@@ -66,15 +90,26 @@ async def fetch_document_vectordb_namespace(session: AsyncSession, user_id: str,
         print(f"No attribute named  in memory.")
 
     print("Available memory classes:", await memory.list_memory_classes())
-    result = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
-                                                    observation="placeholder", search_type="summary_filter_by_object_name", params=doc_id)
+    result = await memory.dynamic_method_call(
+        dynamic_memory_class,
+        "fetch_memories",
+        observation="placeholder",
+        search_type="summary_filter_by_object_name",
+        params=doc_id,
+    )
     logging.info("Result is %s", str(result))
 
     return result, namespace_id
 
 
-
-async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, content:str=None, job_id:str=None, loader_settings:dict=None, memory_type:str="PRIVATE"):
+async def load_documents_to_vectorstore(
+    session: AsyncSession,
+    user_id: str,
+    content: str = None,
+    job_id: str = None,
+    loader_settings: dict = None,
+    memory_type: str = "PRIVATE",
+):
     namespace_id = str(generate_letter_uuid()) + "_" + "SEMANTICMEMORY"
     namespace_class = namespace_id + "_class"
 
@@ -96,12 +131,21 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, con
             operation_type="DATA_LOAD",
         ),
     )
-    memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id=job_id, memory_label=namespace_id)
+    memory = await Memory.create_memory(
+        user_id,
+        session,
+        namespace=namespace_id,
+        job_id=job_id,
+        memory_label=namespace_id,
+    )
     if content is not None:
         document_names = [content[:30]]
     if loader_settings is not None:
-        document_source = loader_settings.get("document_names") if isinstance(loader_settings.get("document_names"),
-                                                                    list) else loader_settings.get("path", "None")
+        document_source = (
+            loader_settings.get("document_names")
+            if isinstance(loader_settings.get("document_names"), list)
+            else loader_settings.get("path", "None")
+        )
         logging.info("Document source is %s", document_source)
         # try:
         document_names = get_document_names(document_source[0])
@@ -109,12 +153,21 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, con
         # except:
         #     document_names = document_source
     for doc in document_names:
-        from cognitive_architecture.shared.language_processing import translate_text, detect_language
-        #translates doc titles to english
+        from cognitive_architecture.shared.language_processing import (
+            translate_text,
+            detect_language,
+        )
+
+        # translates doc titles to english
         if loader_settings is not None:
             logging.info("Detecting language of document %s", doc)
-            loader_settings["single_document_path"]= loader_settings.get("path", "None")[0] +"/"+doc
-            logging.info("Document path is %s", loader_settings.get("single_document_path", "None"))
+            loader_settings["single_document_path"] = (
+                loader_settings.get("path", "None")[0] + "/" + doc
+            )
+            logging.info(
+                "Document path is %s",
+                loader_settings.get("single_document_path", "None"),
+            )
             memory_category = loader_settings.get("memory_category", "PUBLIC")
         if loader_settings is None:
             memory_category = "CUSTOM"
@@ -122,7 +175,7 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, con
             doc_ = doc.strip(".pdf").replace("-", " ")
             doc_ = translate_text(doc_, "sr", "en")
         else:
-            doc_=doc
+            doc_ = doc
         doc_id = str(uuid.uuid4())
 
         logging.info("Document name is %s", doc_)
@@ -131,17 +184,15 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, con
             DocsModel(
                 id=doc_id,
                 operation_id=job_id,
-                graph_summary= False,
-                memory_category= memory_category,
-                doc_name=doc_
-            )
+                graph_summary=False,
+                memory_category=memory_category,
+                doc_name=doc_,
+            ),
         )
         # Managing memory attributes
         existing_user = await Memory.check_existing_user(user_id, session)
         await memory.manage_memory_attributes(existing_user)
-        params = {
-            "doc_id":doc_id
-        }
+        params = {"doc_id": doc_id}
         print("Namespace id is %s", namespace_id)
         await memory.add_dynamic_memory_class(namespace_id.lower(), namespace_id)
 
@@ -157,13 +208,18 @@ async def load_documents_to_vectorstore(session: AsyncSession, user_id: str, con
             print(f"No attribute named  in memory.")
 
         print("Available memory classes:", await memory.list_memory_classes())
-        result = await memory.dynamic_method_call(dynamic_memory_class, 'add_memories',
-                                                        observation=content, params=params, loader_settings=loader_settings)
+        result = await memory.dynamic_method_call(
+            dynamic_memory_class,
+            "add_memories",
+            observation=content,
+            params=params,
+            loader_settings=loader_settings,
+        )
         await update_entity(session, Operation, job_id, "SUCCESS")
         return 1
 
-async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_input: str):
 
+async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_input: str):
     try:
         new_user = User(id=user_id)
         await add_entity(session, new_user)
@@ -189,18 +245,31 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
     else:
         translated_query = query_input
 
-    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username, password=config.graph_database_password)
+    neo4j_graph_db = Neo4jGraphDB(
+        url=config.graph_database_url,
+        username=config.graph_database_username,
+        password=config.graph_database_password,
+    )
 
-    cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id, translated_query)
+    cypher_query = (
+        await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(
+            user_id, translated_query
+        )
+    )
     result = neo4j_graph_db.query(cypher_query)
 
-    neo4j_graph_db.run_merge_query(user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.8)
-    neo4j_graph_db.run_merge_query(user_id=user_id, memory_type="EpisodicMemory", similarity_threshold=0.8)
+    neo4j_graph_db.run_merge_query(
+        user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.8
+    )
+    neo4j_graph_db.run_merge_query(
+        user_id=user_id, memory_type="EpisodicMemory", similarity_threshold=0.8
+    )
     neo4j_graph_db.close()
 
     await update_entity(session, Operation, job_id, "SUCCESS")
 
     return result
+
 
 # async def add_documents_to_graph_db(session: AsyncSession, user_id: Optional[str] = None,
 #                                     document_memory_types: Optional[List[str]] = None):
@@ -256,106 +325,159 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
 #         return e
 
 
-async def add_documents_to_graph_db(session: AsyncSession, user_id: str= None, document_memory_types:list=None):
+async def add_documents_to_graph_db(
+    session: AsyncSession, user_id: str = None, document_memory_types: list = None
+):
     """"""
     if document_memory_types is None:
-        document_memory_types = ['PUBLIC']
+        document_memory_types = ["PUBLIC"]
 
     logging.info("Document memory types are", document_memory_types)
     try:
         # await update_document_vectordb_namespace(postgres_session, user_id)
-        memory_details, docs = await get_unsumarized_vector_db_namespace(session, user_id)
+        memory_details, docs = await get_unsumarized_vector_db_namespace(
+            session, user_id
+        )
 
         logging.info("Docs are", docs)
-        memory_details= [detail for detail in memory_details if detail[1] in document_memory_types]
+        memory_details = [
+            detail for detail in memory_details if detail[1] in document_memory_types
+        ]
         logging.info("Memory details", memory_details)
         for doc in docs:
             logging.info("Memory names are", memory_details)
             doc_name, doc_id = doc
             logging.info("Doc id is", doc_id)
             try:
-                classification_content = await fetch_document_vectordb_namespace(session, user_id, memory_details[0][0], doc_id)
-                retrieval_chunks = [item['text'] for item in
-                                    classification_content[0]['data']['Get'][memory_details[0][0]]]
+                classification_content = await fetch_document_vectordb_namespace(
+                    session, user_id, memory_details[0][0], doc_id
+                )
+                retrieval_chunks = [
+                    item["text"]
+                    for item in classification_content[0]["data"]["Get"][
+                        memory_details[0][0]
+                    ]
+                ]
                 logging.info("Classification content is", classification_content)
             except:
                 classification_content = ""
                 retrieval_chunks = ""
             # retrieval_chunks = [item['text'] for item in classification_content[0]['data']['Get'][memory_details[0]]]
             # Concatenating the extracted text values
-            concatenated_retrievals = ' '.join(retrieval_chunks)
+            concatenated_retrievals = " ".join(retrieval_chunks)
             print(concatenated_retrievals)
             logging.info("Retrieval chunks are", retrieval_chunks)
-            classification = await classify_documents(doc_name, document_id =doc_id, content=concatenated_retrievals)
+            classification = await classify_documents(
+                doc_name, document_id=doc_id, content=concatenated_retrievals
+            )
 
             logging.info("Classification is %s", str(classification))
-            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                          password=config.graph_database_password)
-            if document_memory_types == ['PUBLIC']:
-                await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
-                ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic="PublicMemory")
+            neo4j_graph_db = Neo4jGraphDB(
+                url=config.graph_database_url,
+                username=config.graph_database_username,
+                password=config.graph_database_password,
+            )
+            if document_memory_types == ["PUBLIC"]:
+                await create_public_memory(
+                    user_id=user_id, labels=["sr"], topic="PublicMemory"
+                )
+                ids = neo4j_graph_db.retrieve_node_id_for_memory_type(
+                    topic="PublicMemory"
+                )
                 neo4j_graph_db.close()
                 print(ids)
             else:
-                ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic="SemanticMemory")
+                ids = neo4j_graph_db.retrieve_node_id_for_memory_type(
+                    topic="SemanticMemory"
+                )
                 neo4j_graph_db.close()
                 print(ids)
 
             for id in ids:
-                print(id.get('memoryId'))
-                neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                              password=config.graph_database_password)
-                if document_memory_types == ['PUBLIC']:
-
-                    rs = neo4j_graph_db.create_document_node_cypher(classification, user_id, public_memory_id=id.get('memoryId'))
+                print(id.get("memoryId"))
+                neo4j_graph_db = Neo4jGraphDB(
+                    url=config.graph_database_url,
+                    username=config.graph_database_username,
+                    password=config.graph_database_password,
+                )
+                if document_memory_types == ["PUBLIC"]:
+                    rs = neo4j_graph_db.create_document_node_cypher(
+                        classification, user_id, public_memory_id=id.get("memoryId")
+                    )
                     neo4j_graph_db.close()
                 else:
-                    rs = neo4j_graph_db.create_document_node_cypher(classification, user_id, memory_type='SemanticMemory')
+                    rs = neo4j_graph_db.create_document_node_cypher(
+                        classification, user_id, memory_type="SemanticMemory"
+                    )
                     neo4j_graph_db.close()
                 logging.info("Cypher query is %s", str(rs))
-                neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                              password=config.graph_database_password)
+                neo4j_graph_db = Neo4jGraphDB(
+                    url=config.graph_database_url,
+                    username=config.graph_database_username,
+                    password=config.graph_database_password,
+                )
                 neo4j_graph_db.query(rs)
                 neo4j_graph_db.close()
             logging.info("WE GOT HERE")
-            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                          password=config.graph_database_password)
+            neo4j_graph_db = Neo4jGraphDB(
+                url=config.graph_database_url,
+                username=config.graph_database_username,
+                password=config.graph_database_password,
+            )
             if memory_details[0][1] == "PUBLIC":
-
-                neo4j_graph_db.update_document_node_with_db_ids( vectordb_namespace=memory_details[0][0],
-                                                               document_id=doc_id)
+                neo4j_graph_db.update_document_node_with_db_ids(
+                    vectordb_namespace=memory_details[0][0], document_id=doc_id
+                )
                 neo4j_graph_db.close()
             else:
-                neo4j_graph_db.update_document_node_with_db_ids( vectordb_namespace=memory_details[0][0],
-                                                                document_id=doc_id, user_id=user_id)
+                neo4j_graph_db.update_document_node_with_db_ids(
+                    vectordb_namespace=memory_details[0][0],
+                    document_id=doc_id,
+                    user_id=user_id,
+                )
                 neo4j_graph_db.close()
             # await update_entity_graph_summary(session, DocsModel, doc_id, True)
     except Exception as e:
         return e
 
+
 class ResponseString(BaseModel):
-    response: str = Field(default=None)  # Defaulting to None or you can use a default string like ""
+    response: str = Field(
+        default=None
+    )  # Defaulting to None or you can use a default string like ""
     quotation: str = Field(default=None)  # Same here
+
 
 #
 
+
 def generate_graph(input) -> ResponseString:
-    out =  aclient.chat.completions.create(
+    out = aclient.chat.completions.create(
         model="gpt-4-1106-preview",
         messages=[
             {
                 "role": "user",
                 "content": f"""Use the given context to answer query and use help of associated context: {input}. """,
-
             },
-            {   "role":"system", "content": """You are a top-tier algorithm
+            {
+                "role": "system",
+                "content": """You are a top-tier algorithm
                 designed for using context summaries based on cognitive psychology to answer user queries, and provide a simple response. 
-                Do not mention anything explicit about cognitive architecture, but use the context to answer the query. If you are using a document, reference document metadata field"""}
+                Do not mention anything explicit about cognitive architecture, but use the context to answer the query. If you are using a document, reference document metadata field""",
+            },
         ],
         response_model=ResponseString,
     )
     return out
-async def user_context_enrichment(session, user_id:str, query:str, generative_response:bool=False, memory_type:str=None)->str:
+
+
+async def user_context_enrichment(
+    session,
+    user_id: str,
+    query: str,
+    generative_response: bool = False,
+    memory_type: str = None,
+) -> str:
     """
     Asynchronously enriches the user context by integrating various memory systems and document classifications.
 
@@ -387,31 +509,38 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
     enriched_context = await user_context_enrichment(session, "user123", "How does cognitive architecture work?")
     ```
     """
-    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                  password=config.graph_database_password)
+    neo4j_graph_db = Neo4jGraphDB(
+        url=config.graph_database_url,
+        username=config.graph_database_username,
+        password=config.graph_database_password,
+    )
 
     # await user_query_to_graph_db(session, user_id, query)
 
     semantic_mem = neo4j_graph_db.retrieve_semantic_memory(user_id=user_id)
     neo4j_graph_db.close()
-    neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                  password=config.graph_database_password)
+    neo4j_graph_db = Neo4jGraphDB(
+        url=config.graph_database_url,
+        username=config.graph_database_username,
+        password=config.graph_database_password,
+    )
     episodic_mem = neo4j_graph_db.retrieve_episodic_memory(user_id=user_id)
     neo4j_graph_db.close()
     # public_mem = neo4j_graph_db.retrieve_public_memory(user_id=user_id)
-
-
 
     if detect_language(query) != "en":
         query = translate_text(query, "sr", "en")
     logging.info("Translated query is %s", str(query))
 
-    if memory_type=='PublicMemory':
-
-
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                      password=config.graph_database_password)
-        summaries = await neo4j_graph_db.get_memory_linked_document_summaries(user_id=user_id, memory_type=memory_type)
+    if memory_type == "PublicMemory":
+        neo4j_graph_db = Neo4jGraphDB(
+            url=config.graph_database_url,
+            username=config.graph_database_username,
+            password=config.graph_database_password,
+        )
+        summaries = await neo4j_graph_db.get_memory_linked_document_summaries(
+            user_id=user_id, memory_type=memory_type
+        )
         neo4j_graph_db.close()
         logging.info("Summaries are  is %s", summaries)
         # logging.info("Context from graphdb is %s", context)
@@ -424,7 +553,9 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         relevant_summary_id = None
 
         for _ in range(max_attempts):
-            relevant_summary_id = await classify_call( query= query, document_summaries=str(summaries))
+            relevant_summary_id = await classify_call(
+                query=query, document_summaries=str(summaries)
+            )
 
             logging.info("Relevant summary id is %s", relevant_summary_id)
 
@@ -432,22 +563,32 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
                 break
 
         # logging.info("Relevant categories after the classifier are %s", relevant_categories)
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                      password=config.graph_database_password)
-        postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(user_id, summary_id = relevant_summary_id, memory_type=memory_type)
+        neo4j_graph_db = Neo4jGraphDB(
+            url=config.graph_database_url,
+            username=config.graph_database_username,
+            password=config.graph_database_password,
+        )
+        postgres_id = await neo4j_graph_db.get_memory_linked_document_ids(
+            user_id, summary_id=relevant_summary_id, memory_type=memory_type
+        )
         neo4j_graph_db.close()
         # postgres_id  = neo4j_graph_db.query(get_doc_ids)
         logging.info("Postgres ids are %s", postgres_id)
         namespace_id = await get_memory_name_by_doc_id(session, postgres_id[0])
         logging.info("Namespace ids are %s", namespace_id)
-        params= {"doc_id":postgres_id[0]}
+        params = {"doc_id": postgres_id[0]}
         namespace_id = namespace_id[0]
         namespace_class = namespace_id + "_class"
-        if memory_type =='PublicMemory':
-            user_id = 'system_user'
+        if memory_type == "PublicMemory":
+            user_id = "system_user"
 
-        memory = await Memory.create_memory(user_id, session, namespace=namespace_id, job_id="23232",
-                                            memory_label=namespace_id)
+        memory = await Memory.create_memory(
+            user_id,
+            session,
+            namespace=namespace_id,
+            job_id="23232",
+            memory_label=namespace_id,
+        )
 
         existing_user = await Memory.check_existing_user(user_id, session)
         print("here is the existing user", existing_user)
@@ -468,17 +609,26 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
             print(f"No attribute named  in memory.")
 
         print("Available memory classes:", await memory.list_memory_classes())
-        results = await memory.dynamic_method_call(dynamic_memory_class, 'fetch_memories',
-                                                  observation=query, params=postgres_id[0], search_type="summary_filter_by_object_name")
+        results = await memory.dynamic_method_call(
+            dynamic_memory_class,
+            "fetch_memories",
+            observation=query,
+            params=postgres_id[0],
+            search_type="summary_filter_by_object_name",
+        )
         logging.info("Result is %s", str(results))
-
 
         search_context = ""
 
-        for result in results['data']['Get'][namespace_id]:
+        for result in results["data"]["Get"][namespace_id]:
             # Assuming 'result' is a dictionary and has keys like 'source', 'text'
-            source = result['source'].replace('-', ' ').replace('.pdf', '').replace('.data/', '')
-            text = result['text']
+            source = (
+                result["source"]
+                .replace("-", " ")
+                .replace(".pdf", "")
+                .replace(".data/", "")
+            )
+            text = result["text"]
             search_context += f"Document source: {source}, Document text: {text} \n"
 
     else:
@@ -502,7 +652,9 @@ async def user_context_enrichment(session, user_id:str, query:str, generative_re
         return generative_result.model_dump_json()
 
 
-async def create_public_memory(user_id: str=None, labels:list=None, topic:str=None) -> Optional[int]:
+async def create_public_memory(
+    user_id: str = None, labels: list = None, topic: str = None
+) -> Optional[int]:
     """
     Create a public memory node associated with a user in a Neo4j graph database.
     If Public Memory exists, it will return the id of the memory.
@@ -521,16 +673,17 @@ async def create_public_memory(user_id: str=None, labels:list=None, topic:str=No
     """
     # Validate input parameters
     if not labels:
-        labels = ['sr']  # Labels for the memory node
+        labels = ["sr"]  # Labels for the memory node
 
     if not topic:
         topic = "PublicMemory"
 
-
     try:
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
-                                      username=config.graph_database_username,
-                                      password=config.graph_database_password)
+        neo4j_graph_db = Neo4jGraphDB(
+            url=config.graph_database_url,
+            username=config.graph_database_username,
+            password=config.graph_database_password,
+        )
 
         # Assuming the topic for public memory is predefined, e.g., "PublicMemory"
         # Create the memory node
@@ -541,7 +694,10 @@ async def create_public_memory(user_id: str=None, labels:list=None, topic:str=No
         logging.error(f"Error creating public memory node: {e}")
         return None
 
-async def attach_user_to_memory(user_id: str=None, labels:list=None, topic:str=None) -> Optional[int]:
+
+async def attach_user_to_memory(
+    user_id: str = None, labels: list = None, topic: str = None
+) -> Optional[int]:
     """
     Link user to public memory
 
@@ -560,33 +716,41 @@ async def attach_user_to_memory(user_id: str=None, labels:list=None, topic:str=N
     if not user_id:
         raise ValueError("User ID is required.")
     if not labels:
-        labels = ['sr']  # Labels for the memory node
+        labels = ["sr"]  # Labels for the memory node
 
     if not topic:
         topic = "PublicMemory"
 
-
     try:
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
-                                      username=config.graph_database_username,
-                                      password=config.graph_database_password)
+        neo4j_graph_db = Neo4jGraphDB(
+            url=config.graph_database_url,
+            username=config.graph_database_username,
+            password=config.graph_database_password,
+        )
 
         # Assuming the topic for public memory is predefined, e.g., "PublicMemory"
         ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic=topic)
         neo4j_graph_db.close()
 
         for id in ids:
-            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
-                                          username=config.graph_database_username,
-                                          password=config.graph_database_password)
-            linked_memory = neo4j_graph_db.link_public_memory_to_user(memory_id=id.get('memoryId'), user_id=user_id)
+            neo4j_graph_db = Neo4jGraphDB(
+                url=config.graph_database_url,
+                username=config.graph_database_username,
+                password=config.graph_database_password,
+            )
+            linked_memory = neo4j_graph_db.link_public_memory_to_user(
+                memory_id=id.get("memoryId"), user_id=user_id
+            )
             neo4j_graph_db.close()
         return 1
     except Neo4jError as e:
         logging.error(f"Error creating public memory node: {e}")
         return None
 
-async def unlink_user_from_memory(user_id: str=None, labels:list=None, topic:str=None) -> Optional[int]:
+
+async def unlink_user_from_memory(
+    user_id: str = None, labels: list = None, topic: str = None
+) -> Optional[int]:
     """
     Unlink user from memory
 
@@ -604,34 +768,39 @@ async def unlink_user_from_memory(user_id: str=None, labels:list=None, topic:str
     if not user_id:
         raise ValueError("User ID is required.")
     if not labels:
-        labels = ['sr']  # Labels for the memory node
+        labels = ["sr"]  # Labels for the memory node
 
     if not topic:
         topic = "PublicMemory"
 
-
     try:
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
-                                      username=config.graph_database_username,
-                                      password=config.graph_database_password)
+        neo4j_graph_db = Neo4jGraphDB(
+            url=config.graph_database_url,
+            username=config.graph_database_username,
+            password=config.graph_database_password,
+        )
 
         # Assuming the topic for public memory is predefined, e.g., "PublicMemory"
         ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic=topic)
         neo4j_graph_db.close()
 
         for id in ids:
-            neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
-                                          username=config.graph_database_username,
-                                          password=config.graph_database_password)
-            linked_memory = neo4j_graph_db.unlink_memory_from_user(memory_id=id.get('memoryId'), user_id=user_id)
+            neo4j_graph_db = Neo4jGraphDB(
+                url=config.graph_database_url,
+                username=config.graph_database_username,
+                password=config.graph_database_password,
+            )
+            linked_memory = neo4j_graph_db.unlink_memory_from_user(
+                memory_id=id.get("memoryId"), user_id=user_id
+            )
             neo4j_graph_db.close()
         return 1
     except Neo4jError as e:
         logging.error(f"Error creating public memory node: {e}")
         return None
 
-async def relevance_feedback(query: str, input_type: str):
 
+async def relevance_feedback(query: str, input_type: str):
     max_attempts = 6
     result = None
     for attempt in range(1, max_attempts + 1):
@@ -641,15 +810,12 @@ async def relevance_feedback(query: str, input_type: str):
     return result
 
 
-
 async def main():
     user_id = "user_test_1_1"
 
     async with session_scope(AsyncSessionLocal()) as session:
         # await update_entity(session, DocsModel, "8cd9a022-5a7a-4af5-815a-f988415536ae", True)
         # output = await get_unsumarized_vector_db_namespace(session, user_id)
-
-
 
         class GraphQLQuery(BaseModel):
             query: str
@@ -713,7 +879,7 @@ async def main():
         # print(out)
         # load_doc_to_graph = await add_documents_to_graph_db(session, user_id)
         # print(load_doc_to_graph)
-        user_id = 'test_user'
+        user_id = "test_user"
         # loader_settings = {
         #     "format": "PDF",
         #     "source": "DEVICE",
@@ -723,10 +889,15 @@ async def main():
         # await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
         # await add_documents_to_graph_db(session, user_id)
         #
-        neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username,
-                                      password=config.graph_database_password)
+        neo4j_graph_db = Neo4jGraphDB(
+            url=config.graph_database_url,
+            username=config.graph_database_username,
+            password=config.graph_database_password,
+        )
 
-        out  = neo4j_graph_db.run_merge_query(user_id = user_id,  memory_type="SemanticMemory", similarity_threshold=0.5)
+        out = neo4j_graph_db.run_merge_query(
+            user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.5
+        )
         bb = neo4j_graph_db.query(out)
         print(bb)
 
@@ -798,6 +969,4 @@ async def main():
 if __name__ == "__main__":
     import asyncio
 
-
     asyncio.run(main())
-

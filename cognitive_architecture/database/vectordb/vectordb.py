@@ -1,10 +1,10 @@
-
 # Make sure to install the following packages: dlt, langchain, duckdb, python-dotenv, openai, weaviate-client
 import logging
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from marshmallow import Schema, fields
 from cognitive_architecture.database.vectordb.loaders.loaders import _document_loader
+
 # Add the parent directory to sys.path
 
 
@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO)
 from langchain.retrievers import WeaviateHybridSearchRetriever, ParentDocumentRetriever
 from weaviate.gql.get import HybridFusion
 import tracemalloc
+
 tracemalloc.start()
 import os
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -28,6 +29,8 @@ config.load()
 LTM_MEMORY_ID_DEFAULT = "00000"
 ST_MEMORY_ID_DEFAULT = "0000"
 BUFFER_ID_DEFAULT = "0000"
+
+
 class VectorDB:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
@@ -37,13 +40,14 @@ class VectorDB:
         index_name: str,
         memory_id: str,
         namespace: str = None,
-        embeddings = None,
+        embeddings=None,
     ):
         self.user_id = user_id
         self.index_name = index_name
         self.namespace = namespace
         self.memory_id = memory_id
         self.embeddings = embeddings
+
 
 class PineconeVectorDB(VectorDB):
     def __init__(self, *args, **kwargs):
@@ -54,13 +58,21 @@ class PineconeVectorDB(VectorDB):
         # Pinecone initialization logic
         pass
 
+
 import langchain.embeddings
+
+
 class WeaviateVectorDB(VectorDB):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.init_weaviate(embeddings= self.embeddings, namespace = self.namespace)
+        self.init_weaviate(embeddings=self.embeddings, namespace=self.namespace)
 
-    def init_weaviate(self,  embeddings=OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY", "")), namespace=None,retriever_type="",):
+    def init_weaviate(
+        self,
+        embeddings=OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY", "")),
+        namespace=None,
+        retriever_type="",
+    ):
         # Weaviate initialization logic
         auth_config = weaviate.auth.AuthApiKey(
             api_key=os.environ.get("WEAVIATE_API_KEY")
@@ -91,15 +103,16 @@ class WeaviateVectorDB(VectorDB):
                 create_schema_if_missing=True,
             )
             return retriever
-        else :
+        else:
             return client
-                # child_splitter = RecursiveCharacterTextSplitter(chunk_size=400)
-                # store = InMemoryStore()
-                # retriever = ParentDocumentRetriever(
-                #     vectorstore=vectorstore,
-                #     docstore=store,
-                #     child_splitter=child_splitter,
-                # )
+            # child_splitter = RecursiveCharacterTextSplitter(chunk_size=400)
+            # store = InMemoryStore()
+            # retriever = ParentDocumentRetriever(
+            #     vectorstore=vectorstore,
+            #     docstore=store,
+            #     child_splitter=child_splitter,
+            # )
+
     from marshmallow import Schema, fields
 
     def create_document_structure(observation, params, metadata_schema_class=None):
@@ -111,10 +124,7 @@ class WeaviateVectorDB(VectorDB):
         :param metadata_schema_class: Custom metadata schema class (optional).
         :return: A list containing the validated document data.
         """
-        document_data = {
-            "metadata": params,
-            "page_content": observation
-        }
+        document_data = {"metadata": params, "page_content": observation}
 
         def get_document_schema():
             class DynamicDocumentSchema(Schema):
@@ -128,30 +138,42 @@ class WeaviateVectorDB(VectorDB):
         loaded_document = CurrentDocumentSchema().load(document_data)
         return [loaded_document]
 
-    def _stuct(self, observation, params, metadata_schema_class =None):
+    def _stuct(self, observation, params, metadata_schema_class=None):
         """Utility function to create the document structure with optional custom fields."""
         # Construct document data
-        document_data = {
-            "metadata": params,
-            "page_content": observation
-        }
+        document_data = {"metadata": params, "page_content": observation}
+
         def get_document_schema():
             class DynamicDocumentSchema(Schema):
                 metadata = fields.Nested(metadata_schema_class, required=True)
                 page_content = fields.Str(required=True)
 
             return DynamicDocumentSchema
+
         # Validate and deserialize  # Default to "1.0" if not provided
         CurrentDocumentSchema = get_document_schema()
         loaded_document = CurrentDocumentSchema().load(document_data)
         return [loaded_document]
-    async def add_memories(self, observation, loader_settings=None, params=None, namespace=None, metadata_schema_class=None, embeddings = 'hybrid'):
+
+    async def add_memories(
+        self,
+        observation,
+        loader_settings=None,
+        params=None,
+        namespace=None,
+        metadata_schema_class=None,
+        embeddings="hybrid",
+    ):
         # Update Weaviate memories here
         if namespace is None:
             namespace = self.namespace
-        params['user_id'] = self.user_id
+        params["user_id"] = self.user_id
         logging.info("User id is %s", self.user_id)
-        retriever = self.init_weaviate(embeddings=OpenAIEmbeddings(),namespace = namespace, retriever_type="single_document_context")
+        retriever = self.init_weaviate(
+            embeddings=OpenAIEmbeddings(),
+            namespace=namespace,
+            retriever_type="single_document_context",
+        )
         if loader_settings:
             # Assuming _document_loader returns a list of documents
             documents = await _document_loader(observation, loader_settings)
@@ -160,27 +182,49 @@ class WeaviateVectorDB(VectorDB):
             for doc_list in documents:
                 for doc in doc_list:
                     chunk_count += 1
-                    params['chunk_count'] = doc.metadata.get("chunk_count", "None")
-                    logging.info("Loading document with provided loader settings %s", str(doc))
-                    params['source'] = doc.metadata.get("source", "None")
+                    params["chunk_count"] = doc.metadata.get("chunk_count", "None")
+                    logging.info(
+                        "Loading document with provided loader settings %s", str(doc)
+                    )
+                    params["source"] = doc.metadata.get("source", "None")
                     logging.info("Params are %s", str(params))
-                    retriever.add_documents([
-                Document(metadata=params, page_content=doc.page_content)])
+                    retriever.add_documents(
+                        [Document(metadata=params, page_content=doc.page_content)]
+                    )
         else:
             chunk_count = 0
-            from cognitive_architecture.database.vectordb.chunkers.chunkers import chunk_data
-            documents = [chunk_data(chunk_strategy="VANILLA", source_data=observation, chunk_size=300,
-                       chunk_overlap=20)]
+            from cognitive_architecture.database.vectordb.chunkers.chunkers import (
+                chunk_data,
+            )
+
+            documents = [
+                chunk_data(
+                    chunk_strategy="VANILLA",
+                    source_data=observation,
+                    chunk_size=300,
+                    chunk_overlap=20,
+                )
+            ]
             for doc in documents[0]:
                 chunk_count += 1
-                params['chunk_order'] = chunk_count
-                params['source'] = "User loaded"
-                logging.info("Loading document with default loader settings %s", str(doc))
+                params["chunk_order"] = chunk_count
+                params["source"] = "User loaded"
+                logging.info(
+                    "Loading document with default loader settings %s", str(doc)
+                )
                 logging.info("Params are %s", str(params))
-                retriever.add_documents([
-                Document(metadata=params, page_content=doc.page_content)])
+                retriever.add_documents(
+                    [Document(metadata=params, page_content=doc.page_content)]
+                )
 
-    async def fetch_memories(self, observation: str, namespace: str = None, search_type: str = 'hybrid',params=None, **kwargs):
+    async def fetch_memories(
+        self,
+        observation: str,
+        namespace: str = None,
+        search_type: str = "hybrid",
+        params=None,
+        **kwargs,
+    ):
         """
         Fetch documents from weaviate.
 
@@ -196,12 +240,9 @@ class WeaviateVectorDB(VectorDB):
         Example:
             fetch_memories(query="some query", search_type='text', additional_param='value')
         """
-        client = self.init_weaviate(namespace =self.namespace)
+        client = self.init_weaviate(namespace=self.namespace)
         if search_type is None:
-            search_type = 'hybrid'
-
-
-
+            search_type = "hybrid"
 
         if not namespace:
             namespace = self.namespace
@@ -222,37 +263,41 @@ class WeaviateVectorDB(VectorDB):
                 for prop in class_obj["properties"]
             ]
 
-        base_query = client.query.get(
-            namespace, list(list_objects_of_class(namespace, client.schema.get()))
-        ).with_additional(
-            ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
-        ).with_where(params_user_id).with_limit(10)
+        base_query = (
+            client.query.get(
+                namespace, list(list_objects_of_class(namespace, client.schema.get()))
+            )
+            .with_additional(
+                ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", "distance"]
+            )
+            .with_where(params_user_id)
+            .with_limit(10)
+        )
 
-        n_of_observations = kwargs.get('n_of_observations', 2)
+        n_of_observations = kwargs.get("n_of_observations", 2)
 
         # try:
-        if search_type == 'text':
+        if search_type == "text":
             query_output = (
-                base_query
-                .with_near_text({"concepts": [observation]})
+                base_query.with_near_text({"concepts": [observation]})
                 .with_autocut(n_of_observations)
                 .do()
             )
-        elif search_type == 'hybrid':
+        elif search_type == "hybrid":
             query_output = (
-                base_query
-                .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
+                base_query.with_hybrid(
+                    query=observation, fusion_type=HybridFusion.RELATIVE_SCORE
+                )
                 .with_autocut(n_of_observations)
                 .do()
             )
-        elif search_type == 'bm25':
+        elif search_type == "bm25":
             query_output = (
-                base_query
-                .with_bm25(query=observation)
+                base_query.with_bm25(query=observation)
                 .with_autocut(n_of_observations)
                 .do()
             )
-        elif search_type == 'summary':
+        elif search_type == "summary":
             filter_object = {
                 "operator": "And",
                 "operands": [
@@ -266,20 +311,32 @@ class WeaviateVectorDB(VectorDB):
                         "operator": "LessThan",
                         "valueNumber": 30,
                     },
-                ]
+                ],
             }
-            base_query = client.query.get(
-                namespace, list(list_objects_of_class(namespace, client.schema.get()))
-            ).with_additional(
-                ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
-            ).with_where(filter_object).with_limit(30)
+            base_query = (
+                client.query.get(
+                    namespace,
+                    list(list_objects_of_class(namespace, client.schema.get())),
+                )
+                .with_additional(
+                    [
+                        "id",
+                        "creationTimeUnix",
+                        "lastUpdateTimeUnix",
+                        "score",
+                        "distance",
+                    ]
+                )
+                .with_where(filter_object)
+                .with_limit(30)
+            )
             query_output = (
                 base_query
                 # .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
                 .do()
             )
 
-        elif search_type == 'summary_filter_by_object_name':
+        elif search_type == "summary_filter_by_object_name":
             filter_object = {
                 "operator": "And",
                 "operands": [
@@ -293,17 +350,27 @@ class WeaviateVectorDB(VectorDB):
                         "operator": "Equal",
                         "valueText": params,
                     },
-                ]
+                ],
             }
-            base_query = client.query.get(
-                namespace, list(list_objects_of_class(namespace, client.schema.get()))
-            ).with_additional(
-                ["id", "creationTimeUnix", "lastUpdateTimeUnix", "score", 'distance']
-            ).with_where(filter_object).with_limit(30).with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
-            query_output = (
-                base_query
-                .do()
+            base_query = (
+                client.query.get(
+                    namespace,
+                    list(list_objects_of_class(namespace, client.schema.get())),
+                )
+                .with_additional(
+                    [
+                        "id",
+                        "creationTimeUnix",
+                        "lastUpdateTimeUnix",
+                        "score",
+                        "distance",
+                    ]
+                )
+                .with_where(filter_object)
+                .with_limit(30)
+                .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
             )
+            query_output = base_query.do()
             # from weaviate.classes import Filter
             # client = weaviate.connect_to_wcs(
             #     cluster_url=config.weaviate_url,
@@ -311,20 +378,18 @@ class WeaviateVectorDB(VectorDB):
             # )
 
             return query_output
-        elif search_type == 'generate':
-            generate_prompt = kwargs.get('generate_prompt', "")
+        elif search_type == "generate":
+            generate_prompt = kwargs.get("generate_prompt", "")
             query_output = (
-                base_query
-                .with_generate(single_prompt=observation)
+                base_query.with_generate(single_prompt=observation)
                 .with_near_text({"concepts": [observation]})
                 .with_autocut(n_of_observations)
                 .do()
             )
-        elif search_type == 'generate_grouped':
-            generate_prompt = kwargs.get('generate_prompt', "")
+        elif search_type == "generate_grouped":
+            generate_prompt = kwargs.get("generate_prompt", "")
             query_output = (
-                base_query
-                .with_generate(grouped_task=observation)
+                base_query.with_generate(grouped_task=observation)
                 .with_near_text({"concepts": [observation]})
                 .with_autocut(n_of_observations)
                 .do()
@@ -338,12 +403,10 @@ class WeaviateVectorDB(VectorDB):
 
         return query_output
 
-
-
-    async def delete_memories(self, namespace:str, params: dict = None):
+    async def delete_memories(self, namespace: str, params: dict = None):
         if namespace is None:
             namespace = self.namespace
-        client = self.init_weaviate(namespace = self.namespace)
+        client = self.init_weaviate(namespace=self.namespace)
         if params:
             where_filter = {
                 "path": ["id"],
@@ -366,7 +429,6 @@ class WeaviateVectorDB(VectorDB):
                 },
             )
 
-
     async def count_memories(self, namespace: str = None, params: dict = None) -> int:
         """
         Count memories in a Weaviate database.
@@ -380,7 +442,7 @@ class WeaviateVectorDB(VectorDB):
         if namespace is None:
             namespace = self.namespace
 
-        client = self.init_weaviate(namespace =namespace)
+        client = self.init_weaviate(namespace=namespace)
 
         try:
             object_count = client.query.aggregate(namespace).with_meta_count().do()
@@ -391,7 +453,7 @@ class WeaviateVectorDB(VectorDB):
             return 0
 
     def update_memories(self, observation, namespace: str, params: dict = None):
-        client = self.init_weaviate(namespace = self.namespace)
+        client = self.init_weaviate(namespace=self.namespace)
 
         client.data_object.update(
             data_object={
@@ -416,12 +478,15 @@ class WeaviateVectorDB(VectorDB):
         )
         return
 
+
 import os
 import lancedb
 from pydantic import BaseModel
 from typing import List, Optional
 import pandas as pd
 import pyarrow as pa
+
+
 class LanceDB(VectorDB):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -434,21 +499,28 @@ class LanceDB(VectorDB):
         db = lancedb.connect(uri, api_key=os.getenv("LANCEDB_API_KEY"))
         return db
 
-    def create_table(self, name: str, schema: Optional[pa.Schema] = None, data: Optional[pd.DataFrame] = None):
+    def create_table(
+        self,
+        name: str,
+        schema: Optional[pa.Schema] = None,
+        data: Optional[pd.DataFrame] = None,
+    ):
         # Create a table in LanceDB. If schema is not provided, it will be inferred from the data.
         if data is not None and schema is None:
             schema = pa.Schema.from_pandas(data)
         table = self.db.create_table(name, schema=schema)
         if data is not None:
-            table.add(data.to_dict('records'))
+            table.add(data.to_dict("records"))
         return table
 
     def add_memories(self, table_name: str, data: pd.DataFrame):
         # Add data to an existing table in LanceDB
         table = self.db.open_table(table_name)
-        table.add(data.to_dict('records'))
+        table.add(data.to_dict("records"))
 
-    def fetch_memories(self, table_name: str, query_vector: List[float], top_k: int = 10):
+    def fetch_memories(
+        self, table_name: str, query_vector: List[float], top_k: int = 10
+    ):
         # Perform a vector search in the specified table
         table = self.db.open_table(table_name)
         results = table.search(query_vector).limit(top_k).to_pandas()

@@ -1,11 +1,12 @@
-
 import logging
 from io import BytesIO
 import os, sys
+
 # Add the parent directory to sys.path
 # sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import sqlalchemy as sa
+
 print(os.getcwd())
 logging.basicConfig(level=logging.INFO)
 # import marvin
@@ -22,6 +23,7 @@ from cognitive_architecture.database.relationaldb.models.operation import Operat
 from cognitive_architecture.database.relationaldb.models.docs import DocsModel
 from sqlalchemy.orm import sessionmaker
 from cognitive_architecture.database.relationaldb.database import engine
+
 load_dotenv()
 from typing import Optional
 import time
@@ -31,7 +33,11 @@ tracemalloc.start()
 
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
-from cognitive_architecture.database.vectordb.vectordb import PineconeVectorDB, WeaviateVectorDB, LanceDB
+from cognitive_architecture.database.vectordb.vectordb import (
+    PineconeVectorDB,
+    WeaviateVectorDB,
+    LanceDB,
+)
 from langchain.schema import Document
 import uuid
 import weaviate
@@ -42,6 +48,7 @@ from vector_db_type import VectorDBType
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # marvin.settings.openai.api_key = os.environ.get("OPENAI_API_KEY")
+
 
 class VectorDBFactory:
     def __init__(self):
@@ -63,14 +70,11 @@ class VectorDBFactory:
     ):
         if db_type in self.db_map:
             return self.db_map[db_type](
-                user_id,
-                index_name,
-                memory_id,
-                namespace,
-                embeddings
+                user_id, index_name, memory_id, namespace, embeddings
             )
 
         raise ValueError(f"Unsupported database type: {db_type}")
+
 
 class BaseMemory:
     def __init__(
@@ -95,13 +99,11 @@ class BaseMemory:
             self.memory_id,
             db_type=self.db_type,
             namespace=self.namespace,
-            embeddings=self.embeddings
+            embeddings=self.embeddings,
         )
 
     def init_client(self, embeddings, namespace: str):
         return self.vector_db.init_client(embeddings, namespace)
-
-
 
     def create_field(self, field_type, **kwargs):
         field_mapping = {
@@ -109,7 +111,6 @@ class BaseMemory:
             "Int": fields.Int,
             "Float": fields.Float,
             "Bool": fields.Bool,
-
         }
         return field_mapping[field_type](**kwargs)
 
@@ -120,7 +121,6 @@ class BaseMemory:
         # Create a Schema instance with the dynamic fields
         dynamic_schema_instance = Schema.from_dict(dynamic_fields)()
         return dynamic_schema_instance
-
 
     async def get_version_from_db(self, user_id, memory_id):
         # Logic to retrieve the version from the database.
@@ -137,11 +137,11 @@ class BaseMemory:
             )
 
             if result:
-
                 version_in_db, created_at = result
                 logging.info(f"version_in_db: {version_in_db}")
                 from ast import literal_eval
-                version_in_db= literal_eval(version_in_db)
+
+                version_in_db = literal_eval(version_in_db)
                 version_in_db = version_in_db.get("version")
                 return [version_in_db, created_at]
             else:
@@ -157,19 +157,32 @@ class BaseMemory:
 
         # If there is no metadata, insert it.
         if version_from_db is None:
-
-            session.add(MetaDatas(id = str(uuid.uuid4()), user_id=self.user_id, version = str(int(time.time())) ,memory_id=self.memory_id, contract_metadata=params))
+            session.add(
+                MetaDatas(
+                    id=str(uuid.uuid4()),
+                    user_id=self.user_id,
+                    version=str(int(time.time())),
+                    memory_id=self.memory_id,
+                    contract_metadata=params,
+                )
+            )
             session.commit()
             return params
 
         # If params version is higher, update the metadata.
         elif version_in_params > version_from_db[0]:
-            session.add(MetaDatas(id = str(uuid.uuid4()), user_id=self.user_id, memory_id=self.memory_id, contract_metadata=params))
+            session.add(
+                MetaDatas(
+                    id=str(uuid.uuid4()),
+                    user_id=self.user_id,
+                    memory_id=self.memory_id,
+                    contract_metadata=params,
+                )
+            )
             session.commit()
             return params
         else:
             return params
-
 
     async def add_memories(
         self,
@@ -179,11 +192,14 @@ class BaseMemory:
         namespace: Optional[str] = None,
         custom_fields: Optional[str] = None,
         embeddings: Optional[str] = None,
-
     ):
         return await self.vector_db.add_memories(
-            observation=observation, loader_settings=loader_settings,
-            params=params, namespace=namespace, metadata_schema_class = None, embeddings=embeddings
+            observation=observation,
+            loader_settings=loader_settings,
+            params=params,
+            namespace=namespace,
+            metadata_schema_class=None,
+            embeddings=embeddings,
         )
         # Add other db_type conditions if necessary
 
@@ -200,17 +216,15 @@ class BaseMemory:
         logging.info(observation)
 
         return await self.vector_db.fetch_memories(
-            observation=observation, search_type= search_type, params=params,
+            observation=observation,
+            search_type=search_type,
+            params=params,
             namespace=namespace,
-            n_of_observations=n_of_observations
+            n_of_observations=n_of_observations,
         )
 
-    async def delete_memories(self, namespace:str, params: Optional[str] = None):
-        return await self.vector_db.delete_memories(namespace,params)
+    async def delete_memories(self, namespace: str, params: Optional[str] = None):
+        return await self.vector_db.delete_memories(namespace, params)
 
-
-    async def count_memories(self, namespace:str, params: Optional[str] = None):
-        return await self.vector_db.count_memories(namespace,params)
-
-
-
+    async def count_memories(self, namespace: str, params: Optional[str] = None):
+        return await self.vector_db.count_memories(namespace, params)

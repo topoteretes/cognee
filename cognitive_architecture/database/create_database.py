@@ -22,11 +22,16 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from contextlib import contextmanager
 from dotenv import load_dotenv
-from relationaldb.database import Base  # Assuming all models are imported within this module
-from relationaldb.database import DatabaseConfig  # Assuming DatabaseConfig is defined as before
+from relationaldb.database import (
+    Base,
+)  # Assuming all models are imported within this module
+from relationaldb.database import (
+    DatabaseConfig,
+)  # Assuming DatabaseConfig is defined as before
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
 
 class DatabaseManager:
     def __init__(self, config: DatabaseConfig):
@@ -36,7 +41,7 @@ class DatabaseManager:
 
     @contextmanager
     def get_connection(self):
-        if self.db_type in ['sqlite', 'duckdb']:
+        if self.db_type in ["sqlite", "duckdb"]:
             # For SQLite and DuckDB, the engine itself manages connections
             yield self.engine
         else:
@@ -47,7 +52,7 @@ class DatabaseManager:
                 connection.close()
 
     def database_exists(self, db_name):
-        if self.db_type in ['sqlite', 'duckdb']:
+        if self.db_type in ["sqlite", "duckdb"]:
             # For SQLite and DuckDB, check if the database file exists
             return os.path.exists(db_name)
         else:
@@ -57,14 +62,14 @@ class DatabaseManager:
                 return result is not None
 
     def create_database(self, db_name):
-        if self.db_type not in ['sqlite', 'duckdb']:
+        if self.db_type not in ["sqlite", "duckdb"]:
             # For databases like PostgreSQL, create the database explicitly
             with self.get_connection() as connection:
                 connection.execution_options(isolation_level="AUTOCOMMIT")
                 connection.execute(f"CREATE DATABASE {db_name}")
 
     def drop_database(self, db_name):
-        if self.db_type in ['sqlite', 'duckdb']:
+        if self.db_type in ["sqlite", "duckdb"]:
             # For SQLite and DuckDB, simply remove the database file
             os.remove(db_name)
         else:
@@ -75,9 +80,10 @@ class DatabaseManager:
     def create_tables(self):
         Base.metadata.create_all(bind=self.engine)
 
+
 if __name__ == "__main__":
     # Example usage with SQLite
-    config = DatabaseConfig(db_type='sqlite', db_name='mydatabase.db')
+    config = DatabaseConfig(db_type="sqlite", db_name="mydatabase.db")
 
     # For DuckDB, you would set db_type to 'duckdb' and provide the database file name
     # config = DatabaseConfig(db_type='duckdb', db_name='mydatabase.duckdb')

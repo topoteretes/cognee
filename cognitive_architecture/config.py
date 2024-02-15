@@ -10,52 +10,65 @@ from dotenv import load_dotenv
 
 base_dir = Path(__file__).resolve().parent.parent
 # Load the .env file from the base directory
-dotenv_path = base_dir / '.env'
+dotenv_path = base_dir / ".env"
 load_dotenv(dotenv_path=dotenv_path)
+
 
 @dataclass
 class Config:
     # Paths and Directories
-    memgpt_dir: str = field(default_factory=lambda: os.getenv('COG_ARCH_DIR', 'cognitive_achitecture'))
-    config_path: str = field(default_factory=lambda: os.path.join(os.getenv('COG_ARCH_DIR', 'cognitive_achitecture'), 'config'))
+    memgpt_dir: str = field(
+        default_factory=lambda: os.getenv("COG_ARCH_DIR", "cognitive_achitecture")
+    )
+    config_path: str = field(
+        default_factory=lambda: os.path.join(
+            os.getenv("COG_ARCH_DIR", "cognitive_achitecture"), "config"
+        )
+    )
 
-    vectordb:str = 'lancedb'
+    vectordb: str = "lancedb"
 
     # Model parameters
-    model: str = 'gpt-4-1106-preview'
-    model_endpoint: str = 'openai'
-    openai_key: Optional[str] = os.getenv('OPENAI_API_KEY')
+    model: str = "gpt-4-1106-preview"
+    model_endpoint: str = "openai"
+    openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
 
     # Embedding parameters
-    embedding_model: str = 'openai'
+    embedding_model: str = "openai"
     embedding_dim: int = 1536
     embedding_chunk_size: int = 300
 
     # Database parameters
-    if os.getenv('ENV') == 'prod' or os.getenv('ENV') == 'dev' or os.getenv('AWS_ENV') == 'dev' or   os.getenv('AWS_ENV') == 'prd':
-        graph_database_url: str = os.getenv('GRAPH_DB_URL_PROD')
-        graph_database_username: str = os.getenv('GRAPH_DB_USER')
-        graph_database_password: str = os.getenv('GRAPH_DB_PW')
+    if (
+        os.getenv("ENV") == "prod"
+        or os.getenv("ENV") == "dev"
+        or os.getenv("AWS_ENV") == "dev"
+        or os.getenv("AWS_ENV") == "prd"
+    ):
+        graph_database_url: str = os.getenv("GRAPH_DB_URL_PROD")
+        graph_database_username: str = os.getenv("GRAPH_DB_USER")
+        graph_database_password: str = os.getenv("GRAPH_DB_PW")
     else:
-        graph_database_url: str = os.getenv('GRAPH_DB_URL')
-        graph_database_username: str = os.getenv('GRAPH_DB_USER')
-        graph_database_password: str = os.getenv('GRAPH_DB_PW')
-    weaviate_url: str = os.getenv('WEAVIATE_URL')
-    weaviate_api_key: str = os.getenv('WEAVIATE_API_KEY')
-    postgres_user: str = os.getenv('POSTGRES_USER')
-    postgres_password: str = os.getenv('POSTGRES_PASSWORD')
-    postgres_db: str = os.getenv('POSTGRES_DB')
-    if os.getenv('ENV') == 'prod' or os.getenv('ENV') == 'dev' or os.getenv('AWS_ENV') == 'dev' or os.getenv('AWS_ENV') == 'prd':
-        postgres_host: str = os.getenv('POSTGRES_PROD_HOST')
-    elif os.getenv('ENV') == 'docker':
-        postgres_host: str = os.getenv('POSTGRES_HOST_DOCKER')
-    elif os.getenv('ENV') == 'local':
-        postgres_host: str = os.getenv('POSTGRES_HOST_LOCAL')
-
-
-
-
+        graph_database_url: str = os.getenv("GRAPH_DB_URL")
+        graph_database_username: str = os.getenv("GRAPH_DB_USER")
+        graph_database_password: str = os.getenv("GRAPH_DB_PW")
+    weaviate_url: str = os.getenv("WEAVIATE_URL")
+    weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY")
+    postgres_user: str = os.getenv("POSTGRES_USER")
+    postgres_password: str = os.getenv("POSTGRES_PASSWORD")
+    postgres_db: str = os.getenv("POSTGRES_DB")
+    if (
+        os.getenv("ENV") == "prod"
+        or os.getenv("ENV") == "dev"
+        or os.getenv("AWS_ENV") == "dev"
+        or os.getenv("AWS_ENV") == "prd"
+    ):
+        postgres_host: str = os.getenv("POSTGRES_PROD_HOST")
+    elif os.getenv("ENV") == "docker":
+        postgres_host: str = os.getenv("POSTGRES_HOST_DOCKER")
+    elif os.getenv("ENV") == "local":
+        postgres_host: str = os.getenv("POSTGRES_HOST_LOCAL")
 
     # Client ID
     anon_clientid: Optional[str] = field(default_factory=lambda: uuid.uuid4().hex)
@@ -84,12 +97,12 @@ class Config:
 
         # Save the current settings to the config file
         for attr, value in self.__dict__.items():
-            section, option = attr.split('_', 1)
+            section, option = attr.split("_", 1)
             if not config.has_section(section):
                 config.add_section(section)
             config.set(section, option, str(value))
 
-        with open(self.config_path, 'w') as configfile:
+        with open(self.config_path, "w") as configfile:
             config.write(configfile)
 
     def to_dict(self) -> Dict[str, Any]:

@@ -4,7 +4,6 @@ import os
 import time
 
 
-
 HOST = os.getenv("OPENAI_API_BASE")
 HOST_TYPE = os.getenv("BACKEND_TYPE")  # default None == ChatCompletion
 
@@ -41,7 +40,9 @@ def retry_with_exponential_backoff(
 
                 # Check if max retries has been reached
                 if num_retries > max_retries:
-                    raise Exception(f"Maximum number of retries ({max_retries}) exceeded.")
+                    raise Exception(
+                        f"Maximum number of retries ({max_retries}) exceeded."
+                    )
 
                 # Increment the delay
                 delay *= exponential_base * (1 + jitter * random.random())
@@ -90,7 +91,9 @@ def aretry_with_exponential_backoff(
 
                 # Check if max retries has been reached
                 if num_retries > max_retries:
-                    raise Exception(f"Maximum number of retries ({max_retries}) exceeded.")
+                    raise Exception(
+                        f"Maximum number of retries ({max_retries}) exceeded."
+                    )
 
                 # Increment the delay
                 delay *= exponential_base * (1 + jitter * random.random())
@@ -135,6 +138,3 @@ def get_embedding_with_backoff(text, model="text-embedding-ada-002"):
     response = create_embedding_with_backoff(input=[text], model=model)
     embedding = response["data"][0]["embedding"]
     return embedding
-
-
-

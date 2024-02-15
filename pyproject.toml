@@ -62,6 +62,7 @@ iso639 = "^0.1.4"
 debugpy = "^1.8.0"
 lancedb = "^0.5.5"
 pyarrow = "^15.0.0"
+pylint = "^3.0.3"
 
 [build-system]
 requires = ["poetry-core"]

@@ -3,13 +3,15 @@ from botocore.exceptions import BotoCoreError, ClientError
 from langdetect import detect, LangDetectException
 import iso639
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import logging
 
 # Basic configuration of the logging system
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def detect_language(text):
@@ -34,8 +36,8 @@ def detect_language(text):
         logging.info(f"Detected ISO 639-1 code: {detected_lang_iso639_1}")
 
         # Special case: map 'hr' (Croatian) to 'sr' (Serbian ISO 639-2)
-        if detected_lang_iso639_1 == 'hr':
-            return 'sr'
+        if detected_lang_iso639_1 == "hr":
+            return "sr"
         return detected_lang_iso639_1
 
     except LangDetectException as e:
@@ -46,8 +48,12 @@ def detect_language(text):
     return -1
 
 
-
-def translate_text(text, source_language:str='sr', target_language:str='en', region_name='eu-west-1'):
+def translate_text(
+    text,
+    source_language: str = "sr",
+    target_language: str = "en",
+    region_name="eu-west-1",
+):
     """
     Translate text from source language to target language using AWS Translate.
 
@@ -68,9 +74,15 @@ def translate_text(text, source_language:str='sr', target_language:str='en', reg
         return "Both source and target language codes are required."
 
     try:
-        translate = boto3.client(service_name='translate', region_name=region_name, use_ssl=True)
-        result = translate.translate_text(Text=text, SourceLanguageCode=source_language, TargetLanguageCode=target_language)
-        return result.get('TranslatedText', 'No translation found.')
+        translate = boto3.client(
+            service_name="translate", region_name=region_name, use_ssl=True
+        )
+        result = translate.translate_text(
+            Text=text,
+            SourceLanguageCode=source_language,
+            TargetLanguageCode=target_language,
+        )
+        return result.get("TranslatedText", "No translation found.")
 
     except BotoCoreError as e:
         logging.info(f"BotoCoreError occurred: {e}")
@@ -81,8 +93,8 @@ def translate_text(text, source_language:str='sr', target_language:str='en', reg
         return "Error with AWS client or network issue."
 
 
-source_language = 'sr'
-target_language = 'en'
+source_language = "sr"
+target_language = "en"
 text_to_translate = "Ja volim da pecam i idem na reku da šetam pored nje ponekad"
 
 translated_text = translate_text(text_to_translate, source_language, target_language)

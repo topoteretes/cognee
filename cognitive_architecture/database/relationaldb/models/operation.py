@@ -4,13 +4,14 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 import os
 import sys
-from ..database  import Base
+from ..database import Base
+
 
 class Operation(Base):
-    __tablename__ = 'operations'
+    __tablename__ = "operations"
 
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey('users.id'), index=True)  # Link to User
+    user_id = Column(String, ForeignKey("users.id"), index=True)  # Link to User
     operation_type = Column(String, nullable=True)
     operation_status = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -16,15 +16,16 @@ sys.path.insert(0, parent_dir)
 
 environment = os.getenv("AWS_ENV", "dev")
 
+
 def fetch_secret(secret_name, region_name, env_file_path):
     print("Initializing session")
     session = boto3.session.Session()
     print("Session initialized")
-    client = session.client(service_name="secretsmanager", region_name = region_name)
+    client = session.client(service_name="secretsmanager", region_name=region_name)
     print("Client initialized")
 
     try:
-        response = client.get_secret_value(SecretId = secret_name)
+        response = client.get_secret_value(SecretId=secret_name)
     except Exception as e:
         print(f"Error retrieving secret: {e}")
         return None
@@ -45,6 +46,7 @@ def fetch_secret(secret_name, region_name, env_file_path):
         print("The .env file is loaded.")
     else:
         print(f"The .env file was not found at: {env_file_path}.")
+
 
 ENV_FILE_PATH = os.path.abspath("../.env")
 

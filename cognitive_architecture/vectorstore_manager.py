@@ -9,8 +9,6 @@ import os
 print(os.getcwd())
 
 
-
-
 from cognitive_architecture.database.relationaldb.models.user import User
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 
@@ -27,15 +25,12 @@ import uuid
 load_dotenv()
 
 
-
 from cognitive_architecture.database.vectordb.basevectordb import BaseMemory
 
 from cognitive_architecture.config import Config
 
 config = Config()
 config.load()
-
-
 
 
 class DynamicBaseMemory(BaseMemory):
@@ -145,8 +140,8 @@ class Memory:
         db_type: str = None,
         namespace: str = None,
         memory_id: str = None,
-        memory_class = None,
-        job_id:str = None
+        memory_class=None,
+        job_id: str = None,
     ) -> None:
         self.load_environment_variables()
         self.memory_id = memory_id
@@ -157,12 +152,10 @@ class Memory:
         self.namespace = namespace
         self.memory_instances = []
         self.memory_class = memory_class
-        self.job_id=job_id
+        self.job_id = job_id
         # self.memory_class = DynamicBaseMemory(
         #     "Memory", user_id, str(self.memory_id), index_name, db_type, namespace
         # )
-
-
 
     def load_environment_variables(self) -> None:
         load_dotenv()
@@ -170,7 +163,14 @@ class Memory:
         self.OPENAI_API_KEY = config.openai_key
 
     @classmethod
-    async def create_memory(cls, user_id: str,  session, job_id:str=None, memory_label:str=None, **kwargs):
+    async def create_memory(
+        cls,
+        user_id: str,
+        session,
+        job_id: str = None,
+        memory_label: str = None,
+        **kwargs,
+    ):
         """
         Class method that acts as a factory method for creating Memory instances.
         It performs necessary DB checks or updates before instance creation.
@@ -180,9 +180,14 @@ class Memory:
 
         if existing_user:
             # Handle existing user scenario...
-            memory_id = await cls.check_existing_memory(user_id,memory_label, session)
+            memory_id = await cls.check_existing_memory(user_id, memory_label, session)
             if memory_id is None:
-                memory_id = await cls.handle_new_memory(user_id = user_id, session= session,job_id=job_id, memory_name= memory_label)
+                memory_id = await cls.handle_new_memory(
+                    user_id=user_id,
+                    session=session,
+                    job_id=job_id,
+                    memory_name=memory_label,
+                )
             logging.info(
                 f"Existing user {user_id} found in the DB. Memory ID: {memory_id}"
             )
@@ -190,16 +195,33 @@ class Memory:
             # Handle new user scenario...
             await cls.handle_new_user(user_id, session)
 
-            memory_id = await cls.handle_new_memory(user_id =user_id, session=session, job_id=job_id, memory_name= memory_label)
+            memory_id = await cls.handle_new_memory(
+                user_id=user_id,
+                session=session,
+                job_id=job_id,
+                memory_name=memory_label,
+            )
             logging.info(
                 f"New user {user_id} created in the DB. Memory ID: {memory_id}"
             )
 
         memory_class = DynamicBaseMemory(
-            memory_label, user_id, str(memory_id), index_name=memory_label , db_type=config.vectordb, **kwargs
+            memory_label,
+            user_id,
+            str(memory_id),
+            index_name=memory_label,
+            db_type=config.vectordb,
+            **kwargs,
         )
 
-        return cls(user_id=user_id, session=session, memory_id=memory_id, job_id =job_id, memory_class=memory_class, **kwargs)
+        return cls(
+            user_id=user_id,
+            session=session,
+            memory_id=memory_id,
+            job_id=job_id,
+            memory_class=memory_class,
+            **kwargs,
+        )
 
     async def list_memory_classes(self):
         """
@@ -215,19 +237,20 @@ class Memory:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def check_existing_memory(user_id: str, memory_label:str, session):
+    async def check_existing_memory(user_id: str, memory_label: str, session):
         """Check if a user memory exists in the DB and return it. Filters by user and label"""
         try:
             result = await session.execute(
-                select(MemoryModel.id).where(MemoryModel.user_id == user_id)
+                select(MemoryModel.id)
+                .where(MemoryModel.user_id == user_id)
                 .filter_by(memory_name=memory_label)
                 .order_by(MemoryModel.created_at)
-
             )
             return result.scalar_one_or_none()
         except Exception as e:
             logging.error(f"An error occurred: {str(e)}")
             return None
+
     @staticmethod
     async def handle_new_user(user_id: str, session):
         """
@@ -251,7 +274,13 @@ class Memory:
             return f"Error creating user: {str(e)}"
 
     @staticmethod
-    async def handle_new_memory(user_id: str, session, job_id: str = None, memory_name: str = None, memory_category:str='PUBLIC'):
+    async def handle_new_memory(
+        user_id: str,
+        session,
+        job_id: str = None,
+        memory_name: str = None,
+        memory_category: str = "PUBLIC",
+    ):
         """
         Handle new memory creation associated with a user.
 
@@ -295,7 +324,6 @@ class Memory:
             return memory_id
         except Exception as e:
             return f"Error creating memory: {str(e)}"
-
 
     async def add_memory_instance(self, memory_class_name: str):
         """Add a new memory instance to the memory_instances list."""
@@ -446,7 +474,9 @@ async def main():
     from database.relationaldb.database import AsyncSessionLocal
 
     async with session_scope(AsyncSessionLocal()) as session:
-        memory = await Memory.create_memory("677", session, "SEMANTICMEMORY", namespace="SEMANTICMEMORY")
+        memory = await Memory.create_memory(
+            "677", session, "SEMANTICMEMORY", namespace="SEMANTICMEMORY"
+        )
         ff = memory.memory_instances
         logging.info("ssss %s", ff)
 
@@ -462,8 +492,13 @@ async def main():
         await memory.add_dynamic_memory_class("semanticmemory", "SEMANTICMEMORY")
         await memory.add_method_to_class(memory.semanticmemory_class, "add_memories")
         await memory.add_method_to_class(memory.semanticmemory_class, "fetch_memories")
-        sss = await memory.dynamic_method_call(memory.semanticmemory_class, 'add_memories',
-                                                        observation='some_observation', params=params, loader_settings=loader_settings)
+        sss = await memory.dynamic_method_call(
+            memory.semanticmemory_class,
+            "add_memories",
+            observation="some_observation",
+            params=params,
+            loader_settings=loader_settings,
+        )
 
         # susu = await memory.dynamic_method_call(
         #     memory.semanticmemory_class,
