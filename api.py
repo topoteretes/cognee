@@ -15,6 +15,9 @@ from cognitive_architecture.vectorstore_manager import Memory
 from dotenv import load_dotenv
 from main import add_documents_to_graph_db, user_context_enrichment
 from cognitive_architecture.config import Config
+from fastapi import Depends
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Set up logging
 logging.basicConfig(
@@ -25,7 +28,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+config = Config()
+config.load()
+
 app = FastAPI(debug=True)
 #
 # from auth.cognito.JWTBearer import JWTBearer
@@ -33,31 +39,12 @@ app = FastAPI(debug=True)
 #
 # auth = JWTBearer(jwks)
 
-from fastapi import Depends
-
-config = Config()
-config.load()
-
-@app.get(
-    "/",
-)
-"""
-Root endpoint that returns a welcome message.
-"""
-async def root():
-class ImageResponse(BaseModel):
-    success: bool
-    message: str
-
-
-@app.get(
-    "/",
-)
+@app.get("/")
 async def root():
     """
     Root endpoint that returns a welcome message.
     """
-    return {"message": "Hello, World, I am alive!"}
+    return { "message": "Hello, World, I am alive!" }
 
 
 @app.get("/health")
@@ -234,10 +221,11 @@ async def drop_db(payload: Payload):
             else:
                 pass
 
-            from cognitive_architecture.database.create_database_tst import drop_database, create_admin_engine
+            from cognitive_architecture.database.create_database import drop_database, create_admin_engine
 
             engine = create_admin_engine(username, password, host, database_name)
-            drop_database(engine)
+            connection = engine.raw_connection()
+            drop_database(connection, database_name)
             return JSONResponse(content={"response": "DB dropped"}, status_code=200)
         else:
 
@@ -249,10 +237,11 @@ async def drop_db(payload: Payload):
             else:
                 pass
 
-            from cognitive_architecture.database.create_database_tst import create_database, create_admin_engine
+            from cognitive_architecture.database.create_database import create_database, create_admin_engine
 
             engine = create_admin_engine(username, password, host, database_name)
-            create_database(engine)
+            connection = engine.raw_connection()
+            create_database(connection, database_name)
             return JSONResponse(content={"response": " DB drop"}, status_code=200)
 
 

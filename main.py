@@ -183,10 +183,17 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
     )
 
     detected_language = detect_language(query_input)
-    translated_query = translate_text(query_input, detected_language, "en")
+
+    if detected_language != "en":
+        translated_query = translate_text(query_input, detected_language, "en")
+    else:
+        translated_query = query_input
+
     neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url, username=config.graph_database_username, password=config.graph_database_password)
-    cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id,translated_query)
+
+    cypher_query = await neo4j_graph_db.generate_cypher_query_for_user_prompt_decomposition(user_id, translated_query)
     result = neo4j_graph_db.query(cypher_query)
+
     neo4j_graph_db.run_merge_query(user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.8)
     neo4j_graph_db.run_merge_query(user_id=user_id, memory_type="EpisodicMemory", similarity_threshold=0.8)
     neo4j_graph_db.close()

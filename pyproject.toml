@@ -59,10 +59,7 @@ neo4j = "^5.14.1"
 grpcio = "^1.60.0"
 langdetect = "^1.0.9"
 iso639 = "^0.1.4"
-
-
-
-
+debugpy = "^1.8.0"
 
 [build-system]
 requires = ["poetry-core"]

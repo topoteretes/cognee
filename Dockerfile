@@ -1,13 +1,15 @@
-
 FROM python:3.11
 
 # Set build argument
+ARG DEBUG
 ARG API_ENABLED
 
 # Set environment variable based on the build argument
-ENV API_ENABLED=${API_ENABLED} \
-    PIP_NO_CACHE_DIR=true
+ENV DEBUG=${DEBUG}
+ENV API_ENABLED=${API_ENABLED}
+ENV PIP_NO_CACHE_DIR=true
 ENV PATH="${PATH}:/root/.poetry/bin"
+
 RUN pip install poetry
 
 WORKDIR /app
@@ -15,6 +17,7 @@ COPY pyproject.toml poetry.lock /app/
 
 # Install the dependencies
 RUN poetry config virtualenvs.create false && \
+    poetry lock --no-update && \
     poetry install --no-root --no-dev
 
 RUN apt-get update -q && \
@@ -37,13 +40,11 @@ RUN apt-get update -q && \
         /tmp/* \
         /var/tmp/*
 
-
-
 WORKDIR /app
+
 COPY cognitive_architecture/ /app/cognitive_architecture
 COPY main.py /app
 COPY api.py /app
-
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
