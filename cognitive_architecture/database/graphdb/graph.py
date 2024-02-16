@@ -388,7 +388,7 @@ class Neo4jGraphDB(AbstractGraphDB):
         except Exception as e:
             return f"An error occurred: {str(e)}"
 
-    def retrieve_semantic_memory(
+    async def retrieve_semantic_memory(
         self, user_id: str, timestamp: float = None, summarized: bool = None
     ):
         if timestamp is not None and summarized is not None:
@@ -418,9 +418,10 @@ class Neo4jGraphDB(AbstractGraphDB):
             MATCH (semantic)-[:HAS_KNOWLEDGE]->(knowledge)
             RETURN knowledge
             """
-        return self.query(query, params={"user_id": user_id})
+        output = await self.query(query, params={"user_id": user_id})
+        return output
 
-    def retrieve_episodic_memory(
+    async def retrieve_episodic_memory(
         self, user_id: str, timestamp: float = None, summarized: bool = None
     ):
         if timestamp is not None and summarized is not None:
@@ -450,9 +451,10 @@ class Neo4jGraphDB(AbstractGraphDB):
             MATCH (episodic)-[:HAS_EVENT]->(event)
             RETURN event
             """
-        return self.query(query, params={"user_id": user_id})
+        output = await self.query(query, params={"user_id": user_id})
+        return output
 
-    def retrieve_buffer_memory(
+    async def retrieve_buffer_memory(
         self, user_id: str, timestamp: float = None, summarized: bool = None
     ):
         if timestamp is not None and summarized is not None:
@@ -482,15 +484,17 @@ class Neo4jGraphDB(AbstractGraphDB):
             MATCH (buffer)-[:CURRENTLY_HOLDING]->(item)
             RETURN item
             """
-        return self.query(query, params={"user_id": user_id})
+        output = self.query(query, params={"user_id": user_id})
+        return output
 
-    def retrieve_public_memory(self, user_id: str):
+    async def retrieve_public_memory(self, user_id: str):
         query = """
         MATCH (user:User {userId: $user_id})-[:HAS_PUBLIC_MEMORY]->(public:PublicMemory)
         MATCH (public)-[:HAS_DOCUMENT]->(document)
         RETURN document
         """
-        return self.query(query, params={"user_id": user_id})
+        output = await self.query(query, params={"user_id": user_id})
+        return output
 
     def generate_graph_semantic_memory_document_summary(
         self,
@@ -698,7 +702,7 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
-    def update_document_node_with_db_ids(
+    async def update_document_node_with_db_ids(
         self, vectordb_namespace: str, document_id: str, user_id: str = None
     ):
         """
@@ -731,7 +735,7 @@ class Neo4jGraphDB(AbstractGraphDB):
 
         return cypher_query
 
-    def run_merge_query(
+    async def run_merge_query(
         self, user_id: str, memory_type: str, similarity_threshold: float
     ) -> str:
         """
@@ -769,7 +773,7 @@ class Neo4jGraphDB(AbstractGraphDB):
                     RETURN labels(n) AS NodeType, collect(n) AS Nodes
                     """
 
-        node_results = self.query(query)
+        node_results = await self.query(query)
 
         node_types = [record["NodeType"] for record in node_results]
 
@@ -785,11 +789,11 @@ class Neo4jGraphDB(AbstractGraphDB):
                 CALL apoc.refactor.mergeNodes([n1, n2], {{mergeRels: true}}) YIELD node
                  RETURN node
             """
-            self.query(query)
-            self.close()
+            await self.query(query)
+            await self.close()
         return query
 
-    def get_namespaces_by_document_category(self, user_id: str, category: str):
+    async def get_namespaces_by_document_category(self, user_id: str, category: str):
         """
         Retrieve a list of Vectordb namespaces for documents of a specified category associated with a given user.
 
@@ -812,7 +816,7 @@ class Neo4jGraphDB(AbstractGraphDB):
             WHERE document.documentCategory = '{category}'
             RETURN document.vectordbNamespace AS namespace
             """
-            result = self.query(query)
+            result = await self.query(query)
             namespaces = [record["namespace"] for record in result]
             return namespaces
         except Exception as e:
@@ -850,10 +854,10 @@ class Neo4jGraphDB(AbstractGraphDB):
         """
 
         try:
-            result = self.query(memory_cypher)
+            result = await self.query(memory_cypher)
             # Assuming the result is a list of records, where each record contains 'memoryId'
             memory_id = result[0]["memoryId"] if result else None
-            self.close()
+            await self.close()
             return memory_id
         except Neo4jError as e:
             logging.error(f"Error creating or finding memory node: {e}")
@@ -882,7 +886,7 @@ class Neo4jGraphDB(AbstractGraphDB):
             logging.error(f"Error linking Public node to user: {e}")
             raise
 
-    def delete_memory_node(self, memory_id: int, topic: str) -> None:
+    async def delete_memory_node(self, memory_id: int, topic: str) -> None:
         if not memory_id or not topic:
             raise ValueError("Memory ID and Topic are required for deletion.")
 
@@ -892,12 +896,12 @@ class Neo4jGraphDB(AbstractGraphDB):
             DETACH DELETE {topic.lower()}
             """
             logging.info("Delete Cypher Query: %s", delete_cypher)
-            self.query(delete_cypher)
+            await self.query(delete_cypher)
         except Neo4jError as e:
             logging.error(f"Error deleting {topic} memory node: {e}")
             raise
 
-    def unlink_memory_from_user(
+    async def unlink_memory_from_user(
         self, memory_id: int, user_id: str, topic: str = "PublicMemory"
     ) -> None:
         """
@@ -929,27 +933,27 @@ class Neo4jGraphDB(AbstractGraphDB):
             MATCH (user:User {{userId: '{user_id}'}})-[r:{relationship_type}]->(memory:{topic}) WHERE id(memory) = {memory_id}
             DELETE r
             """
-            self.query(unlink_cypher)
+            await self.query(unlink_cypher)
         except Neo4jError as e:
             logging.error(f"Error unlinking {topic} from user: {e}")
             raise
 
-    def link_public_memory_to_user(self, memory_id, user_id):
+    async def link_public_memory_to_user(self, memory_id, user_id):
         # Link an existing Public Memory node to a User node
         link_cypher = f"""
         MATCH (user:User {{userId: '{user_id}'}})
         MATCH (publicMemory:PublicMemory) WHERE id(publicMemory) = {memory_id}
         MERGE (user)-[:HAS_PUBLIC_MEMORY]->(publicMemory)
         """
-        self.query(link_cypher)
+        await self.query(link_cypher)
 
-    def retrieve_node_id_for_memory_type(self, topic: str = "SemanticMemory"):
+    async def retrieve_node_id_for_memory_type(self, topic: str = "SemanticMemory"):
         link_cypher = f""" MATCH(publicMemory: {topic})
         RETURN
         id(publicMemory)
         AS
         memoryId """
-        node_ids = self.query(link_cypher)
+        node_ids = await self.query(link_cypher)
         return node_ids
 
 
