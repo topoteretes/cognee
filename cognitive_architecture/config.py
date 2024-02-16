@@ -1,8 +1,8 @@
+"""Configuration for cognee - cognitive architecture framework."""
 import os
-import json
 import configparser
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
@@ -16,8 +16,8 @@ load_dotenv(dotenv_path=dotenv_path)
 
 @dataclass
 class Config:
-    # Paths and Directories
-    memgpt_dir: str = field(
+    """ Configuration for cognee - cognitive architecture framework. """
+    cognee_dir: str = field(
         default_factory=lambda: os.getenv("COG_ARCH_DIR", "cognitive_achitecture")
     )
     config_path: str = field(
@@ -26,7 +26,15 @@ class Config:
         )
     )
 
-    vectordb: str = "lancedb"
+    db_path = Path(__file__).resolve().parent / "database/data"
+
+    vectordb: str = "weaviate"
+    db_type: str = os.getenv("DB_TYPE", "postgres")
+    db_name: str = os.getenv("DB_NAME", "cognee.db")
+    db_host: str = os.getenv("DB_HOST", "localhost")
+    db_port: str = os.getenv("DB_PORT", "5432")
+    db_user: str = os.getenv("DB_USER", "cognee")
+    db_password: str = os.getenv("DB_PASSWORD", "cognee")
 
     # Model parameters
     model: str = "gpt-4-1106-preview"

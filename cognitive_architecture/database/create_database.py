@@ -1,104 +1,91 @@
+"""This module provides functionalities for creating and managing databases."""
+
+import asyncio
 import os
 import logging
-import psycopg2
-from dotenv import load_dotenv
-from relationaldb.database import Base
+from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import create_async_engine
+from relationaldb.models import memory, metadatas, operation, sessions, user, docs
 from sqlalchemy import create_engine, text
-
-from relationaldb.models import memory
-from relationaldb.models import metadatas
-from relationaldb.models import operation
-from relationaldb.models import sessions
-from relationaldb.models import user
-from relationaldb.models import docs
+from dotenv import load_dotenv
+from relationaldb.database import (
+    Base,DatabaseConfig)
+from cognitive_architecture.config import Config
+config = Config()
+config.load()
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-import os
-import logging
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
-from contextlib import contextmanager
-from dotenv import load_dotenv
-from relationaldb.database import (
-    Base,
-)  # Assuming all models are imported within this module
-from relationaldb.database import (
-    DatabaseConfig,
-)  # Assuming DatabaseConfig is defined as before
-
-load_dotenv()
-logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
+    """Manages database creation, deletion, and table initialization."""
     def __init__(self, config: DatabaseConfig):
+        """Initialize the DatabaseManager with a given configuration."""
         self.config = config
-        self.engine = create_engine(config.get_sqlalchemy_database_url())
+        self.engine = create_async_engine(config.get_sqlalchemy_database_url(), echo=True)
         self.db_type = config.db_type
 
-    @contextmanager
-    def get_connection(self):
+    @asynccontextmanager
+    async def get_connection(self):
+        """Initialize the DatabaseManager with a given configuration."""
         if self.db_type in ["sqlite", "duckdb"]:
             # For SQLite and DuckDB, the engine itself manages connections
             yield self.engine
         else:
-            connection = self.engine.connect()
-            try:
+            async with self.engine.connect() as connection:
                 yield connection
-            finally:
-                connection.close()
 
-    def database_exists(self, db_name):
+    async def database_exists(self, db_name):
+        """Check if a database exists."""
         if self.db_type in ["sqlite", "duckdb"]:
             # For SQLite and DuckDB, check if the database file exists
             return os.path.exists(db_name)
         else:
             query = text(f"SELECT 1 FROM pg_database WHERE datname='{db_name}'")
-            with self.get_connection() as connection:
-                result = connection.execute(query).fetchone()
-                return result is not None
+            async with self.get_connection() as connection:
+                result = await connection.execute(query)
+                return await result.fetchone() is not None
 
-    def create_database(self, db_name):
+    async def create_database(self, db_name):
+        """Create a new database."""
         if self.db_type not in ["sqlite", "duckdb"]:
             # For databases like PostgreSQL, create the database explicitly
-            with self.get_connection() as connection:
-                connection.execution_options(isolation_level="AUTOCOMMIT")
-                connection.execute(f"CREATE DATABASE {db_name}")
+            async with self.get_connection() as connection:
+                await connection.execute(text(f"CREATE DATABASE {db_name}"))
 
-    def drop_database(self, db_name):
+    async def drop_database(self, db_name):
+        """Drop an existing database."""
         if self.db_type in ["sqlite", "duckdb"]:
             # For SQLite and DuckDB, simply remove the database file
             os.remove(db_name)
         else:
-            with self.get_connection() as connection:
-                connection.execution_options(isolation_level="AUTOCOMMIT")
-                connection.execute(f"DROP DATABASE IF EXISTS {db_name}")
+            async with self.get_connection() as connection:
+                await connection.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
 
-    def create_tables(self):
-        Base.metadata.create_all(bind=self.engine)
-
+    async def create_tables(self):
+        """Create tables based on the SQLAlchemy Base metadata."""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 if __name__ == "__main__":
-    # Example usage with SQLite
-    config = DatabaseConfig(db_type="sqlite", db_name="mydatabase.db")
+    async def main():
+        """Runs as a part of startup docker scripts to create the database and tables."""
 
-    # For DuckDB, you would set db_type to 'duckdb' and provide the database file name
-    # config = DatabaseConfig(db_type='duckdb', db_name='mydatabase.duckdb')
+        dbconfig = DatabaseConfig(db_type=config.db_type, db_name=config.db_name)
+        db_manager = DatabaseManager(config=dbconfig)
+        database_name = dbconfig.db_name
 
-    db_manager = DatabaseManager(config=config)
+        if not await db_manager.database_exists(database_name):
+            print(f"Database {database_name} does not exist. Creating...")
+            await db_manager.create_database(database_name)
+            print(f"Database {database_name} created successfully.")
 
-    database_name = config.db_name
+        await db_manager.create_tables()
 
-    if not db_manager.database_exists(database_name):
-        logger.info(f"Database {database_name} does not exist. Creating...")
-        db_manager.create_database(database_name)
-        logger.info(f"Database {database_name} created successfully.")
-
-    db_manager.create_tables()
-
+    asyncio.run(main())
 #
 # def create_admin_engine(username, password, host, database_name):
 #     admin_url = f"postgresql://{username}:{password}@{host}:5432/{database_name}"
