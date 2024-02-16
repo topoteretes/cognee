@@ -28,7 +28,7 @@ class Config:
 
     db_path = Path(__file__).resolve().parent / "database/data"
 
-    vectordb: str = "weaviate"
+    vectordb: str = os.getenv("VECTORDB", "weaviate")
     db_type: str = os.getenv("DB_TYPE", "postgres")
     db_name: str = os.getenv("DB_NAME", "cognee.db")
     db_host: str = os.getenv("DB_HOST", "localhost")

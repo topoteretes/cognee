@@ -53,9 +53,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 class VectorDBFactory:
     def __init__(self):
         self.db_map = {
-            VectorDBType.PINECONE: PineconeVectorDB,
-            VectorDBType.WEAVIATE: WeaviateVectorDB,
-            VectorDBType.LANCEDB: LanceDB,
+            VectorDBType.PINECONE.value: PineconeVectorDB,
+            VectorDBType.WEAVIATE.value: WeaviateVectorDB,
+            VectorDBType.LANCEDB.value: LanceDB,
             # Add more database types and their corresponding classes here
         }
 
@@ -68,6 +68,8 @@ class VectorDBFactory:
         namespace: str = None,
         embeddings=None,
     ):
+        logging.info(f"db_type: {db_type}")
+        logging.info(f"embeddings: {self.db_map}")
         if db_type in self.db_map:
             return self.db_map[db_type](
                 user_id, index_name, memory_id, namespace, embeddings

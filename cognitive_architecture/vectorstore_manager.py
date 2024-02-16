@@ -1,34 +1,18 @@
 import logging
 
 from sqlalchemy.future import select
-
 logging.basicConfig(level=logging.INFO)
-
-import os
-
-print(os.getcwd())
-
-
 from cognitive_architecture.database.relationaldb.models.user import User
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
-
 import ast
 import tracemalloc
 from cognitive_architecture.database.relationaldb.database_crud import add_entity
-
 tracemalloc.start()
-
-import os
 from dotenv import load_dotenv
 import uuid
-
-load_dotenv()
-
-
 from cognitive_architecture.database.vectordb.basevectordb import BaseMemory
-
 from cognitive_architecture.config import Config
-
+load_dotenv()
 config = Config()
 config.load()
 
@@ -41,7 +25,7 @@ class DynamicBaseMemory(BaseMemory):
         memory_id: str,
         index_name: str,
         db_type: str,
-        namespace: str,
+        namespace: str=None,
         embeddings=None,
     ):
         super().__init__(user_id, memory_id, index_name, db_type, namespace, embeddings)
@@ -137,7 +121,7 @@ class Memory:
         user_id: str = "676",
         session=None,
         index_name: str = None,
-        db_type: str = None,
+        db_type: str = config.vectordb,
         namespace: str = None,
         memory_id: str = None,
         memory_class=None,
