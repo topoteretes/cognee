@@ -218,7 +218,7 @@ async def user_query_classfier(payload: Payload):
 
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
-            from cognitive_architecture.classifiers.classifier import (
+            from cognitive_architecture.classifiers.classify_user_input import (
                 classify_user_query,
             )
 

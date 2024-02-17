@@ -4,7 +4,6 @@ from neo4j.exceptions import Neo4jError
 from pydantic import BaseModel, Field
 from cognitive_architecture.database.graphdb.graph import Neo4jGraphDB
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
-from cognitive_architecture.classifiers.classifier import classify_documents
 import os
 from dotenv import load_dotenv
 from cognitive_architecture.database.relationaldb.database_crud import (
@@ -30,7 +29,10 @@ from cognitive_architecture.database.relationaldb.models.metadatas import MetaDa
 from cognitive_architecture.database.relationaldb.models.docs import DocsModel
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 from cognitive_architecture.database.relationaldb.models.user import User
-from cognitive_architecture.classifiers.classifier import classify_call
+from cognitive_architecture.classifiers.classify_summary import classify_summary
+from cognitive_architecture.classifiers.classify_documents import classify_documents
+from cognitive_architecture.classifiers.classify_user_query import classify_user_query
+from cognitive_architecture.classifiers.classify_user_input import classify_user_input
 
 aclient = instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"
@@ -59,8 +61,6 @@ from cognitive_architecture.shared.language_processing import (
     translate_text,
     detect_language,
 )
-from cognitive_architecture.classifiers.classifier import classify_user_input
-
 
 async def fetch_document_vectordb_namespace(
     session: AsyncSession, user_id: str, namespace_id: str, doc_id: str = None
@@ -553,7 +553,7 @@ async def user_context_enrichment(
         relevant_summary_id = None
 
         for _ in range(max_attempts):
-            relevant_summary_id = await classify_call(
+            relevant_summary_id = await classify_summary(
                 query=query, document_summaries=str(summaries)
             )
 

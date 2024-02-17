@@ -78,8 +78,6 @@ AsyncSessionLocal = sessionmaker(
 
 Base = declarative_base()
 
-
-# Use asynccontextmanager to define an async context manager
 @asynccontextmanager
 async def get_db():
     """Provide a database session to the context."""
