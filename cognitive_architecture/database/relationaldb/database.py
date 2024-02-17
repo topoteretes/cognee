@@ -33,20 +33,16 @@ def get_sqlalchemy_database_url(db_type='sqlite', db_name=config.db_name, base_p
         raise ValueError(f"Unsupported DB_TYPE: {db_type}")
 
 
-# Example usage with a configuration file:
-# config = DatabaseConfig(config_file='path/to/config.json')
-# Or set them programmatically:
-
-
 SQLALCHEMY_DATABASE_URL = get_sqlalchemy_database_url()
 
 
 engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL,
     pool_recycle=3600,
-    echo=True,  # Enable logging for tutorial purposes
+    echo=config.sqlalchemy_logging,
 )
-# Use AsyncSession for the session
+
+
 AsyncSessionLocal = sessionmaker(
     bind=engine,
     class_=AsyncSession,
