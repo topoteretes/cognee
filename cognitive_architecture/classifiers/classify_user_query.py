@@ -36,7 +36,7 @@ async def classify_user_query(query, context, document_types):
                         "description": "The classification of documents in groups such as legal, medical, etc.",
                     }
                 },
-                "required": ["UserQueryClassiffier"],
+                "required": ["UserQueryClassifier"],
             },
         }
     ]
