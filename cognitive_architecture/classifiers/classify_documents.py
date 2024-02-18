@@ -59,6 +59,6 @@ async def classify_documents(query: str, document_id: str, content: str):
         {"query": query, "d_id": document_id, "context": str(document_context)}
     )
     arguments_str = classifier_output.additional_kwargs["function_call"]["arguments"]
-    print("This is the arguments string", arguments_str)
+    logging.info("This is the arguments string %s", arguments_str)
     arguments_dict = json.loads(arguments_str)
     return arguments_dict

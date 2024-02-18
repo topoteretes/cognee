@@ -52,11 +52,11 @@ async def classify_summary(query, document_summaries):
         {"query": query, "document_summaries": document_summaries}
     )
     arguments_str = classifier_output.additional_kwargs["function_call"]["arguments"]
-    print("This is the arguments string", arguments_str)
+    logging.info("This is the arguments string %s", arguments_str)
     arguments_dict = json.loads(arguments_str)
     logging.info("Relevant summary is %s", arguments_dict.get("DocumentSummary", None))
     classfier_id = arguments_dict.get("d_id", None)
 
-    print("This is the classifier id ", classfier_id)
+    logging.info("This is the classifier id %s", classfier_id)
 
     return classfier_id
