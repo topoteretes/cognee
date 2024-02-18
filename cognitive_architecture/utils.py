@@ -6,14 +6,17 @@ import uuid
 from graphviz import Digraph
 from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager
-
+from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
+from cognitive_architecture.database.relationaldb.models.docs import DocsModel
+from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
+from cognitive_architecture.database.relationaldb.models.user import User
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+import logging
 from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
 from dotenv import load_dotenv
 
 load_dotenv()
-
-
-# from graph_database.graph import KnowledgeGraph
 
 
 class Node:
@@ -31,21 +34,7 @@ class Edge:
         self.color = color
 
 
-# def visualize_knowledge_graph(kg: KnowledgeGraph):
-#     dot = Digraph(comment="Knowledge Graph")
-#
-#     # Add nodes
-#     for node in kg.nodes:
-#         dot.node(str(node.id), node.description, color=node.color)
-#
-#     # Add edges
-#     for edge in kg.edges:
-#         dot.edge(str(edge.source), str(edge.target), label=edge.description, color=edge.color)
-#
-#     # Render the graph
-#     dot.render("knowledge_graph.gv", view=True)
-#
-#
+
 def get_document_names(doc_input):
     """
     Get a list of document names.
@@ -146,13 +135,7 @@ from cognitive_architecture.database.relationaldb.database_crud import (
     update_entity,
     fetch_job_id,
 )
-from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
-from cognitive_architecture.database.relationaldb.models.docs import DocsModel
-from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
-from cognitive_architecture.database.relationaldb.models.user import User
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-import logging
+
 
 
 async def get_vectordb_namespace(session: AsyncSession, user_id: str):
@@ -304,42 +287,3 @@ async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
         return None
 
 
-#
-# async def main():
-#     user_id = "user"
-#
-#     async with session_scope(AsyncSessionLocal()) as session:
-#         output = await get_unsumarized_vector_db_namespace(session, user_id)
-#
-#         print(output)
-#         # await update_entity(session, DocsModel, "8cd9a022-5a7a-4af5-815a-f988415536ae", True)
-#         # out = await get_vectordb_namespace(session, user_id)
-#         # params = {
-#         #     "version": "1.0",
-#         #     "agreement_id": "AG123456",
-#         #     "privacy_policy": "https://example.com/privacy",
-#         #     "terms_of_service": "https://example.com/terms",
-#         #     "format": "json",
-#         #     "schema_version": "1.1",
-#         #     "checksum": "a1b2c3d4e5f6",
-#         #     "owner": "John Doe",
-#         #     "license": "MIT",
-#         #     "validity_start": "2023-08-01",
-#         #     "validity_end": "2024-07-31",
-#         # }
-#         # loader_settings = {
-#         #     "format": "PDF",
-#         #     "source": "DEVICE",
-#         #     "path": [".data"],
-#         #     "strategy": "SUMMARY",
-#         # }
-#         # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-#         # await user_query_to_graph_db(session, user_id, "I walked in the forest yesterday and added to my list I need to buy some milk in the store and get a summary from a classical book i read yesterday")
-#         # await add_documents_to_graph_db(session, user_id, loader_settings=loader_settings)
-#         # await user_context_enrichment(session, user_id, query="Tell me about the book I read yesterday")
-#
-#
-# if __name__ == "__main__":
-#     import asyncio
-#
-#     asyncio.run(main())

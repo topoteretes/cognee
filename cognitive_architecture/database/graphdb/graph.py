@@ -956,6 +956,53 @@ class Neo4jGraphDB(AbstractGraphDB):
         node_ids = await self.query(link_cypher)
         return node_ids
 
+    async def link_user_to_another(
+            self,
+            source_user_id: str,
+            target_user_id: str,
+            memory: str,
+            memory_attribute_name: str = "memory"
+    ):
+        if not source_user_id or not target_user_id or not memory:
+            raise ValueError(
+                "Valid Source User ID and Target User ID are required for linking, along with a memory attribute.")
+
+        # Fixed relationship type to "CONNECTED_TO", ensuring only user nodes are connected
+        relationship_type = "CONNECTED_TO"
+
+        link_cypher = f"""
+        MATCH (sourceUser:User {{userId: '{source_user_id}'}})  // Ensure the source node is a User
+        MATCH (targetUser:User {{userId: '{target_user_id}'}})  // Ensure the target node is a User
+        WHERE sourceUser:User AND targetUser:User  // Additional check to reinforce that both are User nodes
+        MERGE (sourceUser)-[r:{relationship_type} {{ {memory_attribute_name}: '{memory}' }}]->(targetUser)
+        """
+        try:
+            await self.query(link_cypher)
+        except Neo4jError as e:
+            logging.error(f"Error connecting user nodes: {e}")
+            raise
+
+
+async def unlink_user_from_another(
+    self,
+    source_user_id: str,
+    target_user_id: str
+):
+    if not source_user_id or not target_user_id:
+        raise ValueError("Valid Source User ID and Target User ID are required for unlinking.")
+
+    # The fixed relationship type assumed to be "CONNECTED_TO"
+    relationship_type = "CONNECTED_TO"
+
+    unlink_cypher = f"""
+    MATCH (sourceUser:User {{userId: '{source_user_id}'}})-[r:{relationship_type}]->(targetUser:User {{userId: '{target_user_id}'}})
+    DELETE r
+    """
+    try:
+        await self.query(unlink_cypher)
+    except Neo4jError as e:
+        logging.error(f"Error disconnecting user nodes: {e}")
+        raise
 
 from .networkx_graph import NetworkXGraphDB
 

@@ -256,7 +256,7 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
             user_id, translated_query
         )
     )
-    result = neo4j_graph_db.query(cypher_query)
+    result = await neo4j_graph_db.query(cypher_query)
 
     await neo4j_graph_db.run_merge_query(
         user_id=user_id, memory_type="SemanticMemory", similarity_threshold=0.8
@@ -270,59 +270,6 @@ async def user_query_to_graph_db(session: AsyncSession, user_id: str, query_inpu
 
     return result
 
-
-# async def add_documents_to_graph_db(session: AsyncSession, user_id: Optional[str] = None,
-#                                     document_memory_types: Optional[List[str]] = None):
-#     """ Add documents to a graph database, handling multiple memory types """
-#     if document_memory_types is None:
-#         document_memory_types = ['PUBLIC']
-#
-#     memory_type_actions = {
-#         'PUBLIC': {'topic': 'PublicMemory', 'additional_action': None},
-#         'SEMANTIC': {'topic': 'SemanticMemory', 'additional_action': None}
-#     }
-#
-#     try:
-#         memory_details, docs = await get_unsumarized_vector_db_namespace(session, user_id)
-#         filtered_memory_details = [detail for detail in memory_details if detail[1] in document_memory_types]
-#
-#         neo4j_graph_db = None
-#         for doc in docs:
-#             doc_name, doc_id = doc
-#             try:
-#                 classification_content = await fetch_document_vectordb_namespace(
-#                     session, user_id, filtered_memory_details[0][0], doc_id)
-#                 retrieval_chunks = [item['text'] for item in
-#                                     classification_content[0]['data']['Get'][filtered_memory_details[0][0]]]
-#             except Exception as e:
-#                 logging.error(f"Error fetching document content: {e}")
-#                 retrieval_chunks = ""
-#
-#             concatenated_retrievals = ' '.join(retrieval_chunks)
-#             classification = await classify_documents(doc_name, document_id=doc_id, content=concatenated_retrievals)
-#
-#             for memory_type in document_memory_types:
-#                 if memory_type in memory_type_actions:
-#                     if neo4j_graph_db is None:
-#                         neo4j_graph_db = Neo4jGraphDB(url=config.graph_database_url,
-#                                                       username=config.graph_database_username,
-#                                                       password=config.graph_database_password)
-#                     topic = memory_type_actions[memory_type]['topic']
-#                     ids = neo4j_graph_db.retrieve_node_id_for_memory_type(topic=topic)
-#                     for id in ids:
-#                         memory_id = id.get('memoryId')
-#                         if memory_id:
-#                             rs = neo4j_graph_db.create_document_node_cypher(classification, user_id,
-#                                                                             public_memory_id=memory_id if memory_type == 'PUBLIC' else None)
-#                             neo4j_graph_db.query(rs)
-#
-#                     if filtered_memory_details[0][1] == memory_type:
-#                         neo4j_graph_db.update_document_node_with_db_ids(
-#                             vectordb_namespace=filtered_memory_details[0][0],
-#                             document_id=doc_id, user_id=user_id if memory_type != "PUBLIC" else None)
-#     except Exception as e:
-#         logging.error(f"An error occurred: {e}")
-#         return e
 
 
 async def add_documents_to_graph_db(
@@ -446,9 +393,6 @@ class ResponseString(BaseModel):
         default=None
     )  # Defaulting to None or you can use a default string like ""
     quotation: str = Field(default=None)  # Same here
-
-
-#
 
 
 def generate_graph(input) -> ResponseString:
@@ -820,8 +764,8 @@ async def main():
         class GraphQLQuery(BaseModel):
             query: str
 
-        # gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
-        # print(gg)
+        gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
+        print(gg)
 
         # def cypher_statement_correcting( input: str) -> str:
         #     out = aclient.chat.completions.create(
@@ -886,7 +830,7 @@ async def main():
         #     "path": [".data"]
         # }
         # await load_documents_to_vectorstore(session, user_id, loader_settings=loader_settings)
-        await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
+        # await create_public_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
         # await add_documents_to_graph_db(session, user_id)
         #
         # neo4j_graph_db = Neo4jGraphDB(
