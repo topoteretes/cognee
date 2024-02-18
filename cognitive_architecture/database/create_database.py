@@ -9,7 +9,7 @@ from relationaldb.models import memory, metadatas, operation, sessions, user, do
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 from relationaldb.database import (
-    Base,DatabaseConfig)
+    Base,get_sqlalchemy_database_url)
 from cognitive_architecture.config import Config
 config = Config()
 config.load()
@@ -22,10 +22,9 @@ logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """Manages database creation, deletion, and table initialization."""
-    def __init__(self, config: DatabaseConfig):
-        """Initialize the DatabaseManager with a given configuration."""
-        self.config = config
-        self.engine = create_async_engine(config.get_sqlalchemy_database_url(), echo=True)
+    def __init__(self):
+        """Initialize the Database Url with a given configuration."""
+        self.engine = create_async_engine(get_sqlalchemy_database_url(), echo=True)
         self.db_type = config.db_type
 
     @asynccontextmanager
