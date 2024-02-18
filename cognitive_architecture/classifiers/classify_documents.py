@@ -1,11 +1,10 @@
+""" This module contains the classifiers for the documents. """
 import logging
 
 from langchain.prompts import ChatPromptTemplate
 import json
-
-# TO DO, ADD ALL CLASSIFIERS HERE
-
-
+from langchain.document_loaders import TextLoader
+from langchain.document_loaders import DirectoryLoader
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 
@@ -15,17 +14,19 @@ from ..database.vectordb.loaders.loaders import _document_loader
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
-from langchain.document_loaders import TextLoader
-from langchain.document_loaders import DirectoryLoader
+
 
 
 async def classify_documents(query: str, document_id: str, content: str):
+    """Classify the documents based on the query and content."""
     document_context = content
     logging.info("This is the document context", document_context)
 
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a summarizer and classifier. Determine what book this is and where does it belong in the output : {query}, Id: {d_id} Document context is: {context}"""
+        """You are a summarizer and classifier.
+         Determine what book this is and where does it belong in the output :
+          {query}, Id: {d_id} Document context is: {context}"""
     )
     json_structure = [
         {
@@ -36,7 +37,8 @@ async def classify_documents(query: str, document_id: str, content: str):
                 "properties": {
                     "DocumentCategory": {
                         "type": "string",
-                        "description": "The classification of documents in groups such as legal, medical, etc.",
+                        "description": "The classification of documents "
+                                       "in groups such as legal, medical, etc.",
                     },
                     "Title": {
                         "type": "string",
@@ -58,6 +60,7 @@ async def classify_documents(query: str, document_id: str, content: str):
     classifier_output = await chain_filter.ainvoke(
         {"query": query, "d_id": document_id, "context": str(document_context)}
     )
+
     arguments_str = classifier_output.additional_kwargs["function_call"]["arguments"]
     logging.info("This is the arguments string %s", arguments_str)
     arguments_dict = json.loads(arguments_str)

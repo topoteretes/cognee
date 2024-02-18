@@ -1,22 +1,16 @@
+""" This module contains the function to classify a summary of a document. """
 import logging
 
 from langchain.prompts import ChatPromptTemplate
 import json
-
-# TO DO, ADD ALL CLASSIFIERS HERE
-
-
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 
 from ..config import Config
-from ..database.vectordb.loaders.loaders import _document_loader
 
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
-from langchain.document_loaders import TextLoader
-from langchain.document_loaders import DirectoryLoader
 
 
 
@@ -24,9 +18,12 @@ from langchain.document_loaders import DirectoryLoader
 
 
 async def classify_summary(query, document_summaries):
+    """Classify the documents based on the query and content."""
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a  classifier. Determine what document  are relevant for the given query: {query}, Document summaries and ids:{document_summaries}"""
+        """You are a  classifier. Determine what document  
+        are relevant for the given query: {query}, 
+        Document summaries and ids:{document_summaries}"""
     )
     json_structure = [
         {
@@ -37,7 +34,8 @@ async def classify_summary(query, document_summaries):
                 "properties": {
                     "DocumentSummary": {
                         "type": "string",
-                        "description": "The summary of the document and the topic it deals with.",
+                        "description": "The summary of the document "
+                                       "and the topic it deals with.",
                     },
                     "d_id": {"type": "string", "description": "The id of the document"},
                 },

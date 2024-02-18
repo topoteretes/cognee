@@ -1,9 +1,9 @@
+""" This module contains the classifiers for the documents. """
+
 import logging
 
 from langchain.prompts import ChatPromptTemplate
 import json
-
-# TO DO, ADD ALL CLASSIFIERS HERE
 
 
 from langchain.chains import create_extraction_chain
@@ -15,14 +15,14 @@ from ..database.vectordb.loaders.loaders import _document_loader
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
-from langchain.document_loaders import TextLoader
-from langchain.document_loaders import DirectoryLoader
-
 
 async def classify_user_input(query, input_type):
+    """ Classify the user input based on the query and input type."""
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a  classifier. Determine with a True or False if the following input: {query}, is relevant for the following memory category: {input_type}"""
+        """You are a  classifier. 
+        Determine with a True or False if the following input: {query}, 
+        is relevant for the following memory category: {input_type}"""
     )
     json_structure = [
         {

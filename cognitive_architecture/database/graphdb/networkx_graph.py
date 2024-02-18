@@ -4,7 +4,7 @@ import networkx as nx
 
 
 class NetworkXGraphDB:
-    def __init__(self, filename="networkx_graph.pkl"):
+    def __init__(self, filename="cognee_graph.pkl"):
         self.filename = filename
         try:
             self.graph = self.load_graph()  # Attempt to load an existing graph

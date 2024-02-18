@@ -1,13 +1,10 @@
-import logging
-
+""" This module contains the function to classify the user query. """
 from langchain.prompts import ChatPromptTemplate
 import json
-
-# TO DO, ADD ALL CLASSIFIERS HERE
-
-
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
+from langchain.document_loaders import TextLoader
+from langchain.document_loaders import DirectoryLoader
 
 from ..config import Config
 from ..database.vectordb.loaders.loaders import _document_loader
@@ -15,14 +12,15 @@ from ..database.vectordb.loaders.loaders import _document_loader
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
-from langchain.document_loaders import TextLoader
-from langchain.document_loaders import DirectoryLoader
 
 
 async def classify_user_query(query, context, document_types):
+    """Classify the user query based on the context and document types."""
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a  classifier. You store user memories, thoughts and feelings. Determine if you need to use them to answer this query : {query}"""
+        """You are a  classifier. 
+        You store user memories, thoughts and feelings. 
+        Determine if you need to use them to answer this query : {query}"""
     )
     json_structure = [
         {
@@ -33,7 +31,8 @@ async def classify_user_query(query, context, document_types):
                 "properties": {
                     "UserQueryClassifier": {
                         "type": "bool",
-                        "description": "The classification of documents in groups such as legal, medical, etc.",
+                        "description": "The classification of documents "
+                                       "in groups such as legal, medical, etc.",
                     }
                 },
                 "required": ["UserQueryClassifier"],
@@ -50,7 +49,5 @@ async def classify_user_query(query, context, document_types):
     print("This is the arguments string", arguments_str)
     arguments_dict = json.loads(arguments_str)
     classfier_value = arguments_dict.get("UserQueryClassifier", None)
-
     print("This is the classifier value", classfier_value)
-
     return classfier_value
