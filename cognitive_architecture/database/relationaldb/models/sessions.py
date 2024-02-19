@@ -9,10 +9,10 @@ from ..database import Base
 
 
 class Session(Base):
-    __tablename__ = 'sessions'
+    __tablename__ = "sessions"
 
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey('users.id'), index=True)
+    user_id = Column(String, ForeignKey("users.id"), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
 

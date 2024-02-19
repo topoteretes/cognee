@@ -1,4 +1,3 @@
-
 from contextlib import asynccontextmanager
 import logging
 from .models.sessions import Session
@@ -9,8 +8,8 @@ from .models.metadatas import MetaDatas
 from .models.docs import DocsModel
 
 
-
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def session_scope(session):
@@ -44,6 +43,8 @@ def update_entity_graph_summary(session, model, entity_id, new_value):
             return "Successfully updated entity"
         else:
             return "Entity not found"
+
+
 async def update_entity(session, model, entity_id, new_value):
     async with session_scope(session) as s:
         # Retrieve the entity from the database

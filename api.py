@@ -1,23 +1,9 @@
-import json
-import logging
 import os
-from enum import Enum
-from typing import Dict, Any
-
+import json
 import uvicorn
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
-from cognitive_architecture.database.postgres.database import AsyncSessionLocal
-from cognitive_architecture.database.postgres.database_crud import session_scope
-from cognitive_architecture.vectorstore_manager import Memory
-from dotenv import load_dotenv
-from main import add_documents_to_graph_db, user_context_enrichment
-from cognitive_architecture.config import Config
 from fastapi import Depends
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+import logging
 
 # Set up logging
 logging.basicConfig(
@@ -27,10 +13,22 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+from cognitive_architecture.config import Config
 
 config = Config()
 config.load()
+
+from typing import Dict, Any
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
+from cognitive_architecture.database.relationaldb.database_crud import session_scope
+from cognitive_architecture.vectorstore_manager import Memory
+from main import add_documents_to_graph_db, user_context_enrichment
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 app = FastAPI(debug=True)
 #
@@ -39,12 +37,13 @@ app = FastAPI(debug=True)
 #
 # auth = JWTBearer(jwks)
 
+
 @app.get("/")
 async def root():
     """
     Root endpoint that returns a welcome message.
     """
-    return { "message": "Hello, World, I am alive!" }
+    return {"message": "Hello, World, I am alive!"}
 
 
 @app.get("/health")
@@ -61,8 +60,8 @@ class Payload(BaseModel):
 
 @app.post("/add-memory", response_model=dict)
 async def add_memory(
-        payload: Payload,
-        # files: List[UploadFile] = File(...),
+    payload: Payload,
+    # files: List[UploadFile] = File(...),
 ):
     try:
         logging.info(" Adding to Memory ")
@@ -70,68 +69,76 @@ async def add_memory(
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import load_documents_to_vectorstore
 
-            if 'settings' in decoded_payload and decoded_payload['settings'] is not None:
-                settings_for_loader = decoded_payload['settings']
+            if (
+                "settings" in decoded_payload
+                and decoded_payload["settings"] is not None
+            ):
+                settings_for_loader = decoded_payload["settings"]
             else:
                 settings_for_loader = None
 
-            if 'content' in decoded_payload and decoded_payload['content'] is not None:
-                content = decoded_payload['content']
+            if "content" in decoded_payload and decoded_payload["content"] is not None:
+                content = decoded_payload["content"]
             else:
                 content = None
 
-            output = await load_documents_to_vectorstore(session, decoded_payload['user_id'], content=content,
-                                                         loader_settings=settings_for_loader)
+            output = await load_documents_to_vectorstore(
+                session,
+                decoded_payload["user_id"],
+                content=content,
+                loader_settings=settings_for_loader,
+            )
             return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
-        return JSONResponse(
-            content={"response": {"error": str(e)}}, status_code=503
-        )
+        return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
 
 
 @app.post("/add-architecture-public-memory", response_model=dict)
 async def add_memory(
-        payload: Payload,
-        # files: List[UploadFile] = File(...),
+    payload: Payload,
+    # files: List[UploadFile] = File(...),
 ):
     try:
         logging.info(" Adding to Memory ")
         decoded_payload = payload.payload
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import load_documents_to_vectorstore
-            if 'content' in decoded_payload and decoded_payload['content'] is not None:
-                content = decoded_payload['content']
+
+            if "content" in decoded_payload and decoded_payload["content"] is not None:
+                content = decoded_payload["content"]
             else:
                 content = None
 
-            user_id = 'system_user'
-            loader_settings = {
-                "format": "PDF",
-                "source": "DEVICE",
-                "path": [".data"]
-            }
+            user_id = "system_user"
+            loader_settings = {"format": "PDF", "source": "DEVICE", "path": [".data"]}
 
-            output = await load_documents_to_vectorstore(session, user_id=user_id, content=content,
-                                                         loader_settings=loader_settings)
+            output = await load_documents_to_vectorstore(
+                session,
+                user_id=user_id,
+                content=content,
+                loader_settings=loader_settings,
+            )
             return JSONResponse(content={"response": output}, status_code=200)
 
     except Exception as e:
-        return JSONResponse(
-            content={"response": {"error": str(e)}}, status_code=503
-        )
+        return JSONResponse(content={"response": {"error": str(e)}}, status_code=503)
 
 
 @app.post("/user-query-to-graph")
 async def user_query_to_graph(payload: Payload):
     try:
         from main import user_query_to_graph_db
+
         decoded_payload = payload.payload
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await user_query_to_graph_db(session=session, user_id=decoded_payload['user_id'],
-                                                  query_input=decoded_payload['query'])
+            result = await user_query_to_graph_db(
+                session=session,
+                user_id=decoded_payload["user_id"],
+                query_input=decoded_payload["query"],
+            )
 
         return result
 
@@ -144,17 +151,23 @@ async def document_to_graph_db(payload: Payload):
     logging.info("Adding documents to graph db")
     try:
         decoded_payload = payload.payload
-        if 'settings' in decoded_payload and decoded_payload['settings'] is not None:
-            settings_for_loader = decoded_payload['settings']
+        if "settings" in decoded_payload and decoded_payload["settings"] is not None:
+            settings_for_loader = decoded_payload["settings"]
         else:
             settings_for_loader = None
-        if 'memory_type' in decoded_payload and decoded_payload['memory_type'] is not None:
-            memory_type = decoded_payload['memory_type']
+        if (
+            "memory_type" in decoded_payload
+            and decoded_payload["memory_type"] is not None
+        ):
+            memory_type = decoded_payload["memory_type"]
         else:
             memory_type = None
         async with session_scope(session=AsyncSessionLocal()) as session:
-            result = await add_documents_to_graph_db(session=session, user_id=decoded_payload['user_id'],
-                                                     document_memory_types=memory_type)
+            result = await add_documents_to_graph_db(
+                session=session,
+                user_id=decoded_payload["user_id"],
+                document_memory_types=memory_type,
+            )
         return result
 
     except Exception as e:
@@ -166,10 +179,13 @@ async def cognitive_context_enrichment(payload: Payload):
     try:
         decoded_payload = payload.payload
         async with session_scope(session=AsyncSessionLocal()) as session:
-            result = await user_context_enrichment(session, user_id=decoded_payload['user_id'],
-                                                   query=decoded_payload['query'],
-                                                   generative_response=decoded_payload['generative_response'],
-                                                   memory_type=decoded_payload['memory_type'])
+            result = await user_context_enrichment(
+                session,
+                user_id=decoded_payload["user_id"],
+                query=decoded_payload["query"],
+                generative_response=decoded_payload["generative_response"],
+                memory_type=decoded_payload["memory_type"],
+            )
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
@@ -182,8 +198,11 @@ async def classify_user_query(payload: Payload):
         decoded_payload = payload.payload
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import relevance_feedback
-            result = await relevance_feedback(query=decoded_payload['query'],
-                                              input_type=decoded_payload['knowledge_type'])
+
+            result = await relevance_feedback(
+                query=decoded_payload["query"],
+                input_type=decoded_payload["knowledge_type"],
+            )
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
@@ -197,9 +216,14 @@ async def user_query_classfier(payload: Payload):
 
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
-            from cognitive_architecture.classifiers.classifier import classify_user_query
+            from cognitive_architecture.classifiers.classify_user_input import (
+                classify_user_query,
+            )
+
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await classify_user_query(session, decoded_payload['user_id'], decoded_payload['query'])
+            result = await classify_user_query(
+                session, decoded_payload["user_id"], decoded_payload["query"]
+            )
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
@@ -211,40 +235,42 @@ async def drop_db(payload: Payload):
     try:
         decoded_payload = payload.payload
 
-        if decoded_payload['operation'] == 'drop':
-
-            if os.environ.get('AWS_ENV') == 'dev':
-                host = os.environ.get('POSTGRES_HOST')
-                username = os.environ.get('POSTGRES_USER')
-                password = os.environ.get('POSTGRES_PASSWORD')
-                database_name = os.environ.get('POSTGRES_DB')
+        if decoded_payload["operation"] == "drop":
+            if os.environ.get("AWS_ENV") == "dev":
+                host = os.environ.get("POSTGRES_HOST")
+                username = os.environ.get("POSTGRES_USER")
+                password = os.environ.get("POSTGRES_PASSWORD")
+                database_name = os.environ.get("POSTGRES_DB")
             else:
                 pass
 
-            from cognitive_architecture.database.create_database import drop_database, create_admin_engine
+            from cognitive_architecture.database.create_database import (
+                drop_database,
+                create_admin_engine,
+            )
 
             engine = create_admin_engine(username, password, host, database_name)
             connection = engine.raw_connection()
             drop_database(connection, database_name)
             return JSONResponse(content={"response": "DB dropped"}, status_code=200)
         else:
-
-            if os.environ.get('AWS_ENV') == 'dev':
-                host = os.environ.get('POSTGRES_HOST')
-                username = os.environ.get('POSTGRES_USER')
-                password = os.environ.get('POSTGRES_PASSWORD')
-                database_name = os.environ.get('POSTGRES_DB')
+            if os.environ.get("AWS_ENV") == "dev":
+                host = os.environ.get("POSTGRES_HOST")
+                username = os.environ.get("POSTGRES_USER")
+                password = os.environ.get("POSTGRES_PASSWORD")
+                database_name = os.environ.get("POSTGRES_DB")
             else:
                 pass
 
-            from cognitive_architecture.database.create_database import create_database, create_admin_engine
+            from cognitive_architecture.database.create_database import (
+                create_database,
+                create_admin_engine,
+            )
 
             engine = create_admin_engine(username, password, host, database_name)
             connection = engine.raw_connection()
             create_database(connection, database_name)
             return JSONResponse(content={"response": " DB drop"}, status_code=200)
-
-
 
     except Exception as e:
         return HTTPException(status_code=500, detail=str(e))
@@ -255,18 +281,18 @@ async def create_public_memory(payload: Payload):
     try:
         decoded_payload = payload.payload
 
-        if 'user_id' in decoded_payload and decoded_payload['user_id'] is not None:
-            user_id = decoded_payload['user_id']
+        if "user_id" in decoded_payload and decoded_payload["user_id"] is not None:
+            user_id = decoded_payload["user_id"]
         else:
             user_id = None
 
-        if 'labels' in decoded_payload and decoded_payload['labels'] is not None:
-            labels = decoded_payload['labels']
+        if "labels" in decoded_payload and decoded_payload["labels"] is not None:
+            labels = decoded_payload["labels"]
         else:
             labels = None
 
-        if 'topic' in decoded_payload and decoded_payload['topic'] is not None:
-            topic = decoded_payload['topic']
+        if "topic" in decoded_payload and decoded_payload["topic"] is not None:
+            topic = decoded_payload["topic"]
         else:
             topic = None
 
@@ -286,21 +312,26 @@ async def attach_user_to_public_memory(payload: Payload):
     try:
         decoded_payload = payload.payload
 
-        if 'topic' in decoded_payload and decoded_payload['topic'] is not None:
-            topic = decoded_payload['topic']
+        if "topic" in decoded_payload and decoded_payload["topic"] is not None:
+            topic = decoded_payload["topic"]
         else:
             topic = None
-        if 'labels' in decoded_payload and decoded_payload['labels'] is not None:
-            labels = decoded_payload['labels']
+        if "labels" in decoded_payload and decoded_payload["labels"] is not None:
+            labels = decoded_payload["labels"]
         else:
-            labels = ['sr']
+            labels = ["sr"]
 
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import attach_user_to_memory, create_public_memory
+
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            await create_public_memory(user_id=decoded_payload['user_id'], topic=topic, labels=labels)
-            result = await attach_user_to_memory(user_id=decoded_payload['user_id'], topic=topic, labels=labels)
+            await create_public_memory(
+                user_id=decoded_payload["user_id"], topic=topic, labels=labels
+            )
+            result = await attach_user_to_memory(
+                user_id=decoded_payload["user_id"], topic=topic, labels=labels
+            )
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:
@@ -312,17 +343,21 @@ async def unlink_user_from_public_memory(payload: Payload):
     try:
         decoded_payload = payload.payload
 
-        if 'topic' in decoded_payload and decoded_payload['topic'] is not None:
-            topic = decoded_payload['topic']
+        if "topic" in decoded_payload and decoded_payload["topic"] is not None:
+            topic = decoded_payload["topic"]
         else:
             topic = None
 
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
             from main import unlink_user_from_memory
+
             # Assuming you have a method in Neo4jGraphDB to execute the query
-            result = await unlink_user_from_memory(user_id=decoded_payload['user_id'], topic=topic,
-                                                   labels=decoded_payload['labels'])
+            result = await unlink_user_from_memory(
+                user_id=decoded_payload["user_id"],
+                topic=topic,
+                labels=decoded_payload["labels"],
+            )
         return JSONResponse(content={"response": result}, status_code=200)
 
     except Exception as e:

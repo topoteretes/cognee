@@ -63,6 +63,8 @@ To read more about the approach and details on cognitive architecture, see the b
 
 Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
 
+
+
 ## Getting started
 
 In order to run cognee you need to have <a href="https://docs.docker.com/get-docker" target="_blank">Docker</a> installed on your machine.
@@ -80,27 +82,10 @@ In order to run Cognee with debugger attached you need to build the Cognee image
 - `docker compose build cognee --no-cache --build-arg DEBUG=true`
 - `docker compose up cognee`
 
-### Visual Studio Code debugger
 
-Add the following configuration to VSCode `Run and Debug` configurations array:
-```json
-  {
-      "name": "Attach (remote debug)",
-      "type": "python",
-      "request": "attach",
-      "port": 5678,
-      "host": "127.0.0.1",
-      "pathMappings": [{
-          "localRoot": "${workspaceFolder}",
-          "remoteRoot": "."
-      }]
-  }
-```
+## Demo
 
-It should look like this:
-
-<img src="assets/vscode-debug-config.png" width="500px" />
-
+[<img src="https://i3.ytimg.com/vi/yjParvJVgPI/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=yjParvJVgPI "Learn about cognee: 55")
 ## Current Focus
 
 ### Integration with keepi.ai and other apps
