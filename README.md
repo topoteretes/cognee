@@ -85,7 +85,7 @@ In order to run Cognee with debugger attached you need to build the Cognee image
 
 ## Demo
 
-[<img src="https://i3.ytimg.com/vi/yjParvJVgPI/maxresdefault.jpg" width="50%">](https://www.youtube.com/watch?v=yjParvJVgPI "Learn about cognee: 55")
+[<img src="https://i3.ytimg.com/vi/yjParvJVgPI/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=yjParvJVgPI "Learn about cognee: 55")
 ## Current Focus
 
 ### Integration with keepi.ai and other apps
