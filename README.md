@@ -1,6 +1,6 @@
 # cognee
 
-AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps
+AI Memory - Cognitive Architecture, Testability, Production-Ready Apps
 
 <p>
   <a href="https://cognee.ai" target="_blank">
@@ -9,7 +9,7 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 </p>
 
 <p>
-  <i>Open-source framework for building and testing RAGs and Cognitive Architectures, designed for accuracy, transparency, and control.</i>
+  <i>Open-source framework for building AI Memory, extending the limits of cognitive architecture, designed for accuracy, transparency, and control.</i>
 </p>
 
 <p>
@@ -56,8 +56,8 @@ AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready
 
 [Star us on Github!](https://www.github.com/topoteretes/cognee)
 
-Jump into the world of RAG architecture, inspired by human cognitive processes, using Python.
-<a href="https://www.cognee.ai" target="_blank">Cognee</a> runs in iterations, from POC towards production ready code.
+Jump into AI memory architecture, inspired by human cognitive processes, using Python.
+<a href="https://www.cognee.ai" target="_blank">Cognee</a> runs in iterations, from POC towards production-ready code.
 
 To read more about the approach and details on cognitive architecture, see the blog post: <a href="https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4" target="_blank">AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps</a>  
 
@@ -67,7 +67,7 @@ Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners<
 
 ## Getting started
 
-In order to run cognee you need to have <a href="https://docs.docker.com/get-docker" target="_blank">Docker</a> installed on your machine.
+To run cognee you need to have <a href="https://docs.docker.com/get-docker" target="_blank">Docker</a> installed on your machine.
 
 Run <a href="https://www.cognee.ai" target="_blank">Cognee</a> in a couple of steps:
 - Run  `cp .env.template .env` in your terminal and set all the environment variables
@@ -77,7 +77,7 @@ Run <a href="https://www.cognee.ai" target="_blank">Cognee</a> in a couple of st
 <!-- Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000 -->
 
 ## Debugging
-In order to run Cognee with debugger attached you need to build the Cognee image with the `DEBUG` flag set to true.
+To run Cognee with debugger attached you need to build the Cognee image with the `DEBUG` flag set to true.
 
 - `docker compose build cognee --no-cache --build-arg DEBUG=true`
 - `docker compose up cognee`
@@ -86,13 +86,6 @@ In order to run Cognee with debugger attached you need to build the Cognee image
 ## Demo
 
 [<img src="https://i3.ytimg.com/vi/yjParvJVgPI/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=yjParvJVgPI "Learn about cognee: 55")
-## Current Focus
-
-### Integration with keepi.ai and other apps
-- Cognee uses Neo4j graph database to map user data into a graph structure consisting of semantic, episodic, and procedural memory.
-- Stores data and files through the WhatsApp chatbot <a href="https://keepi.ai">keepi.ai</a>
-- Uses the graph to answer user queries and store new information in the graph.
-
 
 ## Architecture
 
@@ -107,3 +100,11 @@ Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases intr
 </br>
 
 ![Image](assets/architecture.png)
+
+## Current Focus
+
+### Integration with keepi.ai and other apps
+- Cognee uses the Neo4j graph database to map user data into a graph structure consisting of semantic, episodic, and procedural memory.
+- Stores data and files through the WhatsApp chatbot <a href="https://keepi.ai">keepi.ai</a>
+- Uses the graph to answer user queries and store new information in the graph.
+
