@@ -13,10 +13,6 @@ from cognitive_architecture.database.relationaldb.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import logging
-from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class Node:

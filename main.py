@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 from cognitive_architecture.database.graphdb.graph import Neo4jGraphDB
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 import os
-from dotenv import load_dotenv
 from cognitive_architecture.database.relationaldb.database_crud import (
     session_scope,
     update_entity_graph_summary,
@@ -38,12 +37,12 @@ aclient = instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
-load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 from cognitive_architecture.config import Config
 
 config = Config()
 config.load()
+
 from cognitive_architecture.utils import get_document_names
 from sqlalchemy.orm import selectinload, joinedload, contains_eager
 import logging

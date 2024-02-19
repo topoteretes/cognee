@@ -11,7 +11,6 @@ print(os.getcwd())
 logging.basicConfig(level=logging.INFO)
 # import marvin
 import requests
-from dotenv import load_dotenv
 from langchain.document_loaders import PyPDFLoader
 from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
@@ -24,7 +23,6 @@ from cognitive_architecture.database.relationaldb.models.docs import DocsModel
 from sqlalchemy.orm import sessionmaker
 from cognitive_architecture.database.relationaldb.database import engine
 
-load_dotenv()
 from typing import Optional
 import time
 import tracemalloc

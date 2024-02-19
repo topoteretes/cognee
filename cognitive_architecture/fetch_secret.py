@@ -53,7 +53,7 @@ ENV_FILE_PATH = os.path.abspath("../.env")
 if os.path.exists(ENV_FILE_PATH):
     # Load default environment variables (.env)
     load_dotenv()
-    print("Cognee is already running...")
+    print("Environment variables are already loaded.")
 else:
     fetch_secret(
         f"promethai-{environment}-backend-secretso-promethaijs-dotenv",

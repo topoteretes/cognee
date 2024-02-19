@@ -17,11 +17,11 @@ else
     echo '"local" environment is active, skipping fetch_secret.py'
 fi
 
-echo "Running create_database.py"
+echo "Creating database..."
 
-python cognitive_architecture/database/create_database.py
+python cognitive_architecture/setup_database.py
 if [ $? -ne 0 ]; then
-    echo "Error: create_database.py failed"
+    echo "Error: setup_database.py failed"
     exit 1
 fi
 

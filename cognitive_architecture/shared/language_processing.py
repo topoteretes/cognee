@@ -2,9 +2,6 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from langdetect import detect, LangDetectException
 import iso639
-from dotenv import load_dotenv
-
-load_dotenv()
 
 import logging
 

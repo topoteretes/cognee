@@ -1,7 +1,5 @@
 import os
 
-from dotenv import load_dotenv
-
 from ..shared.data_models import Node, Edge, KnowledgeGraph, GraphQLQuery, MemorySummary
 from ..config import Config
 import instructor
@@ -17,7 +15,6 @@ OPENAI_API_KEY = config.openai_key
 
 aclient = instructor.patch(OpenAI())
 
-load_dotenv()
 import logging
 
 

@@ -16,15 +16,8 @@ import tracemalloc
 tracemalloc.start()
 import os
 from langchain.embeddings.openai import OpenAIEmbeddings
-from dotenv import load_dotenv
 from langchain.schema import Document
 import weaviate
-
-load_dotenv()
-from ...config import Config
-
-config = Config()
-config.load()
 
 LTM_MEMORY_ID_DEFAULT = "00000"
 ST_MEMORY_ID_DEFAULT = "0000"
@@ -371,11 +364,6 @@ class WeaviateVectorDB(VectorDB):
                 .with_hybrid(query=observation, fusion_type=HybridFusion.RELATIVE_SCORE)
             )
             query_output = base_query.do()
-            # from weaviate.classes import Filter
-            # client = weaviate.connect_to_wcs(
-            #     cluster_url=config.weaviate_url,
-            #     auth_credentials=weaviate.AuthApiKey(config.weaviate_api_key)
-            # )
 
             return query_output
         elif search_type == "generate":

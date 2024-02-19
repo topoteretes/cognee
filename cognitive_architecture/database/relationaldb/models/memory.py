@@ -1,9 +1,6 @@
-# memory.py
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-import os
-import sys
 from ..database import Base
 
 

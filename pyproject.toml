@@ -63,6 +63,7 @@ debugpy = "^1.8.0"
 lancedb = "^0.5.5"
 pyarrow = "^15.0.0"
 pylint = "^3.0.3"
+aiosqlite = "^0.19.0"
 
 [build-system]
 requires = ["poetry-core"]

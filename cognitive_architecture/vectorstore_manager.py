@@ -1,21 +1,19 @@
 import logging
 
-from sqlalchemy.future import select
 logging.basicConfig(level=logging.INFO)
+
+from sqlalchemy.future import select
 from cognitive_architecture.database.relationaldb.models.user import User
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
 import ast
 import tracemalloc
 from cognitive_architecture.database.relationaldb.database_crud import add_entity
 tracemalloc.start()
-from dotenv import load_dotenv
 import uuid
 from cognitive_architecture.database.vectordb.basevectordb import BaseMemory
 from cognitive_architecture.config import Config
-load_dotenv()
-config = Config()
-config.load()
 
+globalConfig = Config()
 
 class DynamicBaseMemory(BaseMemory):
     def __init__(
@@ -121,7 +119,7 @@ class Memory:
         user_id: str = "676",
         session=None,
         index_name: str = None,
-        db_type: str = config.vectordb,
+        db_type: str = globalConfig.vectordb,
         namespace: str = None,
         memory_id: str = None,
         memory_class=None,
@@ -142,9 +140,8 @@ class Memory:
         # )
 
     def load_environment_variables(self) -> None:
-        load_dotenv()
-        self.OPENAI_TEMPERATURE = config.openai_temperature
-        self.OPENAI_API_KEY = config.openai_key
+        self.OPENAI_TEMPERATURE = globalConfig.openai_temperature
+        self.OPENAI_API_KEY = globalConfig.openai_key
 
     @classmethod
     async def create_memory(
@@ -194,7 +191,7 @@ class Memory:
             user_id,
             str(memory_id),
             index_name=memory_label,
-            db_type=config.vectordb,
+            db_type=globalConfig.vectordb,
             **kwargs,
         )
 

@@ -10,7 +10,6 @@ import networkx as nx
 
 from langchain.graphs import Neo4jGraph
 import os
-from dotenv import load_dotenv
 
 import openai
 import instructor
@@ -41,7 +40,6 @@ from typing import Any, Dict, Optional, List
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
-load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 from ...config import Config

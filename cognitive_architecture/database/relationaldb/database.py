@@ -1,21 +1,25 @@
 """Database configuration and connection."""
 from pathlib import Path
-from contextlib import asynccontextmanager
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import declarative_base, sessionmaker
-from dotenv import load_dotenv
+# from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import declarative_base
 from cognitive_architecture.config import Config
-config = Config()
 
-load_dotenv()
-
-
+globalConfig = Config()
 
 # in seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5
 
-def get_sqlalchemy_database_url(db_type='sqlite', db_name=config.db_name, base_path=config.db_path, user=config.db_user, password=config.db_password, host=config.db_host, port=config.db_port):
+def get_sqlalchemy_database_url(
+    db_type = globalConfig.db_type,
+    db_name = globalConfig.db_name,
+    base_path = globalConfig.db_path,
+    user = globalConfig.db_user,
+    password = globalConfig.db_password,
+    host = globalConfig.db_host,
+    port = globalConfig.db_port,
+):
     """Get the SQLAlchemy database URL based on parameters."""
     db_path = (Path(base_path) / db_name).absolute()
     if db_type == "sqlite":
@@ -39,11 +43,11 @@ SQLALCHEMY_DATABASE_URL = get_sqlalchemy_database_url()
 engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL,
     pool_recycle=3600,
-    echo=config.sqlalchemy_logging,
+    echo=globalConfig.sqlalchemy_logging,
 )
 
 
-AsyncSessionLocal = sessionmaker(
+AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
@@ -51,13 +55,13 @@ AsyncSessionLocal = sessionmaker(
 
 Base = declarative_base()
 
-@asynccontextmanager
-async def get_db():
-    """Provide a database session to the context."""
-    db = AsyncSessionLocal()
-    try:
-        yield db
-    finally:
-        await db.close()
+# @asynccontextmanager
+# async def get_db():
+#     """Provide a database session to the context."""
+#     db = AsyncSessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         await db.close()
 
 

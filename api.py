@@ -1,23 +1,9 @@
-import json
-import logging
 import os
-from enum import Enum
-from typing import Dict, Any
-
+import json
 import uvicorn
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
-from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
-from cognitive_architecture.database.relationaldb.database_crud import session_scope
-from cognitive_architecture.vectorstore_manager import Memory
-from dotenv import load_dotenv
-from main import add_documents_to_graph_db, user_context_enrichment
-from cognitive_architecture.config import Config
 from fastapi import Depends
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+import logging
 
 # Set up logging
 logging.basicConfig(
@@ -27,10 +13,22 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+from cognitive_architecture.config import Config
 
 config = Config()
 config.load()
+
+from typing import Dict, Any
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
+from cognitive_architecture.database.relationaldb.database_crud import session_scope
+from cognitive_architecture.vectorstore_manager import Memory
+from main import add_documents_to_graph_db, user_context_enrichment
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 app = FastAPI(debug=True)
 #
