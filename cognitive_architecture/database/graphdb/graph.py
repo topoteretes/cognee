@@ -1004,7 +1004,7 @@ async def unlink_user_from_another(
         logging.error(f"Error disconnecting user nodes: {e}")
         raise
 
-from .networkx_graph import NetworkXGraphDB
+from .networkx.networkx_graph import NetworkXGraphDB
 
 
 class GraphDBFactory:

@@ -461,14 +461,15 @@ async def user_context_enrichment(
 
     # await user_query_to_graph_db(session, user_id, query)
 
-    semantic_mem = neo4j_graph_db.retrieve_semantic_memory(user_id=user_id)
+    semantic_mem = await neo4j_graph_db.retrieve_semantic_memory(user_id=user_id)
     await neo4j_graph_db.close()
     neo4j_graph_db = Neo4jGraphDB(
         url=config.graph_database_url,
         username=config.graph_database_username,
         password=config.graph_database_password,
     )
-    episodic_mem = neo4j_graph_db.retrieve_episodic_memory(user_id=user_id)
+    episodic_mem = await neo4j_graph_db.retrieve_episodic_memory(user_id=user_id)
+    logging.info("Episodic memory is %s", episodic_mem)
     await neo4j_graph_db.close()
     # public_mem = neo4j_graph_db.retrieve_public_memory(user_id=user_id)
 
@@ -581,8 +582,8 @@ async def user_context_enrichment(
     context = f""" You are a memory system that uses cognitive architecture to enrich the 
     LLM context and provide better query response.
     You have access to the following information:
-    EPISODIC MEMORY: {episodic_mem[:200]}
-    SEMANTIC MEMORY: {semantic_mem[:200]}
+    EPISODIC MEMORY: {episodic_mem}
+    SEMANTIC MEMORY: {semantic_mem}
     PROCEDURAL MEMORY: NULL
     SEARCH CONTEXT: The following documents provided with sources they were 
     extracted from could be used to provide an answer {search_context}
@@ -764,8 +765,8 @@ async def main():
         class GraphQLQuery(BaseModel):
             query: str
 
-        gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
-        print(gg)
+        # gg = await user_query_to_graph_db(session, user_id, "How does cognitive architecture work?")
+        # print(gg)
 
         # def cypher_statement_correcting( input: str) -> str:
         #     out = aclient.chat.completions.create(
@@ -846,10 +847,10 @@ async def main():
         # print(bb)
 
         # await attach_user_to_memory(user_id=user_id, labels=['sr'], topic="PublicMemory")
-
-        # return_ = await user_context_enrichment(user_id=user_id, query="Koja je minimalna širina vrata za osobe sa invaliditetom?", session=session, memory_type="PublicMemory", generative_response=True)
-        # print(return_)
-        # aa = await relevance_feedback("I need to understand how to build a staircase in an apartment building", "PublicMemory")
+        user_id = "test_user"
+        return_ = await user_context_enrichment(user_id=user_id, query="I need to understand what did I do yesterday?", session=session, memory_type="SemanticMemory", generative_response=True)
+        print(return_)
+        # aa = await relevance_feedback("I need to understand what did I do yesterday", "PublicMemory")
         # print(aa)
 
         # document_summary = {
