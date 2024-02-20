@@ -21,10 +21,12 @@ def get_sqlalchemy_database_url(
     port = globalConfig.db_port,
 ):
     """Get the SQLAlchemy database URL based on parameters."""
-    db_path = (Path(db_path) / db_name).absolute()
+
     if db_type == "sqlite":
+        db_path = (Path(db_path) / db_name).absolute()
         return f"sqlite+aiosqlite:///{db_path}"  # SQLite uses file path
     elif db_type == "duckdb":
+        db_path = (Path(db_path) / db_name).absolute()
         return f"duckdb+aiosqlite:///{db_path}"
     elif db_type == "postgresql":
         # Ensure optional parameters are handled gracefully
