@@ -1,3 +1,4 @@
+""" This module contains the MemoryModel class, which is a SQLAlchemy model for the memory table in the relational database. """
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
@@ -5,6 +6,7 @@ from ..database import Base
 
 
 class MemoryModel(Base):
+    """ Memory model"""
     __tablename__ = "memories"
 
     id = Column(String, primary_key=True)

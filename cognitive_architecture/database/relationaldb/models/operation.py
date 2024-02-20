@@ -1,4 +1,5 @@
 # operation.py
+""" Operation model """
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
@@ -8,6 +9,7 @@ from ..database import Base
 
 
 class Operation(Base):
+    """ Operation model"""
     __tablename__ = "operations"
 
     id = Column(String, primary_key=True)
