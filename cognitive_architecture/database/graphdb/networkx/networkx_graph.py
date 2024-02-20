@@ -9,8 +9,8 @@ config  = config.load()
 
 class NetworkXGraphDB:
     """A class to manage a graph database using NetworkX"""
-    graph_path = (Path(config.base_path) / config.graph_name).absolute()
-    def __init__(self, filename=graph_path):
+    # graph_path = (Path(config.db_path) / config.graph_name).absolute()
+    def __init__(self, filename="cognee_graph.pkl"):
         self.filename = filename
         try:
             self.graph = self.load_graph()  # Attempt to load an existing graph

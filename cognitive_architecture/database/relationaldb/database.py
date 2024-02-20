@@ -14,14 +14,14 @@ RETRY_DELAY = 5
 def get_sqlalchemy_database_url(
     db_type = globalConfig.db_type,
     db_name = globalConfig.db_name,
-    base_path = globalConfig.db_path,
+    db_path = globalConfig.db_path,
     user = globalConfig.db_user,
     password = globalConfig.db_password,
     host = globalConfig.db_host,
     port = globalConfig.db_port,
 ):
     """Get the SQLAlchemy database URL based on parameters."""
-    db_path = (Path(base_path) / db_name).absolute()
+    db_path = (Path(db_path) / db_name).absolute()
     if db_type == "sqlite":
         return f"sqlite+aiosqlite:///{db_path}"  # SQLite uses file path
     elif db_type == "duckdb":
