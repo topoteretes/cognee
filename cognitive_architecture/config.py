@@ -36,6 +36,7 @@ class Config:
     db_user: str = os.getenv("DB_USER", "cognee")
     db_password: str = os.getenv("DB_PASSWORD", "cognee")
     sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
+    graph_name = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
     model: str = "gpt-4-1106-preview"

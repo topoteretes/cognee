@@ -12,12 +12,11 @@ parent_dir = os.path.dirname(current_dir)
 # Add the parent directory to sys.path
 sys.path.insert(0, parent_dir)
 
-# API_ENABLED = os.environ.get("API_ENABLED", "False").lower() == "true"
-
 environment = os.getenv("AWS_ENV", "dev")
 
 
-def fetch_secret(secret_name, region_name, env_file_path):
+def fetch_secret(secret_name:str, region_name:str, env_file_path:str):
+    """Fetch the secret from AWS Secrets Manager and write it to the .env file."""
     print("Initializing session")
     session = boto3.session.Session()
     print("Session initialized")
@@ -28,20 +27,19 @@ def fetch_secret(secret_name, region_name, env_file_path):
         response = client.get_secret_value(SecretId=secret_name)
     except Exception as e:
         print(f"Error retrieving secret: {e}")
-        return None
+        return f"Error retrieving secret: {e}"
 
     if "SecretString" in response:
         secret = response["SecretString"]
     else:
         secret = response["SecretBinary"]
 
+    with open(env_file_path, "w") as env_file:
+        env_file.write(secret)
+        print("Secrets are added to the .env file.")
+
     if os.path.exists(env_file_path):
         print(f"The .env file is located at: {env_file_path}")
-
-        with open(env_file_path, "w") as env_file:
-            env_file.write(secret)
-            print("Secrets are added to the .env file.")
-
         load_dotenv()
         print("The .env file is loaded.")
     else:

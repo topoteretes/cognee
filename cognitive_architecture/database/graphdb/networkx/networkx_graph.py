@@ -1,10 +1,16 @@
 import pickle
-
+from pathlib import Path
+from cognitive_architecture.config import Config
 import networkx as nx
+config = Config()
+config  = config.load()
+
 
 
 class NetworkXGraphDB:
-    def __init__(self, filename="cognee_graph.pkl"):
+    """A class to manage a graph database using NetworkX"""
+    graph_path = (Path(config.base_path) / config.graph_name).absolute()
+    def __init__(self, filename=graph_path):
         self.filename = filename
         try:
             self.graph = self.load_graph()  # Attempt to load an existing graph

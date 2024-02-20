@@ -1,3 +1,5 @@
+""" This module contains utility functions for the cognitive architecture. """
+
 import os
 import random
 import string
@@ -13,7 +15,13 @@ from cognitive_architecture.database.relationaldb.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import logging
-
+from cognitive_architecture.database.relationaldb.models.operation import Operation
+from cognitive_architecture.database.relationaldb.database_crud import (
+    session_scope,
+    add_entity,
+    update_entity,
+    fetch_job_id,
+)
 
 class Node:
     def __init__(self, id, description, color):
@@ -72,6 +80,7 @@ def get_document_names(doc_input):
 
 
 def format_dict(d):
+    """ Format a dictionary as a string."""
     # Initialize an empty list to store formatted items
     formatted_items = []
 
@@ -93,6 +102,7 @@ def format_dict(d):
 
 
 def append_uuid_to_variable_names(variable_mapping):
+    """ Append a UUID to the variable names to make them unique."""
     unique_variable_mapping = {}
     for original_name in variable_mapping.values():
         unique_name = f"{original_name}_{uuid.uuid4().hex}"
@@ -102,6 +112,7 @@ def append_uuid_to_variable_names(variable_mapping):
 
 # Update the functions to use the unique variable names
 def create_node_variable_mapping(nodes):
+    """ Create a mapping of node identifiers to unique variable names."""
     mapping = {}
     for node in nodes:
         variable_name = f"{node['category']}{node['id']}".lower()
@@ -110,6 +121,7 @@ def create_node_variable_mapping(nodes):
 
 
 def create_edge_variable_mapping(edges):
+    """ Create a mapping of edge identifiers to unique variable names."""
     mapping = {}
     for edge in edges:
         # Construct a unique identifier for the edge
@@ -124,17 +136,10 @@ def generate_letter_uuid(length=8):
     return "".join(random.choice(letters) for _ in range(length))
 
 
-from cognitive_architecture.database.relationaldb.models.operation import Operation
-from cognitive_architecture.database.relationaldb.database_crud import (
-    session_scope,
-    add_entity,
-    update_entity,
-    fetch_job_id,
-)
-
 
 
 async def get_vectordb_namespace(session: AsyncSession, user_id: str):
+    """ Asynchronously retrieves the latest memory names for a given user."""
     try:
         result = await session.execute(
             select(MemoryModel.memory_name)
@@ -151,6 +156,7 @@ async def get_vectordb_namespace(session: AsyncSession, user_id: str):
 
 
 async def get_vectordb_document_name(session: AsyncSession, user_id: str):
+    """ Asynchronously retrieves the latest memory names for a given user."""
     try:
         result = await session.execute(
             select(DocsModel.doc_name)
@@ -167,6 +173,7 @@ async def get_vectordb_document_name(session: AsyncSession, user_id: str):
 
 
 async def get_model_id_name(session: AsyncSession, id: str):
+    """ Asynchronously retrieves the latest memory names for a given user."""
     try:
         result = await session.execute(
             select(MemoryModel.memory_name)
@@ -235,12 +242,6 @@ async def get_unsumarized_vector_db_namespace(session: AsyncSession, user_id: st
     docs = [(doc.doc_name, doc.id) for op in operations for doc in op.docs]
 
     return memory_details, docs
-
-    # except Exception as e:
-    #     # Handle the exception as needed
-    #     print(f"An error occurred: {e}")
-    #     return None
-
 
 async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
     """

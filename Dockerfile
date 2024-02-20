@@ -41,6 +41,8 @@ RUN apt-get update -q && \
         /var/tmp/*
 
 WORKDIR /app
+# Set the PYTHONPATH environment variable to include the /app directory
+ENV PYTHONPATH=/app
 
 COPY cognitive_architecture/ /app/cognitive_architecture
 COPY main.py /app
