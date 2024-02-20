@@ -1,4 +1,5 @@
 """Configuration for cognee - cognitive architecture framework."""
+import logging
 import os
 import configparser
 import uuid
@@ -72,8 +73,11 @@ class Config:
         or os.getenv("AWS_ENV") == "dev"
         or os.getenv("AWS_ENV") == "prd"
     ):
+        load_dotenv()
         db_type = 'postgresql'
-        db_host: str = os.getenv("POSTGRES_PROD_HOST")
+
+        db_host: str = os.getenv("POSTGRES_HOST")
+        logging.info("db_host: %s", db_host)
         db_user: str = os.getenv("POSTGRES_USER")
         db_password: str = os.getenv("POSTGRES_PASSWORD")
         db_name: str = os.getenv("POSTGRES_DB")
