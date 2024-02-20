@@ -1,3 +1,4 @@
+"""Tools for interacting with OpenAI's GPT-3, GPT-4 API"""
 import asyncio
 import random
 import os

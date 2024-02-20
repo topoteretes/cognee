@@ -72,6 +72,7 @@ class Config:
         or os.getenv("AWS_ENV") == "dev"
         or os.getenv("AWS_ENV") == "prd"
     ):
+        db_type = 'postgresql'
         db_host: str = os.getenv("POSTGRES_PROD_HOST")
         db_user: str = os.getenv("POSTGRES_USER")
         db_password: str = os.getenv("POSTGRES_PASSWORD")

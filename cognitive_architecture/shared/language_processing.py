@@ -1,9 +1,10 @@
+""" This module provides language processing functions for language detection and translation. """
+import logging
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from langdetect import detect, LangDetectException
 import iso639
 
-import logging
 
 # Basic configuration of the logging system
 logging.basicConfig(
@@ -30,7 +31,7 @@ def detect_language(text):
     try:
         # Detect the language using langdetect
         detected_lang_iso639_1 = detect(trimmed_text)
-        logging.info(f"Detected ISO 639-1 code: {detected_lang_iso639_1}")
+        logging.info(f"Detected ISO 639-1 code: %s {detected_lang_iso639_1}")
 
         # Special case: map 'hr' (Croatian) to 'sr' (Serbian ISO 639-2)
         if detected_lang_iso639_1 == "hr":
@@ -38,9 +39,9 @@ def detect_language(text):
         return detected_lang_iso639_1
 
     except LangDetectException as e:
-        logging.error(f"Language detection error: {e}")
+        logging.error(f"Language detection error: %s  {e}")
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        logging.error(f"Unexpected error: %s  {e}")
 
     return -1
 
@@ -57,8 +58,10 @@ def translate_text(
 
     Parameters:
     text (str): The text to be translated.
-    source_language (str): The source language code (e.g., 'sr' for Serbian). ISO 639-2 Code https://www.loc.gov/standards/iso639-2/php/code_list.php
-    target_language (str): The target language code (e.g., 'en' for English). ISO 639-2 Code https://www.loc.gov/standards/iso639-2/php/code_list.php
+    source_language (str): The source language code (e.g., 'sr' for Serbian).
+     ISO 639-2 Code https://www.loc.gov/standards/iso639-2/php/code_list.php
+    target_language (str): The target language code (e.g., 'en' for English).
+    ISO 639-2 Code https://www.loc.gov/standards/iso639-2/php/code_list.php
     region_name (str): AWS region name.
 
     Returns:
@@ -82,20 +85,9 @@ def translate_text(
         return result.get("TranslatedText", "No translation found.")
 
     except BotoCoreError as e:
-        logging.info(f"BotoCoreError occurred: {e}")
+        logging.info(f"BotoCoreError occurred: %s  {e}")
         return "Error with AWS Translate service configuration or request."
 
     except ClientError as e:
-        logging.info(f"ClientError occurred: {e}")
+        logging.info(f"ClientError occurred: %s  {e}")
         return "Error with AWS client or network issue."
-
-
-source_language = "sr"
-target_language = "en"
-text_to_translate = "Ja volim da pecam i idem na reku da šetam pored nje ponekad"
-
-translated_text = translate_text(text_to_translate, source_language, target_language)
-print(translated_text)
-
-
-# print(detect_language("Koliko krava ide u setnju?"))
