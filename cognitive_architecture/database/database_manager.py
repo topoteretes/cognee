@@ -15,7 +15,7 @@ class DatabaseManager:
     """Manages database creation, deletion, and table initialization."""
     def __init__(self):
         """Initialize the Database Url with a given configuration."""
-        self.engine = create_async_engine(get_sqlalchemy_database_url("sqlite"), echo = True)
+        self.engine = create_async_engine(get_sqlalchemy_database_url(globalConfig.db_type), echo = True)
         self.db_type = globalConfig.db_type
 
     @asynccontextmanager
@@ -37,7 +37,7 @@ class DatabaseManager:
             query = text(f"SELECT 1 FROM pg_database WHERE datname='{db_name}'")
             async with self.get_connection() as connection:
                 result = await connection.execute(query)
-                return await result.fetchone() is not None
+                return  result.fetchone() is not None
 
     async def create_database(self, db_name):
         """Create a new database."""

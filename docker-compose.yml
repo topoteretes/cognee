@@ -33,9 +33,9 @@ services:
       - 80:80
       - 50051:50051
       - 5678:5678
-      - 5432:5432
+#      - 5432:5432
     depends_on:
-    #   - postgres
+      - postgres
       - neo4j
     deploy:
       resources:
@@ -43,18 +43,18 @@ services:
           cpus: "4.0"
           memory: 8GB
 
-  # postgres:
-  #   image: postgres
-  #   container_name: postgres
-  #   environment:
-  #     - POSTGRES_HOST_AUTH_METHOD=trust
-  #     - POSTGRES_USER=bla
-  #     - POSTGRES_PASSWORD=bla
-  #     - POSTGRES_DB=bubu
-  #   networks:
-  #     - cognee_backend
-  #   ports:
-  #     - "5432:5432"
+  postgres:
+     image: postgres
+     container_name: postgres
+     environment:
+       - POSTGRES_HOST_AUTH_METHOD=trust
+       - POSTGRES_USER=bla
+       - POSTGRES_PASSWORD=bla
+       - POSTGRES_DB=bubu
+     networks:
+       - cognee_backend
+     ports:
+       - "5432:5432"
 
 networks:
   cognee_backend:
