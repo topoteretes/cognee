@@ -57,6 +57,7 @@ class Config:
         or os.getenv("AWS_ENV") == "dev"
         or os.getenv("AWS_ENV") == "prd"
     ):
+        load_dotenv()
         logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL_PROD"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL_PROD")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
