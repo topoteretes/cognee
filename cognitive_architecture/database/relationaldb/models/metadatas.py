@@ -1,4 +1,5 @@
 # metadata.py
+""" MetaData model """
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
@@ -8,6 +9,7 @@ from ..database import Base
 
 
 class MetaDatas(Base):
+    """ MetaData model"""
     __tablename__ = "metadatas"
 
     id = Column(String, primary_key=True)

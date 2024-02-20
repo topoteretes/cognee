@@ -1,4 +1,5 @@
 """Configuration for cognee - cognitive architecture framework."""
+import logging
 import os
 import configparser
 import uuid
@@ -36,6 +37,7 @@ class Config:
     db_user: str = os.getenv("DB_USER", "cognee")
     db_password: str = os.getenv("DB_PASSWORD", "cognee")
     sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
+    graph_name = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
     model: str = "gpt-4-1106-preview"
@@ -55,29 +57,34 @@ class Config:
         or os.getenv("AWS_ENV") == "dev"
         or os.getenv("AWS_ENV") == "prd"
     ):
+        load_dotenv()
+        logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL_PROD"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL_PROD")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
     else:
+        logging.info("graph_db_urlvvv: %s", os.getenv("GRAPH_DB_URL"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
     weaviate_url: str = os.getenv("WEAVIATE_URL")
     weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY")
-    postgres_user: str = os.getenv("POSTGRES_USER")
-    postgres_password: str = os.getenv("POSTGRES_PASSWORD")
-    postgres_db: str = os.getenv("POSTGRES_DB")
+
     if (
         os.getenv("ENV") == "prod"
         or os.getenv("ENV") == "dev"
         or os.getenv("AWS_ENV") == "dev"
         or os.getenv("AWS_ENV") == "prd"
     ):
-        postgres_host: str = os.getenv("POSTGRES_PROD_HOST")
-    elif os.getenv("ENV") == "docker":
-        postgres_host: str = os.getenv("POSTGRES_HOST_DOCKER")
-    elif os.getenv("ENV") == "local":
-        postgres_host: str = os.getenv("POSTGRES_HOST_LOCAL")
+        load_dotenv()
+        db_type = 'postgresql'
+
+        db_host: str = os.getenv("POSTGRES_HOST")
+        logging.info("db_host: %s", db_host)
+        db_user: str = os.getenv("POSTGRES_USER")
+        db_password: str = os.getenv("POSTGRES_PASSWORD")
+        db_name: str = os.getenv("POSTGRES_DB")
+
 
     # Client ID
     anon_clientid: Optional[str] = field(default_factory=lambda: uuid.uuid4().hex)

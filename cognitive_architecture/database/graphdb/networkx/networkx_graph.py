@@ -1,9 +1,15 @@
 import pickle
-
+from pathlib import Path
+from cognitive_architecture.config import Config
 import networkx as nx
+config = Config()
+config  = config.load()
+
 
 
 class NetworkXGraphDB:
+    """A class to manage a graph database using NetworkX"""
+    # graph_path = (Path(config.db_path) / config.graph_name).absolute()
     def __init__(self, filename="cognee_graph.pkl"):
         self.filename = filename
         try:

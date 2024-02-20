@@ -1,4 +1,5 @@
 # user.py
+""" User model """
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.orm import relationship
@@ -14,6 +15,7 @@ from ..database import Base
 
 
 class User(Base):
+    """ User model"""
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, index=True)
