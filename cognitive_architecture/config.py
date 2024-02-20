@@ -57,10 +57,12 @@ class Config:
         or os.getenv("AWS_ENV") == "dev"
         or os.getenv("AWS_ENV") == "prd"
     ):
+        logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL_PROD"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL_PROD")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
     else:
+        logging.info("graph_db_urlvvv: %s", os.getenv("GRAPH_DB_URL"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
