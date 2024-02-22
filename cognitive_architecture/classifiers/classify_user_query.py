@@ -1,18 +1,18 @@
 """ This module contains the function to classify the user query. """
-from langchain.prompts import ChatPromptTemplate
+
 import json
+
+from langchain.prompts import ChatPromptTemplate
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 from langchain.document_loaders import TextLoader
 from langchain.document_loaders import DirectoryLoader
 
 from ..config import Config
-from ..database.vectordb.loaders.loaders import _document_loader
 
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
-
 
 async def classify_user_query(query, context, document_types):
     """Classify the user query based on the context and document types."""

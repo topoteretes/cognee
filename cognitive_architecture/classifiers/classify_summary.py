@@ -1,8 +1,9 @@
 """ This module contains the function to classify a summary of a document. """
+
+import json
 import logging
 
 from langchain.prompts import ChatPromptTemplate
-import json
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 
@@ -11,11 +12,6 @@ from ..config import Config
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
-
-
-
-
-
 
 async def classify_summary(query, document_summaries):
     """Classify the documents based on the query and content."""

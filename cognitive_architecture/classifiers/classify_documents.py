@@ -1,26 +1,24 @@
 """ This module contains the classifiers for the documents. """
+
+import json
 import logging
 
 from langchain.prompts import ChatPromptTemplate
-import json
 from langchain.document_loaders import TextLoader
 from langchain.document_loaders import DirectoryLoader
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 
 from ..config import Config
-from ..database.vectordb.loaders.loaders import _document_loader
 
 config = Config()
 config.load()
 OPENAI_API_KEY = config.openai_key
 
-
-
 async def classify_documents(query: str, document_id: str, content: str):
     """Classify the documents based on the query and content."""
     document_context = content
-    logging.info("This is the document context", document_context)
+    logging.info("This is the document context %s", document_context)
 
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(

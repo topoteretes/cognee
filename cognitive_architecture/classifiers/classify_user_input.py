@@ -1,16 +1,13 @@
 """ This module contains the classifiers for the documents. """
 
+import json
 import logging
 
 from langchain.prompts import ChatPromptTemplate
-import json
-
-
 from langchain.chains import create_extraction_chain
 from langchain.chat_models import ChatOpenAI
 
 from ..config import Config
-from ..database.vectordb.loaders.loaders import _document_loader
 
 config = Config()
 config.load()
@@ -20,7 +17,7 @@ async def classify_user_input(query, input_type):
     """ Classify the user input based on the query and input type."""
     llm = ChatOpenAI(temperature=0, model=config.model)
     prompt_classify = ChatPromptTemplate.from_template(
-        """You are a  classifier. 
+        """You are a classifier. 
         Determine with a True or False if the following input: {query}, 
         is relevant for the following memory category: {input_type}"""
     )

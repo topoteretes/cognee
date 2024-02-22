@@ -17,7 +17,6 @@ COPY pyproject.toml poetry.lock /app/
 
 # Install the dependencies
 RUN poetry config virtualenvs.create false && \
-    poetry lock --no-update && \
     poetry install --no-root --no-dev
 
 RUN apt-get update -q && \
