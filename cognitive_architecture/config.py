@@ -30,8 +30,11 @@ class Config:
     db_path = Path(__file__).resolve().parent / "database/data"
 
     vectordb: str = os.getenv("VECTORDB", "weaviate")
+    qdrant_path: str = os.getenv("QDRANT_PATH")
+    qdrant_url: str = os.getenv("QDRANT_URL")
+    qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
     db_type: str = os.getenv("DB_TYPE", "sqlite")
-    db_name: str = os.getenv("DB_NAME", "cognee.db")
+    db_name: str = os.getenv("DB_NAME", "cognee.sqlite")
     db_host: str = os.getenv("DB_HOST", "localhost")
     db_port: str = os.getenv("DB_PORT", "5432")
     db_user: str = os.getenv("DB_USER", "cognee")

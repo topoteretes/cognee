@@ -163,3 +163,4 @@ cython_debug/
 #.idea/
 
 .vscode/
+database/data/

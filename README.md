@@ -67,6 +67,8 @@ Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners<
 
 ## Getting started
 
+### Run with Docker
+
 To run cognee you need to have <a href="https://docs.docker.com/get-docker" target="_blank">Docker</a> installed on your machine.
 
 Run <a href="https://www.cognee.ai" target="_blank">Cognee</a> in a couple of steps:
@@ -74,14 +76,22 @@ Run <a href="https://www.cognee.ai" target="_blank">Cognee</a> in a couple of st
 - Run `docker compose up` in order to start graph and relational databases
 - Run `docker compose up cognee` in order start Cognee
 
-<!-- Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000 -->
-
-## Debugging
+#### Debugging
 To run Cognee with debugger attached you need to build the Cognee image with the `DEBUG` flag set to true.
 
 - `docker compose build cognee --no-cache --build-arg DEBUG=true`
 - `docker compose up cognee`
 
+
+### Run without Docker
+- Run `PYTHONPATH=. python cognitive_architecture/setup_database.py` to setup database
+- Run `python -m gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=127.0.0.1:8000 --log-level debug api:app`
+
+#### Debugging
+- Run `python -m debugpy --wait-for-client --listen localhost:5678 -m gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=127.0.0.1:8000 --log-level debug api:app`
+- Attach debugger
+
+<!-- Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000 -->
 
 ## Demo
 

@@ -3,16 +3,13 @@ import asyncio
 import random
 import os
 import time
-
+import openai
 
 HOST = os.getenv("OPENAI_API_BASE")
 HOST_TYPE = os.getenv("BACKEND_TYPE")  # default None == ChatCompletion
 
-import openai
-
 if HOST is not None:
     openai.api_base = HOST
-
 
 def retry_with_exponential_backoff(
     func,
@@ -20,7 +17,7 @@ def retry_with_exponential_backoff(
     exponential_base: float = 2,
     jitter: bool = True,
     max_retries: int = 20,
-    errors: tuple = (openai.error.RateLimitError,),
+    errors: tuple = (openai.RateLimitError,),
 ):
     """Retry a function with exponential backoff."""
 
@@ -35,7 +32,7 @@ def retry_with_exponential_backoff(
                 return func(*args, **kwargs)
 
             # Retry on specified errors
-            except errors as e:
+            except errors:
                 # Increment retries
                 num_retries += 1
 
@@ -61,7 +58,7 @@ def retry_with_exponential_backoff(
 @retry_with_exponential_backoff
 def completions_with_backoff(**kwargs):
     # Local model
-    return openai.ChatCompletion.create(**kwargs)
+    return openai.chat.completions.create(**kwargs)
 
 
 def aretry_with_exponential_backoff(
@@ -70,7 +67,7 @@ def aretry_with_exponential_backoff(
     exponential_base: float = 2,
     jitter: bool = True,
     max_retries: int = 20,
-    errors: tuple = (openai.error.RateLimitError,),
+    errors: tuple = (openai.RateLimitError,),
 ):
     """Retry a function with exponential backoff."""
 
@@ -111,13 +108,19 @@ def aretry_with_exponential_backoff(
 
 @aretry_with_exponential_backoff
 async def acompletions_with_backoff(**kwargs):
-    return await openai.ChatCompletion.acreate(**kwargs)
+    return await openai.chat.completions.acreate(**kwargs)
 
 
 @aretry_with_exponential_backoff
 async def acreate_embedding_with_backoff(**kwargs):
     """Wrapper around Embedding.acreate w/ backoff"""
-    return await openai.Embedding.acreate(**kwargs)
+
+    client = openai.AsyncOpenAI(
+        # This is the default and can be omitted
+        api_key=os.environ.get("OPENAI_API_KEY"),
+    )
+
+    return await client.embeddings.create(**kwargs)
 
 
 async def async_get_embedding_with_backoff(text, model="text-embedding-ada-002"):
@@ -125,17 +128,17 @@ async def async_get_embedding_with_backoff(text, model="text-embedding-ada-002")
     It specifies defaults + handles rate-limiting + is async"""
     text = text.replace("\n", " ")
     response = await acreate_embedding_with_backoff(input=[text], model=model)
-    embedding = response["data"][0]["embedding"]
+    embedding = response.data[0].embedding
     return embedding
 
 
 @retry_with_exponential_backoff
 def create_embedding_with_backoff(**kwargs):
-    return openai.Embedding.create(**kwargs)
+    return openai.embeddings.create(**kwargs)
 
 
 def get_embedding_with_backoff(text, model="text-embedding-ada-002"):
     text = text.replace("\n", " ")
     response = create_embedding_with_backoff(input=[text], model=model)
-    embedding = response["data"][0]["embedding"]
+    embedding = response.data[0].embedding
     return embedding

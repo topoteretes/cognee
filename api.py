@@ -18,7 +18,7 @@ from cognitive_architecture.config import Config
 config = Config()
 config.load()
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -57,6 +57,54 @@ def health_check():
 class Payload(BaseModel):
     payload: Dict[str, Any]
 
+from cognitive_architecture.api.v1.memory.create_memory import MemoryType
+
+class CreateMemoryPayload(BaseModel):
+    user_id: str
+    memory_name: str
+    memory_type: MemoryType
+
+@app.post("/create-memory", response_model=dict)
+async def create_memory(payload: CreateMemoryPayload):
+    from cognitive_architecture.api.v1.memory.create_memory import create_memory as create_memory_v1, MemoryException
+
+    try:
+        await create_memory_v1(
+            payload.user_id,
+            payload.memory_name,
+            payload.memory_type or MemoryType.VECTOR,
+        )
+    except MemoryException as error:
+        return JSONResponse(
+            status_code = 409,
+            content = { "error": error.message }
+        )
+
+    return JSONResponse(
+        status_code = 200,
+        content = { "memory_name": payload.memory_name }
+    )
+
+
+class RememberPayload(BaseModel):
+    user_id: str
+    memory_name: str
+    payload: List[str]
+
+@app.post("/remember", response_model=dict)
+async def remember(payload: RememberPayload):
+    from cognitive_architecture.api.v1.memory.remember import remember as remember_v1
+    
+    await remember_v1(
+        payload.user_id,
+        payload.memory_name,
+        payload.payload
+    )
+
+    return JSONResponse(
+        status_code = 200,
+        content = { "message": "ok" }
+    )
 
 @app.post("/add-memory", response_model=dict)
 async def add_memory(
@@ -83,10 +131,10 @@ async def add_memory(
                 content = None
 
             output = await load_documents_to_vectorstore(
-                session,
-                decoded_payload["user_id"],
-                content=content,
-                loader_settings=settings_for_loader,
+                session = session,
+                content = content,
+                user_id = decoded_payload["user_id"],
+                loader_settings = settings_for_loader,
             )
             return JSONResponse(content={"response": output}, status_code=200)
 
@@ -114,10 +162,10 @@ async def add_memory(
             loader_settings = {"format": "PDF", "source": "DEVICE", "path": [".data"]}
 
             output = await load_documents_to_vectorstore(
-                session,
-                user_id=user_id,
-                content=content,
-                loader_settings=loader_settings,
+                user_id = user_id,
+                content = content,
+                session = session,
+                loader_settings = loader_settings,
             )
             return JSONResponse(content={"response": output}, status_code=200)
 
