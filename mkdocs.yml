@@ -3,7 +3,7 @@ site_author: Vasilije Markovic
 site_description: desc
 repo_name: cognee
 repo_url: https://github.com/topoteretes/cognee
-#site_url: https://github.com/topoteretes/cognee
+site_url: topoteretes.github.io/cognee
 edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2024 cognee
 theme:

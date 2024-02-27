@@ -6,7 +6,6 @@ authors = ["Vasilije Markovic"]
 readme = "README.md"
 license = "Apache-2.0"
 homepage = "https://www.cognee.ai"
-repository = "https://github.com/topoteretes/cognee "
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
