@@ -1,6 +1,6 @@
 # cognee
 
-AI Memory - Cognitive Architecture, Testability, Production-Ready Apps
+AI Memory - Cognitive Architecture
 
 <p>
   <a href="https://cognee.ai" target="_blank">
