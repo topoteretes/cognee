@@ -15,7 +15,8 @@ classifiers = [
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",]
-
+[tool.poetry.repository]
+url = "https://github.com/topoteretes/cognee"
 [tool.poetry.dependencies]
 python = "^3.10"
 langchain = "^0.0.338"
