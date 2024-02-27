@@ -68,6 +68,12 @@ pinecone = ["pinecone-client"]
 neo4j = ["neo4j", "py2neo"]
 notebook =[ "ipykernel", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.21.1"
+coverage = "^7.3.2"
+mypy = "^1.7.1"
+
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.4.3"
 mkdocs-material = {extras = ["imaging"], version = "^9.5.9"}
