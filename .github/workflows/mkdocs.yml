@@ -17,6 +17,8 @@ jobs:
 
       - name: Install Poetry
         uses: snok/install-poetry@v1.3.1
+      - name: Use output
+        run: echo "The stage is finished"
 
       - name: Setup Python
         uses: actions/setup-python@v4
