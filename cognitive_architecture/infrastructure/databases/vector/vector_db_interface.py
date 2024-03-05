@@ -67,3 +67,18 @@ class VectorDBInterface(Protocol):
     #     collection_name: str,
     #     data_point_id: str
     # ): raise NotImplementedError
+    """ Search """
+    @abstractmethod
+    async def search(
+        self,
+        collection_name: str,
+        query: object
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def batch_search(
+        self,
+        collection_name: str,
+        query: object
+    ): raise NotImplementedError
+
