@@ -166,3 +166,16 @@ class ContentPrediction(BaseModel):
 
     label: Union[TextContent, AudioContent, ImageContent, VideoContent, MultimediaContent, Model3DContent, ProceduralContent]
 
+
+class CognitiveLayerSubgroup(BaseModel):
+    """ CognitiveLayerSubgroup in a general layer """
+    id: int
+    name:str
+    description: str
+
+
+class CognitiveLayer(BaseModel):
+    """Cognitive  layer"""
+    category_name:str
+    cognitive_layers: List[CognitiveLayerSubgroup] = Field(..., default_factory=list)
+

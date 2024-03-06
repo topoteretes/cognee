@@ -13,3 +13,8 @@ async def content_to_cog_layers(text_input: str,system_prompt_path:str, response
     return await llm_client.acreate_structured_output(text_input,system_prompt_path, response_model)
 
 
+if __name__ == "__main__":
+
+    content_to_cog_layers("test", "test", ContentPrediction)
+
+
