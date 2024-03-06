@@ -180,11 +180,11 @@ class OpenAIAdapter(LLMInterface):
 
         return embeddings
 
-    async def acreate_structured_output(self, text_input: str, system_prompt_path: str, response_model: Type[BaseModel], model:str) -> BaseModel:
+    async def acreate_structured_output(self, text_input: str, system_prompt_path: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
         system_prompt = read_query_prompt(system_prompt_path)
         return self.aclient.chat.completions.create(
-            model=model,
+            model=self.model,
             messages=[
                 {
                     "role": "user",

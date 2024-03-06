@@ -161,7 +161,7 @@ class ProceduralContent(ContentType):
     type = "PROCEDURAL"
     subclass: List[ProceduralSubclass]
 
-class SinglePrediction(BaseModel):
+class ContentPrediction(BaseModel):
     """Class for a single class label prediction."""
 
     label: Union[TextContent, AudioContent, ImageContent, VideoContent, MultimediaContent, Model3DContent, ProceduralContent]
