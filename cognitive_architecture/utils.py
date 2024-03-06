@@ -4,6 +4,7 @@ import os
 import random
 import string
 import uuid
+from pathlib import Path
 
 from graphviz import Digraph
 from sqlalchemy import or_
@@ -284,3 +285,13 @@ async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
         return None
 
 
+def read_query_prompt(filename: str) -> str:
+    """Read a query prompt from a file."""
+    file_path = Path(filename)
+    try:
+        return file_path.read_text()
+    except FileNotFoundError:
+        logging.error(f"File not found: {file_path.absolute()}")
+    except Exception as e:
+        logging.error(f"An error of type {type(e).__name__} occurred while reading file: {file_path.absolute()}. Error message: {e}")
+    return None

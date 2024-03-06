@@ -1,4 +1,3 @@
-import logging
 import os
 
 from neo4j import AsyncSession
@@ -6,32 +5,23 @@ from neo4j.exceptions import Neo4jError
 
 print(os.getcwd())
 
-import networkx as nx
-
-from langchain.graphs import Neo4jGraph
 import os
 
-import openai
 import instructor
 from openai import OpenAI
-from openai import AsyncOpenAI
-import pickle
 
 from abc import ABC, abstractmethod
 
 # Adds response_model to ChatCompletion
 # Allows the return of Pydantic model rather than raw JSON
 
-from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
 from ...utils import (
     format_dict,
     append_uuid_to_variable_names,
     create_edge_variable_mapping,
     create_node_variable_mapping,
-    get_unsumarized_vector_db_namespace,
 )
-from ...llm.queries import generate_summary, generate_graph
+from cognitive_architecture.infrastructure.llm.openai.queries import generate_summary, generate_graph
 import logging
 from neo4j import AsyncGraphDatabase
 from contextlib import asynccontextmanager
@@ -45,11 +35,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 from ...config import Config
 
 from ...shared.data_models import (
-    Node,
-    Edge,
     KnowledgeGraph,
     GraphQLQuery,
-    MemorySummary,
 )
 
 config = Config()

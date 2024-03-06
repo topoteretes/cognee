@@ -3,8 +3,8 @@ import os
 import instructor
 from openai import OpenAI
 import logging
-from ..shared.data_models import  KnowledgeGraph,  MemorySummary
-from ..config import Config
+from cognitive_architecture.shared.data_models import  KnowledgeGraph,  MemorySummary
+from cognitive_architecture.config import Config
 
 
 

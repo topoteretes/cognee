@@ -158,7 +158,7 @@ def get_embedding_with_backoff(text:str, model:str="text-embedding-ada-002"):
 
 
 
-async def async_get_multiple_embeddings_with_backoff(texts: List[str], models: List[str]) :
+async def async_get_batch_embeddings_with_backoff(texts: List[str], models: List[str]) :
     """To get multiple text embeddings in parallel, import/call this function
     It specifies defaults + handles rate-limiting + is async"""
     # Create a generator of coroutines
