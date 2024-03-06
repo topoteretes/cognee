@@ -14,9 +14,26 @@ class GraphDBInterface(Protocol):
     @abstractmethod
     async def update_graph(
         self,
-        collection_name: str,
-        collection_config: object
+        graph_name: str,
+        graph_config: object
     ): raise NotImplementedError
+
+
+    """ Save and Load Graphs """
+
+    @abstractmethod
+    async def save_graph(
+        self,
+        graph_name: str
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def load_graph(
+        self,
+        graph_name: str
+    ): raise NotImplementedError
+
+    """ Collections """
 
     # @abstractmethod
     # async def delete_collection(
