@@ -1,4 +1,4 @@
-""" Content to Propositions"""
+""" This module is responsible for converting content to cognitive layers. """
 from typing import Type
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client

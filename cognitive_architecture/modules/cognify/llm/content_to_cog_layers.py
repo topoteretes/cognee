@@ -1,3 +1,4 @@
+""" This module contains the code to classify content into categories using the LLM API. """
 from typing import Type
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
