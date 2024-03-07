@@ -180,9 +180,9 @@ class OpenAIAdapter(LLMInterface):
 
         return embeddings
 
-    async def acreate_structured_output(self, text_input: str, system_prompt_path: str, response_model: Type[BaseModel]) -> BaseModel:
+    async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
-        system_prompt = read_query_prompt(system_prompt_path)
+
 
         return await self.aclient.chat.completions.create(
             model=self.model,
@@ -196,3 +196,14 @@ class OpenAIAdapter(LLMInterface):
             ],
             response_model=response_model,
         )
+
+    def show_prompt(self, text_input: str, system_prompt_path: str) -> str:
+        """Format and display the prompt for a user query."""
+        if not text_input:
+            text_input= "No user input provided."
+        if not system_prompt_path:
+            raise ValueError("No system prompt path provided.")
+        system_prompt = read_query_prompt(system_prompt_path)
+
+        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
+        return formatted_prompt

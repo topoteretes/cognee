@@ -5,7 +5,7 @@ import random
 import string
 import uuid
 from pathlib import Path
-
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from graphviz import Digraph
 from sqlalchemy import or_
 from sqlalchemy.orm import contains_eager
@@ -285,8 +285,11 @@ async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
         return None
 
 
-def read_query_prompt(filename: str) -> str:
-    """Read a query prompt from a file."""
+async def read_query_prompt(filename: str) -> str:
+    """Read a query prompt from a file.
+    :param filename: The name of the file to read.
+    :return: The content of the file as a string.
+    """
     script_directory = Path(__file__).parent
 
     # Set the base directory relative to the script's directory
@@ -301,3 +304,46 @@ def read_query_prompt(filename: str) -> str:
     except Exception as e:
         logging.error(f"An error of type {type(e).__name__} occurred while reading file: {file_path.absolute()}. Error message: {e}")
     return None
+
+
+
+async def print_file_content(file_path):
+    # Create a Path object for the file path
+    path = Path(file_path)
+
+    # Check if the file exists
+    if path.is_file():
+        # Open and read the file, then print its content
+        with path.open('r') as file:
+            print(file.read())
+    else:
+        # Print an error message if the file does not exist
+        print(f"The file '{file_path}' does not exist.")
+
+async def async_render_template(filename: str,  context: dict) -> str:
+    """Render a Jinja2 template asynchronously.
+    :param filename: The name of the template file to render.
+    :param context: The context to render the template with.
+    :return: The rendered template as a string."""
+    # Initialize the Jinja2 environment to load templates from the filesystem
+    script_directory = Path(__file__).parent
+
+    # Set the base directory relative to the script's directory
+    base_directory = script_directory.parent / "cognitive_architecture/infrastructure/llm/prompts"
+
+
+    # Construct the full file path
+    file_path = base_directory / filename
+
+    env = Environment(
+        loader=FileSystemLoader(base_directory),
+        autoescape=select_autoescape(['html', 'xml', 'txt'])
+    )
+
+    # Load the template by name
+    template = env.get_template(filename)
+
+    # Render the template with the provided context
+    rendered_template = template.render(context)
+
+    return rendered_template
