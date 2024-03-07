@@ -157,7 +157,7 @@ class OpenAIAdapter(LLMInterface):
         """Wrapper around Embedding.create w/ backoff"""
         return openai.embeddings.create(**kwargs)
 
-    def get_embedding_with_backoffself(self, text: str, model: str = "text-embedding-ada-002"):
+    def get_embedding_with_backoff(self, text: str, model: str = "text-embedding-ada-002"):
         """To get text embeddings, import/call this function
         It specifies defaults + handles rate-limiting
         :param text: str
@@ -183,7 +183,8 @@ class OpenAIAdapter(LLMInterface):
     async def acreate_structured_output(self, text_input: str, system_prompt_path: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
         system_prompt = read_query_prompt(system_prompt_path)
-        return self.aclient.chat.completions.create(
+
+        return await self.aclient.chat.completions.create(
             model=self.model,
             messages=[
                 {

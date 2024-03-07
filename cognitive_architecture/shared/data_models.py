@@ -134,31 +134,31 @@ class ContentType(BaseModel):
     type: str
 
 class TextContent(ContentType):
-    type = "TEXT"
+    type:str = "TEXT"
     subclass: List[TextSubclass]
 
 class AudioContent(ContentType):
-    type = "AUDIO"
+    type:str = "AUDIO"
     subclass: List[AudioSubclass]
 
 class ImageContent(ContentType):
-    type = "IMAGE"
+    type:str = "IMAGE"
     subclass: List[ImageSubclass]
 
 class VideoContent(ContentType):
-    type = "VIDEO"
+    type:str = "VIDEO"
     subclass: List[VideoSubclass]
 
 class MultimediaContent(ContentType):
-    type = "MULTIMEDIA"
+    type:str = "MULTIMEDIA"
     subclass: List[MultimediaSubclass]
 
 class Model3DContent(ContentType):
-    type = "3D_MODEL"
+    type:str = "3D_MODEL"
     subclass: List[Model3DSubclass]
 
 class ProceduralContent(ContentType):
-    type = "PROCEDURAL"
+    type:str = "PROCEDURAL"
     subclass: List[ProceduralSubclass]
 
 class ContentPrediction(BaseModel):

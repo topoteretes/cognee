@@ -287,7 +287,13 @@ async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
 
 def read_query_prompt(filename: str) -> str:
     """Read a query prompt from a file."""
-    file_path = Path(filename)
+    script_directory = Path(__file__).parent
+
+    # Set the base directory relative to the script's directory
+    base_directory = script_directory.parent / "cognitive_architecture/infrastructure/llm/prompts"
+
+    # Construct the full file path
+    file_path = base_directory / filename
     try:
         return file_path.read_text()
     except FileNotFoundError:

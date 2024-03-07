@@ -2411,6 +2411,17 @@ typing-extensions = ">=4.7,<5"
 datalib = ["numpy (>=1)", "pandas (>=1.2.3)", "pandas-stubs (>=1.1.0.11)"]
 
 [[package]]
+name = "overrides"
+version = "7.7.0"
+description = "A decorator to automatically detect mismatch when overriding a method."
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "overrides-7.7.0-py3-none-any.whl", hash = "sha256:c7ed9d062f78b8e4c1a7b70bd8796b35ead4d9f510227ef9c5dc7626c60d7e49"},
+    {file = "overrides-7.7.0.tar.gz", hash = "sha256:55158fa3d93b98cc75299b1e67078ad9003ca27945c76162c1c0766d6f91820a"},
+]
+
+[[package]]
 name = "packaging"
 version = "23.2"
 description = "Core utilities for Python packages"
@@ -4234,4 +4245,4 @@ weaviate = []
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "3d583c04bdb28b91b12a9544ddca78e322abb21e980e32c3070ff7d0ac82acc6"
+content-hash = "39962c40053f064940d94532130d182d5a0a0526c915c39a0c48f98f21321630"

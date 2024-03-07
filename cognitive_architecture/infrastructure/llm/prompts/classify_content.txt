@@ -1,3 +1,5 @@
+You are a classification engine and should classify content. Make sure to use one of the existing classification options nad not invent your own.
+The possible classifications are:
 {
     "Natural Language Text": {
         "type": "TEXT",

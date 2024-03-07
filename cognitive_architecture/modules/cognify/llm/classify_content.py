@@ -13,8 +13,14 @@ async def content_to_cog_layers(text_input: str,system_prompt_path:str, response
     return await llm_client.acreate_structured_output(text_input,system_prompt_path, response_model)
 
 
+
+
+# Your async function definitions and other code here...
+
 if __name__ == "__main__":
+    import asyncio
+    asyncio.run(content_to_cog_layers("""Russia summons US ambassador in Moscow and says it will expel diplomats who meddle in its internal affairs
+The Russian foreign ministry said on Thursday it had summoned the US ambassador in Moscow and warned her against “attempts to interfere in the internal affairs of the Russian Federation”, reports Reuters.
 
-    content_to_cog_layers("test", "test", ContentPrediction)
-
+Ahead of a March presidential election, it said in a statement that such behaviour would be “firmly and resolutely suppressed, up to and including the expulsion as ‘persona non grata’ of US embassy staff involved in such actions”.""", "classify_content.txt", ContentPrediction))
 
