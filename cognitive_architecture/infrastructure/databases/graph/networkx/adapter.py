@@ -5,7 +5,7 @@ import networkx as nx
 from cognitive_architecture.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 import logging
 
-class NetworXDB(GraphDBInterface):
+class NetworXAdapter(GraphDBInterface):
     def __init__(self, filename="cognee_graph.pkl"):
         self.filename = filename
         self.graph = nx.MultiDiGraph()
