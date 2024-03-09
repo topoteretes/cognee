@@ -1,4 +1,5 @@
 """ This module is responsible for converting content to cognitive layers. """
+import json
 from typing import Type
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
@@ -10,7 +11,13 @@ async def generate_graph(text_input:str, filename: str,context, response_model: 
     llm_client = get_llm_client()
 
     formatted_text_input = await async_render_template(filename, context)
-    return await llm_client.acreate_structured_output(text_input,formatted_text_input, response_model)
+    output = await llm_client.acreate_structured_output(text_input, formatted_text_input, response_model)
+
+
+    context_key = json.dumps(context, sort_keys=True)
+
+    # Returning a dictionary with context as the key and the awaited output as its value
+    return {context_key: output}
 
 
 if __name__ == "__main__":

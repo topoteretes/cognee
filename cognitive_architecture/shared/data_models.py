@@ -1,6 +1,6 @@
 """Data models for the cognitive architecture."""
-from enum import Enum
-from typing import Optional, List, Union
+from enum import Enum, auto
+from typing import Optional, List, Union, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -161,7 +161,7 @@ class ProceduralContent(ContentType):
     type:str = "PROCEDURAL"
     subclass: List[ProceduralSubclass]
 
-class ContentPrediction(BaseModel):
+class DefaultContentPrediction(BaseModel):
     """Class for a single class label prediction."""
 
     label: Union[TextContent, AudioContent, ImageContent, VideoContent, MultimediaContent, Model3DContent, ProceduralContent]
@@ -174,8 +174,53 @@ class CognitiveLayerSubgroup(BaseModel):
     description: str
 
 
-class CognitiveLayer(BaseModel):
+class DefaultCognitiveLayer(BaseModel):
     """Cognitive  layer"""
     category_name:str
     cognitive_layers: List[CognitiveLayerSubgroup] = Field(..., default_factory=list)
+
+
+class GraphDBType(Enum):
+    NETWORKX = auto()
+    NEO4J = auto()
+
+
+# Models for representing different entities
+class Relationship(BaseModel):
+    type: str
+    properties: Optional[Dict[str, Any]] = None
+
+class DocumentType(BaseModel):
+    type_id: str
+    description: str
+    default_relationship: Relationship = Relationship(type='is_type')
+
+class Category(BaseModel):
+    category_id: str
+    name: str
+    default_relationship: Relationship = Relationship(type='categorized_as')
+
+class Document(BaseModel):
+    doc_id: str
+    title: str
+    summary: Optional[str] = None
+    content_id: Optional[str] = None
+    doc_type: Optional[DocumentType] = None
+    categories: List[Category] = []
+    default_relationship: Relationship = Relationship(type='has_document')
+
+class UserLocation(BaseModel):
+    location_id: str
+    description: str
+    default_relationship: Relationship = Relationship(type='located_in')
+
+class UserProperties(BaseModel):
+    custom_properties: Optional[Dict[str, Any]] = None
+    location: Optional[UserLocation] = None
+
+class DefaultGraphModel(BaseModel):
+    id: str
+    user_properties: UserProperties = UserProperties()
+    documents: List[Document] = []
+    default_fields: Optional[Dict[str, Any]] = {}
 

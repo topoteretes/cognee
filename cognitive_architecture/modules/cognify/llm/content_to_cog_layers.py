@@ -2,7 +2,7 @@
 from typing import Type
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
-from cognitive_architecture.shared.data_models import CognitiveLayer
+from cognitive_architecture.shared.data_models import DefaultCognitiveLayer
 from cognitive_architecture.utils import async_render_template
 
 async def content_to_cog_layers(filename: str,context, response_model: Type[BaseModel]):
