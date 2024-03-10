@@ -48,6 +48,9 @@ class Config:
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
 
+    graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
+    graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
+
     # Embedding parameters
     embedding_model: str = "openai"
     embedding_dim: int = 1536

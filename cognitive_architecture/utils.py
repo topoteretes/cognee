@@ -4,6 +4,7 @@ import os
 import random
 import string
 import uuid
+import graphistry
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from graphviz import Digraph
@@ -23,6 +24,12 @@ from cognitive_architecture.database.relationaldb.database_crud import (
     update_entity,
     fetch_job_id,
 )
+
+from cognitive_architecture.config import Config
+
+config = Config()
+config.load()
+
 
 class Node:
     def __init__(self, id, description, color):
@@ -347,3 +354,40 @@ async def async_render_template(filename: str,  context: dict) -> str:
     rendered_template = template.render(context)
 
     return rendered_template
+
+
+async def render_graph(graph, graph_type):
+
+    # Authenticate with your Graphistry API key
+
+    import networkx as nx
+    import pandas as pd
+    graphistry.register(api=3, username=config.graphistry_username, password=config.graphistry_password)
+    # Convert the NetworkX graph to a Pandas DataFrame representing the edge list
+    edges = nx.to_pandas_edgelist(graph)
+    # Visualize the graph using Graphistry
+    plotter = graphistry.edges(edges, 'source', 'target')
+    # Visualize the graph (this will open a URL in your default web browser)
+    url = plotter.plot(render=False, as_files=True)
+    print(f"Graph is visualized at: {url}")
+
+
+# import networkx as nx
+# # Create a simple NetworkX graph
+# G = nx.Graph()
+#
+# # Add nodes
+# G.add_node(1)
+# G.add_node(2)
+#
+# # Add an edge between nodes
+# G.add_edge(1, 2)
+#
+# import asyncio
+#
+# # Define the graph type (for this example, it's just a placeholder as the function doesn't use it yet)
+# graph_type = "simple"
+#
+# # Call the render_graph function
+# asyncio.run(render_graph(G, graph_type))
+
