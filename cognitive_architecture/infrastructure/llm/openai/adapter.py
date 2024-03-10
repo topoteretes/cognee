@@ -134,21 +134,24 @@ class OpenAIAdapter(LLMInterface):
         return await openai.chat.completions.acreate(**kwargs)
 
     @aretry_with_exponential_backoff
-    async def acreate_embedding_with_backoff(self,**kwargs):
+    async def acreate_embedding_with_backoff(self, input: List[str], model: str = "text-embedding-ada-002"):
         """Wrapper around Embedding.acreate w/ backoff"""
 
-        client = openai.AsyncOpenAI(
-            # This is the default and can be omitted
-            api_key=os.environ.get("OPENAI_API_KEY"),
-        )
+        # client = openai.AsyncOpenAI(
+        #     # This is the default and can be omitted
+        #     api_key=os.environ.get("OPENAI_API_KEY"),
+        # )
 
-        return await client.embeddings.create(**kwargs)
+        return await self.aclient.embeddings.create(input=input, model=model)
 
     async def async_get_embedding_with_backoff(self, text, model="text-embedding-ada-002"):
         """To get text embeddings, import/call this function
         It specifies defaults + handles rate-limiting + is async"""
         text = text.replace("\n", " ")
-        response = await self.acreate_embedding_with_backoff(input=[text], model=model)
+        print(text)
+        print(model)
+        response = await self.aclient.embeddings.create(input =text, model= model)
+        # response = await self.acreate_embedding_with_backoff(input=text, model=model)
         embedding = response.data[0].embedding
         return embedding
 
@@ -172,7 +175,7 @@ class OpenAIAdapter(LLMInterface):
         """To get multiple text embeddings in parallel, import/call this function
         It specifies defaults + handles rate-limiting + is async"""
         # Create a generator of coroutines
-        coroutines = (self.async_get_embedding_with_backoff(text, model)
+        coroutines = (await self.async_get_embedding_with_backoff(text, model)
                       for text, model in zip(texts, models))
 
         # Run the coroutines in parallel and gather the results

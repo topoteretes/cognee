@@ -1,5 +1,6 @@
 """ Here we update semantic graph with content that classifier produced"""
 import uuid
+import json
 from datetime import datetime
 from enum import Enum, auto
 from typing import Type, Optional, Any
@@ -64,7 +65,35 @@ async def add_propositions(G, category_name, subclass_content, layer_description
 
     return G
 
+async def append_to_graph(layer_graphs, required_layers, G):
+    # Generate a UUID for the overall layer
+    layer_uuid = uuid.uuid4()
 
+    # Extract category name from required_layers data
+    category_name = required_layers.dict()['label']['type']
+
+    # Extract subgroup name from required_layers data
+    # Assuming there's always at least one subclass and we're taking the first
+    subgroup_name = required_layers.dict()['label']['subclass'][0].value  # Access the value of the enum
+
+    for layer_ind in layer_graphs:
+
+        for layer_json, knowledge_graph in layer_ind.items():
+            # Decode the JSON key to get the layer description
+            layer_description = json.loads(layer_json)
+
+            # Generate a UUID for this particular layer decomposition
+            layer_decomposition_uuid = uuid.uuid4()
+
+            # Assuming append_data_to_graph is defined elsewhere and appends data to G
+            # You would pass relevant information from knowledge_graph along with other details to this function
+            F = await add_propositions(G, category_name, subgroup_name, layer_description, knowledge_graph,
+                                     layer_uuid, layer_decomposition_uuid)
+
+            # Print updated graph for verification (assuming F is the updated NetworkX Graph)
+            print("Updated Nodes:", F.graph.nodes(data=True))
+
+    return F
 
 
 if __name__ == "__main__":
@@ -113,39 +142,6 @@ if __name__ == "__main__":
     )
     # Run the async function for each set of cognitive layers
     level_1_graph = asyncio.run( async_graph_per_layer(input_article_one, cognitive_layers_one))
-    import uuid
-    import json
-
-
-    async def append_to_graph(layer_graphs, required_layers, G):
-        # Generate a UUID for the overall layer
-        layer_uuid = uuid.uuid4()
-
-        # Extract category name from required_layers data
-        category_name = required_layers.dict()['label']['type']
-
-        # Extract subgroup name from required_layers data
-        # Assuming there's always at least one subclass and we're taking the first
-        subgroup_name = required_layers.dict()['label']['subclass'][0].value  # Access the value of the enum
-
-        for layer_ind in layer_graphs:
-
-            for layer_json, knowledge_graph in layer_ind.items():
-                # Decode the JSON key to get the layer description
-                layer_description = json.loads(layer_json)
-
-                # Generate a UUID for this particular layer decomposition
-                layer_decomposition_uuid = uuid.uuid4()
-
-                # Assuming append_data_to_graph is defined elsewhere and appends data to G
-                # You would pass relevant information from knowledge_graph along with other details to this function
-                F = await add_propositions(G, category_name, subgroup_name, layer_description, knowledge_graph,
-                                         layer_uuid, layer_decomposition_uuid)
-
-                # Print updated graph for verification (assuming F is the updated NetworkX Graph)
-                print("Updated Nodes:", F.graph.nodes(data=True))
-
-        return F
 
     G = asyncio.run(append_to_graph(level_1_graph, required_layers_one, graph_client))
 

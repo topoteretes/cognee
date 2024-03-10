@@ -1,7 +1,7 @@
 """ This module is responsible for creating a semantic graph """
 from datetime import datetime
 from enum import Enum, auto
-from typing import Type, Optional, Any
+from typing import  Optional, Any
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognitive_architecture.shared.data_models import GraphDBType, DefaultGraphModel, Document, DocumentType, Category, Relationship, UserProperties, UserLocation

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 
 from langchain.prompts import ChatPromptTemplate
 import json
@@ -11,6 +12,11 @@ import re
 
 from dotenv import load_dotenv
 import os
+
+from cognitive_architecture.infrastructure.databases.vector.qdrant.adapter import CollectionConfig
+from cognitive_architecture.modules.cognify.graph.add_classification_nodes import add_classification_nodes
+from cognitive_architecture.modules.cognify.graph.add_propositions import append_to_graph
+from cognitive_architecture.modules.cognify.vector.load_propositions import add_propositions
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,47 +33,22 @@ from cognitive_architecture.modules.cognify.llm.classify_content import classify
 from cognitive_architecture.modules.cognify.llm.content_to_cog_layers import content_to_cog_layers
 from cognitive_architecture.modules.cognify.llm.content_to_propositions import generate_graph
 from cognitive_architecture.shared.data_models import DefaultContentPrediction,  KnowledgeGraph, DefaultCognitiveLayer
+from cognitive_architecture.modules.cognify.graph.create import create_semantic_graph
+from typing import  Optional, Any
+from pydantic import BaseModel
+from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognitive_architecture.shared.data_models import GraphDBType, DefaultGraphModel, Document, DocumentType, Category, Relationship, UserProperties, UserLocation
+from qdrant_client import models
+from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
 
 
-
-async def cognify():
+async def cognify(input_text:str):
     """This function is responsible for the cognitive processing of the content."""
     # Load the content from the text file
 
-
+    input_article_one= input_text
     # Classify the content into categories
-    input_article_one = """ In the nicest possible way, Britons have always been a bit silly about animals. “Keeping pets, for the English, is not so much a leisure activity as it is an entire way of life,” wrote the anthropologist Kate Fox in Watching the English, nearly 20 years ago. Our dogs, in particular, have been an acceptable outlet for emotions and impulses we otherwise keep strictly controlled – our latent desire to be demonstratively affectionate, to be silly and chat to strangers. If this seems like an exaggeration, consider the different reactions you’d get if you struck up a conversation with someone in a park with a dog, versus someone on the train.
 
-    Indeed, British society has been set up to accommodate these four-legged ambassadors. In the UK – unlike Australia, say, or New Zealand – dogs are not just permitted on public transport but often openly encouraged. Many pubs and shops display waggish signs, reading, “Dogs welcome, people tolerated”, and have treat jars on their counters. The other day, as I was waiting outside a cafe with a friend’s dog, the barista urged me to bring her inside.
-
-    For years, Britons’ non-partisan passion for animals has been consistent amid dwindling common ground. But lately, rather than bringing out the best in us, our relationship with dogs is increasingly revealing us at our worst – and our supposed “best friends” are paying the price.
-
-    As with so many latent traits in the national psyche, it all came unleashed with the pandemic, when many people thought they might as well make the most of all that time at home and in local parks with a dog. Between 2019 and 2022, the number of pet dogs in the UK rose from about nine million to 13 million. But there’s long been a seasonal surge around this time of year, substantial enough for the Dogs Trust charity to coin its famous slogan back in 1978: “A dog is for life, not just for Christmas.”
-
-    Green spaces, meanwhile, have been steadily declining, and now many of us have returned to the office, just as those “pandemic dogs” are entering their troublesome teens. It’s a combustible combination and we are already seeing the results: the number of dog attacks recorded by police in England and Wales rose by more than a third between 2018 and 2022.
-
-    At the same time, sites such as Pets4Homes.co.uk are replete with listings for dogs that, their owners accept “with deep regret”, are no longer suited to their lifestyles now that lockdown is over. It may have felt as if it would go on for ever, but was there ever any suggestion it was going to last the average dog’s lifespan of a decade?
-
-    Living beings are being downgraded to mere commodities. You can see it reflected the “designer” breeds currently in fashion, the French bulldogs and pugs that look cute but spend their entire lives in discomfort. American XL bully dogs, now so controversial, are often sought after as a signifier of masculinity: roping an entire other life in service of our egos. Historically, many of Britain’s most popular breeds evolved to hunt vermin, retrieve game, herd, or otherwise do a specific job alongside humans; these days we are breeding and buying them for their aesthetic appeal.
-
-    Underpinning this is a shift to what was long disdained as the “American” approach: treating pets as substitutes for children. In the past in Britain, dogs were treasured on their own terms, for the qualities that made them dogs, and as such, sometimes better than people: their friendliness and trustingness and how they opened up the world for us. They were indulged, certainly – by allowing them on to the sofa or in our beds, for instance, when we’d sworn we never would – but in ways that did not negate or deny their essential otherness.
-
-    Now we have more dogs of such ludicrous proportions, they struggle to function as dogs at all – and we treat them accordingly, indulging them as we would ourselves: by buying unnecessary things. The total spend on pets in the UK has more than doubled in the past decade, reaching nearly £10bn last year. That huge rise has not just come from essentials: figures from the marketing agency Mintel suggest that one in five UK owners like their pet to “keep up with the latest trends” in grooming or, heaven forbid, outfits.
-
-    These days pet “boutiques” – like the one that recently opened on my street in Norwich, selling “cold-pressed” dog treats, “paw and nose balms” and spa services – are a widespread sign of gentrification. But it’s not just wealthier areas: this summer in Great Yarmouth, one of the most deprived towns in the country, I noticed seaside stalls selling not one but two brands of ice-cream for dogs.
-
-    It suggests dog-lovers have become untethered from their companions’ desires, let alone their needs. Let’s be honest: most dogs would be thrilled to bits to be eating a paper bag, or even their own faeces. And although they are certainly delighted by ice-cream, they don’t need it. But the ways we ourselves find solace – in consumption, by indulging our simian “treat brain” with things that we don’t need and/or aren’t good for us – we have simply extended to our pets.
-
-    It’s hard not to see the rise in dog-friendly restaurants, cinema screenings and even churches as similar to the ludicrous expenditure: a way to placate the two-legged being on the end of the lead (regardless of the experience of others in the vicinity).
-
-    Meanwhile, many dogs suffer daily deprivation, their worlds made small and monotonous by our busy modern schedules. These are social animals: it’s not natural for them to live without other dogs, let alone in an empty house for eight hours a day, Monday to Friday. If we are besieged by badly behaved dogs, the cause isn’t hard to pinpoint. Many behavioural problems can be alleviated and even addressed by sufficient exercise, supervision and consistent routines, but instead of organising our lives so that our pets may thrive, we show our love with a Halloween-themed cookie, or a new outfit for Instagram likes.
-
-    It’s easy to forget that we are sharing our homes with a descendant of the wolf when it is dressed in sheep’s clothing; but the more we learn about animals, the clearer it becomes that our treatment of them, simultaneously adoring and alienated, means they are leading strange, unsatisfying simulacra of the lives they ought to lead.
-
-    But for as long as we choose to share our lives with pets, the bar should be the same as for any relationship we value: being prepared to make sacrifices for their wellbeing, prioritising quality time and care, and loving them as they are – not for how they reflect on us, or how we’d like them to be.
-
-
-    """
     required_layers_one = await classify_into_categories(input_article_one, "classify_content.txt",
                                                          DefaultContentPrediction)
 
@@ -113,3 +94,96 @@ async def cognify():
 
     # Run the async function for each set of cognitive layers
     layer_1_graph = await async_graph_per_layer(input_article_one, cognitive_layers_one)
+    print(layer_1_graph)
+
+
+
+    graph_client = get_graph_client(GraphDBType.NETWORKX)
+
+    # Define a GraphModel instance with example data
+    graph_model_instance = DefaultGraphModel(
+        id="user123",
+        documents=[
+            Document(
+                doc_id="doc1",
+                title="Document 1",
+                summary="Summary of Document 1",
+                content_id="content_id_for_doc1",
+                doc_type=DocumentType(type_id="PDF", description="Portable Document Format"),
+                categories=[
+                    Category(category_id="finance", name="Finance",
+                             default_relationship=Relationship(type="belongs_to")),
+                    Category(category_id="tech", name="Technology",
+                             default_relationship=Relationship(type="belongs_to"))
+                ],
+                default_relationship=Relationship(type='has_document')
+            ),
+            Document(
+                doc_id="doc2",
+                title="Document 2",
+                summary="Summary of Document 2",
+                content_id="content_id_for_doc2",
+                doc_type=DocumentType(type_id="TXT", description="Text File"),
+                categories=[
+                    Category(category_id="health", name="Health", default_relationship=Relationship(type="belongs_to")),
+                    Category(category_id="wellness", name="Wellness",
+                             default_relationship=Relationship(type="belongs_to"))
+                ],
+                default_relationship=Relationship(type='has_document')
+            )
+        ],
+        user_properties=UserProperties(
+            custom_properties={"age": "30"},
+            location=UserLocation(location_id="ny", description="New York",
+                                  default_relationship=Relationship(type='located_in'))
+        ),
+        default_fields={
+            'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'updated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    )
+    G = await create_semantic_graph(graph_model_instance, graph_client)
+
+    await add_classification_nodes(graph_client, 'Document:doc1', transformed_dict_1)
+
+    await append_to_graph(layer_1_graph, required_layers_one, graph_client)
+
+    def extract_node_descriptions(data):
+        descriptions = []
+        for node_id, attributes in data:
+            if 'description' in attributes and 'id' in attributes:
+                descriptions.append({'node_id': attributes['id'], 'description': attributes['description'],
+                                     'layer_uuid': attributes['layer_uuid'],
+                                     'layer_decomposition_uuid': attributes['layer_decomposition_uuid']})
+        return descriptions
+
+    # Extract the node descriptions
+    graph = await graph_client.graph()
+    node_descriptions = extract_node_descriptions(graph.nodes(data=True))
+    unique_layer_uuids = set(node['layer_decomposition_uuid'] for node in node_descriptions)
+
+    db = get_vector_database()
+
+
+    collection_config = CollectionConfig(
+        vector_config={
+            'content': models.VectorParams(
+                distance=models.Distance.COSINE,
+                size=3072
+            )
+        },
+        # Set other configs as needed
+    )
+
+    for layer in unique_layer_uuids:
+        await db.create_collection(layer,collection_config)
+
+    #to check if it works
+
+    await add_propositions(node_descriptions, db)
+
+
+
+
+if __name__ == "__main__":
+    asyncio.run(cognify("The quick brown fox jumps over the lazy dog"))
