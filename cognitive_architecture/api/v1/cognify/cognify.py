@@ -14,8 +14,13 @@ from dotenv import load_dotenv
 import os
 
 from cognitive_architecture.infrastructure.databases.vector.qdrant.adapter import CollectionConfig
+from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
 from cognitive_architecture.modules.cognify.graph.add_classification_nodes import add_classification_nodes
+from cognitive_architecture.modules.cognify.graph.add_node_connections import add_node_connection, graph_ready_output, \
+    connect_nodes_in_graph
 from cognitive_architecture.modules.cognify.graph.add_propositions import append_to_graph
+from cognitive_architecture.modules.cognify.llm.add_node_connection_embeddings import process_items
+from cognitive_architecture.modules.cognify.vector.batch_search import adapted_qdrant_batch_search
 from cognitive_architecture.modules.cognify.vector.load_propositions import add_propositions
 
 # Load environment variables from .env file
@@ -146,7 +151,7 @@ async def cognify(input_text:str):
 
     await add_classification_nodes(graph_client, 'Document:doc1', transformed_dict_1)
 
-    await append_to_graph(layer_1_graph, required_layers_one, graph_client)
+    F, unique_layer_uuids = await append_to_graph(layer_1_graph, required_layers_one, graph_client)
 
     def extract_node_descriptions(data):
         descriptions = []
@@ -158,10 +163,10 @@ async def cognify(input_text:str):
         return descriptions
 
     # Extract the node descriptions
-    graph = await graph_client.graph()
+    graph = graph_client.graph
     node_descriptions = extract_node_descriptions(graph.nodes(data=True))
-    unique_layer_uuids = set(node['layer_decomposition_uuid'] for node in node_descriptions)
-
+    # unique_layer_uuids = set(node['layer_decomposition_uuid'] for node in node_descriptions)
+    #
     db = get_vector_database()
 
 
@@ -178,9 +183,42 @@ async def cognify(input_text:str):
     for layer in unique_layer_uuids:
         await db.create_collection(layer,collection_config)
 
-    #to check if it works
-
+    # #to check if it works
+    #
     await add_propositions(node_descriptions, db)
+
+    from cognitive_architecture.infrastructure.databases.vector.qdrant.adapter import AsyncQdrantClient
+
+    grouped_data = await add_node_connection(graph_client, db, node_descriptions)
+
+    llm_client = get_llm_client()
+
+    relationship_dict = await process_items(grouped_data, unique_layer_uuids, llm_client)
+
+    results = await adapted_qdrant_batch_search(relationship_dict, db)
+    relationship_d = graph_ready_output(results)
+
+    CONNECTED_GRAPH = connect_nodes_in_graph(F, relationship_d)
+    return CONNECTED_GRAPH
+
+    #
+    # grouped_data = {}
+    #
+    # # Iterate through each dictionary in the list
+    # for item in node_descriptions:
+    #     # Get the layer_decomposition_uuid of the current dictionary
+    #     uuid = item['layer_decomposition_uuid']
+    #
+    #     # Check if this uuid is already a key in the grouped_data dictionary
+    #     if uuid not in grouped_data:
+    #         # If not, initialize a new list for this uuid
+    #         grouped_data[uuid] = []
+    #
+    #     # Append the current dictionary to the list corresponding to its uuid
+    #     grouped_data[uuid].append(item)
+
+
+
 
 
 

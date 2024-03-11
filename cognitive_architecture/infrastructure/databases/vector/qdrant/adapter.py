@@ -52,7 +52,7 @@ class QDrantAdapter(VectorDBInterface):
             quantization_config = collection_config.quantization_config
         )
 
-    async def create_data_points(self, collection_name: str, data_points: List[any]):
+    async def create_data_points(self, collection_name: str, data_points):
         client = self.get_qdrant_client()
 
         return await client.upload_points(
@@ -96,11 +96,11 @@ class QDrantAdapter(VectorDBInterface):
                 # vector= embedding,
                 limit=3,
                 with_vector=False
-            ) for embedding in embeddings
+            ) for embedding in [embeddings]
         ]
 
         # Perform batch search with the dynamically generated requests
-        results = client.search_batch(
+        results = await client.search_batch(
             collection_name=collection_name,
             requests=requests
         )

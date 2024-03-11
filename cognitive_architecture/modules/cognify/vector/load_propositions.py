@@ -28,6 +28,7 @@ async def upload_embedding(id, metadata, some_embeddings, collection_name, clien
 async def add_propositions(node_descriptions, client):
     for item in node_descriptions:
         print(item['node_id'])
-        await upload_embedding(id = item['node_id'], metadata = {"meta":item['description']}, some_embeddings = get_embeddings(item['description']), collection_name= item['layer_decomposition_uuid'],client= client)
+        embeddings = await get_embeddings(item['description'])
+        await upload_embedding(id = item['node_id'], metadata = {"meta":item['description']}, some_embeddings = embeddings[0], collection_name= item['layer_decomposition_uuid'],client= client)
 
 

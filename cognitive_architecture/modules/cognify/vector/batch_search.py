@@ -1,7 +1,7 @@
 
 from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
 
-async def adapted_qdrant_batch_search(results_to_check, client):
+async def adapted_qdrant_batch_search(results_to_check,vector_client):
     search_results_list = []
 
     for result in results_to_check:
@@ -15,9 +15,10 @@ async def adapted_qdrant_batch_search(results_to_check, client):
         limits = [3] * len(embedding)  # Set a limit of 3 results for this embedding
 
         try:
-            # Perform the batch search for this id with its embedding
-            # Assuming qdrant_batch_search function accepts a single embedding and a list of limits
-            id_search_results = await client.batch_search(id, [embedding], limits)
+            #Perform the batch search for this id with its embedding
+            #Assuming qdrant_batch_search function accepts a single embedding and a list of limits
+            #qdrant_batch_search
+            id_search_results = await vector_client.batch_search(collection_name = id, embeddings= embedding, with_vectors=limits)
             search_results_list.append((id, id_search_results, node_id, target))
         except Exception as e:
             print(f"Error during batch search for ID {id}: {e}")
@@ -26,4 +27,6 @@ async def adapted_qdrant_batch_search(results_to_check, client):
     return search_results_list
 
 
-client = get_vector_database()
+if __name__ == '__main__':
+
+    client = get_vector_database()

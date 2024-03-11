@@ -68,7 +68,7 @@ async def add_propositions(G, category_name, subclass_content, layer_description
 async def append_to_graph(layer_graphs, required_layers, G):
     # Generate a UUID for the overall layer
     layer_uuid = uuid.uuid4()
-
+    decomposition_uuids = set()
     # Extract category name from required_layers data
     category_name = required_layers.dict()['label']['type']
 
@@ -84,7 +84,7 @@ async def append_to_graph(layer_graphs, required_layers, G):
 
             # Generate a UUID for this particular layer decomposition
             layer_decomposition_uuid = uuid.uuid4()
-
+            decomposition_uuids.add(layer_decomposition_uuid)
             # Assuming append_data_to_graph is defined elsewhere and appends data to G
             # You would pass relevant information from knowledge_graph along with other details to this function
             F = await add_propositions(G, category_name, subgroup_name, layer_description, knowledge_graph,
@@ -93,7 +93,7 @@ async def append_to_graph(layer_graphs, required_layers, G):
             # Print updated graph for verification (assuming F is the updated NetworkX Graph)
             print("Updated Nodes:", F.graph.nodes(data=True))
 
-    return F
+    return F, decomposition_uuids
 
 
 if __name__ == "__main__":

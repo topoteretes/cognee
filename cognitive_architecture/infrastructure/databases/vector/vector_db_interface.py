@@ -43,7 +43,7 @@ class VectorDBInterface(Protocol):
     async def create_data_points(
         self,
         collection_name: str,
-        data_points: List[any]
+        data_points
     ): raise NotImplementedError
 
     # @abstractmethod
