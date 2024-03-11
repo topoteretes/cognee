@@ -17,7 +17,7 @@ from cognitive_architecture.infrastructure.databases.vector.qdrant.adapter impor
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
 from cognitive_architecture.modules.cognify.graph.add_classification_nodes import add_classification_nodes
 from cognitive_architecture.modules.cognify.graph.add_node_connections import add_node_connection, graph_ready_output, \
-    connect_nodes_in_graph
+    connect_nodes_in_graph, extract_node_descriptions
 from cognitive_architecture.modules.cognify.graph.add_propositions import append_to_graph
 from cognitive_architecture.modules.cognify.llm.add_node_connection_embeddings import process_items
 from cognitive_architecture.modules.cognify.vector.batch_search import adapted_qdrant_batch_search
@@ -100,11 +100,14 @@ async def cognify(input_text:str):
 
     # Run the async function for each set of cognitive layers
     layer_1_graph = await async_graph_per_layer(input_article_one, cognitive_layers_one)
-    print(layer_1_graph)
-
-
-
+    # print(layer_1_graph)
+    #
+    #
+    #
     graph_client = get_graph_client(GraphDBType.NETWORKX)
+    #
+    # ADD SUMMARY
+    # ADD CATEGORIES
 
     # Define a GraphModel instance with example data
     graph_model_instance = DefaultGraphModel(
@@ -154,23 +157,15 @@ async def cognify(input_text:str):
 
     F, unique_layer_uuids = await append_to_graph(layer_1_graph, required_layers_one, graph_client)
 
-    def extract_node_descriptions(data):
-        descriptions = []
-        for node_id, attributes in data:
-            if 'description' in attributes and 'id' in attributes:
-                descriptions.append({'node_id': attributes['id'], 'description': attributes['description'],
-                                     'layer_uuid': attributes['layer_uuid'],
-                                     'layer_decomposition_uuid': attributes['layer_decomposition_uuid']})
-        return descriptions
-
-    # Extract the node descriptions
+    # # Extract the node descriptions
+    await graph_client.load_graph_from_file()
     graph = graph_client.graph
-    node_descriptions = extract_node_descriptions(graph.nodes(data=True))
-    # unique_layer_uuids = set(node['layer_decomposition_uuid'] for node in node_descriptions)
-    #
+    node_descriptions = await extract_node_descriptions(graph.nodes(data=True))
+    unique_layer_uuids = set(node['layer_decomposition_uuid'] for node in node_descriptions)
+    # #
     db = get_vector_database()
-
-
+    #
+    #
     collection_config = CollectionConfig(
         vector_config={
             'content': models.VectorParams(
@@ -181,27 +176,49 @@ async def cognify(input_text:str):
         # Set other configs as needed
     )
 
-    for layer in unique_layer_uuids:
-        await db.create_collection(layer,collection_config)
+    from qdrant_client import  QdrantClient
+    try:
+        for layer in unique_layer_uuids:
+            await db.create_collection(layer,collection_config)
+    except:
+        pass
 
-    # #to check if it works
+    # qdrant = QdrantClient(
+    #     url=os.getenv('QDRANT_URL'),
+    #     api_key=os.getenv('QDRANT_API_KEY'))
     #
-    await add_propositions(node_descriptions, db)
+    # collections_response = qdrant.http.collections_api.get_collections()
+    # collections = collections_response.result.collections
+    # print(collections)
+
+
+    # print(node_descriptions)
+    #
+    await add_propositions(node_descriptions)
 
     from cognitive_architecture.infrastructure.databases.vector.qdrant.adapter import AsyncQdrantClient
 
     grouped_data = await add_node_connection(graph_client, db, node_descriptions)
 
+    # print("we are here, grouped_data", grouped_data)
+
     llm_client = get_llm_client()
+
+
 
     relationship_dict = await process_items(grouped_data, unique_layer_uuids, llm_client)
 
+
+    # print("we are here", relationship_dict[0])
+
     results = await adapted_qdrant_batch_search(relationship_dict, db)
+    # print(results)
     relationship_d = graph_ready_output(results)
+    # print(relationship_d)
 
     CONNECTED_GRAPH = connect_nodes_in_graph(F, relationship_d)
 
-    out = await render_graph(CONNECTED_GRAPH, graph_type='networkx')
+    out = await render_graph(CONNECTED_GRAPH.graph, graph_type='networkx')
     print(out)
     return CONNECTED_GRAPH
 
@@ -228,4 +245,8 @@ async def cognify(input_text:str):
 
 
 if __name__ == "__main__":
-    asyncio.run(cognify("The quick brown fox jumps over the lazy dog"))
+    asyncio.run(cognify("""In the nicest possible way, Britons have always been a bit silly about animals. “Keeping pets, for the English, is not so much a leisure activity as it is an entire way of life,” wrote the anthropologist Kate Fox in Watching the English, nearly 20 years ago. Our dogs, in particular, have been an acceptable outlet for emotions and impulses we otherwise keep strictly controlled – our latent desire to be demonstratively affectionate, to be silly and chat to strangers. If this seems like an exaggeration, consider the different reactions you’d get if you struck up a conversation with someone in a park with a dog, versus someone on the train.
+Indeed, British society has been set up to accommodate these four-legged ambassadors. In the UK – unlike Australia, say, or New Zealand – dogs are not just permitted on public transport but often openly encouraged. Many pubs and shops display waggish signs, reading, “Dogs welcome, people tolerated”, and have treat jars on their counters. The other day, as I was waiting outside a cafe with a friend’s dog, the barista urged me to bring her inside.
+For years, Britons’ non-partisan passion for animals has been consistent amid dwindling common ground. But lately, rather than bringing out the best in us, our relationship with dogs is increasingly revealing us at our worst – and our supposed “best friends” are paying the price.
+As with so many latent traits in the national psyche, it all came unleashed with the pandemic, when many people thought they might as well make the most of all that time at home and in local parks with a dog. Between 2019 and 2022, the number of pet dogs in the UK rose from about nine million to 13 million. But there’s long been a seasonal surge around this time of year, substantial enough for the Dogs Trust charity to coin its famous slogan back in 1978: “A dog is for life, not just for Christmas.”
+"""))

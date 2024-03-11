@@ -2,11 +2,11 @@ from cognitive_architecture.infrastructure.databases.graph.get_graph_client impo
 from cognitive_architecture.shared.data_models import GraphDBType
 
 
-def extract_node_descriptions(data):
+async def extract_node_descriptions(data):
     descriptions = []
     for node_id, attributes in data:
-        if 'description' in attributes and 'id' in attributes:
-            descriptions.append({'node_id': attributes['id'], 'description': attributes['description'], 'layer_uuid': attributes['layer_uuid'], 'layer_decomposition_uuid': attributes['layer_decomposition_uuid'] })
+        if 'description' in attributes and 'unique_id' in attributes:
+            descriptions.append({'node_id': attributes['unique_id'], 'description': attributes['description'], 'layer_uuid': attributes['layer_uuid'], 'layer_decomposition_uuid': attributes['layer_decomposition_uuid'] })
     return descriptions
 
 
@@ -15,7 +15,7 @@ def extract_node_descriptions(data):
 async def add_node_connection(graph_client, vector_database_client, data):
 
     graph = graph_client.graph
-    node_descriptions = extract_node_descriptions(graph.nodes(data=True))
+    node_descriptions = data
 
 
     grouped_data = {}
@@ -56,10 +56,10 @@ def connect_nodes_in_graph(graph, relationship_dict):
 
             # Find nodes in the graph that match the searched_node_id and score_id from their attributes
             for node, attrs in graph.nodes(data=True):
-                if 'id' in attrs:  # Ensure there is an 'id' attribute
-                    if attrs['id'] == searched_node_attr_id:
+                if 'unique_id' in attrs:  # Ensure there is an 'id' attribute
+                    if attrs['unique_id'] == searched_node_attr_id:
                         searched_node_key = node
-                    elif attrs['id'] == score_attr_id:
+                    elif attrs['unique_id'] == score_attr_id:
                         score_node_key = node
 
                 # If both nodes are found, no need to continue checking other nodes

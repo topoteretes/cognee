@@ -15,14 +15,14 @@ async def process_items(grouped_data, unique_layer_uuids, llm_client):
         for item in items:
             # For each target UUID, create an async task for the item's embedding retrieval
             for target_id in target_uuids:
-                task = asyncio.create_task(
-                    llm_client.async_get_embedding_with_backoff(item['description'], "text-embedding-3-large"))
+                task = asyncio.create_task(llm_client.async_get_embedding_with_backoff(item['description'], "text-embedding-3-large"))
                 tasks.append(task)
                 # Map the task to the target id, item's node_id, and description for later retrieval
                 task_to_info[task] = (target_id, item['node_id'], group_id, item['description'])
 
     # Await all tasks to complete and gather results
     results = await asyncio.gather(*tasks)
+
 
     # Process the results, associating them with their target id, node id, and description
     for task, embedding in zip(tasks, results):

@@ -60,6 +60,16 @@ class QDrantAdapter(VectorDBInterface):
             points = data_points
         )
 
+    async def search(self, collection_name: str, query_vector: List[float], limit: int, with_vector: bool = False):
+        client = self.get_qdrant_client()
+
+        return await client.search(
+            collection_name = collection_name,
+            query_vector = query_vector,
+            limit = limit,
+            with_vectors = with_vector
+        )
+
 
     async def batch_search(self, collection_name: str, embeddings: List[List[float]],
                                   with_vectors: List[bool] = None):

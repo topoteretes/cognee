@@ -30,3 +30,5 @@ async def adapted_qdrant_batch_search(results_to_check,vector_client):
 if __name__ == '__main__':
 
     client = get_vector_database()
+
+    adapted_qdrant_batch_search()
