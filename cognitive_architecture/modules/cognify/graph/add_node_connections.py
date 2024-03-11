@@ -12,7 +12,7 @@ def extract_node_descriptions(data):
 
 
 
-def add_node_connection(graph_client, vector_database_client, data):
+async def add_node_connection(graph_client, vector_database_client, data):
 
     graph = graph_client.graph
     node_descriptions = extract_node_descriptions(graph.nodes(data=True))

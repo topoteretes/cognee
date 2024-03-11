@@ -22,6 +22,7 @@ from cognitive_architecture.modules.cognify.graph.add_propositions import append
 from cognitive_architecture.modules.cognify.llm.add_node_connection_embeddings import process_items
 from cognitive_architecture.modules.cognify.vector.batch_search import adapted_qdrant_batch_search
 from cognitive_architecture.modules.cognify.vector.load_propositions import add_propositions
+from cognitive_architecture.utils import render_graph
 
 # Load environment variables from .env file
 load_dotenv()
@@ -199,6 +200,9 @@ async def cognify(input_text:str):
     relationship_d = graph_ready_output(results)
 
     CONNECTED_GRAPH = connect_nodes_in_graph(F, relationship_d)
+
+    out = await render_graph(CONNECTED_GRAPH, graph_type='networkx')
+    print(out)
     return CONNECTED_GRAPH
 
     #
