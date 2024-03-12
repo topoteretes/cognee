@@ -40,13 +40,17 @@ class Config:
     db_user: str = os.getenv("DB_USER", "cognee")
     db_password: str = os.getenv("DB_PASSWORD", "cognee")
     sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
-    graph_name = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
+    graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
-    model: str = "gpt-4-1106-preview"
+    model: str = "gpt-4-0125-preview"
+    # model: str = "gpt-3.5-turbo"
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
+
+    graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
+    graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
 
     # Embedding parameters
     embedding_model: str = "openai"

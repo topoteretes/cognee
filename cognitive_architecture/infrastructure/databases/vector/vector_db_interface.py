@@ -43,14 +43,7 @@ class VectorDBInterface(Protocol):
     async def create_data_points(
         self,
         collection_name: str,
-        data_points: List[any]
-    ): raise NotImplementedError
-
-    @abstractmethod
-    async def find_related_data_points(
-        self,
-        collection_name: str,
-        query_vector: any
+        data_points
     ): raise NotImplementedError
 
     # @abstractmethod
@@ -74,3 +67,22 @@ class VectorDBInterface(Protocol):
     #     collection_name: str,
     #     data_point_id: str
     # ): raise NotImplementedError
+    """ Search """
+    @abstractmethod
+    async def search(
+        self,
+        collection_name: str,
+        query_vector: List[float],
+        limit: int,
+        with_vector: bool = False
+
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def batch_search(
+        self,
+        collection_name: str,
+        embeddings: List[List[float]],
+        with_vectors: List[bool] = None
+    ): raise NotImplementedError
+

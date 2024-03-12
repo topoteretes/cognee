@@ -46,6 +46,12 @@ nltk = "^3.8.1"
 scikit-learn = "^1.4.1.post1"
 dlt = "^0.4.6"
 duckdb = {version = "^0.10.0", extras = ["dlt"]}
+overrides = "^7.7.0"
+aiofiles = "^23.2.1"
+qdrant-client = "^1.8.0"
+duckdb-engine = "^0.11.2"
+graphistry = "^0.33.5"
+tenacity = "^8.2.3"
 
 [tool.poetry.extras]
 dbt = ["dbt-core", "dbt-redshift", "dbt-bigquery", "dbt-duckdb", "dbt-snowflake", "dbt-athena-community", "dbt-databricks"]
@@ -72,7 +78,7 @@ databricks = ["databricks-sql-connector"]
 lancedb = ["lancedb"]
 pinecone = ["pinecone-client"]
 neo4j = ["neo4j", "py2neo"]
-notebook =[ "ipykernel", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
+notebook =[ "ipykernel","overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

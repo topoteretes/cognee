@@ -1,27 +1,25 @@
 """ This module contains utility functions for the cognitive architecture. """
 
 import os
+import uuid
 import random
 import string
-import uuid
-
-from graphviz import Digraph
+import logging
+import graphistry
+from pathlib import Path
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import or_
+from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager
-from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
+from sqlalchemy.ext.asyncio import AsyncSession
 from cognitive_architecture.database.relationaldb.models.docs import DocsModel
 from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
-from cognitive_architecture.database.relationaldb.models.user import User
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-import logging
 from cognitive_architecture.database.relationaldb.models.operation import Operation
-from cognitive_architecture.database.relationaldb.database_crud import (
-    session_scope,
-    add_entity,
-    update_entity,
-    fetch_job_id,
-)
+
+from cognitive_architecture.config import Config
+
+config = Config()
+config.load()
 
 class Node:
     def __init__(self, id, description, color):
@@ -283,4 +281,104 @@ async def get_memory_name_by_doc_id(session: AsyncSession, docs_id: str):
         print(f"An error occurred: {e}")
         return None
 
+
+async def read_query_prompt(filename: str) -> str:
+    """Read a query prompt from a file.
+    :param filename: The name of the file to read.
+    :return: The content of the file as a string.
+    """
+    script_directory = Path(__file__).parent
+
+    # Set the base directory relative to the script's directory
+    base_directory = script_directory.parent / "cognitive_architecture/infrastructure/llm/prompts"
+
+    # Construct the full file path
+    file_path = base_directory / filename
+    try:
+        return file_path.read_text()
+    except FileNotFoundError:
+        logging.error(f"File not found: {file_path.absolute()}")
+    except Exception as e:
+        logging.error(f"An error of type {type(e).__name__} occurred while reading file: {file_path.absolute()}. Error message: {e}")
+    return None
+
+
+
+async def print_file_content(file_path):
+    # Create a Path object for the file path
+    path = Path(file_path)
+
+    # Check if the file exists
+    if path.is_file():
+        # Open and read the file, then print its content
+        with path.open('r') as file:
+            print(file.read())
+    else:
+        # Print an error message if the file does not exist
+        print(f"The file '{file_path}' does not exist.")
+
+async def async_render_template(filename: str,  context: dict) -> str:
+    """Render a Jinja2 template asynchronously.
+    :param filename: The name of the template file to render.
+    :param context: The context to render the template with.
+    :return: The rendered template as a string."""
+    # Initialize the Jinja2 environment to load templates from the filesystem
+    script_directory = Path(__file__).parent
+
+    # Set the base directory relative to the script's directory
+    base_directory = script_directory.parent / "cognitive_architecture/infrastructure/llm/prompts"
+
+
+    # Construct the full file path
+    file_path = base_directory / filename
+
+    env = Environment(
+        loader=FileSystemLoader(base_directory),
+        autoescape=select_autoescape(['html', 'xml', 'txt'])
+    )
+
+    # Load the template by name
+    template = env.get_template(filename)
+
+    # Render the template with the provided context
+    rendered_template = template.render(context)
+
+    return rendered_template
+
+
+async def render_graph(graph, graph_type):
+
+    # Authenticate with your Graphistry API key
+
+    import networkx as nx
+    import pandas as pd
+
+    graphistry.register(api=3, username=config.graphistry_username, password=config.graphistry_password)
+    # Convert the NetworkX graph to a Pandas DataFrame representing the edge list
+    edges = nx.to_pandas_edgelist(graph)
+    # Visualize the graph using Graphistry
+    plotter = graphistry.edges(edges, 'source', 'target')
+    # Visualize the graph (this will open a URL in your default web browser)
+    url = plotter.plot(render=False, as_files=True)
+    print(f"Graph is visualized at: {url}")
+
+
+# import networkx as nx
+# # Create a simple NetworkX graph
+# G = nx.Graph()
+#
+# # Add nodes
+# G.add_node(1)
+# G.add_node(2)
+#
+# # Add an edge between nodes
+# G.add_edge(1, 2)
+#
+# import asyncio
+#
+# # Define the graph type (for this example, it's just a placeholder as the function doesn't use it yet)
+# graph_type = "simple"
+#
+# # Call the render_graph function
+# asyncio.run(render_graph(G, graph_type))
 
