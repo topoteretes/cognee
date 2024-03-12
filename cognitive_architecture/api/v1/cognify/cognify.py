@@ -4,6 +4,8 @@ from typing import List
 from qdrant_client import models
 import instructor
 from openai import OpenAI
+from unstructured.cleaners.core import clean
+from unstructured.partition.pdf import partition_pdf
 from cognitive_architecture.infrastructure.databases.vector.qdrant.QDrantAdapter import CollectionConfig
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
 from cognitive_architecture.modules.cognify.graph.add_classification_nodes import add_classification_nodes
@@ -23,15 +25,34 @@ from cognitive_architecture.modules.cognify.graph.create import create_semantic_
 from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognitive_architecture.shared.data_models import GraphDBType
 from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
+from cognitive_architecture.infrastructure.databases.relational import DuckDBAdapter
 
 config = Config()
 config.load()
 
 aclient = instructor.patch(OpenAI())
 
-async def cognify(input_text : str):
+async def cognify(dataset_name: str):
     """This function is responsible for the cognitive processing of the content."""
 
+    db = DuckDBAdapter()
+    files_metadata = db.get_files_metadata(dataset_name)
+    files = list(files_metadata["file_path"].values())
+
+    awaitables = []
+
+    for file in files:
+        with open(file, "rb") as file:
+            elements = partition_pdf(file = file, strategy = "fast")
+            text = "\n".join(map(lambda element: clean(element.text), elements))
+
+            awaitables.append(process_text(text))
+
+    graphs = await asyncio.gather(*awaitables)
+
+    return graphs[0]
+
+async def process_text(input_text: str):
     classified_categories = None
 
     try:
@@ -55,7 +76,7 @@ async def cognify(input_text : str):
 
     async def generate_graph_per_layer(text_input: str, layers: List[str], response_model: KnowledgeGraph = KnowledgeGraph):
         generate_graphs_awaitables = [generate_graph(text_input, "generate_graph_prompt.txt", {"layer": layer}, response_model) for layer in
-                 layers]
+                layers]
 
         return await asyncio.gather(*generate_graphs_awaitables)
 

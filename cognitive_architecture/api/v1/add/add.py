@@ -1,53 +1,91 @@
+from typing import List, Union
+from os import path, listdir
 import asyncio
-from uuid import UUID, uuid4
-from typing import Union, BinaryIO, List
+import dlt
+import duckdb
+from unstructured.cleaners.core import clean
+from cognitive_architecture.root_dir import get_absolute_path
 import cognitive_architecture.modules.ingestion as ingestion
-from cognitive_architecture.infrastructure import infrastructure_config
+from cognitive_architecture.infrastructure.files import get_file_metadata
+from cognitive_architecture.infrastructure.files.storage import LocalStorage
 
-class DatasetException(Exception):
-    message: str
+async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
+    if isinstance(file_paths, str):
+        # Directory path provided, we need to extract the file paths and dataset name
 
-    def __init__(self, message: str):
-        self.message = message
+        def list_dir_files(root_dir_path: str, parent_dir: str = "root"):
+            datasets = {}
 
+            for file_or_dir in listdir(root_dir_path):
+                if path.isdir(path.join(root_dir_path, file_or_dir)):
+                    dataset_name = file_or_dir if parent_dir == "root" else parent_dir + "." + file_or_dir
+                    dataset_name = clean(dataset_name.replace(" ", "_"))
 
-async def add(
-    data: Union[str, BinaryIO, List[Union[str, BinaryIO]]],
-    dataset_id: UUID = uuid4(),
-    dataset_name: str = None
-):
-    db_engine = infrastructure_config.get_config()["database_engine"]
-    if db_engine.is_db_done is not True:
-        await db_engine.ensure_tables()
+                    nested_datasets = list_dir_files(path.join(root_dir_path, file_or_dir), dataset_name)
 
-    if not data:
-        raise DatasetException("Data must be provided to cognee.add(data: str)")
+                    for dataset in nested_datasets:
+                        datasets[dataset] = nested_datasets[dataset]
+                else:
+                    if parent_dir not in datasets:
+                        datasets[parent_dir] = []
 
-    if isinstance(data, list):
-        promises = []
+                    datasets[parent_dir].append(path.join(root_dir_path, file_or_dir))
 
-        for data_item in data:
-            promises.append(add(data_item, dataset_id, dataset_name))
+            return datasets
 
-        results = await asyncio.gather(*promises)
+        datasets = list_dir_files(file_paths)
 
-        return results
+        results = []
 
+        for key in datasets:
+            if dataset_name is not None and not key.startswith(dataset_name):
+                continue
 
-    if is_data_path(data):
-        with open(data.replace("file://", ""), "rb") as file:
-            return await add(file, dataset_id, dataset_name)
+            results.append(add_dlt(datasets[key], dataset_name = key))
 
-    classified_data = ingestion.classify(data)
-
-    data_id = ingestion.identify(classified_data)
-
-    await ingestion.save(dataset_id, dataset_name, data_id, classified_data)
-
-    return dataset_id
-
-    # await ingestion.vectorize(dataset_id, dataset_name, data_id, classified_data)
+        return await asyncio.gather(*results)
 
 
-def is_data_path(data: str) -> bool:
-    return False if not isinstance(data, str) else data.startswith("file://")
+    db_path = get_absolute_path("./data/cognee")
+    db_location = f"{db_path}/cognee.duckdb"
+
+    LocalStorage.ensure_directory_exists(db_path)
+
+    db = duckdb.connect(db_location)
+
+    destination = dlt.destinations.duckdb(
+        credentials = db,
+    )
+
+    pipeline = dlt.pipeline(
+        pipeline_name = "file_load_from_filesystem",
+        destination = destination,
+    )
+
+    @dlt.resource(standalone = True, merge_key = "id")
+    def data_resources(file_paths: str):
+        for file_path in file_paths:
+            with open(file_path.replace("file://", ""), mode = "rb") as file:
+                classified_data = ingestion.classify(file)
+
+                data_id = ingestion.identify(classified_data)
+
+                file_metadata = get_file_metadata(classified_data.get_data())
+
+                yield {
+                    "id": data_id,
+                    "name": file_metadata["name"],
+                    "file_path": file_metadata["file_path"],
+                    "extension": file_metadata["extension"],
+                    "mime_type": file_metadata["mime_type"],
+                    "keywords": "|".join(file_metadata["keywords"]),
+                }
+
+    run_info = pipeline.run(
+        data_resources(file_paths),
+        table_name = "file_metadata",
+        dataset_name = dataset_name,
+        write_disposition = "merge",
+    )
+
+    return run_info
