@@ -131,7 +131,6 @@ Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases intr
 - Document Topology: Structure and store documents in public and private domains.
 - Personalized Context: Provide a context object to the LLM for a better response.
 
-</br>
 
 ![Image](assets/architecture.png)
 
