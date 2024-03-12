@@ -1,13 +1,11 @@
 """This module provides functionalities for creating and managing databases."""
 
 import os
-
 from contextlib import asynccontextmanager
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-from config import Config
-from database.relationaldb.database import Base, get_sqlalchemy_database_url
-from database.relationaldb.models import memory, metadatas, operation, sessions, user, docs
+from cognitive_architecture.config import Config
+from cognitive_architecture.database.relationaldb.database import Base, get_sqlalchemy_database_url
 
 globalConfig = Config()
 
@@ -58,10 +56,8 @@ class DatabaseManager:
     async def create_tables(self):
         """Create tables based on the SQLAlchemy Base metadata."""
         try:
-          async with self.engine.begin() as conn:
-              await conn.run_sync(Base.metadata.create_all)
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
         except Exception as e:
             print(e)
             raise e
-
-

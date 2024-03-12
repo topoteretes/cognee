@@ -1,1 +1,1 @@
-from .adapter import QDrantAdapter
+from .QDrantAdapter import QDrantAdapter, CollectionConfig

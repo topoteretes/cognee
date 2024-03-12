@@ -27,7 +27,7 @@ class Config:
         )
     )
 
-    db_path = Path(__file__).resolve().parent / "database/data"
+    db_path = str(Path(__file__).resolve().parent / "data/system")
 
     vectordb: str = os.getenv("VECTORDB", "weaviate")
     qdrant_path: str = os.getenv("QDRANT_PATH")

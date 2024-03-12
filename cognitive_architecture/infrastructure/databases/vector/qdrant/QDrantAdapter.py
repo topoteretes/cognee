@@ -59,3 +59,13 @@ class QDrantAdapter(VectorDBInterface):
             collection_name = collection_name,
             points = data_points
         )
+
+    async def find_related_data_points(self, collection_name: str, query_vector):
+        client = self.get_qdrant_client()
+
+        return await client.search(
+            collection_name = collection_name,
+            query_vector = query_vector,
+            with_payload = True,
+            score_threshold = 0.8
+        )

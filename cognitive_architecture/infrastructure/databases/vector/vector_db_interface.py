@@ -46,6 +46,13 @@ class VectorDBInterface(Protocol):
         data_points: List[any]
     ): raise NotImplementedError
 
+    @abstractmethod
+    async def find_related_data_points(
+        self,
+        collection_name: str,
+        query_vector: any
+    ): raise NotImplementedError
+
     # @abstractmethod
     # async def get_data_point(
     #     self,

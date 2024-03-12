@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "3.10.13"
 langchain = "^0.0.338"
 openai = "1.12.0"
 python-dotenv = "1.0.1"
@@ -40,6 +40,12 @@ pymupdf = "^1.23.25"
 pandas = "^2.2.1"
 greenlet = "^3.0.3"
 ruff = "^0.2.2"
+filetype = "^1.2.0"
+unstructured = {extras = ["all-docs"], version = "^0.12.5"}
+nltk = "^3.8.1"
+scikit-learn = "^1.4.1.post1"
+dlt = "^0.4.6"
+duckdb = {version = "^0.10.0", extras = ["dlt"]}
 
 [tool.poetry.extras]
 dbt = ["dbt-core", "dbt-redshift", "dbt-bigquery", "dbt-duckdb", "dbt-snowflake", "dbt-athena-community", "dbt-databricks"]
@@ -73,6 +79,7 @@ pytest = "^7.4.0"
 pytest-asyncio = "^0.21.1"
 coverage = "^7.3.2"
 mypy = "^1.7.1"
+notebook = "^7.1.1"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.4.3"
