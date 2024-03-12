@@ -1,6 +1,6 @@
 # cognee
 
-Semantic AI Memory 
+Make data processing for LLMs easy
 
 <p>
   <a href="https://cognee.ai" target="_blank">
@@ -9,7 +9,7 @@ Semantic AI Memory
 </p>
 
 <p>
-  <i>Open-source framework for building AI Memory, extending the limits of cognitive architecture, designed for accuracy, transparency, and control.</i>
+  <i>Open-source framework for creating knowledge graphs and data models for LLMs.</i>
 </p>
 
 <p>
