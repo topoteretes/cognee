@@ -2,6 +2,7 @@
 
 Make data processing for LLMs easy
 
+
 <p>
   <a href="https://cognee.ai" target="_blank">
     <img src="assets/cognee-logo.png" width="160px" alt="Cognee logo" />
