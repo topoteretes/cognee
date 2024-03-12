@@ -1,6 +1,6 @@
 # cognee
 
-AI Memory - Cognitive Architecture, Testability, Production-Ready Apps
+Semantic AI Memory 
 
 <p>
   <a href="https://cognee.ai" target="_blank">
@@ -27,71 +27,93 @@ AI Memory - Cognitive Architecture, Testability, Production-Ready Apps
   </a>
 </p>
 
+[//]: # (<p>)
+
+[//]: # (  <b>Share cognee Repository</b>)
+
+[//]: # (</p>)
+
+[//]: # (<p>)
+
+[//]: # (  <a href="https://twitter.com/intent/tweet?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee&hashtags=AGI,Autonomics,Cognee,future" target="_blank">)
+
+[//]: # (    <img src="https://img.shields.io/twitter/follow/_promethAI?label=Share Repo on Twitter&style=social" alt="Follow Cognee"/>)
+
+[//]: # (  </a>)
+
+[//]: # (  <a href="https://t.me/share/url?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee" target="_blank">)
+
+[//]: # (    <img src="https://img.shields.io/twitter/url?label=Telegram&logo=Telegram&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Telegram"/>)
+
+[//]: # (  </a>)
+
+[//]: # (  <a href="https://api.whatsapp.com/send?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%20https://github.com/topoteretes/cognee" target="_blank">)
+
+[//]: # (    <img src="https://img.shields.io/twitter/url?label=whatsapp&logo=whatsapp&style=social&url=https://github.com/topoteretes/cognee" />)
+
+[//]: # (  </a>)
+
+[//]: # (  <a href="https://www.reddit.com/submit?url=https://github.com/topoteretes/cognee&title=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.)
+
+[//]: # (  " target="_blank">)
+
+[//]: # (    <img src="https://img.shields.io/twitter/url?label=Reddit&logo=Reddit&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Reddit"/>)
+
+[//]: # (  </a>)
+
+[//]: # (  <a href="mailto:?subject=Check%20this%20GitHub%20repository%20out.&body=Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%3A%0Ahttps://github.com/topoteretes/cognee" target="_blank">)
+
+[//]: # (    <img src="https://img.shields.io/twitter/url?label=Gmail&logo=Gmail&style=social&url=https://github.com/topoteretes/cognee"/>)
+
+[//]: # (  </a>)
+
+[//]: # (  <a href="https://www.buymeacoffee.com/promethAI" target="_blank">)
+
+[//]: # (    <img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="23" width="100" style="border-radius:1px">)
+
+[//]: # (  </a>)
+
+[//]: # (</p>)
+
+[//]: # ()
+[//]: # (<hr>)
+
+[//]: # ()
+[//]: # ([Star us on Github!]&#40;https://www.github.com/topoteretes/cognee&#41;)
+
+[//]: # ()
+[//]: # (<a href="https://www.cognee.ai" target="_blank">Cognee</a> runs in iterations, from POC towards production-ready code.)
+
 <p>
-  <b>Share cognee Repository</b>
-</p>
-<p>
-  <a href="https://twitter.com/intent/tweet?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee&hashtags=AGI,Autonomics,Cognee,future" target="_blank">
-    <img src="https://img.shields.io/twitter/follow/_promethAI?label=Share Repo on Twitter&style=social" alt="Follow Cognee"/>
-  </a>
-  <a href="https://t.me/share/url?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee" target="_blank">
-    <img src="https://img.shields.io/twitter/url?label=Telegram&logo=Telegram&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Telegram"/>
-  </a>
-  <a href="https://api.whatsapp.com/send?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%20https://github.com/topoteretes/cognee" target="_blank">
-    <img src="https://img.shields.io/twitter/url?label=whatsapp&logo=whatsapp&style=social&url=https://github.com/topoteretes/cognee" />
-  </a>
-  <a href="https://www.reddit.com/submit?url=https://github.com/topoteretes/cognee&title=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.
-  " target="_blank">
-    <img src="https://img.shields.io/twitter/url?label=Reddit&logo=Reddit&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Reddit"/>
-  </a>
-  <a href="mailto:?subject=Check%20this%20GitHub%20repository%20out.&body=Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%3A%0Ahttps://github.com/topoteretes/cognee" target="_blank">
-    <img src="https://img.shields.io/twitter/url?label=Gmail&logo=Gmail&style=social&url=https://github.com/topoteretes/cognee"/>
-  </a>
-  <a href="https://www.buymeacoffee.com/promethAI" target="_blank">
-    <img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="23" width="100" style="border-radius:1px">
-  </a>
-</p>
-
-<hr>
-
-[Star us on Github!](https://www.github.com/topoteretes/cognee)
-
-Jump into AI memory architecture, inspired by human cognitive processes, using Python.
-<a href="https://www.cognee.ai" target="_blank">Cognee</a> runs in iterations, from POC towards production-ready code.
-
-To read more about the approach and details on cognitive architecture, see the blog post: <a href="https://topoteretes.notion.site/Going-beyond-Langchain-Weaviate-and-towards-a-production-ready-modern-data-platform-7351d77a1eba40aab4394c24bef3a278?pvs=4" target="_blank">AI Applications and RAGs - Cognitive Architecture, Testability, Production Ready Apps</a>  
 
 Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
+</p>
+
+
+## 📦 Installation
+
+With pip:
+
+```bash
+pip install cognee
+```
+
+With poetry:
+
+```bash
+poetry add cognee
+```
 
 
 
-## Getting started
+## 💻 Usage
 
-### Run with Docker
+```cognee.add()``` - Add a new piece of information to storage
 
-To run cognee you need to have <a href="https://docs.docker.com/get-docker" target="_blank">Docker</a> installed on your machine.
+```cognee.cognify() ``` - Use LLMs to create graphs
 
-Run <a href="https://www.cognee.ai" target="_blank">Cognee</a> in a couple of steps:
-- Run  `cp .env.template .env` in your terminal and set all the environment variables
-- Run `docker compose up` in order to start graph and relational databases
-- Run `docker compose up cognee` in order start Cognee
+```cognee.search()``` - Query the graph for a piece of information
 
-#### Debugging
-To run Cognee with debugger attached you need to build the Cognee image with the `DEBUG` flag set to true.
-
-- `docker compose build cognee --no-cache --build-arg DEBUG=true`
-- `docker compose up cognee`
-
-
-### Run without Docker
-- Run `PYTHONPATH=. python cognitive_architecture/setup_database.py` to setup database
-- Run `python -m gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=127.0.0.1:8000 --log-level debug api:app`
-
-#### Debugging
-- Run `python -m debugpy --wait-for-client --listen localhost:5678 -m gunicorn -w 1 -k uvicorn.workers.UvicornWorker -t 30000 --bind=127.0.0.1:8000 --log-level debug api:app`
-- Attach debugger
-
-<!-- Send API requests add-memory, user-query-to-graph, document-to-graph-db, user-query-processor to the locahost:8000 -->
 
 ## Demo
 
@@ -110,11 +132,4 @@ Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases intr
 </br>
 
 ![Image](assets/architecture.png)
-
-## Current Focus
-
-### Integration with keepi.ai and other apps
-- Cognee uses the Neo4j graph database to map user data into a graph structure consisting of semantic, episodic, and procedural memory.
-- Stores data and files through the WhatsApp chatbot <a href="https://keepi.ai">keepi.ai</a>
-- Uses the graph to answer user queries and store new information in the graph.
 
