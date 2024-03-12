@@ -84,6 +84,8 @@ Semantic AI Memory
 [//]: # ()
 [//]: # (<a href="https://www.cognee.ai" target="_blank">Cognee</a> runs in iterations, from POC towards production-ready code.)
 
+
+## 🚀 It's alive
 <p>
 
 Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
