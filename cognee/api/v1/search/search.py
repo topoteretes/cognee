@@ -1,14 +1,13 @@
 """ This module contains the search function that is used to search for nodes in the graph."""
+import asyncio
 from enum import Enum, auto
 from typing import Dict, Any, Callable, List
 
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
-from cognee.shared.data_models import GraphDBType
-import asyncio
+
 
 class SearchType(Enum):
     ADJACENT = auto()
@@ -47,21 +46,18 @@ async def search(graph, query_params: Dict[SearchType, Dict[str, Any]]) -> List:
 
     return results
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
+#     import asyncio
 
+#     query_params = {
+#         SearchType.SIMILARITY: {'query': 'your search query here'}
+#     }
+#     async def main():
+#         graph_client = get_graph_client(GraphDBType.NETWORKX)
 
+#         await graph_client.load_graph_from_file()
+#         graph = graph_client.graph
+#         results = await search(graph, query_params)
+#         print(results)
 
-
-
-    query_params = {
-        SearchType.SIMILARITY: {'query': 'your search query here'}
-    }
-    async def main():
-        graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-        await graph_client.load_graph_from_file()
-        graph = graph_client.graph
-        results = await search(graph, query_params)
-        print(results)
-
-    asyncio.run(main())
+#     asyncio.run(main())
