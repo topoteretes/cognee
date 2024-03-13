@@ -1,5 +1,5 @@
 """ This module contains the code to classify content into categories using the LLM API. """
-from typing import Type
+from typing import Type, List
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
 from cognitive_architecture.utils import read_query_prompt
@@ -13,24 +13,23 @@ async def classify_into_categories(text_input: str, system_prompt_path: str, res
 
     return extract_categories(llm_output.dict())
 
-def extract_categories(llm_output):
+def extract_categories(llm_output) -> List[dict]:
     # Extract the first subclass from the list (assuming there could be more)
-    subclass_enum = llm_output["label"]["subclass"][0]
+    layer_enum = llm_output["label"]["subclass"][0]
 
     # The data type is derived from "type" and converted to lowercase
     data_type = llm_output["label"]["type"].lower()
 
-    # The context name is the name of the Enum member (e.g., "NEWS_STORIES")
-    # context_name = subclass_enum.name.replace("_", " ").title()
+    # The layer name is the name of the Enum member (e.g., "NEWS_STORIES")
+    # layer_name = layer_enum.name.replace("_", " ").title()
 
     # The layer name is the value of the Enum member (e.g., "News stories and blog posts")
-    layer_name = subclass_enum.value
+    layer_name = layer_enum.value
 
-    return {
+    return [{
         "data_type": data_type,
-        "context_name": data_type.upper(),  # llm context classification
         "layer_name": layer_name  # llm layer classification
-    }
+    }]
 
 # if __name__ == "__main__":
 #     import asyncio

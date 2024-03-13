@@ -9,14 +9,14 @@ class DuckDBAdapter():
         self.db_client = duckdb.connect(db_location)
 
     def get_datasets(self):
-        tables = self.db_client.sql("SELECT DISTINCT schema_name FROM duckdb_tables();").to_df().to_dict()
+        tables = self.db_client.sql("SELECT DISTINCT schema_name FROM duckdb_tables();").to_df().to_dict("list")
 
         return list(
             filter(
                 lambda table_name: table_name.endswith('staging') is False,
-                tables["schema_name"].values()
+                tables["schema_name"]
             )
         )
 
     def get_files_metadata(self, dataset_name: str):
-        return self.db_client.sql(f"SELECT * FROM {dataset_name}.file_metadata;").to_df().to_dict()
+        return self.db_client.sql(f"SELECT * FROM {dataset_name}.file_metadata;").to_df().to_dict("records")

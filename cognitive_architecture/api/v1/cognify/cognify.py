@@ -21,39 +21,45 @@ from cognitive_architecture.modules.cognify.llm.classify_content import classify
 from cognitive_architecture.modules.cognify.llm.content_to_cog_layers import content_to_cog_layers
 from cognitive_architecture.modules.cognify.llm.generate_graph import generate_graph
 from cognitive_architecture.shared.data_models import DefaultContentPrediction,  KnowledgeGraph, DefaultCognitiveLayer
-from cognitive_architecture.modules.cognify.graph.create import create_semantic_graph
 from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognitive_architecture.shared.data_models import GraphDBType
 from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
 from cognitive_architecture.infrastructure.databases.relational import DuckDBAdapter
+from cognitive_architecture.modules.cognify.graph.add_document_node import add_document_node
+from cognitive_architecture.modules.cognify.graph.initialize_graph import initialize_graph
 
 config = Config()
 config.load()
 
 aclient = instructor.patch(OpenAI())
 
+USER_ID = "default_user"
+
 async def cognify(dataset_name: str):
     """This function is responsible for the cognitive processing of the content."""
 
     db = DuckDBAdapter()
     files_metadata = db.get_files_metadata(dataset_name)
-    files = list(files_metadata["file_path"].values())
 
     awaitables = []
 
-    for file in files:
-        with open(file, "rb") as file:
+    await initialize_graph(USER_ID)
+
+    for file_metadata in files_metadata:
+        with open(file_metadata["file_path"], "rb") as file:
             elements = partition_pdf(file = file, strategy = "fast")
             text = "\n".join(map(lambda element: clean(element.text), elements))
 
-            awaitables.append(process_text(text))
+            awaitables.append(process_text(text, file_metadata))
 
     graphs = await asyncio.gather(*awaitables)
 
     return graphs[0]
 
-async def process_text(input_text: str):
-    classified_categories = None
+async def process_text(input_text: str, file_metadata: dict):
+    print(f"Processing document ({file_metadata['id']})")
+  
+    classified_categories = []
 
     try:
         # Classify the content into categories
@@ -62,13 +68,17 @@ async def process_text(input_text: str):
             "classify_content.txt",
             DefaultContentPrediction
         )
+        file_metadata["categories"] = list(map(lambda category: category["layer_name"], classified_categories))
     except Exception as e:
         print(e)
         raise e
 
+    await add_document_node(f"DefaultGraphModel:{USER_ID}", file_metadata)
+    print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
+
     cognitive_layers = await content_to_cog_layers(
         "generate_cog_layers.txt",
-        classified_categories,
+        classified_categories[0],
         response_model = DefaultCognitiveLayer
     )
 
@@ -84,73 +94,17 @@ async def process_text(input_text: str):
     layer_graphs = await generate_graph_per_layer(input_text, cognitive_layers)
     # print(layer_graphs)
 
-    # ADD SUMMARY
-    # ADD CATEGORIES
+    print(f"Document ({file_metadata['id']}) layer graphs created")
 
-    # Define a GraphModel instance with example data
-    # graph_model_instance = DefaultGraphModel(
-    #     id="user123",
-    #     documents=[
-    #         Document(
-    #             doc_id = "doc1",
-    #             title = "Document 1",
-    #             summary = "Summary of Document 1",
-    #             content_id = "content_id_for_doc1",
-    #             doc_type = DocumentType(type_id = "PDF", description = "Portable Document Format"),
-    #             categories = [
-    #                 Category(
-    #                     category_id = "finance",
-    #                     name = "Finance",
-    #                     default_relationship = Relationship(type = "belongs_to")
-    #                 ),
-    #                 Category(
-    #                     category_id = "tech",
-    #                     name = "Technology",
-    #                     default_relationship = Relationship(type = "belongs_to")
-    #                 )
-    #             ],
-    #             default_relationship = Relationship(type="has_document")
-    #         ),
-    #         Document(
-    #             doc_id = "doc2",
-    #             title = "Document 2",
-    #             summary = "Summary of Document 2",
-    #             content_id = "content_id_for_doc2",
-    #             doc_type = DocumentType(type_id = "TXT", description = "Text File"),
-    #             categories = [
-    #                 Category(
-    #                     category_id = "health",
-    #                     name = "Health",
-    #                     default_relationship = Relationship(type="belongs_to")
-    #                 ),
-    #                 Category(
-    #                     category_id = "wellness",
-    #                     name = "Wellness",
-    #                     default_relationship = Relationship(type="belongs_to")
-    #                 )
-    #             ],
-    #             default_relationship = Relationship(type = "has_document")
-    #         )
-    #     ],
-    #     user_properties = UserProperties(
-    #         custom_properties = {"age": "30"},
-    #         location = UserLocation(
-    #             location_id = "ny",
-    #             description = "New York",
-    #             default_relationship = Relationship(type = "located_in"))
-    #     ),
-    #     default_fields={
-    #         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    #         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    #     }
-    # )
+    # G = await create_semantic_graph(graph_model_instance)
+
+    await add_classification_nodes(f"DOCUMENT:{file_metadata['id']}", classified_categories[0])
+
+    unique_layer_uuids = await append_to_graph(layer_graphs, classified_categories[0])
+
+    print(f"Document ({file_metadata['id']}) layers connected")
 
     graph_client = get_graph_client(GraphDBType.NETWORKX)
-    # G = await create_semantic_graph(graph_model_instance, graph_client)
-
-    await add_classification_nodes("Document:doc1", classified_categories)
-
-    unique_layer_uuids = await append_to_graph(layer_graphs, classified_categories, graph_client)
 
     await graph_client.load_graph_from_file()
 
@@ -169,7 +123,6 @@ async def process_text(input_text: str):
                 size = 3072
             )
         },
-        # Set other configs as needed
     )
 
     try:
@@ -179,25 +132,14 @@ async def process_text(input_text: str):
     except Exception as e:
         print(e)
 
-    # from qdrant_client import  QdrantClient
-    # qdrant = QdrantClient(
-    #     url=os.getenv("QDRANT_URL"),
-    #     api_key=os.getenv("QDRANT_API_KEY"))
-    #
-    # collections_response = qdrant.http.collections_api.get_collections()
-    # collections = collections_response.result.collections
-    # print(collections)
-
     await add_propositions(node_descriptions)
 
     grouped_data = await add_node_connection(node_descriptions)
-
     # print("we are here, grouped_data", grouped_data)
 
     llm_client = get_llm_client()
 
     relationship_dict = await process_items(grouped_data, unique_layer_uuids, llm_client)
-
     # print("we are here", relationship_dict[0])
 
     results = await adapted_qdrant_batch_search(relationship_dict, db)
@@ -208,23 +150,9 @@ async def process_text(input_text: str):
 
     connect_nodes_in_graph(graph, relationship_d)
 
-    return graph
+    print(f"Document ({file_metadata['id']}) processed")
 
-    #
-    # grouped_data = {}
-    #
-    # # Iterate through each dictionary in the list
-    # for item in node_descriptions:
-    #     # Get the layer_decomposition_uuid of the current dictionary
-    #     uuid = item["layer_decomposition_uuid"]
-    #
-    #     # Check if this uuid is already a key in the grouped_data dictionary
-    #     if uuid not in grouped_data:
-    #         # If not, initialize a new list for this uuid
-    #         grouped_data[uuid] = []
-    #
-    #     # Append the current dictionary to the list corresponding to its uuid
-    #     grouped_data[uuid].append(item)
+    return graph
 
 
 

@@ -10,15 +10,3 @@ async def content_to_cog_layers(filename: str, context, response_model: Type[Bas
     formatted_text_input = await async_render_template(filename, context)
 
     return await llm_client.acreate_structured_output(formatted_text_input, formatted_text_input, response_model)
-
-# if __name__ == "__main__":
-#     import asyncio
-#     asyncio.run(content_to_cog_layers("generate_cog_layers.txt", {
-#         'data_type': 'text',
-#         'context_name': 'Scientific Research',
-#         'layer_name': 'Content Layer'
-#     }, response_model=CognitiveLayer))
-
-
-
-

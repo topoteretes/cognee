@@ -27,7 +27,7 @@ async def add_standalone(
         promises = []
 
         for data_item in data:
-            promises.append(add(data_item, dataset_id, dataset_name))
+            promises.append(add_standalone(data_item, dataset_id, dataset_name))
 
         results = await asyncio.gather(*promises)
 
@@ -36,7 +36,7 @@ async def add_standalone(
 
     if is_data_path(data):
         with open(data.replace("file://", ""), "rb") as file:
-            return await add(file, dataset_id, dataset_name)
+            return await add_standalone(file, dataset_id, dataset_name)
 
     classified_data = ingestion.classify(data)
 
