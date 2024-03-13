@@ -2,24 +2,29 @@
 import uuid
 import json
 from datetime import datetime
+from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
 
 
-async def add_propositions(graph_client, category_name, subclass_content, layer_description, new_data, layer_uuid,
-                             layer_decomposition_uuid):
+async def add_propositions(
+    data_type,
+    layer_name,
+    layer_description,
+    new_data,
+    layer_uuid,
+    layer_decomposition_uuid
+):
     """ Add nodes and edges to the graph for the given LLM knowledge graph and the layer"""
+    graph_client = get_graph_client(GraphDBType.NETWORKX)
 
-    # Find the node ID for the subclass within the category
     await graph_client.load_graph_from_file()
 
-    subclass_node_id = None
-    for node, data in graph_client.graph.nodes(data=True):
-        if subclass_content in node:
-            subclass_node_id = node
+    layer_node_id = None
+    for node_id, data in graph_client.graph.nodes(data = True):
+        if layer_name in node_id:
+            layer_node_id = node_id
 
-            print(subclass_node_id)
-
-    if not subclass_node_id:
-        print(f"Subclass '{subclass_content}' under category '{category_name}' not found in the graph.")
+    if not layer_node_id:
+        print(f"Subclass '{layer_name}' under category '{data_type}' not found in the graph.")
         return graph_client
 
     # Mapping from old node IDs to new node IDs
@@ -28,19 +33,24 @@ async def add_propositions(graph_client, category_name, subclass_content, layer_
     # Add nodes from the Pydantic object
     for node in new_data.nodes:
         unique_node_id = uuid.uuid4()
+
         new_node_id = f"{node.description} - {str(layer_uuid)}  - {str(layer_decomposition_uuid)} - {str(unique_node_id)}"
-        await graph_client.add_node(new_node_id,
-                   created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                   updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                   description=node.description,
-                   category=node.category,
-                   memory_type=node.memory_type,
-                   layer_uuid=str(layer_uuid),
-                   layer_description=str(layer_description),
-                   layer_decomposition_uuid=str(layer_decomposition_uuid),
-                   unique_id=str(unique_node_id),
-                   type='detail')
-        await graph_client.add_edge(subclass_node_id, new_node_id, relationship='detail')
+
+        await graph_client.add_node(
+            new_node_id,
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            description=node.description,
+            category=node.category,
+            memory_type=node.memory_type,
+            layer_uuid=str(layer_uuid),
+            layer_description=str(layer_description),
+            layer_decomposition_uuid=str(layer_decomposition_uuid),
+            unique_id=str(unique_node_id),
+            type='detail'
+        )
+
+        await graph_client.add_edge(layer_node_id, new_node_id, relationship='detail')
 
         # Store the mapping from old node ID to new node ID
         node_id_mapping[node.id] = new_node_id
@@ -56,18 +66,16 @@ async def add_propositions(graph_client, category_name, subclass_content, layer_
         else:
             print(f"Could not find mapping for edge from {edge.source} to {edge.target}")
 
-    return graph_client
-
-async def append_to_graph(layer_graphs, required_layers, graph_client):
+async def append_to_graph(layer_graphs, required_layers):
     # Generate a UUID for the overall layer
     layer_uuid = uuid.uuid4()
     decomposition_uuids = set()
     # Extract category name from required_layers data
-    category_name = required_layers["data_type"]
+    data_type = required_layers["data_type"]
 
     # Extract subgroup name from required_layers data
-    # Assuming there's always at least one subclass and we're taking the first
-    subgroup_name = required_layers["layer_name"]
+    # Assuming there's always at least one layer and we're taking the first
+    layer_name = required_layers["layer_name"]
 
     for layer_ind in layer_graphs:
 
@@ -77,14 +85,19 @@ async def append_to_graph(layer_graphs, required_layers, graph_client):
 
             # Generate a UUID for this particular layer decomposition
             layer_decomposition_uuid = uuid.uuid4()
+
             decomposition_uuids.add(layer_decomposition_uuid)
+
             # Assuming append_data_to_graph is defined elsewhere and appends data to graph_client
             # You would pass relevant information from knowledge_graph along with other details to this function
-            await add_propositions(graph_client, category_name, subgroup_name, layer_description, knowledge_graph,
-                                     layer_uuid, layer_decomposition_uuid)
-
-            # Print updated graph for verification (assuming F is the updated NetworkX Graph)
-            print("Updated Nodes:", graph_client.graph.nodes(data=True))
+            await add_propositions(
+                data_type,
+                layer_name,
+                layer_description,
+                knowledge_graph,
+                layer_uuid,
+                layer_decomposition_uuid
+            )
 
     return decomposition_uuids
 

@@ -91,7 +91,7 @@ class NetworXAdapter(GraphDBInterface):
     # async def create(self, user_id, custom_user_properties=None, required_layers=None, default_fields=None, existing_graph=None):
     #     """Asynchronously create or update a user content graph based on given parameters."""
     #     # Assume required_layers is a dictionary-like object; use more robust validation in production
-    #     category_name = required_layers['context_name']
+    #     category_name = required_layers['data_type']
     #     subgroup_names = [required_layers['layer_name']]
     #
     #     # Construct the additional_categories structure

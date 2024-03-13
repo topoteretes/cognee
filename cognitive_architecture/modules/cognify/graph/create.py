@@ -1,13 +1,12 @@
 """ This module is responsible for creating a semantic graph """
-from datetime import datetime
 from typing import  Optional, Any
 from pydantic import BaseModel
 from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognitive_architecture.shared.data_models import GraphDBType, DefaultGraphModel, Document, DocumentType, Category, Relationship, UserProperties, UserLocation
+from cognitive_architecture.shared.data_models import GraphDBType
 
 
 async def generate_node_id(instance: BaseModel) -> str:
-    for field in ['id', 'doc_id', 'location_id', 'type_id']:
+    for field in ["id", "doc_id", "location_id", "type_id"]:
         if hasattr(instance, field):
             return f"{instance.__class__.__name__}:{getattr(instance, field)}"
     return f"{instance.__class__.__name__}:default"
@@ -19,100 +18,100 @@ async def add_node_and_edge(client, parent_id: Optional[str], node_id: str, node
         await client.add_edge(parent_id, node_id, **relationship_data)
 
 
-async def process_attribute(G, parent_id: Optional[str], attribute: str, value: Any):
+async def process_attribute(graph_client, parent_id: Optional[str], attribute: str, value: Any):
     if isinstance(value, BaseModel):
         node_id = await generate_node_id(value)
-        node_data = value.dict(exclude={'default_relationship'})
+
+        node_data = value.dict(exclude={"default_relationship"})
+
         # Use the specified default relationship for the edge between the parent node and the current node
-        relationship_data = value.default_relationship.dict() if hasattr(value, 'default_relationship') else {}
-        await add_node_and_edge(G, parent_id, node_id, node_data, relationship_data)
+        relationship_data = value.default_relationship.dict() if hasattr(value, "default_relationship") else {}
+
+        await add_node_and_edge(graph_client, parent_id, node_id, node_data, relationship_data)
 
         # Recursively process nested attributes to ensure all nodes and relationships are added to the graph
         for sub_attr, sub_val in value.__dict__.items():  # Access attributes and their values directly
-            await process_attribute(G, node_id, sub_attr, sub_val)
+            await process_attribute(graph_client, node_id, sub_attr, sub_val)
 
     elif isinstance(value, list) and all(isinstance(item, BaseModel) for item in value):
         # For lists of BaseModel instances, process each item in the list
         for item in value:
-            await process_attribute(G, parent_id, attribute, item)
+            await process_attribute(graph_client, parent_id, attribute, item)
 
-async def create_dynamic(graph_model, client) :
-    await client.load_graph_from_file()
-
+async def create_dynamic(graph_model) :
     root_id = await generate_node_id(graph_model)
 
     node_data = graph_model.dict(exclude = {"default_relationship", "id"})
-    print(node_data)
 
-    await client.add_node(root_id, **node_data)
+    graph_client = get_graph_client(GraphDBType.NETWORKX)
+
+    await graph_client.add_node(root_id, **node_data)
 
     for attribute_name, attribute_value in graph_model:
-        await process_attribute(client, root_id, attribute_name, attribute_value)
+        await process_attribute(graph_client, root_id, attribute_name, attribute_value)
 
-    return client
+    return graph_client
 
 
-async def create_semantic_graph(graph_model_instance, graph_client):
-    await graph_client.load_graph_from_file()
-
+async def create_semantic_graph(graph_model_instance):
     # Dynamic graph creation based on the provided graph model instance
-    graph = await create_dynamic(graph_model_instance, graph_client)
-
-    # Example of adding a node and saving the graph can be demonstrated in the __main__ section or in tests
+    graph = await create_dynamic(graph_model_instance)
 
     return graph
 
-if __name__ == "__main__":
-    import asyncio
 
-    # Assuming all necessary imports and GraphDBType, get_graph_client, Document, DocumentType, etc. are defined
 
-    # Initialize the graph client
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+# if __name__ == "__main__":
+#     import asyncio
 
-    # Define a GraphModel instance with example data
-    graph_model_instance = DefaultGraphModel(
-        id="user123",
-        documents=[
-            Document(
-                doc_id="doc1",
-                title="Document 1",
-                summary="Summary of Document 1",
-                content_id="content_id_for_doc1",
-                doc_type=DocumentType(type_id="PDF", description="Portable Document Format"),
-                categories=[
-                    Category(category_id="finance", name="Finance", default_relationship=Relationship(type="belongs_to")),
-                    Category(category_id="tech", name="Technology", default_relationship=Relationship(type="belongs_to"))
-                ],
-                default_relationship=Relationship(type="has_document")
-            ),
-            Document(
-                doc_id="doc2",
-                title="Document 2",
-                summary="Summary of Document 2",
-                content_id="content_id_for_doc2",
-                doc_type=DocumentType(type_id="TXT", description="Text File"),
-                categories=[
-                    Category(category_id="health", name="Health", default_relationship=Relationship(type="belongs_to")),
-                    Category(category_id="wellness", name="Wellness", default_relationship=Relationship(type="belongs_to"))
-                ],
-                default_relationship=Relationship(type="has_document")
-            )
-        ],
-        user_properties=UserProperties(
-            custom_properties={"age": "30"},
-            location=UserLocation(location_id="ny", description="New York", default_relationship=Relationship(type="located_in"))
-        ),
-        default_fields={
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-    )
+#     # Assuming all necessary imports and GraphDBType, get_graph_client, Document, DocumentType, etc. are defined
 
-    # Run the graph creation asynchronously
-    G = asyncio.run(create_semantic_graph(graph_model_instance, graph_client))
+#     # Initialize the graph client
+#     graph_client = get_graph_client(GraphDBType.NETWORKX)
 
-    # Optionally, here you can add more nodes, edges, or perform other operations on the graph G
+#     # Define a GraphModel instance with example data
+#     graph_model_instance = DefaultGraphModel(
+#         id="user123",
+#         documents=[
+#             Document(
+#                 doc_id="doc1",
+#                 title="Document 1",
+#                 summary="Summary of Document 1",
+#                 content_id="content_id_for_doc1",
+#                 doc_type=DocumentType(type_id="PDF", description="Portable Document Format"),
+#                 categories=[
+#                     Category(category_id="finance", name="Finance", default_relationship=Relationship(type="belongs_to")),
+#                     Category(category_id="tech", name="Technology", default_relationship=Relationship(type="belongs_to"))
+#                 ],
+#                 default_relationship=Relationship(type="has_document")
+#             ),
+#             Document(
+#                 doc_id="doc2",
+#                 title="Document 2",
+#                 summary="Summary of Document 2",
+#                 content_id="content_id_for_doc2",
+#                 doc_type=DocumentType(type_id="TXT", description="Text File"),
+#                 categories=[
+#                     Category(category_id="health", name="Health", default_relationship=Relationship(type="belongs_to")),
+#                     Category(category_id="wellness", name="Wellness", default_relationship=Relationship(type="belongs_to"))
+#                 ],
+#                 default_relationship=Relationship(type="has_document")
+#             )
+#         ],
+#         user_properties=UserProperties(
+#             custom_properties={"age": "30"},
+#             location=UserLocation(location_id="ny", description="New York", default_relationship=Relationship(type="located_in"))
+#         ),
+#         default_fields={
+#             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+#             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#         }
+#     )
+
+#     # Run the graph creation asynchronously
+#     G = asyncio.run(create_semantic_graph(graph_model_instance, graph_client))
+
+#     # Optionally, here you can add more nodes, edges, or perform other operations on the graph G
 
 # async def create_semantic_graph(
 # ):

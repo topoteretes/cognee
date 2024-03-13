@@ -1,6 +1,6 @@
+from networkx import Graph
 from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognitive_architecture.shared.data_models import GraphDBType
-from networkx import Graph
 
 
 async def extract_node_descriptions(data):
@@ -25,7 +25,6 @@ async def add_node_connection(node_descriptions):
 
     return grouped_data
 
-
 def connect_nodes_in_graph(graph: Graph, relationship_dict: dict) -> Graph:
     """
     For each relationship in relationship_dict, check if both nodes exist in the graph based on node attributes.
@@ -37,7 +36,6 @@ def connect_nodes_in_graph(graph: Graph, relationship_dict: dict) -> Graph:
     for id, relationships in relationship_dict.items():
         for relationship in relationships:
             searched_node_attr_id = relationship['searched_node_id']
-            print(searched_node_attr_id)
             score_attr_id = relationship['original_id_for_search']
             score = relationship['score']
 
@@ -58,8 +56,6 @@ def connect_nodes_in_graph(graph: Graph, relationship_dict: dict) -> Graph:
 
             # Check if both nodes were found in the graph
             if searched_node_key is not None and score_node_key is not None:
-                print(searched_node_key)
-                print(score_node_key)
                 # If both nodes exist, create an edge between them
                 # You can customize the edge attributes as needed, here we use 'score' as an attribute
                 graph.add_edge(searched_node_key, score_node_key, weight=score,
