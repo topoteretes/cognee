@@ -65,7 +65,8 @@ class QDrantAdapter(VectorDBInterface):
 
         return await client.search(
             collection_name = collection_name,
-            query_vector = query_vector,
+            query_vector = (
+            "content", query_vector),
             limit = limit,
             with_vectors = with_vector
         )

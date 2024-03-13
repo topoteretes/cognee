@@ -15,7 +15,12 @@ async def search_similarity(query:str ,graph):
     query = await client.async_get_embedding_with_backoff(query)
     # print(query)
     for id in unique_layer_uuids:
-        result = client.search(id, query[0])
+        from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
+        vector_client = get_vector_database()
+
+        print(query)
+
+        result = await vector_client.search(id, query,10)
 
         if result:
             result_ = [ result_.id for result_ in result]
@@ -23,4 +28,17 @@ async def search_similarity(query:str ,graph):
 
             out.append([result_, score_])
 
-    return out
+    relevant_context = []
+
+    for proposition_id in out[0][0]:
+        print(proposition_id)
+        for n,attr in graph.nodes(data=True):
+            if proposition_id in n:
+                for n_, attr_ in graph.nodes(data=True):
+                    relevant_layer = attr['layer_uuid']
+
+                    if attr_.get('layer_uuid') == relevant_layer:
+                        print(attr_['description'])
+                        relevant_context.append(attr_['description'])
+
+    return relevant_context

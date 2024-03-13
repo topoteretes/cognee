@@ -28,12 +28,12 @@ class OpenAIAdapter(LLMInterface):
         return await openai.chat.completions.acreate(**kwargs)
 
     @retry(stop = stop_after_attempt(5))
-    async def acreate_embedding_with_backoff(self, input: List[str], model: str = "text-embedding-ada-002"):
+    async def acreate_embedding_with_backoff(self, input: List[str], model: str = "text-embedding-3-large"):
         """Wrapper around Embedding.acreate w/ backoff"""
 
         return await self.aclient.embeddings.create(input=input, model=model)
 
-    async def async_get_embedding_with_backoff(self, text, model="text-embedding-ada-002"):
+    async def async_get_embedding_with_backoff(self, text, model="text-embedding-3-large"):
         """To get text embeddings, import/call this function
         It specifies defaults + handles rate-limiting + is async"""
         text = text.replace("\n", " ")
@@ -46,7 +46,7 @@ class OpenAIAdapter(LLMInterface):
         """Wrapper around Embedding.create w/ backoff"""
         return openai.embeddings.create(**kwargs)
 
-    def get_embedding_with_backoff(self, text: str, model: str = "text-embedding-ada-002"):
+    def get_embedding_with_backoff(self, text: str, model: str = "text-embedding-3-large"):
         """To get text embeddings, import/call this function
         It specifies defaults + handles rate-limiting
         :param text: str

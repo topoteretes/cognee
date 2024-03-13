@@ -25,7 +25,7 @@ async def complex_search(graph, query_params: Dict[SearchType, Dict[str, Any]]) 
         SearchType.NEIGHBOR: search_neighbour,
     }
 
-    results = set()
+    results = []
 
     # Create a list to hold all the coroutine objects
     search_tasks = []
@@ -34,7 +34,8 @@ async def complex_search(graph, query_params: Dict[SearchType, Dict[str, Any]]) 
         search_func = search_functions.get(search_type)
         if search_func:
             # Schedule the coroutine for execution and store the task
-            task = search_func(graph, **params)
+            full_params = {**params, 'graph': graph}
+            task = search_func(**full_params)
             search_tasks.append(task)
 
     # Use asyncio.gather to run all scheduled tasks concurrently
@@ -42,9 +43,9 @@ async def complex_search(graph, query_params: Dict[SearchType, Dict[str, Any]]) 
 
     # Update the results set with the results from all tasks
     for search_result in search_results:
-        results.update(search_result)
+        results.append(search_result)
 
-    return list(results)
+    return results
 
 if __name__ == "__main__":
     import asyncio
