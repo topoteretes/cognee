@@ -24,7 +24,7 @@ Make data processing for LLMs easy
     <img src="https://img.shields.io/github/issues-pr/topoteretes/cognee?style=for-the-badge" alt="cognee pull-requests"/>
   </a>
   <a href="https://github.com/topoteretes/cognee/releases">
-    <img src="https://img.shields.io/github/release/topoteretes/cognee?&label=Latest&style=for-the-badge" alt="cognee releases>
+    <img src="https://img.shields.io/github/release/topoteretes/cognee?&label=Latest&style=for-the-badge" alt="cognee releases" />
   </a>
 </p>
 
@@ -107,26 +107,24 @@ With poetry:
 poetry add cognee
 ```
 
-
-
 ## 💻 Usage
 - Add a new piece of information to storage
 ```
 import cognee
-cognee.add(data_path, file_name)
+cognee.add(absolute_data_path, dataset_name)
 ```
 
 - Use LLMs and cognee to create graphs
  
 ``` 
-cognee.cognify(file_name)
+cognee.cognify(dataset_name)
  ``` 
 
 - Render the graph after adding your Graphistry credentials to .env
 
 ```
 graph_url = await render_graph(graph, graph_type = "networkx")
-print(graph_url) 
+print(graph_url)
 ```
 
 - Query the graph for a piece of information
