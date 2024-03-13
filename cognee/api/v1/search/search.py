@@ -8,7 +8,7 @@ from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.shared.data_models import GraphDBType
-
+import asyncio
 
 class SearchType(Enum):
     ADJACENT = auto()
@@ -48,7 +48,7 @@ async def search(graph, query_params: Dict[SearchType, Dict[str, Any]]) -> List:
     return results
 
 if __name__ == "__main__":
-    import asyncio
+
 
 
 
