@@ -17,7 +17,6 @@ COPY pyproject.toml poetry.lock /app/
 
 # Install the dependencies
 RUN poetry config virtualenvs.create false && \
-    poetry lock --no-update && \
     poetry install --no-root --no-dev
 
 RUN apt-get update -q && \
@@ -44,7 +43,7 @@ WORKDIR /app
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
 
-COPY cognitive_architecture/ /app/cognitive_architecture
+COPY cognee/ /app/cognee
 COPY main.py /app
 COPY api.py /app
 

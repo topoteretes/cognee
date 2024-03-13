@@ -1,0 +1,41 @@
+name: Deploy MkDocs
+
+on:
+  push:
+
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.3.1
+      - name: Use output
+        run: echo "The stage is finished"
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+
+      - name: Install APT packages
+        run: |
+          sudo apt-get update &&
+          sudo apt-get install pngquant
+
+      - name: Install via Poetry
+        run: poetry install --with dev,docs
+
+        env:
+          GH_TOKEN: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
+
+      - name: Build and deploy MkDocs
+        run: poetry run mkdocs gh-deploy --force

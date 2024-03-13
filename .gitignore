@@ -163,3 +163,7 @@ cython_debug/
 #.idea/
 
 .vscode/
+database/data/
+cognee/data/
+
+.DS_Store

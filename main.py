@@ -2,53 +2,53 @@ from typing import Optional, List
 
 from neo4j.exceptions import Neo4jError
 from pydantic import BaseModel, Field
-from cognitive_architecture.database.graphdb.graph import Neo4jGraphDB
-from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
+from cognee.database.graphdb.graph import Neo4jGraphDB
+from cognee.database.relationaldb.models.memory import MemoryModel
 import os
-from cognitive_architecture.database.relationaldb.database_crud import (
+from cognee.database.relationaldb.database_crud import (
     session_scope,
     update_entity_graph_summary,
 )
-from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
-from cognitive_architecture.utils import generate_letter_uuid
+from cognee.database.relationaldb.database import AsyncSessionLocal
+from cognee.utils import generate_letter_uuid
 import instructor
 from openai import OpenAI
-from cognitive_architecture.vectorstore_manager import Memory
-from cognitive_architecture.database.relationaldb.database_crud import fetch_job_id
+from cognee.vectorstore_manager import Memory
+from cognee.database.relationaldb.database_crud import fetch_job_id
 import uuid
-from cognitive_architecture.database.relationaldb.models.sessions import Session
-from cognitive_architecture.database.relationaldb.models.operation import Operation
-from cognitive_architecture.database.relationaldb.database_crud import (
+from cognee.database.relationaldb.models.sessions import Session
+from cognee.database.relationaldb.models.operation import Operation
+from cognee.database.relationaldb.database_crud import (
     session_scope,
     add_entity,
     update_entity,
     fetch_job_id,
 )
-from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
-from cognitive_architecture.database.relationaldb.models.docs import DocsModel
-from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
-from cognitive_architecture.database.relationaldb.models.user import User
-from cognitive_architecture.classifiers.classify_summary import classify_summary
-from cognitive_architecture.classifiers.classify_documents import classify_documents
-from cognitive_architecture.classifiers.classify_user_query import classify_user_query
-from cognitive_architecture.classifiers.classify_user_input import classify_user_input
+from cognee.database.relationaldb.models.metadatas import MetaDatas
+from cognee.database.relationaldb.models.docs import DocsModel
+from cognee.database.relationaldb.models.memory import MemoryModel
+from cognee.database.relationaldb.models.user import User
+from cognee.classifiers.classify_summary import classify_summary
+from cognee.classifiers.classify_documents import classify_documents
+from cognee.classifiers.classify_user_query import classify_user_query
+from cognee.classifiers.classify_user_input import classify_user_input
 
 aclient = instructor.patch(OpenAI())
 DEFAULT_PRESET = "promethai_chat"
 preset_options = [DEFAULT_PRESET]
 PROMETHAI_DIR = os.path.join(os.path.expanduser("~"), ".")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-from cognitive_architecture.config import Config
+from cognee.config import Config
 
 config = Config()
 config.load()
 
-from cognitive_architecture.utils import get_document_names
+from cognee.utils import get_document_names
 from sqlalchemy.orm import selectinload, joinedload, contains_eager
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from cognitive_architecture.utils import (
+from cognee.utils import (
     get_document_names,
     generate_letter_uuid,
     get_memory_name_by_doc_id,
@@ -56,7 +56,7 @@ from cognitive_architecture.utils import (
     get_vectordb_namespace,
     get_vectordb_document_name,
 )
-from cognitive_architecture.shared.language_processing import (
+from cognee.shared.language_processing import (
     translate_text,
     detect_language,
 )
@@ -152,7 +152,7 @@ async def load_documents_to_vectorstore(
         # except:
         #     document_names = document_source
     for doc in document_names:
-        from cognitive_architecture.shared.language_processing import (
+        from cognee.shared.language_processing import (
             translate_text,
             detect_language,
         )
