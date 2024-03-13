@@ -41,7 +41,7 @@ async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
             if dataset_name is not None and not key.startswith(dataset_name):
                 continue
 
-            results.append(add_dlt(datasets[key], dataset_name = key))
+            results.append(add(datasets[key], dataset_name = key))
 
         return await asyncio.gather(*results)
 

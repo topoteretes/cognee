@@ -6,10 +6,10 @@ from tenacity import retry, stop_after_attempt
 import openai
 
 HOST = os.getenv("OPENAI_API_BASE")
-HOST_TYPE = os.getenv("BACKEND_TYPE")  # default None == ChatCompletion
 
 if HOST is not None:
     openai.api_base = HOST
+
 
 @retry(stop = stop_after_attempt(5))
 def completions_with_backoff(**kwargs):
@@ -60,7 +60,6 @@ def get_embedding_with_backoff(text:str, model:str="text-embedding-ada-002"):
     response = create_embedding_with_backoff(input=[text], model=model)
     embedding = response.data[0].embedding
     return embedding
-
 
 
 async def async_get_batch_embeddings_with_backoff(texts: List[str], models: List[str]) :
