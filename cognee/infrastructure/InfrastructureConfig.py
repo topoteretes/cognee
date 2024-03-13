@@ -1,4 +1,4 @@
-from cognitive_architecture.config import Config
+from cognee.config import Config
 from .databases.relational import SqliteEngine, DatabaseEngine
 
 config = Config()

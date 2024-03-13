@@ -4,10 +4,10 @@ import asyncio
 import dlt
 import duckdb
 from unstructured.cleaners.core import clean
-from cognitive_architecture.root_dir import get_absolute_path
-import cognitive_architecture.modules.ingestion as ingestion
-from cognitive_architecture.infrastructure.files import get_file_metadata
-from cognitive_architecture.infrastructure.files.storage import LocalStorage
+from cognee.root_dir import get_absolute_path
+import cognee.modules.ingestion as ingestion
+from cognee.infrastructure.files import get_file_metadata
+from cognee.infrastructure.files.storage import LocalStorage
 
 async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
     if isinstance(file_paths, str):

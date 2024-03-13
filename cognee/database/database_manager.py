@@ -4,8 +4,8 @@ import os
 from contextlib import asynccontextmanager
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-from cognitive_architecture.config import Config
-from cognitive_architecture.database.relationaldb.database import Base, get_sqlalchemy_database_url
+from cognee.config import Config
+from cognee.database.relationaldb.database import Base, get_sqlalchemy_database_url
 
 globalConfig = Config()
 

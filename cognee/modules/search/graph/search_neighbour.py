@@ -1,5 +1,5 @@
 """ Fetches the context of a given node in the graph"""
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 async def search_neighbour(CONNECTED_GRAPH, id):
     relevant_context = []
     for n,attr in CONNECTED_GRAPH.nodes(data=True):
@@ -18,7 +18,7 @@ async def search_neighbour(CONNECTED_GRAPH, id):
 if __name__ == '__main__':
     import asyncio
     async def main():
-        from cognitive_architecture.shared.data_models import GraphDBType
+        from cognee.shared.data_models import GraphDBType
 
         graph_client = get_graph_client(GraphDBType.NETWORKX)
         graph = await  graph_client.graph

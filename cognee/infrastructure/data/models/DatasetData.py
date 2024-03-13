@@ -1,7 +1,7 @@
 from uuid import uuid4
 from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, UUID, ForeignKey
-from cognitive_architecture.infrastructure.databases.relational import ModelBase
+from cognee.infrastructure.databases.relational import ModelBase
 
 class DatasetData(ModelBase):
     __tablename__ = "dataset_data"

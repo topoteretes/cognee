@@ -6,27 +6,27 @@ import instructor
 from openai import OpenAI
 from unstructured.cleaners.core import clean
 from unstructured.partition.pdf import partition_pdf
-from cognitive_architecture.infrastructure.databases.vector.qdrant.QDrantAdapter import CollectionConfig
-from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
-from cognitive_architecture.modules.cognify.graph.add_classification_nodes import add_classification_nodes
-from cognitive_architecture.modules.cognify.graph.add_node_connections import add_node_connection, graph_ready_output, \
+from cognee.infrastructure.databases.vector.qdrant.QDrantAdapter import CollectionConfig
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
+from cognee.modules.cognify.graph.add_node_connections import add_node_connection, graph_ready_output, \
     connect_nodes_in_graph, extract_node_descriptions
-from cognitive_architecture.modules.cognify.graph.add_propositions import append_to_graph
-from cognitive_architecture.modules.cognify.llm.add_node_connection_embeddings import process_items
-from cognitive_architecture.modules.cognify.vector.batch_search import adapted_qdrant_batch_search
-from cognitive_architecture.modules.cognify.vector.add_propositions import add_propositions
+from cognee.modules.cognify.graph.add_propositions import append_to_graph
+from cognee.modules.cognify.llm.add_node_connection_embeddings import process_items
+from cognee.modules.cognify.vector.batch_search import adapted_qdrant_batch_search
+from cognee.modules.cognify.vector.add_propositions import add_propositions
 
-from cognitive_architecture.config import Config
-from cognitive_architecture.modules.cognify.llm.classify_content import classify_into_categories
-from cognitive_architecture.modules.cognify.llm.content_to_cog_layers import content_to_cog_layers
-from cognitive_architecture.modules.cognify.llm.generate_graph import generate_graph
-from cognitive_architecture.shared.data_models import DefaultContentPrediction,  KnowledgeGraph, DefaultCognitiveLayer
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognitive_architecture.shared.data_models import GraphDBType
-from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
-from cognitive_architecture.infrastructure.databases.relational import DuckDBAdapter
-from cognitive_architecture.modules.cognify.graph.add_document_node import add_document_node
-from cognitive_architecture.modules.cognify.graph.initialize_graph import initialize_graph
+from cognee.config import Config
+from cognee.modules.cognify.llm.classify_content import classify_into_categories
+from cognee.modules.cognify.llm.content_to_cog_layers import content_to_cog_layers
+from cognee.modules.cognify.llm.generate_graph import generate_graph
+from cognee.shared.data_models import DefaultContentPrediction,  KnowledgeGraph, DefaultCognitiveLayer
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.shared.data_models import GraphDBType
+from cognee.infrastructure.databases.vector.get_vector_database import get_vector_database
+from cognee.infrastructure.databases.relational import DuckDBAdapter
+from cognee.modules.cognify.graph.add_document_node import add_document_node
+from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 
 config = Config()
 config.load()

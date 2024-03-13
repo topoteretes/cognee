@@ -6,7 +6,7 @@ import instructor
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt
-from cognitive_architecture.utils import read_query_prompt
+from cognee.utils import read_query_prompt
 from ..llm_interface import LLMInterface
 
 class OpenAIAdapter(LLMInterface):

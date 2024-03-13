@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",]
 
 [tool.poetry.dependencies]
-python = "3.10.13"
+python = "~3.10"
 langchain = "^0.0.338"
 openai = "1.12.0"
 python-dotenv = "1.0.1"

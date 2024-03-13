@@ -1,8 +1,8 @@
 import uuid
 from typing import List
 from qdrant_client.models import PointStruct
-from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
-from cognitive_architecture.infrastructure.llm.openai.openai_tools import async_get_embedding_with_backoff
+from cognee.infrastructure.databases.vector.get_vector_database import get_vector_database
+from cognee.infrastructure.llm.openai.openai_tools import async_get_embedding_with_backoff
 
 async def create_information_points(memory_name: str, payload: List[str]):
     vector_db = get_vector_database()

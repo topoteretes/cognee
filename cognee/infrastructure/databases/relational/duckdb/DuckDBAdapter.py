@@ -1,5 +1,5 @@
 import duckdb
-from cognitive_architecture.root_dir import get_absolute_path
+from cognee.root_dir import get_absolute_path
 
 class DuckDBAdapter():
     def __init__(self):

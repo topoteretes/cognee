@@ -1,4 +1,4 @@
-from cognitive_architecture.root_dir import get_absolute_path
+from cognee.root_dir import get_absolute_path
 from .storage.StorageManager import StorageManager
 from .storage.LocalStorage import LocalStorage
 

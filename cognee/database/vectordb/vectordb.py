@@ -3,7 +3,7 @@ import logging
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from marshmallow import Schema, fields
-from cognitive_architecture.database.vectordb.loaders.loaders import _document_loader
+from cognee.database.vectordb.loaders.loaders import _document_loader
 
 # Add the parent directory to sys.path
 
@@ -186,7 +186,7 @@ class WeaviateVectorDB(VectorDB):
                     )
         else:
             chunk_count = 0
-            from cognitive_architecture.database.vectordb.chunkers.chunkers import (
+            from cognee.database.vectordb.chunkers.chunkers import (
                 chunk_data,
             )
 

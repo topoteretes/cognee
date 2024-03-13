@@ -43,7 +43,7 @@ WORKDIR /app
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
 
-COPY cognitive_architecture/ /app/cognitive_architecture
+COPY cognee/ /app/cognee
 COPY main.py /app
 COPY api.py /app
 

@@ -2,7 +2,7 @@
 import uuid
 import json
 from datetime import datetime
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
 
 
 async def add_propositions(

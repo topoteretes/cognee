@@ -2,7 +2,7 @@ from typing import List
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, MappedColumn, Mapped
 from sqlalchemy import Column, String, DateTime, UUID, Text, JSON
-from cognitive_architecture.infrastructure.databases.relational import ModelBase
+from cognee.infrastructure.databases.relational import ModelBase
 from .DatasetData import DatasetData
 
 class Data(ModelBase):

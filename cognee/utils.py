@@ -12,11 +12,11 @@ from sqlalchemy import or_
 from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager
 from sqlalchemy.ext.asyncio import AsyncSession
-from cognitive_architecture.database.relationaldb.models.docs import DocsModel
-from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
-from cognitive_architecture.database.relationaldb.models.operation import Operation
+from cognee.database.relationaldb.models.docs import DocsModel
+from cognee.database.relationaldb.models.memory import MemoryModel
+from cognee.database.relationaldb.models.operation import Operation
 
-from cognitive_architecture.config import Config
+from cognee.config import Config
 
 config = Config()
 config.load()
@@ -290,7 +290,7 @@ async def read_query_prompt(filename: str) -> str:
     script_directory = Path(__file__).parent
 
     # Set the base directory relative to the script's directory
-    base_directory = script_directory.parent / "cognitive_architecture/infrastructure/llm/prompts"
+    base_directory = script_directory.parent / "cognee/infrastructure/llm/prompts"
 
     # Construct the full file path
     file_path = base_directory / filename
@@ -326,7 +326,7 @@ async def async_render_template(filename: str,  context: dict) -> str:
     script_directory = Path(__file__).parent
 
     # Set the base directory relative to the script's directory
-    base_directory = script_directory.parent / "cognitive_architecture/infrastructure/llm/prompts"
+    base_directory = script_directory.parent / "cognee/infrastructure/llm/prompts"
 
 
     # Construct the full file path

@@ -1,6 +1,6 @@
 import pickle
 from pathlib import Path
-from cognitive_architecture.config import Config
+from cognee.config import Config
 import networkx as nx
 config = Config()
 config  = config.load()

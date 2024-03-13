@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy.orm import Mapped, MappedColumn
 from sqlalchemy import Column, String, DateTime, ForeignKey, Enum, UUID, JSON
-from cognitive_architecture.infrastructure.databases.relational import ModelBase
+from cognee.infrastructure.databases.relational import ModelBase
 
 class OperationType(Enum):
     MERGE_DATA = "MERGE_DATA"

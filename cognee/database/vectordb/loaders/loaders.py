@@ -3,8 +3,8 @@ import fitz
 import os
 import sys
 
-from cognitive_architecture.database.vectordb.chunkers.chunkers import chunk_data
-from cognitive_architecture.shared.language_processing import (
+from cognee.database.vectordb.chunkers.chunkers import chunk_data
+from cognee.shared.language_processing import (
     translate_text,
     detect_language,
 )
@@ -148,7 +148,7 @@ async def _document_loader(observation: str, loader_settings: dict):
 #                         file_content += page.get_text()
 #                 pages = chunk_data(chunk_strategy=loader_strategy, source_data=file_content, chunk_size=chunk_size,
 #                                    chunk_overlap=chunk_overlap)
-#                 from cognitive_architecture.shared.language_processing import translate_text,detect_language
+#                 from cognee.shared.language_processing import translate_text,detect_language
 #
 #                 if detect_language(pages) != "en":
 #                     logging.info("Current Directory 3")
@@ -169,7 +169,7 @@ async def _document_loader(observation: str, loader_settings: dict):
 #                 pages = chunk_data(chunk_strategy=loader_strategy, source_data=file_content, chunk_size=chunk_size,
 #                                    chunk_overlap=chunk_overlap)
 #
-#                 from cognitive_architecture.shared.language_processing import translate_text, detect_language
+#                 from cognee.shared.language_processing import translate_text, detect_language
 #
 #                 if detect_language(pages) != "en":
 #                     logging.info("Current Directory 3")
@@ -196,7 +196,7 @@ async def _document_loader(observation: str, loader_settings: dict):
 #             pages = chunk_data(chunk_strategy=loader_strategy, source_data=str(documents), chunk_size=chunk_size,
 #                                chunk_overlap=chunk_overlap)
 #             logging.info("Documents: %s", documents)
-#             from cognitive_architecture.shared.language_processing import translate_text, detect_language
+#             from cognee.shared.language_processing import translate_text, detect_language
 #
 #             if detect_language(pages) != "en":
 #                 logging.info("Current Directory 3")

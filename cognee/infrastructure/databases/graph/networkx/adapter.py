@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 import aiofiles.os
 import aiofiles
 import networkx as nx
-from cognitive_architecture.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 import logging
 
 class NetworXAdapter(GraphDBInterface):

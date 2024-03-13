@@ -16,12 +16,12 @@ from langchain.retrievers import WeaviateHybridSearchRetriever
 from weaviate.gql.get import HybridFusion
 
 
-from cognitive_architecture.database.relationaldb.models.sessions import Session
-from cognitive_architecture.database.relationaldb.models.metadatas import MetaDatas
-from cognitive_architecture.database.relationaldb.models.operation import Operation
-from cognitive_architecture.database.relationaldb.models.docs import DocsModel
+from cognee.database.relationaldb.models.sessions import Session
+from cognee.database.relationaldb.models.metadatas import MetaDatas
+from cognee.database.relationaldb.models.operation import Operation
+from cognee.database.relationaldb.models.docs import DocsModel
 from sqlalchemy.orm import sessionmaker
-from cognitive_architecture.database.relationaldb.database import engine
+from cognee.database.relationaldb.database import engine
 
 from typing import Optional
 import time
@@ -31,7 +31,7 @@ tracemalloc.start()
 
 from datetime import datetime
 from langchain.embeddings.openai import OpenAIEmbeddings
-from cognitive_architecture.database.vectordb.vectordb import (
+from cognee.database.vectordb.vectordb import (
     PineconeVectorDB,
     WeaviateVectorDB,
     LanceDB,
@@ -41,7 +41,7 @@ import uuid
 import weaviate
 from marshmallow import Schema, fields
 import json
-from cognitive_architecture.database.vectordb.vector_db_type import VectorDBType
+from cognee.database.vectordb.vector_db_type import VectorDBType
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

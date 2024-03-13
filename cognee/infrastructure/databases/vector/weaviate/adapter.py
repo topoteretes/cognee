@@ -3,7 +3,7 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.retrievers import WeaviateHybridSearchRetriever, ParentDocumentRetriever
 from databases.vector.vector_db_interface import VectorDBInterface
 # from langchain.text_splitter import RecursiveCharacterTextSplitter
-from cognitive_architecture.database.vectordb.loaders.loaders import _document_loader
+from cognee.database.vectordb.loaders.loaders import _document_loader
 
 class WeaviateVectorDB(VectorDBInterface):
     def __init__(self, *args, **kwargs):
@@ -136,7 +136,7 @@ class WeaviateVectorDB(VectorDBInterface):
                     )
         else:
             chunk_count = 0
-            from cognitive_architecture.database.vectordb.chunkers.chunkers import (
+            from cognee.database.vectordb.chunkers.chunkers import (
                 chunk_data,
             )
 

@@ -3,7 +3,7 @@ from pathlib import Path
 # from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
-from cognitive_architecture.config import Config
+from cognee.config import Config
 
 globalConfig = Config()
 

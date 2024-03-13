@@ -1,5 +1,5 @@
 
-from cognitive_architecture.infrastructure.databases.relational import DuckDBAdapter
+from cognee.infrastructure.databases.relational import DuckDBAdapter
 
 def list_datasets():
     db = DuckDBAdapter()

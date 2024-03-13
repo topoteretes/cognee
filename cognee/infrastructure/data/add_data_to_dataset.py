@@ -1,8 +1,8 @@
 import logging
 from . import Dataset, Data
-from cognitive_architecture.infrastructure import infrastructure_config
-from cognitive_architecture.infrastructure.databases.relational import DatabaseEngine
-from cognitive_architecture.infrastructure.files import remove_file_from_storage
+from cognee.infrastructure import infrastructure_config
+from cognee.infrastructure.databases.relational import DatabaseEngine
+from cognee.infrastructure.files import remove_file_from_storage
 
 logger = logging.getLogger(__name__)
 

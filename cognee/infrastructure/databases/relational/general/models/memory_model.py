@@ -2,7 +2,7 @@
 # from sqlalchemy.orm import relationship
 # # from sqlalchemy.orm import DeclarativeBase
 # from sqlalchemy import Column, String, DateTime, ForeignKey
-# from cognitive_architecture.database.relationaldb.database import Base
+# from cognee.database.relationaldb.database import Base
 
 
 # class MemoryModel(Base):

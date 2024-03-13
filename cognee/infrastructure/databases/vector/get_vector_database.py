@@ -1,4 +1,4 @@
-from cognitive_architecture.config import Config
+from cognee.config import Config
 from .qdrant import QDrantAdapter
 
 config = Config()

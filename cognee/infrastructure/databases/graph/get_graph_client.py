@@ -1,7 +1,7 @@
 """Factory function to get the appropriate graph client based on the graph type."""
-from cognitive_architecture.config import Config
-from cognitive_architecture.root_dir import get_absolute_path
-from cognitive_architecture.shared.data_models import GraphDBType
+from cognee.config import Config
+from cognee.root_dir import get_absolute_path
+from cognee.shared.data_models import GraphDBType
 from .graph_db_interface import GraphDBInterface
 from .networkx.adapter import NetworXAdapter
 # from .neo4j.adapter import Neo4jAdapter

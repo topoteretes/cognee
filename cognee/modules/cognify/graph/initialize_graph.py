@@ -1,6 +1,6 @@
 from datetime import datetime
-from cognitive_architecture.shared.data_models import DefaultGraphModel, Relationship, UserProperties, UserLocation
-from cognitive_architecture.modules.cognify.graph.create import create_semantic_graph
+from cognee.shared.data_models import DefaultGraphModel, Relationship, UserProperties, UserLocation
+from cognee.modules.cognify.graph.create import create_semantic_graph
 
 async def initialize_graph(root_id: str):
     graph = DefaultGraphModel(

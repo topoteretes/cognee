@@ -2,9 +2,9 @@ import uuid
 from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from cognitive_architecture.config import Config
+from cognee.config import Config
 # from ..relational_db_interface import RelationalDBInterface
-from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
+from cognee.database.relationaldb.models.memory import MemoryModel
 
 config = Config()
 config.load()

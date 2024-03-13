@@ -2,7 +2,7 @@
 
 import re
 import logging
-from cognitive_architecture.database.vectordb.chunkers.chunk_strategy import ChunkStrategy
+from cognee.database.vectordb.chunkers.chunk_strategy import ChunkStrategy
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 

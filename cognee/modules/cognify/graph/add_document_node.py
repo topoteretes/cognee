@@ -1,5 +1,5 @@
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognitive_architecture.shared.data_models import GraphDBType, Document, DocumentType, Category, Relationship
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.shared.data_models import GraphDBType, Document, DocumentType, Category, Relationship
 from .create import add_node_and_edge
 
 def create_category(category_name: str):

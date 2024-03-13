@@ -164,4 +164,4 @@ cython_debug/
 
 .vscode/
 database/data/
-cognitive_architecture/data/
+cognee/data/

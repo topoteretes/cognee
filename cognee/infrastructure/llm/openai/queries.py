@@ -3,8 +3,8 @@ import os
 import instructor
 from openai import OpenAI
 import logging
-from cognitive_architecture.shared.data_models import  KnowledgeGraph,  MemorySummary
-from cognitive_architecture.config import Config
+from cognee.shared.data_models import  KnowledgeGraph,  MemorySummary
+from cognee.config import Config
 
 
 
@@ -36,7 +36,7 @@ def generate_graph(input) -> KnowledgeGraph:
     model = "gpt-4-1106-preview"
     user_prompt = f"Use the given format to extract information from the following input: {input}."
     system_prompt = read_query_prompt(
-        "cognitive_architecture/llm/prompts/generate_graph_prompt.txt"
+        "cognee/llm/prompts/generate_graph_prompt.txt"
     )
 
     out = aclient.chat.completions.create(
@@ -87,7 +87,7 @@ async def generate_summary(input) -> MemorySummary:
 def user_query_to_edges_and_nodes(input: str) -> KnowledgeGraph:
     """Generate a knowledge graph from a user query."""
     system_prompt = read_query_prompt(
-        "cognitive_architecture/llm/prompts/generate_graph_prompt.txt"
+        "cognee/llm/prompts/generate_graph_prompt.txt"
     )
     return aclient.chat.completions.create(
         model=config.model,

@@ -21,7 +21,7 @@ from ...utils import (
     create_edge_variable_mapping,
     create_node_variable_mapping,
 )
-from cognitive_architecture.infrastructure.llm.openai.queries import generate_summary, generate_graph
+from cognee.infrastructure.llm.openai.queries import generate_summary, generate_graph
 import logging
 from neo4j import AsyncGraphDatabase
 from contextlib import asynccontextmanager

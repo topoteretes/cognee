@@ -4,7 +4,7 @@ from typing import Callable
 from sqlalchemy.inspection import inspect
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine, AsyncSession, async_scoped_session
 from sqlalchemy.future import select
-from cognitive_architecture.infrastructure.files.storage.LocalStorage import LocalStorage
+from cognee.infrastructure.files.storage.LocalStorage import LocalStorage
 from ..DatabaseEngine import DatabaseEngine
 from ..ModelBase import ModelBase
 from ..utils import with_rollback

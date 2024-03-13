@@ -3,15 +3,15 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 from sqlalchemy.future import select
-from cognitive_architecture.database.relationaldb.models.user import User
-from cognitive_architecture.database.relationaldb.models.memory import MemoryModel
+from cognee.database.relationaldb.models.user import User
+from cognee.database.relationaldb.models.memory import MemoryModel
 import ast
 import tracemalloc
-from cognitive_architecture.database.relationaldb.database_crud import add_entity
+from cognee.database.relationaldb.database_crud import add_entity
 tracemalloc.start()
 import uuid
-from cognitive_architecture.database.vectordb.basevectordb import BaseMemory
-from cognitive_architecture.config import Config
+from cognee.database.vectordb.basevectordb import BaseMemory
+from cognee.config import Config
 
 globalConfig = Config()
 

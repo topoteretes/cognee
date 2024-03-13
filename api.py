@@ -13,7 +13,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-from cognitive_architecture.config import Config
+from cognee.config import Config
 
 config = Config()
 config.load()
@@ -23,9 +23,9 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from cognitive_architecture.database.relationaldb.database import AsyncSessionLocal
-from cognitive_architecture.database.relationaldb.database_crud import session_scope
-from cognitive_architecture.vectorstore_manager import Memory
+from cognee.database.relationaldb.database import AsyncSessionLocal
+from cognee.database.relationaldb.database_crud import session_scope
+from cognee.vectorstore_manager import Memory
 from main import add_documents_to_graph_db, user_context_enrichment
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -57,7 +57,7 @@ def health_check():
 class Payload(BaseModel):
     payload: Dict[str, Any]
 
-from cognitive_architecture.api.v1.memory.create_memory import MemoryType
+from cognee.api.v1.memory.create_memory import MemoryType
 
 class CreateMemoryPayload(BaseModel):
     user_id: str
@@ -66,7 +66,7 @@ class CreateMemoryPayload(BaseModel):
 
 @app.post("/create-memory", response_model=dict)
 async def create_memory(payload: CreateMemoryPayload):
-    from cognitive_architecture.api.v1.memory.create_memory import create_memory as create_memory_v1, MemoryException
+    from cognee.api.v1.memory.create_memory import create_memory as create_memory_v1, MemoryException
 
     try:
         await create_memory_v1(
@@ -93,7 +93,7 @@ class RememberPayload(BaseModel):
 
 @app.post("/remember", response_model=dict)
 async def remember(payload: RememberPayload):
-    from cognitive_architecture.api.v1.memory.remember import remember as remember_v1
+    from cognee.api.v1.memory.remember import remember as remember_v1
     
     await remember_v1(
         payload.user_id,
@@ -264,7 +264,7 @@ async def user_query_classfier(payload: Payload):
 
         # Execute the query - replace this with the actual execution method
         async with session_scope(session=AsyncSessionLocal()) as session:
-            from cognitive_architecture.classifiers.classify_user_input import (
+            from cognee.classifiers.classify_user_input import (
                 classify_user_query,
             )
 
@@ -292,7 +292,7 @@ async def drop_db(payload: Payload):
             else:
                 pass
 
-            from cognitive_architecture.database.create_database import (
+            from cognee.database.create_database import (
                 drop_database,
                 create_admin_engine,
             )
@@ -310,7 +310,7 @@ async def drop_db(payload: Payload):
             else:
                 pass
 
-            from cognitive_architecture.database.create_database import (
+            from cognee.database.create_database import (
                 create_database,
                 create_admin_engine,
             )

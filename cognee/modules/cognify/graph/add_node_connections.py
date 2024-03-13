@@ -1,6 +1,6 @@
 from networkx import Graph
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognitive_architecture.shared.data_models import GraphDBType
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.shared.data_models import GraphDBType
 
 
 async def extract_node_descriptions(data):

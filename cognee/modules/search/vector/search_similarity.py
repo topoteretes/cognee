@@ -1,6 +1,6 @@
 
-from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
-from cognitive_architecture.modules.cognify.graph.add_node_connections import extract_node_descriptions
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.cognify.graph.add_node_connections import extract_node_descriptions
 
 
 async def search_similarity(query:str ,graph):
@@ -15,7 +15,7 @@ async def search_similarity(query:str ,graph):
     query = await client.async_get_embedding_with_backoff(query)
     # print(query)
     for id in unique_layer_uuids:
-        from cognitive_architecture.infrastructure.databases.vector.get_vector_database import get_vector_database
+        from cognee.infrastructure.databases.vector.get_vector_database import get_vector_database
         vector_client = get_vector_database()
 
         print(query)

@@ -1,5 +1,5 @@
 """Get the LLM client."""
-from cognitive_architecture.config import Config
+from cognee.config import Config
 from .openai.adapter import OpenAIAdapter
 
 config = Config()

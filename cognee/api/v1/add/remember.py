@@ -1,6 +1,6 @@
 from typing import List
 from enum import Enum
-from cognitive_architecture.modules.users.memory import create_information_points, is_existing_memory
+from cognee.modules.users.memory import create_information_points, is_existing_memory
 
 class MemoryType(Enum):
     GRAPH = "GRAPH"

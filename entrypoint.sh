@@ -7,7 +7,7 @@ echo "Environment: $ENVIRONMENT"
 if [ "$ENVIRONMENT" != "local" ]; then
     echo "Running fetch_secret.py"
 
-    PYTHONPATH=. python cognitive_architecture/fetch_secret.py
+    PYTHONPATH=. python cognee/fetch_secret.py
 
     if [ $? -ne 0 ]; then
         echo "Error: fetch_secret.py failed"
@@ -19,7 +19,7 @@ fi
 
 echo "Creating database..."
 
-PYTHONPATH=. python cognitive_architecture/setup_database.py
+PYTHONPATH=. python cognee/setup_database.py
 if [ $? -ne 0 ]; then
     echo "Error: setup_database.py failed"
     exit 1

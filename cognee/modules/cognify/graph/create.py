@@ -1,8 +1,8 @@
 """ This module is responsible for creating a semantic graph """
 from typing import  Optional, Any
 from pydantic import BaseModel
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognitive_architecture.shared.data_models import GraphDBType
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.shared.data_models import GraphDBType
 
 
 async def generate_node_id(instance: BaseModel) -> str:

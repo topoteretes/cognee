@@ -1,7 +1,7 @@
 import asyncio
 from uuid import UUID, uuid4
-from cognitive_architecture.infrastructure.files import add_file_to_storage
-from cognitive_architecture.infrastructure.data import add_data_to_dataset, Data, Dataset
+from cognee.infrastructure.files import add_file_to_storage
+from cognee.infrastructure.data import add_data_to_dataset, Data, Dataset
 from .data_types import IngestionData
 
 async def save(dataset_id: UUID, dataset_name: str, data_id: UUID, data: IngestionData):

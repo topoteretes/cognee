@@ -5,11 +5,11 @@ logger = logging.getLogger(__name__)
 
 async def main():
     """Runs as a part of startup docker scripts to create the database and tables."""
-    from cognitive_architecture.config import Config
+    from cognee.config import Config
     config = Config()
     config.load()
 
-    from cognitive_architecture.database.database_manager import DatabaseManager
+    from cognee.database.database_manager import DatabaseManager
 
     db_manager = DatabaseManager()
     database_name = config.db_name

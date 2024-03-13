@@ -2,12 +2,12 @@
 from enum import Enum, auto
 from typing import Dict, Any, Callable, List
 
-from cognitive_architecture.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognitive_architecture.modules.search.graph.search_adjacent import search_adjacent
-from cognitive_architecture.modules.search.vector.search_similarity import search_similarity
-from cognitive_architecture.modules.search.graph.search_categories import search_categories
-from cognitive_architecture.modules.search.graph.search_neighbour import search_neighbour
-from cognitive_architecture.shared.data_models import GraphDBType
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.modules.search.graph.search_adjacent import search_adjacent
+from cognee.modules.search.vector.search_similarity import search_similarity
+from cognee.modules.search.graph.search_categories import search_categories
+from cognee.modules.search.graph.search_neighbour import search_neighbour
+from cognee.shared.data_models import GraphDBType
 
 
 class SearchType(Enum):

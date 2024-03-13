@@ -1,8 +1,8 @@
 import asyncio
 
 from qdrant_client import models
-from cognitive_architecture.infrastructure.llm.get_llm_client import get_llm_client
-from cognitive_architecture.infrastructure.databases.vector import get_vector_database
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.databases.vector import get_vector_database
 
 async def get_embeddings(texts:list):
     """ Get embeddings for a list of texts"""

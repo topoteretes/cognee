@@ -1,8 +1,8 @@
 import asyncio
 from uuid import UUID, uuid4
 from typing import Union, BinaryIO, List
-import cognitive_architecture.modules.ingestion as ingestion
-from cognitive_architecture.infrastructure import infrastructure_config
+import cognee.modules.ingestion as ingestion
+from cognee.infrastructure import infrastructure_config
 
 class DatasetException(Exception):
     message: str
