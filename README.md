@@ -110,12 +110,33 @@ poetry add cognee
 
 
 ## 💻 Usage
+- Add a new piece of information to storage
+```
+import cognee
+cognee.add(data_path, file_name)
+```
 
-```cognee.add()``` - Add a new piece of information to storage
+- Use LLMs and cognee to create graphs
+ 
+``` 
+cognee.cognify(file_name)
+ ``` 
 
-```cognee.cognify() ``` - Use LLMs to create graphs
+- Render the graph after adding your Graphistry credentials to .env
 
-```cognee.search()``` - Query the graph for a piece of information
+```
+graph_url = await render_graph(graph, graph_type = "networkx")
+print(graph_url) 
+```
+
+- Query the graph for a piece of information
+
+```
+query_params = {
+    SearchType.SIMILARITY: {'query': 'your search query here'}
+}
+cognee.search(graph, query_params) 
+``` 
 
 
 ## Demo
