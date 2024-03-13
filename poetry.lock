@@ -8048,7 +8048,6 @@ notebook = ["overrides"]
 parquet = ["pyarrow"]
 pinecone = []
 postgres = []
-qdrant = ["qdrant-client"]
 redshift = []
 s3 = []
 snowflake = []
@@ -8058,4 +8057,4 @@ weaviate = []
 [metadata]
 lock-version = "2.0"
 python-versions = "~3.10"
-content-hash = "48d8cbd3319b1370abddeb2ff6c32cf6be01bdaff150d466129a1667b8cce94f"
+content-hash = "37a0db9a6a86b71a35c91ac5ef86204d76529033260032917906a907bffc8216"

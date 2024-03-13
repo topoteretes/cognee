@@ -35,7 +35,7 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-async def cognify(dataset_name: str):
+async def cognify(dataset_name: str = "root"):
     """This function is responsible for the cognitive processing of the content."""
 
     db = DuckDBAdapter()

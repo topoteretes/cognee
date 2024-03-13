@@ -1,13 +1,12 @@
 """ This module contains the search function that is used to search for nodes in the graph."""
+import asyncio
 from enum import Enum, auto
 from typing import Dict, Any, Callable, List
 
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
-from cognee.shared.data_models import GraphDBType
 
 
 class SearchType(Enum):
@@ -17,7 +16,7 @@ class SearchType(Enum):
     NEIGHBOR = auto()
 
 
-async def complex_search(graph, query_params: Dict[SearchType, Dict[str, Any]]) -> List:
+async def search(graph, query_params: Dict[SearchType, Dict[str, Any]]) -> List:
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SIMILARITY: search_similarity,
@@ -47,21 +46,18 @@ async def complex_search(graph, query_params: Dict[SearchType, Dict[str, Any]]) 
 
     return results
 
-if __name__ == "__main__":
-    import asyncio
+# if __name__ == "__main__":
+#     import asyncio
 
+#     query_params = {
+#         SearchType.SIMILARITY: {'query': 'your search query here'}
+#     }
+#     async def main():
+#         graph_client = get_graph_client(GraphDBType.NETWORKX)
 
+#         await graph_client.load_graph_from_file()
+#         graph = graph_client.graph
+#         results = await complex_search(graph, query_params)
+#         print(results)
 
-
-    query_params = {
-        SearchType.SIMILARITY: {'query': 'your search query here'}
-    }
-    async def main():
-        graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-        await graph_client.load_graph_from_file()
-        graph = graph_client.graph
-        results = await complex_search(graph, query_params)
-        print(results)
-
-    asyncio.run(main())
+#     asyncio.run(main())
