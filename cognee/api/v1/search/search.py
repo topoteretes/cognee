@@ -17,7 +17,7 @@ class SearchType(Enum):
     NEIGHBOR = auto()
 
 
-async def complex_search(graph, query_params: Dict[SearchType, Dict[str, Any]]) -> List:
+async def search(graph, query_params: Dict[SearchType, Dict[str, Any]]) -> List:
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SIMILARITY: search_similarity,
@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
         await graph_client.load_graph_from_file()
         graph = graph_client.graph
-        results = await complex_search(graph, query_params)
+        results = await search(graph, query_params)
         print(results)
 
     asyncio.run(main())
