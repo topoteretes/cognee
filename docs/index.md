@@ -23,7 +23,7 @@ We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've bu
 pip install -U cognee
 ```
 
-You can also check out our [cookbook](./examples/index.md)  to learn more about how to use cognee.
+[//]: # (You can also check out our [cookbook]&#40;./examples/index.md&#41;  to learn more about how to use cognee.)
 
 
 
