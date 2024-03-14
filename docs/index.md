@@ -1,4 +1,6 @@
-# cognee, Make data processing for LLMs easy
+# cognee 
+
+## Make data processing for LLMs easy
 
 _Open-source framework for creating knowledge graphs and data models for LLMs._
 
