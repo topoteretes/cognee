@@ -1,5 +1,18 @@
 
 
+---
+draft: False
+date: 2023-12-05
+tags:
+  - pydantic
+  - langchain
+  - llm
+  - openai 
+  - functions
+  - pdfs
+authors:
+  - tricalt
+---
 
 # Going beyond Langchain + Weaviate: Level 4 towards production
 

@@ -1,4 +1,4 @@
-# Welcome to the cognee Blog
+# Welcome to the cognee blog
 
 The goal of the blog is to discuss broader topics around the cognee project, including the motivation behind the project, the technical details, and the future of the project.
 

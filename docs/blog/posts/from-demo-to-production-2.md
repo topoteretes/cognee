@@ -1,7 +1,21 @@
 
+---
+draft: False
+date: 2023-10-05
+tags:
+  - pydantic
+  - langchain
+  - llm
+  - openai 
+  - functions
+  - pdfs
+authors:
+  - tricalt
+---
+
 # Going beyond Langchain + Weaviate: Level 2 towards Production
 
-### **1.1. The problem of putting code to production**
+### 1.1. The problem of putting code to production
 
 *This post is a part of a series of texts aiming to discover and understand patterns and practices that would enable building a production-ready AI data infrastructure. The main focus is on how to evolve data modeling and retrieval in order to enable Large Language Model (LLM) apps and Agents to serve millions of users concurrently.*
 
@@ -27,9 +41,9 @@ In this post, some of the shortcomings from the previous level will be addressed
 5. LLM context and task generation
 6. Dynamic Agent behavior and Agent tooling
 
-## 3**. Level 2:  Memory Layer + FastAPI + Langchain + Weaviate**
+## 3. Level 2:  Memory Layer + FastAPI + Langchain + Weaviate
 
-### **3.1.** Developer Intent at Level 2
+### 3.1. Developer Intent at Level 2
 
 This phase enhances the basic script by incorporating:
 
