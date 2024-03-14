@@ -4,6 +4,7 @@ The goal of the blog is to discuss broader topics around the cognee project, inc
 
 ## Towards production pipelines step by step
 
-1. [bla?](posts/bla-and-bla.md)
-2. [blablabla?](posts/chain-bla.md)
-3. [blabla?](posts/valblart1.md)
+1. [From demo to production 1](posts/from-demo-to-production-1.md)
+2. [From demo to production 2](posts/from-demo-to-production-2.md)
+3. [From demo to production 3](posts/from-demo-to-production-3.md)
+4. [From demo to production 4](posts/from-demo-to-production-4.md)
