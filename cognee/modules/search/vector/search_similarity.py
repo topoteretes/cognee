@@ -18,8 +18,6 @@ async def search_similarity(query:str ,graph):
         from cognee.infrastructure.databases.vector.get_vector_database import get_vector_database
         vector_client = get_vector_database()
 
-        print(query)
-
         result = await vector_client.search(id, query,10)
 
         if result:

@@ -108,6 +108,10 @@ poetry add cognee
 ```
 
 ## 💻 Usage
+
+Check out our demo notebook [here](cognee%20-%20Get%20Started.ipynb)
+
+
 - Add a new piece of information to storage
 ```
 import cognee
