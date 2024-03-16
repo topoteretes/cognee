@@ -112,6 +112,17 @@ poetry add cognee
 Check out our demo notebook [here](cognee%20-%20Get%20Started.ipynb)
 
 
+- Set OpenAI API Key as an environment variable
+```
+import os
+
+# Setting an environment variable
+os.environ['OPENAI_API_KEY'] = ''
+
+
+```
+
+
 - Add a new piece of information to storage
 ```
 import cognee

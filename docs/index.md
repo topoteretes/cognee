@@ -36,6 +36,57 @@ We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've bu
 pip install -U cognee
 
 ```
+Set OpenAI API Key as an environment variable
+
+
+```
+import os
+
+# Setting an environment variable
+os.environ['OPENAI_API_KEY'] = ''
+
+
+```
+
+Import cognee and start using it
+
+
+```
+import cognee
+from os import listdir, path
+from cognee import add
+
+data_path = path.abspath(".data")
+
+results = await add(data_path, "izmene")
+for result in results:
+    print(result)
+    
+```
+
+Run the following command to see the graph. 
+Make sure to add your Graphistry credentials to .env beforehand
+
+```
+from cognee.utils import render_graph
+
+graph = await cognee.cognify("izmene")
+graph_url = await render_graph(graph, graph_type = "networkx")
+print(graph_url)
+```
+
+
+Search the graph for a piece of information
+
+```
+from cognee import search
+from cognee.api.v1.search.search import SearchType
+query_params = {
+    SearchType.SIMILARITY: {'query': 'your search query here'}
+}
+out = await search(graph, query_params)
+```
+
 
 
 [//]: # (You can also check out our [cookbook](./examples/index.md)  to learn more about how to use cognee.)
@@ -48,7 +99,7 @@ pip install -U cognee
 The question of using cognee is fundamentally a question of why to structure data inputs and outputs for your llm workflows.
 
 
-1. **Cost effective** — With our upcoming opensource release, cognee will extend the capabilities of your LLMs without the need for expensive data processing tools.
+1. **Cost effective** — cognee extends the capabilities of your LLMs without the need for expensive data processing tools.
 
 
 2. **Self contained** — cognee runs as a library and is simple to use
