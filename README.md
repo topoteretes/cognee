@@ -90,6 +90,7 @@ Make data processing for LLMs easy
 <p>
 
 Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
+For more info here are the <a href="https://topoteretes.github.io/cognee/">docs</a>
 </p>
 
 
@@ -155,6 +156,7 @@ cognee.search(graph, query_params)
 ## Demo
 
 [<img src="https://i3.ytimg.com/vi/yjParvJVgPI/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=yjParvJVgPI "Learn about cognee: 55")
+
 
 ## Architecture
 
