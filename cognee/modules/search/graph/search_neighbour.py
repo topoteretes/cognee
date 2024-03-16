@@ -8,7 +8,6 @@ async def search_neighbour(CONNECTED_GRAPH, id):
                 relevant_layer = attr['layer_uuid']
 
                 if attr_.get('layer_uuid') == relevant_layer:
-                    print(attr_['description'])
                     relevant_context.append(attr_['description'])
 
     return relevant_context

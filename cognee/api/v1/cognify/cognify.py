@@ -1,6 +1,6 @@
 import asyncio
 # import logging
-from typing import List
+from typing import List, Union
 from qdrant_client import models
 import instructor
 from openai import OpenAI
@@ -35,11 +35,24 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-async def cognify(dataset_name: str = "root"):
+async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
 
     db = DuckDBAdapter()
-    files_metadata = db.get_files_metadata(dataset_name)
+
+    if datasets is None or len(datasets) == 0:
+        datasets = db.get_datasets()
+
+    awaitables = []
+
+    if isinstance(datasets, list):
+        for dataset in datasets:
+            awaitables.append(cognify(dataset))
+
+        graphs = await asyncio.gather(*awaitables)
+        return graphs[0]
+
+    files_metadata = db.get_files_metadata(datasets)
 
     awaitables = []
 
@@ -77,7 +90,6 @@ async def process_text(input_text: str, file_metadata: dict):
     print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
 
     cognitive_layers = await content_to_cog_layers(
-        "generate_cog_layers.txt",
         classified_categories[0],
         response_model = DefaultCognitiveLayer
     )
