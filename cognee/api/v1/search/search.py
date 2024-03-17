@@ -35,12 +35,12 @@ class SearchParameters(BaseModel):
         return value
 
 
-async def perform_search(graph, search_type: str, params: Dict[str, Any]) -> List:
+async def search(graph, search_type: str, params: Dict[str, Any]) -> List:
     search_params = SearchParameters(search_type=search_type, params=params)
-    return await search(graph, [search_params])
+    return await specific_search(graph, [search_params])
 
 
-async def search(graph, query_params: List[SearchParameters]) -> List:
+async def specific_search(graph, query_params: List[SearchParameters]) -> List:
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SIMILARITY: search_similarity,
@@ -83,7 +83,7 @@ if __name__ == "__main__":
         search_type = 'ADJACENT'
         params = {'query': 'example query', 'other_param': {"node_id": "LLM_LAYER_SUMMARY:DOCUMENT:881ecb36-2819-54c3-8147-ed80293084d6"}}
 
-        results = await perform_search(graph, search_type, params)
+        results = await search(graph, search_type, params)
         print(results)
 
     # Run the async main function
