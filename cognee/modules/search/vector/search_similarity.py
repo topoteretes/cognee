@@ -3,7 +3,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.cognify.graph.add_node_connections import extract_node_descriptions
 from cognee.infrastructure.databases.vector.get_vector_database import get_vector_database
 
-async def search_similarity(query:str ,graph):
+async def search_similarity(query:str ,graph,other_param:str = None):
 
     node_descriptions = await extract_node_descriptions(graph.nodes(data = True))
 

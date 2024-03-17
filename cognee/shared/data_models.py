@@ -161,6 +161,19 @@ class DefaultContentPrediction(BaseModel):
     label: Union[TextContent, AudioContent, ImageContent, VideoContent, MultimediaContent, Model3DContent, ProceduralContent]
 
 
+
+class SummarizedContent(BaseModel):
+    """Class for a single class label summary."""
+
+    summary: str
+
+class LabeledContent(BaseModel):
+    """Class for a single class label summary."""
+
+    content_labels: str
+
+
+
 class CognitiveLayerSubgroup(BaseModel):
     """ CognitiveLayerSubgroup in a general layer """
     id: int

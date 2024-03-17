@@ -44,8 +44,7 @@ WORKDIR /app
 ENV PYTHONPATH=/app
 
 COPY cognee/ /app/cognee
-COPY main.py /app
-COPY api.py /app
+
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
