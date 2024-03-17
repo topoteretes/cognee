@@ -2,8 +2,8 @@ site_name: cognee
 site_author: Vasilije Markovic
 site_description: desc
 repo_name: cognee
-repo_url: https://topoteretes.github.io
-site_url: http://topoteretes.github.io
+repo_url: https://topoteretes.github.io/cognee
+site_url: https://www.congee.ai
 edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2024 cognee
 theme:
@@ -99,8 +99,8 @@ markdown_extensions:
   - pymdownx.magiclink:
       normalize_issue_symbols: true
       repo_url_shorthand: true
-      user: jxnl
-      repo: instructor
+      user: tricalt
+      repo: cognee
   - pymdownx.mark
   - pymdownx.smartsymbols
   - pymdownx.snippets:
@@ -119,3 +119,7 @@ markdown_extensions:
 nav:
   - Introduction:
     - Welcome to cognee: 'index.md'
+  - Blog:
+      - "blog/index.md"
+  - Why cognee:
+      - "why.md"
