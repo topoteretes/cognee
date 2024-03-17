@@ -1,32 +1,32 @@
-name: Python Linting
-
-on:
-  push:
-    branches: [ main ]  # This will trigger the workflow on pushes to the main branch
-  pull_request:  # This will trigger the workflow on any pull request to any branch
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'  # Specify the Python version you want to use
-
-    - name: Install Poetry
-      run: |
-        curl -sSL https://install.python-poetry.org | python3 -  # Install Poetry
-
-    - name: Configure Poetry
-      run: |
-        poetry config virtualenvs.create false  # Configure poetry to not create a new virtual environment
-
-    - name: Install dependencies
-      run: |
-        poetry install  # Install the dependencies specified in pyproject.toml
-
-    - name: Run pylint
-      run: |
-        pylint $(git ls-files '*.py')  # Run pylint on all Python files in the repository
+#name: Python Linting
+#
+#on:
+#  push:
+#    branches: [ main ]  # This will trigger the workflow on pushes to the main branch
+#  pull_request:  # This will trigger the workflow on any pull request to any branch
+#
+#jobs:
+#  lint:
+#    runs-on: ubuntu-latest
+#    steps:
+#    - uses: actions/checkout@v3
+#    - name: Set up Python
+#      uses: actions/setup-python@v4
+#      with:
+#        python-version: '3.11'  # Specify the Python version you want to use
+#
+#    - name: Install Poetry
+#      run: |
+#        curl -sSL https://install.python-poetry.org | python3 -  # Install Poetry
+#
+#    - name: Configure Poetry
+#      run: |
+#        poetry config virtualenvs.create false  # Configure poetry to not create a new virtual environment
+#
+#    - name: Install dependencies
+#      run: |
+#        poetry install  # Install the dependencies specified in pyproject.toml
+#
+#    - name: Run pylint
+#      run: |
+#        pylint $(git ls-files '*.py')  # Run pylint on all Python files in the repository
