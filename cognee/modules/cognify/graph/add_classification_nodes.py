@@ -5,6 +5,7 @@ from cognee.infrastructure.databases.graph.get_graph_client import get_graph_cli
 async def add_classification_nodes(document_id, classification_data):
     graph_client = get_graph_client(GraphDBType.NETWORKX)
 
+
     await graph_client.load_graph_from_file()
 
     data_type = classification_data["data_type"]
