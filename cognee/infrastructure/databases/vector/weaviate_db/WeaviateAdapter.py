@@ -49,17 +49,19 @@ class WeaviateAdapter(VectorDBInterface):
         return self.get_collection(collection_name).data.insert_many(objects)
 
     async def search(self, collection_name: str, query_text: str, limit: int, with_vector: bool = False):
-        search_result = self.get_collection(collection_name).query.bm25(
+        search_result = self.get_collection(collection_name).query.hybrid(
             query = query_text,
             limit = limit,
             include_vector = with_vector,
             return_metadata = wvc.query.MetadataQuery(score = True),
         )
 
+        # print(search_result.objects)
+
         return list(map(lambda result: ScoredResult(
-            id = result.uuid,
+            id = str(result.uuid),
             payload = result.properties,
-            score = str(result.metadata.score)
+            score = float(result.metadata.score)
         ), search_result.objects))
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int,  with_vectors: bool = False):

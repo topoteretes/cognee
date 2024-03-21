@@ -28,11 +28,18 @@ async def search_similarity(query: str, graph, other_param: str = None):
 
     for proposition_id in out[0][0]:
         for n, attr in graph.nodes(data = True):
-            if proposition_id in n:
+            if str(proposition_id) in str(n):
                 for n_, attr_ in graph.nodes(data=True):
                     relevant_layer = attr["layer_uuid"]
 
                     if attr_.get("layer_uuid") == relevant_layer:
                         relevant_context.append(attr_["description"])
+
+    def deduplicate_list(original_list):
+        seen = set()
+        deduplicated_list = [x for x in original_list if not (x in seen or seen.add(x))]
+        return deduplicated_list
+
+    relevant_context = deduplicate_list(relevant_context)
 
     return relevant_context

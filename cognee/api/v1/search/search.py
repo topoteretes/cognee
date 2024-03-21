@@ -2,7 +2,7 @@
 import asyncio
 from enum import Enum, auto
 from typing import Dict, Any, Callable, List
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
@@ -28,7 +28,7 @@ class SearchParameters(BaseModel):
     search_type: SearchType
     params: Dict[str, Any]
 
-    @validator('search_type', pre=True)
+    @field_validator('search_type', mode='before')
     def convert_string_to_enum(cls, value):
         if isinstance(value, str):
             return SearchType.from_str(value)
@@ -80,8 +80,8 @@ if __name__ == "__main__":
         await graph_client.load_graph_from_file()
         graph = graph_client.graph
         # Assuming 'graph' is your graph object, obtained from somewhere
-        search_type = 'ADJACENT'
-        params = {'query': 'example query', 'other_param': {"node_id": "LLM_LAYER_SUMMARY:DOCUMENT:881ecb36-2819-54c3-8147-ed80293084d6"}}
+        search_type = 'CATEGORIES'
+        params = {'query': 'Ministarstvo', 'other_param': {"node_id": "LLM_LAYER_SUMMARY:DOCUMENT:881ecb36-2819-54c3-8147-ed80293084d6"}}
 
         results = await search(graph, search_type, params)
         print(results)

@@ -178,7 +178,12 @@ async def process_text(input_text: str, file_metadata: dict):
 
     results = await resolve_cross_graph_references(nodes_by_layer)
 
+
     relationships = graph_ready_output(results)
+    # print(relationships)
+    await graph_client.load_graph_from_file()
+
+    graph = graph_client.graph
 
     connect_nodes_in_graph(graph, relationships)
 
