@@ -153,6 +153,7 @@ cognee.search(graph, query_params)
 ``` 
 
 
+
 ## Demo
 
 
