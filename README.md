@@ -155,7 +155,9 @@ cognee.search(graph, query_params)
 
 ## Demo
 
+
 [<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
+
 
 
 ## Architecture

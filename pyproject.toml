@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.0"
+version = "0.1.1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic"]
 readme = "README.md"
@@ -18,7 +18,6 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "~3.10"
-langchain = "^0.0.338"
 openai = "1.12.0"
 python-dotenv = "1.0.1"
 fastapi = "^0.109.2"
@@ -51,6 +50,7 @@ qdrant-client = "^1.8.0"
 duckdb-engine = "^0.11.2"
 graphistry = "^0.33.5"
 tenacity = "^8.2.3"
+weaviate-client = "^4.5.4"
 
 [tool.poetry.extras]
 dbt = ["dbt-core", "dbt-redshift", "dbt-bigquery", "dbt-duckdb", "dbt-snowflake", "dbt-athena-community", "dbt-databricks"]

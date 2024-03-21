@@ -35,6 +35,6 @@ class LLMInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def show_prompt(self, text_input: str, system_prompt_path: str) -> str:
+    def show_prompt(self, text_input: str, system_prompt: str) -> str:
         """To get structured output, import/call this function"""
         raise NotImplementedError

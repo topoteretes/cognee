@@ -22,10 +22,10 @@ async def process_attribute(graph_client, parent_id: Optional[str], attribute: s
     if isinstance(value, BaseModel):
         node_id = await generate_node_id(value)
 
-        node_data = value.dict(exclude={"default_relationship"})
+        node_data = value.model_dump(exclude = {"default_relationship"})
 
         # Use the specified default relationship for the edge between the parent node and the current node
-        relationship_data = value.default_relationship.dict() if hasattr(value, "default_relationship") else {}
+        relationship_data = value.default_relationship.model_dump() if hasattr(value, "default_relationship") else {}
 
         await add_node_and_edge(graph_client, parent_id, node_id, node_data, relationship_data)
 
@@ -41,7 +41,7 @@ async def process_attribute(graph_client, parent_id: Optional[str], attribute: s
 async def create_dynamic(graph_model) :
     root_id = await generate_node_id(graph_model)
 
-    node_data = graph_model.dict(exclude = {"default_relationship", "id"})
+    node_data = graph_model.model_dump(exclude = {"default_relationship", "id"})
 
     graph_client = get_graph_client(GraphDBType.NETWORKX)
 

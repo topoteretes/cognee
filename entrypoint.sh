@@ -18,18 +18,18 @@ else
 fi
 
 echo "Creating database..."
-
-PYTHONPATH=. python cognee/setup_database.py
-if [ $? -ne 0 ]; then
-    echo "Error: setup_database.py failed"
-    exit 1
-fi
+#
+#PYTHONPATH=. python cognee/setup_database.py
+#if [ $? -ne 0 ]; then
+#    echo "Error: setup_database.py failed"
+#    exit 1
+#fi
 
 echo "Starting Gunicorn"
 
 if [ "$DEBUG" = true ]; then
   echo "Waiting for the debugger to attach..."
-  python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --bind=0.0.0.0:443 --log-level debug api:app
+  python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --bind=0.0.0.0:443 --log-level debug cognee.api.client:app
 else
-  gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --bind=0.0.0.0:443 --log-level debug api:app
+  gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --bind=0.0.0.0:443 --log-level debug cognee.api.client:app
 fi

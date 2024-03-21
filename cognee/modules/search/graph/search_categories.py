@@ -1,15 +1,18 @@
 
 
 
-def search_categories(G, category):
+async def search_categories(graph, query:str, other_param:str = None):
     """
-    Filter nodes by category.
+    Filter nodes that contain 'LABEL' in their identifiers and return their summary attributes.
 
     Parameters:
     - G (nx.Graph): The graph from which to filter nodes.
-    - category (str): The category to filter nodes by.
 
     Returns:
-    - list: A list of nodes that belong to the specified category.
+    - dict: A dictionary where keys are nodes containing 'SUMMARY' in their identifiers,
+            and values are their 'summary' attributes.
     """
-    return [node for node, data in G.nodes(data=True) if data.get('category') == category]
+    return {node: data.get('content_labels') for node, data in graph.nodes(data=True) if 'LABEL' in node and 'content_labels' in data}
+
+
+
