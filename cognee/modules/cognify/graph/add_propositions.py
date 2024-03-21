@@ -3,6 +3,7 @@ import uuid
 import json
 from datetime import datetime
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+from cognee.shared.encode_uuid import encode_uuid
 
 
 async def add_propositions(
@@ -69,7 +70,6 @@ async def add_propositions(
 async def append_to_graph(layer_graphs, required_layers):
     # Generate a UUID for the overall layer
     layer_uuid = uuid.uuid4()
-    decomposition_uuids = set()
     # Extract category name from required_layers data
     data_type = required_layers["data_type"]
 
@@ -84,9 +84,7 @@ async def append_to_graph(layer_graphs, required_layers):
             layer_description = json.loads(layer_json)
 
             # Generate a UUID for this particular layer decomposition
-            layer_decomposition_uuid = uuid.uuid4()
-
-            decomposition_uuids.add(layer_decomposition_uuid)
+            layer_decomposition_id = encode_uuid(uuid.uuid4())
 
             # Assuming append_data_to_graph is defined elsewhere and appends data to graph_client
             # You would pass relevant information from knowledge_graph along with other details to this function
@@ -96,10 +94,8 @@ async def append_to_graph(layer_graphs, required_layers):
                 layer_description,
                 knowledge_graph,
                 layer_uuid,
-                layer_decomposition_uuid
+                layer_decomposition_id
             )
-
-    return decomposition_uuids
 
 
 # if __name__ == "__main__":

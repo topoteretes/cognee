@@ -11,7 +11,7 @@ async def classify_into_categories(text_input: str, system_prompt_file: str, res
 
     llm_output = await llm_client.acreate_structured_output(text_input, system_prompt, response_model)
 
-    return extract_categories(llm_output.dict())
+    return extract_categories(llm_output.model_dump())
 
 def extract_categories(llm_output) -> List[dict]:
     # Extract the first subclass from the list (assuming there could be more)

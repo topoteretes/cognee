@@ -1,19 +1,59 @@
-from typing import List, Optional, Dict
-from pydantic import BaseModel, Field
+import asyncio
+from typing import List, Dict
+# from pydantic import BaseModel, Field
 from qdrant_client import AsyncQdrantClient, models
 from ..vector_db_interface import VectorDBInterface
+from ..models.DataPoint import DataPoint
+from ..models.VectorConfig import VectorConfig
+from ..models.CollectionConfig import CollectionConfig
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
-class CollectionConfig(BaseModel, extra = "forbid"):
-    vector_config: Dict[str, models.VectorParams] = Field(..., description="Vectors configuration" )
-    hnsw_config: Optional[models.HnswConfig] = Field(default = None, description="HNSW vector index configuration")
-    optimizers_config: Optional[models.OptimizersConfig] = Field(default = None, description="Optimizers configuration")
-    quantization_config: Optional[models.QuantizationConfig] = Field(default = None, description="Quantization configuration")
+# class CollectionConfig(BaseModel, extra = "forbid"):
+#     vector_config: Dict[str, models.VectorParams] = Field(..., description="Vectors configuration" )
+#     hnsw_config: Optional[models.HnswConfig] = Field(default = None, description="HNSW vector index configuration")
+#     optimizers_config: Optional[models.OptimizersConfig] = Field(default = None, description="Optimizers configuration")
+#     quantization_config: Optional[models.QuantizationConfig] = Field(default = None, description="Quantization configuration")
+
+async def embed_data(data: str):
+    llm_client = get_llm_client()
+
+    return await llm_client.async_get_embedding_with_backoff(data)
+
+async def convert_to_qdrant_point(data_point: DataPoint):
+    return models.PointStruct(
+        id = data_point.id,
+        payload = data_point.payload,
+        vector = {
+            "text": await embed_data(data_point.get_embeddable_data())
+        }
+    )
+
+def create_vector_config(vector_config: VectorConfig):
+    return models.VectorParams(
+        size = vector_config.size,
+        distance = vector_config.distance
+    )
+
+def create_hnsw_config(hnsw_config: Dict):
+    if hnsw_config is not None:
+        return models.HnswConfig()
+    return None
+
+def create_optimizers_config(optimizers_config: Dict):
+    if optimizers_config is not None:
+        return models.OptimizersConfig()
+    return None
+
+def create_quantization_config(quantization_config: Dict):
+    if quantization_config is not None:
+        return models.QuantizationConfig()
+    return None
 
 class QDrantAdapter(VectorDBInterface):
     qdrant_url: str = None
     qdrant_path: str = None
     qdrant_api_key: str = None
-  
+
     def __init__(self, qdrant_path, qdrant_url, qdrant_api_key):
         if qdrant_path is not None:
             self.qdrant_path = qdrant_path
@@ -46,43 +86,49 @@ class QDrantAdapter(VectorDBInterface):
 
         return await client.create_collection(
             collection_name = collection_name,
-            vectors_config = collection_config.vector_config,
-            hnsw_config = collection_config.hnsw_config,
-            optimizers_config = collection_config.optimizers_config,
-            quantization_config = collection_config.quantization_config
+            vectors_config = {
+                "text": create_vector_config(collection_config.vector_config)
+            }
         )
 
-    async def create_data_points(self, collection_name: str, data_points):
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         client = self.get_qdrant_client()
+
+        awaitables = []
+
+        for point in data_points:
+            awaitables.append(convert_to_qdrant_point(point))
+
+        points = await asyncio.gather(*awaitables)
 
         return await client.upload_points(
             collection_name = collection_name,
-            points = data_points
+            points = points
         )
 
-    async def search(self, collection_name: str, query_vector: List[float], limit: int, with_vector: bool = False):
+    async def search(self, collection_name: str, query_text: str, limit: int, with_vector: bool = False):
         client = self.get_qdrant_client()
 
         return await client.search(
             collection_name = collection_name,
-            query_vector = (
-            "content", query_vector),
+            query_vector = models.NamedVector(
+                name = "text",
+                vector = await embed_data(query_text)
+            ),
             limit = limit,
             with_vectors = with_vector
         )
 
 
-    async def batch_search(self, collection_name: str, embeddings: List[List[float]],
-                                  with_vectors: List[bool] = None):
+    async def batch_search(self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False):
         """
         Perform batch search in a Qdrant collection with dynamic search requests.
 
         Args:
         - collection_name (str): Name of the collection to search in.
-        - embeddings (List[List[float]]): List of embeddings to search for.
-        - limits (List[int]): List of result limits for each search request.
-        - with_vectors (List[bool], optional): List indicating whether to return vectors for each search request.
-            Defaults to None, in which case vectors are not returned.
+        - query_texts (List[str]): List of query texts to search for.
+        - limit (int): List of result limits for search requests.
+        - with_vectors (bool, optional): Bool indicating whether to return vectors for search requests.
 
         Returns:
         - results: The search results from Qdrant.
@@ -90,30 +136,32 @@ class QDrantAdapter(VectorDBInterface):
 
         client = self.get_qdrant_client()
 
-        # Default with_vectors to False for each request if not provided
-        if with_vectors is None:
-            with_vectors = [False] * len(embeddings)
-
-        # Ensure with_vectors list matches the length of embeddings and limits
-        if len(with_vectors) != len(embeddings):
-            raise ValueError("The length of with_vectors must match the length of embeddings and limits")
+        vectors = await asyncio.gather(*[embed_data(query_text) for query_text in query_texts])
 
         # Generate dynamic search requests based on the provided embeddings
         requests = [
-            models.SearchRequest(vector=models.NamedVector(
-                name="content",
-                vector=embedding,
-            ),
-                # vector= embedding,
-                limit=3,
-                with_vector=False
-            ) for embedding in [embeddings]
+            models.SearchRequest(
+                vector = models.NamedVector(
+                    name = "text",
+                    vector = vector
+                ),
+                limit = limit,
+                with_vector = with_vectors
+            ) for vector in vectors
         ]
 
         # Perform batch search with the dynamically generated requests
         results = await client.search_batch(
-            collection_name=collection_name,
-            requests=requests
+            collection_name = collection_name,
+            requests = requests
         )
 
-        return results
+        return [filter(lambda result: result.score > 0.9, result_group) for result_group in results]
+
+    async def prune(self):
+        client = self.get_qdrant_client()
+
+        response = await client.get_collections()
+
+        for collection in response.collections:
+            await client.delete_collection(collection.name)

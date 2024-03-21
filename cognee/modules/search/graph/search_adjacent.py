@@ -1,7 +1,7 @@
 """ This module contains the function to find the neighbours of a given node in the graph"""
 
 
-async def search_adjacent(graph,query:str, other_param:dict = None)->dict:
+async def search_adjacent(graph, query: str, other_param: dict = None) -> dict:
     """ Find the neighbours of a given node in the graph
     :param graph: A NetworkX graph object
 

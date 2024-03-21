@@ -1,23 +1,19 @@
 import asyncio
 # import logging
 from typing import List, Union
-from qdrant_client import models
 import instructor
 from openai import OpenAI
 from unstructured.cleaners.core import clean
 from unstructured.partition.pdf import partition_pdf
-from cognee.infrastructure.databases.vector.qdrant.QDrantAdapter import CollectionConfig
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
+from cognee.modules.cognify.llm.label_content import label_content
 from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
-from cognee.modules.cognify.graph.add_node_connections import add_node_connection, graph_ready_output, \
+from cognee.modules.cognify.llm.summarize_content import summarize_content
+from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
+from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, graph_ready_output, \
     connect_nodes_in_graph, extract_node_descriptions
 from cognee.modules.cognify.graph.add_propositions import append_to_graph
-from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
-from cognee.modules.cognify.llm.add_node_connection_embeddings import process_items
-from cognee.modules.cognify.llm.label_content import label_content
-from cognee.modules.cognify.llm.summarize_content import summarize_content
-from cognee.modules.cognify.vector.batch_search import adapted_qdrant_batch_search
+from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
 from cognee.modules.cognify.vector.add_propositions import add_propositions
 
 from cognee.config import Config
@@ -28,10 +24,11 @@ from cognee.shared.data_models import DefaultContentPrediction, KnowledgeGraph, 
     SummarizedContent, LabeledContent
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
-from cognee.infrastructure.databases.vector.get_vector_database import get_vector_database
 from cognee.infrastructure.databases.relational import DuckDBAdapter
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.initialize_graph import initialize_graph
+from cognee.infrastructure.databases.vector  import CollectionConfig, VectorConfig
+from cognee.infrastructure import infrastructure_config
 
 config = Config()
 config.load()
@@ -76,7 +73,7 @@ async def cognify(datasets: Union[str, List[str]] = None, graphdatamodel: object
 
 async def process_text(input_text: str, file_metadata: dict):
     print(f"Processing document ({file_metadata['id']})")
-  
+
     classified_categories = []
 
     try:
@@ -133,31 +130,22 @@ async def process_text(input_text: str, file_metadata: dict):
 
     # Run the async function for each set of cognitive layers
     layer_graphs = await generate_graph_per_layer(input_text, cognitive_layers)
-    # print(layer_graphs)
 
     print(f"Document ({file_metadata['id']}) layer graphs created")
 
-    # G = await create_semantic_graph(graph_model_instance)
-
     await add_classification_nodes(f"DOCUMENT:{file_metadata['id']}", classified_categories[0])
 
-    # print(file_metadata['summary'])
+    await add_summary_nodes(f"DOCUMENT:{file_metadata['id']}", {"summary": file_metadata["summary"]})
 
-    await add_summary_nodes(f"DOCUMENT:{file_metadata['id']}", {"summary": file_metadata['summary']})
+    await add_label_nodes(f"DOCUMENT:{file_metadata['id']}", {"content_labels": file_metadata["content_labels"]})
 
-    # print(file_metadata['content_labels'])
-
-    await add_label_nodes(f"DOCUMENT:{file_metadata['id']}", {"content_labels": file_metadata['content_labels']})
-
-    unique_layer_uuids = await append_to_graph(layer_graphs, classified_categories[0])
+    await append_to_graph(layer_graphs, classified_categories[0])
 
     print(f"Document ({file_metadata['id']}) layers connected")
 
+    print("Document categories, summaries and metadata are: ", str(classified_categories))
 
-
-    print(f"Document categories, summaries and metadata are ",str(classified_categories) )
-
-    print(f"Document metadata is  ",str(file_metadata) )
+    print("Document metadata is: ", str(file_metadata))
 
     graph_client = get_graph_client(GraphDBType.NETWORKX)
 
@@ -165,45 +153,34 @@ async def process_text(input_text: str, file_metadata: dict):
 
     graph = graph_client.graph
 
-    # # Extract the node descriptions
     node_descriptions = await extract_node_descriptions(graph.nodes(data = True))
-    # print(node_descriptions)
 
-    unique_layer_uuids = set(node["layer_decomposition_uuid"] for node in node_descriptions)
+    nodes_by_layer = await group_nodes_by_layer(node_descriptions)
+
+    unique_layers = nodes_by_layer.keys()
 
     collection_config = CollectionConfig(
-        vector_config = {
-            "content": models.VectorParams(
-                distance = models.Distance.COSINE,
-                size = 3072
-            )
-        },
+        vector_config = VectorConfig(
+            distance = "Cosine",
+            size = 3072
+        )
     )
 
     try:
-        for layer in unique_layer_uuids:
-            db = get_vector_database()
-            await db.create_collection(layer, collection_config)
+        db_engine = infrastructure_config.get_config()["vector_engine"]
+
+        for layer in unique_layers:
+            await db_engine.create_collection(layer, collection_config)
     except Exception as e:
         print(e)
 
-    await add_propositions(node_descriptions)
+    await add_propositions(nodes_by_layer)
 
-    grouped_data = await add_node_connection(node_descriptions)
-    # print("we are here, grouped_data", grouped_data)
+    results = await resolve_cross_graph_references(nodes_by_layer)
 
-    llm_client = get_llm_client()
+    relationships = graph_ready_output(results)
 
-    relationship_dict = await process_items(grouped_data, unique_layer_uuids, llm_client)
-    # print("we are here", relationship_dict[0])
-
-    results = await adapted_qdrant_batch_search(relationship_dict, db)
-    # print(results)
-
-    relationship_d = graph_ready_output(results)
-    # print(relationship_d)
-
-    connect_nodes_in_graph(graph, relationship_d)
+    connect_nodes_in_graph(graph, relationships)
 
     print(f"Document ({file_metadata['id']}) processed")
 
