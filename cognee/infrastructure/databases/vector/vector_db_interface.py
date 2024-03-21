@@ -1,6 +1,7 @@
-from typing import List
+from typing import List, Protocol
 from abc import abstractmethod
-from typing import Protocol
+from .models.CollectionConfig import CollectionConfig
+from .models.DataPoint import DataPoint
 
 class VectorDBInterface(Protocol):
     """ Collections """
@@ -8,7 +9,7 @@ class VectorDBInterface(Protocol):
     async def create_collection(
         self,
         collection_name: str,
-        collection_config: object
+        collection_config: CollectionConfig
     ): raise NotImplementedError
 
     # @abstractmethod
@@ -43,7 +44,7 @@ class VectorDBInterface(Protocol):
     async def create_data_points(
         self,
         collection_name: str,
-        data_points
+        data_points: List[DataPoint]
     ): raise NotImplementedError
 
     # @abstractmethod
@@ -67,12 +68,13 @@ class VectorDBInterface(Protocol):
     #     collection_name: str,
     #     data_point_id: str
     # ): raise NotImplementedError
+
     """ Search """
     @abstractmethod
     async def search(
         self,
         collection_name: str,
-        query_vector: List[float],
+        query_text: str,
         limit: int,
         with_vector: bool = False
 
@@ -82,7 +84,7 @@ class VectorDBInterface(Protocol):
     async def batch_search(
         self,
         collection_name: str,
-        embeddings: List[List[float]],
-        with_vectors: List[bool] = None
+        query_texts: List[str],
+        limit: int,
+        with_vectors: bool = False
     ): raise NotImplementedError
-

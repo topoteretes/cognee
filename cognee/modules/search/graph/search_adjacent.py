@@ -14,6 +14,6 @@ def search_adjacent(G, node_id:str)->dict:
     for neighbor in neighbors:
         # Access the 'description' attribute for each neighbor
         # The get method returns None if 'description' attribute does not exist for the node
-        neighbor_descriptions[neighbor] = G.nodes[neighbor].get('description')
+        neighbor_descriptions[neighbor] = G.nodes[neighbor].get("description")
 
     return neighbor_descriptions

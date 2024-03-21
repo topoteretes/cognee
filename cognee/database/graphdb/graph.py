@@ -279,7 +279,7 @@ class Neo4jGraphDB(AbstractGraphDB):
         for edge in graph.edges:
             edge.created_at = time.time()
             edge.summarized = False
-        graph_dic = graph.dict()
+        graph_dic = graph.model_dump()
 
         node_variable_mapping = create_node_variable_mapping(graph_dic["nodes"])
         edge_variable_mapping = create_edge_variable_mapping(graph_dic["edges"])
