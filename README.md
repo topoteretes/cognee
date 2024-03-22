@@ -99,13 +99,13 @@ For more info here are the <a href="https://topoteretes.github.io/cognee/">docs<
 With pip:
 
 ```bash
-pip install cognee
+pip install cognee["weaviate"]
 ```
 
 With poetry:
 
 ```bash
-poetry add cognee
+poetry add "cognee["weaviate"]"
 ```
 
 ## 💻 Usage
