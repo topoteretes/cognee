@@ -33,7 +33,7 @@ We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've bu
 
 ```
 
-pip install -U cognee
+pip install -U cognee["weaviate"]
 
 ```
 Set OpenAI API Key as an environment variable
