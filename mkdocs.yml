@@ -128,4 +128,5 @@ nav:
     - Multilayer graph network: 'concepts/multilayer_graph_networks.md'
     - Data models: 'concepts/graph_data_models.md'
     - LLM structured Outputs: "concepts/llm_structured_outputs.md"
+    - Research: "research.md"
 
