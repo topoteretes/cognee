@@ -2,7 +2,7 @@ site_name: cognee
 site_author: Vasilije Markovic
 site_description: desc
 repo_name: cognee
-repo_url: https://topoteretes.github.io/cognee
+repo_url: https://github.com/topoteretes/cognee
 site_url: https://www.congee.ai
 edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2024 cognee
@@ -128,4 +128,5 @@ nav:
     - Multilayer graph network: 'concepts/multilayer_graph_networks.md'
     - Data models: 'concepts/graph_data_models.md'
     - LLM structured Outputs: "concepts/llm_structured_outputs.md"
+  - Research: "research.md"
 
