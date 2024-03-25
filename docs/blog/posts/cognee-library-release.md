@@ -32,8 +32,8 @@ Moving forward, we have adopted several new strategies, features, and design pri
 💡 Propositions: Defined as atomic expressions within a text, each proposition encapsulates a unique factoid, conveyed in a succinct, standalone natural language format.
 
 We employ Large Language Models (LLMs) to break down text into propositions and link them, forming graphs with propositions as nodes and their connections as edges. 
-For example, **"Grass is green", and "2 + 5 = 5"** are propositions. The first proposition has the truth value of "true" and the second "false". 
-The inspiration was found in the following [paper] (https://arxiv.org/pdf/2312.06648.pdf)
+For example,  "Grass is green", and "2 + 5 = 5"  are propositions. The first proposition has the truth value of "true" and the second "false". 
+The inspiration was found in the following [paper](https://arxiv.org/pdf/2312.06648.pdf)
 
 </aside>
 
