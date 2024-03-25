@@ -33,7 +33,7 @@ Moving forward, we have adopted several new strategies, features, and design pri
 
 We employ Large Language Models (LLMs) to break down text into propositions and link them, forming graphs with propositions as nodes and their connections as edges. 
 For example,  "Grass is green", and "2 + 5 = 5"  are propositions. The first proposition has the truth value of "true" and the second "false". 
-The inspiration was found in the following [paper](https://arxiv.org/pdf/2312.06648.pdf)
+The inspiration was found in the following paper: https://arxiv.org/pdf/2312.06648.pdf
 
 </aside>
 
@@ -53,7 +53,7 @@ Utilizing LLMs, we construct layers within the multilayer network to house propo
 
 For example, if "John Doe" authored two New York Times cooking articles, we could extract an "ingredients" layer when needed, while also easily accessing all articles by "John Doe".
 
-We used concepts from psycholinguistics described [here](https://arxiv.org/abs/1507.08539)
+We used concepts from psycholinguistics described here: https://arxiv.org/abs/1507.08539
 
 </aside>
 
