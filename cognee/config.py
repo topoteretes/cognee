@@ -43,6 +43,10 @@ class Config:
     graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
+    llm_provider: str = "ollama"
+    ollama_endpoint: str = "http://localhost:11434/v1"
+    ollama_key: Optional[str] = os.getenv("OLLAMA_API_KEY")
+    ollama_model: str = "gpt-3.5-turbo"
     model: str = "gpt-4-0125-preview"
     # model: str = "gpt-3.5-turbo"
     model_endpoint: str = "openai"

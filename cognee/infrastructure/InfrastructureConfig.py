@@ -1,6 +1,8 @@
 from cognee.config import Config
 from .databases.relational import SqliteEngine, DatabaseEngine
 from .databases.vector import WeaviateAdapter, VectorDBInterface
+from .llm.llm_interface import LLMInterface
+from .llm.openai.adapter import OpenAIAdapter
 
 config = Config()
 config.load()
@@ -8,10 +10,14 @@ config.load()
 class InfrastructureConfig():
     database_engine: DatabaseEngine = None
     vector_engine: VectorDBInterface = None
+    llm_engine: LLMInterface = None
 
     def get_config(self) -> dict:
         if self.database_engine is None:
             self.database_engine = SqliteEngine(config.db_path, config.db_name)
+
+        if self.llm_engine is None:
+            self.llm_engine = OpenAIAdapter(config.openai_key, config.model)
 
         if self.vector_engine is None:
             self.vector_engine = WeaviateAdapter(
@@ -28,5 +34,6 @@ class InfrastructureConfig():
     def set_config(self, new_config: dict):
         self.database_engine = new_config["database_engine"]
         self.vector_engine = new_config["vector_engine"]
+        self.llm_engine = new_config["llm_engine"]
 
 infrastructure_config = InfrastructureConfig()
