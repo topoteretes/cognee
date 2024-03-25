@@ -29,11 +29,20 @@ With the integration of Keepi.ai, we encountered several challenges that made us
 Moving forward, we have adopted several new strategies, features, and design principles:
 
 <aside>
-💡 Propositions: Defined as atomic expressions within a text, each proposition encapsulates a unique factoid, conveyed in a succinct, standalone natural language format. We employ Large Language Models (LLMs) to break down text into propositions and link them, forming graphs with propositions as nodes and their connections as edges.  For example, **"Grass is green", and "2 + 5 = 5"** are propositions. The first proposition has the truth value of "true" and the second "false". The inspiration was found in the following [paper](https://arxiv.org/pdf/2312.06648.pdf)
+💡 Propositions: Defined as atomic expressions within a text, each proposition encapsulates a unique factoid, conveyed in a succinct, standalone natural language format.
+
+We employ Large Language Models (LLMs) to break down text into propositions and link them, forming graphs with propositions as nodes and their connections as edges. 
+For example, **"Grass is green", and "2 + 5 = 5"** are propositions. The first proposition has the truth value of "true" and the second "false". 
+The inspiration was found in the following [paper] (https://arxiv.org/pdf/2312.06648.pdf)
 
 </aside>
 
+
+
 <aside>
+
+
+
 💡 Multilayer Graph Network:
 
 A cognitive multilayer networks is both a quantitative and interpretive framework for exploring the mental lexicon, the intricate cognitive system that stores information about known words/concepts.
@@ -47,6 +56,8 @@ For example, if "John Doe" authored two New York Times cooking articles, we coul
 We used concepts from psycholinguistics described [here](https://arxiv.org/abs/1507.08539)
 
 </aside>
+
+
 
 <aside>
 💡 Data Loader:
