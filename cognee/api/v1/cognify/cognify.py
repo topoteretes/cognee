@@ -27,7 +27,6 @@ from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.relational import DuckDBAdapter
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.initialize_graph import initialize_graph
-from cognee.infrastructure.databases.vector  import CollectionConfig, VectorConfig
 from cognee.infrastructure import infrastructure_config
 
 config = Config()
@@ -159,25 +158,17 @@ async def process_text(input_text: str, file_metadata: dict):
 
     unique_layers = nodes_by_layer.keys()
 
-    collection_config = CollectionConfig(
-        vector_config = VectorConfig(
-            distance = "Cosine",
-            size = 3072
-        )
-    )
-
     try:
         db_engine = infrastructure_config.get_config()["vector_engine"]
 
         for layer in unique_layers:
-            await db_engine.create_collection(layer, collection_config)
+            await db_engine.create_collection(layer)
     except Exception as e:
         print(e)
 
     await add_propositions(nodes_by_layer)
 
     results = await resolve_cross_graph_references(nodes_by_layer)
-
 
     relationships = graph_ready_output(results)
     # print(relationships)

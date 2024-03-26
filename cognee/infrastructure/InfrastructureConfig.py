@@ -1,6 +1,6 @@
 from cognee.config import Config
 from .databases.relational import SqliteEngine, DatabaseEngine
-from .databases.vector import WeaviateAdapter, VectorDBInterface
+from .databases.vector import WeaviateAdapter, VectorDBInterface, DefaultEmbeddingEngine
 
 config = Config()
 config.load()
@@ -17,7 +17,7 @@ class InfrastructureConfig():
             self.vector_engine = WeaviateAdapter(
                 config.weaviate_url,
                 config.weaviate_api_key,
-                config.openai_key
+                embedding_engine = DefaultEmbeddingEngine()
             )
 
         return {

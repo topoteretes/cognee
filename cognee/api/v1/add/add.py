@@ -23,7 +23,7 @@ async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
 
                     nested_datasets = list_dir_files(path.join(root_dir_path, file_or_dir), dataset_name)
 
-                    for dataset in nested_datasets:
+                    for dataset in nested_datasets.keys():
                         datasets[dataset] = nested_datasets[dataset]
                 else:
                     if parent_dir not in datasets:
@@ -37,7 +37,7 @@ async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
 
         results = []
 
-        for key in datasets:
+        for key in datasets.keys():
             if dataset_name is not None and not key.startswith(dataset_name):
                 continue
 
