@@ -1,9 +1,7 @@
 from typing import BinaryIO, TypedDict
 import filetype
-from unstructured.cleaners.core import clean
-from unstructured.partition.pdf import partition_pdf
+from pypdf import PdfReader
 from .extract_keywords import extract_keywords
-
 
 class FileTypeException(Exception):
     message: str
@@ -27,10 +25,10 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
     keywords: list = []
 
     if file_type.extension == "pdf":
-        elements = partition_pdf(file = file, strategy = "fast")
-        keywords = extract_keywords(
-            "\n".join(map(lambda element: clean(element.text), elements))
-        )
+        reader = PdfReader(stream = file)
+        pages = list(reader.pages[:3])
+        text = "\n".join([page.extract_text().strip() for page in pages])
+        keywords = extract_keywords(text)
 
     file_path = file.name
     file_name = file_path.split("/")[-1].split(".")[0]

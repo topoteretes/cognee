@@ -34,9 +34,8 @@ debugpy = "^1.8.0"
 pyarrow = "^15.0.0"
 pylint = "^3.0.3"
 aiosqlite = "^0.20.0"
-unstructured = {extras = ["all-docs"], version = "^0.12.5"}
 pymupdf = "^1.23.25"
-pandas = "^2.2.1"
+pandas = "^2.2.0"
 greenlet = "^3.0.3"
 ruff = "^0.2.2"
 filetype = "^1.2.0"
@@ -51,7 +50,8 @@ graphistry = "^0.33.5"
 tenacity = "^8.2.3"
 weaviate-client = "^4.5.4"
 scikit-learn = "^1.4.1.post1"
-fastembed = "0.1.3"
+fastembed = "^0.2.5"
+pypdf = "^4.1.0"
 
 [tool.poetry.extras]
 dbt = ["dbt-core", "dbt-redshift", "dbt-bigquery", "dbt-duckdb", "dbt-snowflake", "dbt-athena-community", "dbt-databricks"]
@@ -93,7 +93,6 @@ mkdocstrings = "^0.22.0"
 mkdocstrings-python = "^1.1.2"
 pytest-examples = "^0.0.10"
 mkdocs-jupyter = "^0.24.6"
-mkdocs-rss-plugin = "^1.12.0"
 mkdocs-minify-plugin = "^0.8.0"
 mkdocs-redirects = "^1.2.1"
 

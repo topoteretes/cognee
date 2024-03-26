@@ -3,8 +3,7 @@ import asyncio
 from typing import List, Union
 import instructor
 from openai import OpenAI
-from unstructured.cleaners.core import clean
-from unstructured.partition.pdf import partition_pdf
+from pypdf import PdfReader
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
 from cognee.modules.cognify.llm.label_content import label_content
 from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
@@ -61,8 +60,9 @@ async def cognify(datasets: Union[str, List[str]] = None, graphdatamodel: object
 
     for file_metadata in files_metadata:
         with open(file_metadata["file_path"], "rb") as file:
-            elements = partition_pdf(file = file, strategy = "fast")
-            text = "\n".join(map(lambda element: clean(element.text), elements))
+            reader = PdfReader(stream = file)
+            pages = list(reader.pages[:3])
+            text = "\n".join([page.extract_text().strip() for page in pages])
 
             awaitables.append(process_text(text, file_metadata))
 
