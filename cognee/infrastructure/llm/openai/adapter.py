@@ -13,7 +13,7 @@ class OpenAIAdapter(LLMInterface):
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
     def __init__(self, api_key: str, model:str):
         openai.api_key = api_key
-        self.aclient = instructor.apatch(AsyncOpenAI())
+        self.aclient = instructor.patch(AsyncOpenAI())
         self.model = model
 
     @retry(stop = stop_after_attempt(5))

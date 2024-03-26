@@ -18,12 +18,12 @@ class OllamaAPIAdapter(LLMInterface):
     def __init__(self, ollama_endpoint, api_key: str, model: str):
 
         self.aclient =  instructor.patch(
-                                                AsyncOpenAI(
-                                                    base_url=ollama_endpoint,
-                                                    api_key=api_key,  # required, but unused
-                                                ),
-                                                mode=instructor.Mode.JSON,
-                                            )
+            AsyncOpenAI(
+                base_url=ollama_endpoint,
+                api_key=api_key,  # required, but unused
+            ),
+            mode=instructor.Mode.JSON,
+        )
         self.model = model
 
     @retry(stop=stop_after_attempt(5))

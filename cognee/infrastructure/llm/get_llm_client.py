@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.INFO)
 class LLMProvider(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
+    CUSTOM = "custom"
 
 config = Config()
 config.load()
@@ -24,6 +25,10 @@ def get_llm_client():
     elif provider == LLMProvider.OLLAMA:
         print("Using Ollama API")
         return OllamaAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
+    elif provider == LLMProvider.CUSTOM:
+        print("Using Custom API")
+        return OllamaAPIAdapter(config.custom_endpoint, config.custom_key, config.model)
+        # Add your custom LLM provider here
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 

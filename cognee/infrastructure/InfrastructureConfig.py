@@ -29,7 +29,8 @@ class InfrastructureConfig():
 
         return {
             "database_engine": self.database_engine,
-            "vector_engine": self.vector_engine
+            "vector_engine": self.vector_engine,
+            "llm_engine": self.llm_engine
         }
 
     def set_config(self, new_config: dict):
