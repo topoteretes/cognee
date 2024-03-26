@@ -18,7 +18,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "~3.10"
-openai = "1.14.3"
+openai = "1.12.0"
 python-dotenv = "1.0.1"
 fastapi = "^0.109.2"
 uvicorn = "0.22.0"
@@ -26,7 +26,7 @@ boto3 = "^1.26.125"
 gunicorn = "^20.1.0"
 sqlalchemy = "^2.0.21"
 asyncpg = "^0.28.0"
-instructor = "^0.6.6"
+instructor = "^0.3.4"
 networkx = "^3.2.1"
 graphviz = "^0.20.1"
 langdetect = "^1.0.9"
@@ -34,23 +34,24 @@ debugpy = "^1.8.0"
 pyarrow = "^15.0.0"
 pylint = "^3.0.3"
 aiosqlite = "^0.20.0"
-unstructured = {extras = ["all-docs"], version = "^0.12.5"}
 pymupdf = "^1.23.25"
-pandas = "^2.2.1"
+pandas = "^2.2.0"
 greenlet = "^3.0.3"
 ruff = "^0.2.2"
 filetype = "^1.2.0"
 nltk = "^3.8.1"
-scikit-learn = "^1.4.1.post1"
 dlt = "^0.4.6"
 duckdb = {version = "^0.10.0", extras = ["dlt"]}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
+qdrant-client = "^1.8.0"
 duckdb-engine = "^0.11.2"
 graphistry = "^0.33.5"
 tenacity = "^8.2.3"
 weaviate-client = "^4.5.4"
-qdrant-client = "^1.8.0"
+scikit-learn = "^1.4.1.post1"
+fastembed = "^0.2.5"
+pypdf = "^4.1.0"
 
 [tool.poetry.extras]
 dbt = ["dbt-core", "dbt-redshift", "dbt-bigquery", "dbt-duckdb", "dbt-snowflake", "dbt-athena-community", "dbt-databricks"]
@@ -61,7 +62,6 @@ postgres = ["psycopg2-binary", "psycopg2cffi"]
 redshift = ["psycopg2-binary", "psycopg2cffi"]
 parquet = ["pyarrow"]
 duckdb = ["duckdb"]
-qdrant = ["qdrant-client"]
 filesystem = ["s3fs", "botocore"]
 s3 = ["s3fs", "botocore"]
 gs = ["gcsfs"]
@@ -93,7 +93,6 @@ mkdocstrings = "^0.22.0"
 mkdocstrings-python = "^1.1.2"
 pytest-examples = "^0.0.10"
 mkdocs-jupyter = "^0.24.6"
-mkdocs-rss-plugin = "^1.12.0"
 mkdocs-minify-plugin = "^0.8.0"
 mkdocs-redirects = "^1.2.1"
 

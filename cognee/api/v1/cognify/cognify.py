@@ -3,8 +3,7 @@ import asyncio
 from typing import List, Union
 import instructor
 from openai import OpenAI
-from unstructured.cleaners.core import clean
-from unstructured.partition.pdf import partition_pdf
+from pypdf import PdfReader
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
 from cognee.modules.cognify.llm.label_content import label_content
 from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
@@ -27,7 +26,6 @@ from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.relational import DuckDBAdapter
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.initialize_graph import initialize_graph
-from cognee.infrastructure.databases.vector  import CollectionConfig, VectorConfig
 from cognee.infrastructure import infrastructure_config
 
 config = Config()
@@ -62,8 +60,9 @@ async def cognify(datasets: Union[str, List[str]] = None, graphdatamodel: object
 
     for file_metadata in files_metadata:
         with open(file_metadata["file_path"], "rb") as file:
-            elements = partition_pdf(file = file, strategy = "fast")
-            text = "\n".join(map(lambda element: clean(element.text), elements))
+            reader = PdfReader(stream = file)
+            pages = list(reader.pages[:3])
+            text = "\n".join([page.extract_text().strip() for page in pages])
 
             awaitables.append(process_text(text, file_metadata))
 
@@ -159,25 +158,17 @@ async def process_text(input_text: str, file_metadata: dict):
 
     unique_layers = nodes_by_layer.keys()
 
-    collection_config = CollectionConfig(
-        vector_config = VectorConfig(
-            distance = "Cosine",
-            size = 3072
-        )
-    )
-
     try:
         db_engine = infrastructure_config.get_config()["vector_engine"]
 
         for layer in unique_layers:
-            await db_engine.create_collection(layer, collection_config)
+            await db_engine.create_collection(layer)
     except Exception as e:
         print(e)
 
     await add_propositions(nodes_by_layer)
 
     results = await resolve_cross_graph_references(nodes_by_layer)
-
 
     relationships = graph_ready_output(results)
     # print(relationships)

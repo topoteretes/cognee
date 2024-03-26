@@ -35,8 +35,9 @@ def extract_categories(llm_output) -> List[dict]:
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(classify_into_categories("""Russia summons US ambassador in Moscow and says it will expel diplomats who meddle in its internal affairs
+    gg = asyncio.run(classify_into_categories("""Russia summons US ambassador in Moscow and says it will expel diplomats who meddle in its internal affairs
 The Russian foreign ministry said on Thursday it had summoned the US ambassador in Moscow and warned her against “attempts to interfere in the internal affairs of the Russian Federation”, reports Reuters.
 
 Ahead of a March presidential election, it said in a statement that such behaviour would be “firmly and resolutely suppressed, up to and including the expulsion as ‘persona non grata’ of US embassy staff involved in such actions”.""", "classify_content.txt", DefaultContentPrediction))
+    print(gg)
 

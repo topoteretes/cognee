@@ -3,6 +3,7 @@ from .databases.relational import SqliteEngine, DatabaseEngine
 from .databases.vector import WeaviateAdapter, VectorDBInterface
 from .llm.llm_interface import LLMInterface
 from .llm.openai.adapter import OpenAIAdapter
+from .databases.vector import WeaviateAdapter, VectorDBInterface, DefaultEmbeddingEngine
 
 config = Config()
 config.load()

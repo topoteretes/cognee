@@ -1,6 +1,5 @@
-from typing import List, Protocol
+from typing import List, Protocol, Optional
 from abc import abstractmethod
-from .models.CollectionConfig import CollectionConfig
 from .models.DataPoint import DataPoint
 
 class VectorDBInterface(Protocol):
@@ -8,8 +7,7 @@ class VectorDBInterface(Protocol):
     @abstractmethod
     async def create_collection(
         self,
-        collection_name: str,
-        collection_config: CollectionConfig
+        collection_name: str
     ): raise NotImplementedError
 
     # @abstractmethod
@@ -74,7 +72,8 @@ class VectorDBInterface(Protocol):
     async def search(
         self,
         collection_name: str,
-        query_text: str,
+        query_text: Optional[str],
+        query_vector: Optional[List[float]],
         limit: int,
         with_vector: bool = False
 

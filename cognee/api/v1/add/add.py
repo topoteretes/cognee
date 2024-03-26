@@ -3,7 +3,6 @@ from os import path, listdir
 import asyncio
 import dlt
 import duckdb
-from unstructured.cleaners.core import clean
 from cognee.root_dir import get_absolute_path
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.files import get_file_metadata
@@ -19,11 +18,11 @@ async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
             for file_or_dir in listdir(root_dir_path):
                 if path.isdir(path.join(root_dir_path, file_or_dir)):
                     dataset_name = file_or_dir if parent_dir == "root" else parent_dir + "." + file_or_dir
-                    dataset_name = clean(dataset_name.replace(" ", "_"))
+                    dataset_name = dataset_name.strip().replace(" ", "_")
 
                     nested_datasets = list_dir_files(path.join(root_dir_path, file_or_dir), dataset_name)
 
-                    for dataset in nested_datasets:
+                    for dataset in nested_datasets.keys():
                         datasets[dataset] = nested_datasets[dataset]
                 else:
                     if parent_dir not in datasets:
@@ -37,7 +36,7 @@ async def add(file_paths: Union[str, List[str]], dataset_name: str = None):
 
         results = []
 
-        for key in datasets:
+        for key in datasets.keys():
             if dataset_name is not None and not key.startswith(dataset_name):
                 continue
 
