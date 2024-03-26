@@ -6,7 +6,7 @@ This is not an exhaustive list, and any PRs would be welcome
 
 ### Research Papers
 
-- [2024/03/24] [Compound AI systems] (https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/)
+- [2024/03/24] [Compound AI systems](https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/)
 - [2015/07/30] [Multilayer Network of Language](https://arxiv.org/abs/1507.08539)
 - [2023/12/12]  [Dense X Retrieval: What Retrieval Granularity Should We Use?](https://arxiv.org/pdf/2312.06648.pdf)
 - [2024/01/05] [Retrieval-Augmented Generation for Large Language Models: A Survey](https://arxiv.org/pdf/2312.10997.pdf)
