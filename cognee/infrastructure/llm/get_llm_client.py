@@ -3,6 +3,8 @@ from enum import Enum
 from cognee.config import Config
 from .openai.adapter import OpenAIAdapter
 from .ollama.adapter import OllamaAPIAdapter
+import logging
+logging.basicConfig(level=logging.INFO)
 
 # Define an Enum for LLM Providers
 class LLMProvider(Enum):
@@ -17,8 +19,10 @@ def get_llm_client():
     provider = LLMProvider(config.llm_provider)
 
     if provider == LLMProvider.OPENAI:
+        print("Using OpenAI API")
         return OpenAIAdapter(config.openai_key, config.model)
     elif provider == LLMProvider.OLLAMA:
+        print("Using Ollama API")
         return OllamaAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
