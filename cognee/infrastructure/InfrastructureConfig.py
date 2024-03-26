@@ -24,7 +24,7 @@ class InfrastructureConfig():
             self.vector_engine = WeaviateAdapter(
                 config.weaviate_url,
                 config.weaviate_api_key,
-                config.openai_key
+                embedding_engine = DefaultEmbeddingEngine()
             )
 
         return {
