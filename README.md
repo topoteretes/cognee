@@ -110,7 +110,7 @@ poetry add "cognee["weaviate"]"
 
 ## 💻 Usage
 
-Check out our demo notebook [here](cognee%20-%20Get%20Started.ipynb)
+Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee%20-%20Get%20Started.ipynb)
 
 
 - Set OpenAI API Key as an environment variable
