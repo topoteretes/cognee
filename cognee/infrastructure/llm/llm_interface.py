@@ -6,20 +6,20 @@ from pydantic import BaseModel
 class LLMInterface(Protocol):
     """ LLM Interface """
 
-    @abstractmethod
-    async def async_get_embedding_with_backoff(self, text, model="text-embedding-ada-002"):
-        """To get text embeddings, import/call this function"""
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_embedding_with_backoff(self, text: str, model: str = "text-embedding-ada-002"):
-        """To get text embeddings, import/call this function"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def async_get_batch_embeddings_with_backoff(self, texts: List[str], models: List[str]):
-        """To get multiple text embeddings in parallel, import/call this function"""
-        raise NotImplementedError
+    # @abstractmethod
+    # async def async_get_embedding_with_backoff(self, text, model="text-embedding-ada-002"):
+    #     """To get text embeddings, import/call this function"""
+    #     raise NotImplementedError
+    #
+    # @abstractmethod
+    # def get_embedding_with_backoff(self, text: str, model: str = "text-embedding-ada-002"):
+    #     """To get text embeddings, import/call this function"""
+    #     raise NotImplementedError
+    #
+    # @abstractmethod
+    # async def async_get_batch_embeddings_with_backoff(self, texts: List[str], models: List[str]):
+    #     """To get multiple text embeddings in parallel, import/call this function"""
+    #     raise NotImplementedError
 
     # """ Get completions """
     # async def acompletions_with_backoff(self, **kwargs):
