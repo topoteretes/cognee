@@ -99,7 +99,7 @@ For more info here are the <a href="https://topoteretes.github.io/cognee/">docs<
 With pip:
 
 ```bash
-pip install cognee["weaviate"]
+pip install "cognee[weaviate]"
 ```
 
 With poetry:
