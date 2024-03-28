@@ -43,10 +43,10 @@ class Config:
     graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
-    llm_provider: str = "anthropic" #openai, or custom or ollama
-    custom_model: str = "claude-3-haiku-20240307"
-    custom_endpoint: str = "" # pass claude endpoint
-    custom_key: Optional[str] = "custom"
+    llm_provider: str = "custom" #openai, or custom or ollama
+    custom_model: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
+    custom_endpoint: str = "https://api.endpoints.anyscale.com/v1" # pass claude endpoint
+    custom_key: Optional[str] = os.getenv("ANYSCALE_API_KEY")
     ollama_endpoint: str = "http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
     ollama_model: str = "mistral:instruct"

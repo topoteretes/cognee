@@ -3,7 +3,7 @@ from enum import Enum
 from cognee.config import Config
 from .anthropic.adapter import AnthropicAdapter
 from .openai.adapter import OpenAIAdapter
-from .ollama.adapter import OllamaAPIAdapter
+from .generic_llm_api.adapter import GenericAPIAdapter
 import logging
 logging.basicConfig(level=logging.INFO)
 
@@ -26,13 +26,13 @@ def get_llm_client():
         return OpenAIAdapter(config.openai_key, config.model)
     elif provider == LLMProvider.OLLAMA:
         print("Using Ollama API")
-        return OllamaAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
+        return GenericAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
     elif provider == LLMProvider.ANTHROPIC:
         print("Using Anthropic API")
-        return AnthropicAdapter(config.ollama_endpoint, config.ollama_key, config.custom_model)
+        return AnthropicAdapter(config.custom_endpoint, config.custom_endpoint, config.custom_model)
     elif provider == LLMProvider.CUSTOM:
         print("Using Custom API")
-        return OllamaAPIAdapter(config.custom_endpoint, config.custom_key, config.model)
+        return GenericAPIAdapter(config.custom_endpoint, config.custom_key, config.custom_model)
         # Add your custom LLM provider here
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
