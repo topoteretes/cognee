@@ -1,6 +1,7 @@
 """Get the LLM client."""
 from enum import Enum
 from cognee.config import Config
+from .anthropic.adapter import AnthropicAdapter
 from .openai.adapter import OpenAIAdapter
 from .ollama.adapter import OllamaAPIAdapter
 import logging
@@ -10,6 +11,7 @@ logging.basicConfig(level=logging.INFO)
 class LLMProvider(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
+    ANTHROPIC = "anthropic"
     CUSTOM = "custom"
 
 config = Config()
@@ -25,6 +27,9 @@ def get_llm_client():
     elif provider == LLMProvider.OLLAMA:
         print("Using Ollama API")
         return OllamaAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
+    elif provider == LLMProvider.ANTHROPIC:
+        print("Using Anthropic API")
+        return AnthropicAdapter(config.ollama_endpoint, config.ollama_key, config.custom_model)
     elif provider == LLMProvider.CUSTOM:
         print("Using Custom API")
         return OllamaAPIAdapter(config.custom_endpoint, config.custom_key, config.model)

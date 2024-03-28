@@ -1,7 +1,7 @@
 from typing import List
 from fastembed import TextEmbedding
 from .EmbeddingEngine import EmbeddingEngine
-from cognitive_architecture.config import Config
+from cognee.config import Config
 
 config = Config()
 config.load()

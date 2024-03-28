@@ -43,7 +43,8 @@ class Config:
     graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
-    llm_provider: str = "openai" #openai, or custom or ollama
+    llm_provider: str = "anthropic" #openai, or custom or ollama
+    custom_model: str = "claude-3-haiku-20240307"
     custom_endpoint: str = "" # pass claude endpoint
     custom_key: Optional[str] = "custom"
     ollama_endpoint: str = "http://localhost:11434/v1"
