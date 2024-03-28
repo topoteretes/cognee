@@ -1,0 +1,1554 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="desc">
+      
+      
+        <meta name="author" content="Vasilije Markovic">
+      
+      
+        <link rel="canonical" href="https://www.congee.ai/blog/posts/from-demo-to-production-1/">
+      
+      
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.15">
+    
+    
+      
+        <title>Going beyond Langchain + Weaviate and towards a production ready modern data platform - cognee</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.7e359304.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+  
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+    
+    
+  
+  
+  <style>:root{--md-admonition-icon--note:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.752 1.752 0 0 1 1 7.775Zm1.5 0c0 .066.026.13.073.177l6.25 6.25a.25.25 0 0 0 .354 0l5.025-5.025a.25.25 0 0 0 0-.354l-6.25-6.25a.25.25 0 0 0-.177-.073H2.75a.25.25 0 0 0-.25.25ZM6 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/></svg>');--md-admonition-icon--abstract:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M2.5 1.75v11.5c0 .138.112.25.25.25h3.17a.75.75 0 0 1 0 1.5H2.75A1.75 1.75 0 0 1 1 13.25V1.75C1 .784 1.784 0 2.75 0h8.5C12.216 0 13 .784 13 1.75v7.736a.75.75 0 0 1-1.5 0V1.75a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13.274 9.537v-.001l-4.557 4.45a.75.75 0 0 1-1.055-.008l-1.943-1.95a.75.75 0 0 1 1.062-1.058l1.419 1.425 4.026-3.932a.75.75 0 1 1 1.048 1.074ZM4.75 4h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM4 7.75A.75.75 0 0 1 4.75 7h2a.75.75 0 0 1 0 1.5h-2A.75.75 0 0 1 4 7.75Z"/></svg>');--md-admonition-icon--info:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>');--md-admonition-icon--tip:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.499.75a.75.75 0 0 1 1.5 0v.996C5.9 2.903 6.793 3.65 7.662 4.376l.24.202c-.036-.694.055-1.422.426-2.163C9.1.873 10.794-.045 12.622.26 14.408.558 16 1.94 16 4.25c0 1.278-.954 2.575-2.44 2.734l.146.508.065.22c.203.701.412 1.455.476 2.226.142 1.707-.4 3.03-1.487 3.898C11.714 14.671 10.27 15 8.75 15h-6a.75.75 0 0 1 0-1.5h1.376a4.484 4.484 0 0 1-.563-1.191 3.835 3.835 0 0 1-.05-2.063 4.647 4.647 0 0 1-2.025-.293.75.75 0 0 1 .525-1.406c1.357.507 2.376-.006 2.698-.318l.009-.01a.747.747 0 0 1 1.06 0 .748.748 0 0 1-.012 1.074c-.912.92-.992 1.835-.768 2.586.221.74.745 1.337 1.196 1.621H8.75c1.343 0 2.398-.296 3.074-.836.635-.507 1.036-1.31.928-2.602-.05-.603-.216-1.224-.422-1.93l-.064-.221c-.12-.407-.246-.84-.353-1.29a2.425 2.425 0 0 1-.507-.441 3.075 3.075 0 0 1-.633-1.248.75.75 0 0 1 1.455-.364c.046.185.144.436.31.627.146.168.353.305.712.305.738 0 1.25-.615 1.25-1.25 0-1.47-.95-2.315-2.123-2.51-1.172-.196-2.227.387-2.706 1.345-.46.92-.27 1.774.019 3.062l.042.19a.884.884 0 0 1 .01.05c.348.443.666.949.94 1.553a.75.75 0 1 1-1.365.62c-.553-1.217-1.32-1.94-2.3-2.768L6.7 5.527c-.814-.68-1.75-1.462-2.692-2.619a3.737 3.737 0 0 0-1.023.88c-.406.495-.663 1.036-.722 1.508.116.122.306.21.591.239.388.038.797-.06 1.032-.19a.75.75 0 0 1 .728 1.31c-.515.287-1.23.439-1.906.373-.682-.067-1.473-.38-1.879-1.193L.75 5.677V5.5c0-.984.48-1.94 1.077-2.664.46-.559 1.05-1.055 1.673-1.353V.75Z"/></svg>');--md-admonition-icon--success:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>');--md-admonition-icon--question:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.92 6.085h.001a.749.749 0 1 1-1.342-.67c.169-.339.436-.701.849-.977C6.845 4.16 7.369 4 8 4a2.756 2.756 0 0 1 1.637.525c.503.377.863.965.863 1.725 0 .448-.115.83-.329 1.15-.205.307-.47.513-.692.662-.109.072-.22.138-.313.195l-.006.004a6.24 6.24 0 0 0-.26.16.952.952 0 0 0-.276.245.75.75 0 0 1-1.248-.832c.184-.264.42-.489.692-.661.103-.067.207-.132.313-.195l.007-.004c.1-.061.182-.11.258-.161a.969.969 0 0 0 .277-.245C8.96 6.514 9 6.427 9 6.25a.612.612 0 0 0-.262-.525A1.27 1.27 0 0 0 8 5.5c-.369 0-.595.09-.74.187a1.01 1.01 0 0 0-.34.398ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg>');--md-admonition-icon--warning:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg>');--md-admonition-icon--failure:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M2.344 2.343h-.001a8 8 0 0 1 11.314 11.314A8.002 8.002 0 0 1 .234 10.089a8 8 0 0 1 2.11-7.746Zm1.06 10.253a6.5 6.5 0 1 0 9.108-9.275 6.5 6.5 0 0 0-9.108 9.275ZM6.03 4.97 8 6.94l1.97-1.97a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l1.97 1.97a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-1.97 1.97a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L6.94 8 4.97 6.03a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018Z"/></svg>');--md-admonition-icon--danger:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M9.504.43a1.516 1.516 0 0 1 2.437 1.713L10.415 5.5h2.123c1.57 0 2.346 1.909 1.22 3.004l-7.34 7.142a1.249 1.249 0 0 1-.871.354h-.302a1.25 1.25 0 0 1-1.157-1.723L5.633 10.5H3.462c-1.57 0-2.346-1.909-1.22-3.004L9.503.429Zm1.047 1.074L3.286 8.571A.25.25 0 0 0 3.462 9H6.75a.75.75 0 0 1 .694 1.034l-1.713 4.188 6.982-6.793A.25.25 0 0 0 12.538 7H9.25a.75.75 0 0 1-.683-1.06l2.008-4.418.003-.006a.036.036 0 0 0-.004-.009l-.006-.006-.008-.001c-.003 0-.006.002-.009.004Z"/></svg>');--md-admonition-icon--bug:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M4.72.22a.75.75 0 0 1 1.06 0l1 .999a3.488 3.488 0 0 1 2.441 0l.999-1a.748.748 0 0 1 1.265.332.75.75 0 0 1-.205.729l-.775.776c.616.63.995 1.493.995 2.444v.327c0 .1-.009.197-.025.292.408.14.764.392 1.029.722l1.968-.787a.75.75 0 0 1 .556 1.392L13 7.258V9h2.25a.75.75 0 0 1 0 1.5H13v.5c0 .409-.049.806-.141 1.186l2.17.868a.75.75 0 0 1-.557 1.392l-2.184-.873A4.997 4.997 0 0 1 8 16a4.997 4.997 0 0 1-4.288-2.427l-2.183.873a.75.75 0 0 1-.558-1.392l2.17-.868A5.036 5.036 0 0 1 3 11v-.5H.75a.75.75 0 0 1 0-1.5H3V7.258L.971 6.446a.75.75 0 0 1 .558-1.392l1.967.787c.265-.33.62-.583 1.03-.722a1.677 1.677 0 0 1-.026-.292V4.5c0-.951.38-1.814.995-2.444L4.72 1.28a.75.75 0 0 1 0-1.06Zm.53 6.28a.75.75 0 0 0-.75.75V11a3.5 3.5 0 1 0 7 0V7.25a.75.75 0 0 0-.75-.75ZM6.173 5h3.654A.172.172 0 0 0 10 4.827V4.5a2 2 0 1 0-4 0v.327c0 .096.077.173.173.173Z"/></svg>');--md-admonition-icon--example:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M5 5.782V2.5h-.25a.75.75 0 0 1 0-1.5h6.5a.75.75 0 0 1 0 1.5H11v3.282l3.666 5.76C15.619 13.04 14.543 15 12.767 15H3.233c-1.776 0-2.852-1.96-1.899-3.458Zm-2.4 6.565a.75.75 0 0 0 .633 1.153h9.534a.75.75 0 0 0 .633-1.153L12.225 10.5h-8.45ZM9.5 2.5h-3V6c0 .143-.04.283-.117.403L4.73 9h6.54L9.617 6.403A.746.746 0 0 1 9.5 6Z"/></svg>');--md-admonition-icon--quote:url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.75 2.5h10.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Zm4 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2.5 7.75v6a.75.75 0 0 1-1.5 0v-6a.75.75 0 0 1 1.5 0Z"/></svg>');}</style>
+
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#going-beyond-langchain-weaviate-and-towards-a-production-ready-modern-data-platform" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+              <button class="md-banner__button md-icon" aria-label="Don't show this again">
+                
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+              </button>
+            
+             For updates follow
+<strong>@tricalt</strong> on
+<a href="https://twitter.com/tricalt">
+  <span class="twemoji twitter">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M459.37 151.716c.325 4.548.325 9.097.325 13.645 0 138.72-105.583 298.558-298.558 298.558-59.452 0-114.68-17.219-161.137-47.106 8.447.974 16.568 1.299 25.34 1.299 49.055 0 94.213-16.568 130.274-44.832-46.132-.975-84.792-31.188-98.112-72.772 6.498.974 12.995 1.624 19.818 1.624 9.421 0 18.843-1.3 27.614-3.573-48.081-9.747-84.143-51.98-84.143-102.985v-1.299c13.969 7.797 30.214 12.67 47.431 13.319-28.264-18.843-46.781-51.005-46.781-87.391 0-19.492 5.197-37.36 14.294-52.954 51.655 63.675 129.3 105.258 216.365 109.807-1.624-7.797-2.599-15.918-2.599-24.04 0-57.828 46.782-104.934 104.934-104.934 30.213 0 57.502 12.67 76.67 33.137 23.715-4.548 46.456-13.32 66.599-25.34-7.798 24.366-24.366 44.833-46.132 57.827 21.117-2.273 41.584-8.122 60.426-16.243-14.292 20.791-32.161 39.308-52.628 54.253z"/></svg>
+  </span>
+  <strong>Twitter</strong>
+</a>
+and
+<span class="twemoji star">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M316.9 18c-5.3-11-16.5-18-28.8-18s-23.4 7-28.8 18L195 150.3 51.4 171.5c-12 1.8-22 10.2-25.7 21.7s-.7 24.2 7.9 32.7L137.8 329l-24.6 145.7c-2 12 3 24.2 12.9 31.3s23 8 33.8 2.3l128.3-68.5 128.3 68.5c10.8 5.7 23.9 4.9 33.8-2.3s14.9-19.3 12.9-31.3L438.5 329l104.2-103.1c8.6-8.5 11.7-21.2 7.9-32.7s-13.7-19.9-25.7-21.7l-143.7-21.2L316.9 18z"/></svg>
+</span>
+us on
+<a href="https://github.com/topoteretes/cognee">
+  <span class="twemoji github">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </span>
+  <strong>GitHub</strong> </a
+>. If you don't like python, too bad. JS, Elixir, and Rust are coming soon. 
+          </div>
+          
+            <script>var content,el=document.querySelector("[data-md-component=announce]");el&&(content=el.querySelector(".md-typeset"),__md_hash(content.innerHTML)===__md_get("__announce")&&(el.hidden=!0))</script>
+          
+        </aside>
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="cognee" class="md-header__button md-logo" aria-label="cognee" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            cognee
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Going beyond Langchain + Weaviate and towards a production ready modern data platform
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12c0-2.42-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/topoteretes/cognee" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cognee
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../.." class="md-tabs__link">
+          
+  
+    
+  
+  Introduction
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../" class="md-tabs__link">
+          
+  
+    
+  
+  Blog
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../why/" class="md-tabs__link">
+          
+  
+    
+  
+  Why cognee
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../concepts/propositions/" class="md-tabs__link">
+          
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../research/" class="md-tabs__link">
+        
+  
+    
+  
+  Research
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="cognee" class="md-nav__button md-logo" aria-label="cognee" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    cognee
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/topoteretes/cognee" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cognee
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+    <a href="../../.." class="md-nav__link">
+      
+  
+  <span class="md-ellipsis">
+    Introduction
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+    <a href="../../" class="md-nav__link">
+      
+  
+  <span class="md-ellipsis">
+    Blog
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+    <a href="../../../why/" class="md-nav__link">
+      
+  
+  <span class="md-ellipsis">
+    Why cognee
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+    <a href="../../../concepts/propositions/" class="md-nav__link">
+      
+  
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../research/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Research
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      Table of Contents
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-introduction-the-current-generative-ai-landscape" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Introduction: The Current Generative AI Landscape
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Introduction: The Current Generative AI Landscape">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-a-brief-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.1. A brief overview
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-the-problem-of-putting-code-to-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      1.2. The problem of putting code to production
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-level-0-the-current-state-of-affairs" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Level 0: The Current State of Affairs
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Level 0: The Current State of Affairs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-developer-intent-at-level-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.1. Developer Intent at Level 0
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-toward-the-production-code-from-the-chatbot-ux-poc-at-level-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.2 Toward the production code from the chatbot UX - POC at level 0
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-summary-ask-pdf-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.3 Summary - Ask PDF questions
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-addendum-companies-in-the-space-openai-anthropic-and-cohere" class="md-nav__link">
+    <span class="md-ellipsis">
+      2.4. Addendum - companies in the space: OpenAI, Anthropic, and Cohere
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-level-1-langchain-weaviate" class="md-nav__link">
+    <span class="md-ellipsis">
+      3**. Level 1:  Langchain &amp; Weaviate**
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3**. Level 1: Langchain & Weaviate**">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-developer-intent-at-level-1-langchain-weaviate-llm-wrapper" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.1. Developer Intent at Level 1**: Langchain &amp; Weaviate LLM Wrapper**
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-translating-theory-into-practice-poc-at-level-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.2. Translating Theory into Practice: POC at Level 1
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-summary-the-thing-startup-bros-pitch-to-vcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.4. Summary - The thing startup bros pitch to VCs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-addendum-frameworks-and-vector-dbs-in-the-space-langchain-weaviate-and-others" class="md-nav__link">
+    <span class="md-ellipsis">
+      3.5. Addendum - Frameworks and Vector DBs in the space: Langchain, Weaviate and others
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resources
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Resources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blog-posts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Blog Posts:
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#research-papers-arxiv" class="md-nav__link">
+    <span class="md-ellipsis">
+      Research Papers (ArXiv):
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-comics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Web Comics:
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reddit-discussions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reddit Discussions:
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#developer-blog-posts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Developer Blog Posts:
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#industry-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      Industry Analysis:
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompt-engineering" class="md-nav__link">
+    <span class="md-ellipsis">
+      Prompt Engineering:
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conclusion
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/topoteretes/cognee/edit/main/docs/blog/posts/from-demo-to-production-1.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75L3 17.25Z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/topoteretes/cognee/raw/main/docs/blog/posts/from-demo-to-production-1.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0 8a5 5 0 0 1-5-5 5 5 0 0 1 5-5 5 5 0 0 1 5 5 5 5 0 0 1-5 5m0-12.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5Z"/></svg>
+    </a>
+  
+
+
+<h1 id="going-beyond-langchain-weaviate-and-towards-a-production-ready-modern-data-platform">Going beyond Langchain + Weaviate and towards a production ready modern data platform<a class="headerlink" href="#going-beyond-langchain-weaviate-and-towards-a-production-ready-modern-data-platform" title="Permanent link">&para;</a></h1>
+<h3 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">&para;</a></h3>
+<h2 id="1-introduction-the-current-generative-ai-landscape"><strong>1. Introduction: The Current Generative AI Landscape</strong><a class="headerlink" href="#1-introduction-the-current-generative-ai-landscape" title="Permanent link">&para;</a></h2>
+<h3 id="11-a-brief-overview">1.1. A brief overview<a class="headerlink" href="#11-a-brief-overview" title="Permanent link">&para;</a></h3>
+<p>Browsing the <a href="https://theresanaiforthat.com/">largest AI platform directory</a> available at the moment, we can observe around 7,000 new, mostly semi-finished AI projects — projects whose development is fueled by recent improvements in foundation models and open-source community contributions.</p>
+<p>Decades of technological advancements have led to small teams being able to do in 2023 what in 2015 required a team of dozens.</p>
+<p>Yet, the AI apps currently being pushed out still mostly feel and perform like demos.</p>
+<p>It seems it has never been easier to create a startup, build an AI app, go to market… and fail.</p>
+<p>The consensus is, nevertheless, that the AI space is <em>the</em> place to be in 2023.</p>
+<blockquote>
+<p>“The AI Engineer [...] will likely be the <strong>highest-demand engineering job of the [coming] decade.”</strong>
+</p>
+</blockquote>
+<p><strong><a href="https://www.latent.space/p/ai-engineer">Swyx</a></strong></p>
+<p>The stellar rise of AI engineering as a profession is, perhaps, signaling the need for a unified solution that is not yet there — a platform that is, in its essence, a Large Language Model (LLM), which could be employed as <a href="https://lilianweng.github.io/posts/2023-06-23-agent/?fbclid=IwAR1p0W-Mg_4WtjOCeE8E6s7pJZlTDCDLmcXqHYVIrEVisz_D_S8LfN6Vv20">a powerful general problem solver</a>.</p>
+<p>To address this issue, dlthub and <a href="http://prometh.ai/">prometh.ai</a> will collaborate on productionizing a common use-case, PDF processing, progressing step by step. We will use LLMs, AI frameworks, and services, refining the code until we attain a clearer understanding of what a modern LLM architecture stack might entail.</p>
+<p>You can find the code in the <a href="https://github.com/topoteretes/PromethAI-Memory">PromethAI-Memory repository</a></p>
+<h3 id="12-the-problem-of-putting-code-to-production"><strong>1.2. The problem of putting code to production</strong><a class="headerlink" href="#12-the-problem-of-putting-code-to-production" title="Permanent link">&para;</a></h3>
+<p><img alt="infographic (2).png" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/infographic_%282%29.png" /></p>
+<p>Despite all the AI startup hype, there’s a glaring issue lurking right under the surface: <strong>foundation models do not have production-ready data infrastructure by default</strong></p>
+<p>Everyone seems to be building simple tools, like “Your Sales Agent” or “Your HR helper,” on top of OpenAI — a so-called  “Thin Wrapper” — and selling them as services.</p>
+<p>Our intention, however, is not to merely capitalize on this nascent industry — it’s to use a new technology to catalyze a true digital paradigm shift  — to <a href="https://www.youtube.com/watch?v=-hxeDjAxvJ8&amp;t=328s&amp;ab_channel=LexFridman">paraphrase investor Marc Andreessen</a>, content of the new medium as the content of the previous medium.</p>
+<p>What Andreessen meant by this is that each new medium for sharing information must encapsulate the content of the prior medium. For example, the internet encapsulates all books, movies, pictures, and stories from previous mediums.</p>
+<p>After a unified AI solution is created, only then will AI agents be able to proactively and competently operate the browsers, apps, and devices we operate by ourselves today.</p>
+<p>Intelligent agents in AI are programs capable of <a href="https://en.wikipedia.org/wiki/Machine_perception">perceiving</a> their environment, acting <a href="https://en.wikipedia.org/wiki/Autonomous">autonomously</a> in order to achieve goals, and may improve their performance by <a href="https://en.wikipedia.org/wiki/Machine_learning">learning</a> or acquiring <a href="https://en.wikipedia.org/wiki/Knowledge_representation">knowledge</a>.</p>
+<p>The reality is that we now have a set of data platforms and AI agents that are becoming available to the general public, whose content and methods were previously inaccessible to anyone not privy to the tech-heavy languages of data scientists and engineers.</p>
+<p>As engineering tools move toward the mainstream, they need to become more intuitive and user friendly, while hiding their complexity with a set of background solutions.</p>
+<blockquote>
+<p><em>Fundamentally, the issue of “Thin wrappers” is not an issue of bad products, but an issue of a lack of robust enough data engineering methods coupled with the general difficulties that come with creating production-ready code that relies on robust data platforms in a new space.</em>
+</p>
+</blockquote>
+<p>The current lack of production-ready data systems for LLMs and AI Agents opens up a gap we want to fill  by introducing robust data engineering practices to solve this issue.</p>
+<p>In this series of texts, our aim will thus be to explore what would constitute:</p>
+<ol>
+<li>Proper data engineering methods for LLMs</li>
+<li>A production-ready generative AI data platform that unlocks AI assistants/Agent Networks</li>
+</ol>
+<p>Each of the coming blog posts will be followed by Python code, to demonstrate the progress made toward building a modern AI data platform, raise important questions, and facilitate an open-source collaboration.</p>
+<p>Let’s start by setting an attainable goal. As an example, let’s conceptualize a production-ready process that can analyze and process hundreds of PDFs for hundreds of users.</p>
+<aside>
+💡 As a user, I want an AI Data Platform to enable me to extract, organize, and summarize data from PDF invoices so that it's seamlessly updated in the database and available for further processing.
+
+</aside>
+
+<p>Imagine you're a developer, and you've got a stack of digital invoices in PDF format from various vendors. These PDFs are not just simple text files; they contain logos, varying fonts, perhaps some tables, and even handwritten notes or signatures.</p>
+<p>Your goal? To extract relevant information, such as vendor names, invoice dates, total amounts, and line-item details, among others.</p>
+<p>This task of analyzing PDFs may help us understand and define what a production-ready AI data platform entails. To perform the task, we’ll be drawing a parallel between Data Engineering concepts and those from Cognitive Sciences which tap into our understanding of how human memory works — this should provide the baseline for the evaluation of the POCs in this post.</p>
+<p>We assume that Agent Networks of the future would resemble groups of humans with their own memory and unique contexts, all working and contributing toward a set of common objectives.</p>
+<p>In our example of data extraction from PDFs — a modern enterprise may have hundreds of thousands, if not millions of such documents stored in different places, with many people hired to make sense of them.</p>
+<p>This data is considered unstructured — you cannot handle it easily with current data engineering practices and database technology. The task to structure it is difficult and, to this day, has always needed to be performed manually.</p>
+<p>With the advent of Agent Networks, which mimic human cognitive abilities, we could start realistically structuring this kind of information at scale. As this is still data processing — an engineering task — we need to combine those two approaches.</p>
+<p>From an engineering standpoint, the next generation Data Platform needs to be built with the following in mind:</p>
+<ul>
+<li>We need to give Agents access to the data at scale.</li>
+<li>We need our Agents to operate like human minds so we need to provide them with tools to execute tasks and various types of memory for reasoning</li>
+<li>We need to keep the systems under control, meaning that we apply good engineering practices to the whole system</li>
+<li>We need to be able to test, sandbox, and roll back what Agents do and we need to observe them and log every action</li>
+</ul>
+<p>In order to conceptualize a new model of data structure and relationships that transcends the traditional Data Warehousing approach, we can start perceiving procedural steps in Agent execution flows as thoughts and interpreting them through the prism of human cognitive processes such as the functioning of our memory system and its memory components.</p>
+<p>Human memory can be divided into several distinct categories:</p>
+<ul>
+<li><strong>Sensory Memory (SM)</strong> → Very short term (15-30s) memory storage unit receiving information from our senses.</li>
+<li><strong>Short Term Memory (STM)</strong> → Short term memory that processes the information, and coordinates work based on information provided.</li>
+<li><strong>Long-Term Memory (LTM) →</strong> Stores information long term, and retrieves what it needs for daily life.</li>
+</ul>
+<p>The general structure of human memory. Note that <a href="https://lilianweng.github.io/posts/2023-06-23-agent/">Weng</a> doesn’t expand on the STM here in the way we did above  :</p>
+<p><img alt="Untitled" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/Untitled.png" /></p>
+<p>Broader, more relevant representation of memory for our context, and the corresponding data processing, based on <a href="https://en.wikipedia.org/wiki/Atkinson%E2%80%93Shiffrin_memory_model">Atkinson-Schiffrin memory model</a> would be:</p>
+<p><img alt="Untitled" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/Untitled%201.png" /></p>
+<h2 id="2-level-0-the-current-state-of-affairs"><strong>2. Level 0: The Current State of Affairs</strong><a class="headerlink" href="#2-level-0-the-current-state-of-affairs" title="Permanent link">&para;</a></h2>
+<p>To understand the current LLM production systems, how they handle data input and processing, and their evolution, we start at Level 0 — the LLMs and their APIs as they are currently — and progress toward Level 7 — AI Agents and complex AI Data Platforms and Agent Networks of the future.</p>
+<h3 id="21-developer-intent-at-level-0">2.1. Developer Intent at Level 0<a class="headerlink" href="#21-developer-intent-at-level-0" title="Permanent link">&para;</a></h3>
+<p><img alt="infographic (2).png" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/infographic_%282%29%201.png" /></p>
+<p>In order to extract relevant data from PDF documents, as an engineer you would turn to a powerful AI model like OpenAI, Anthropic, or Cohere (Layer 0 in our XYZ stack). Not all of them support this functionality, so you’d use <a href="https://www.notion.so/Go-to-market-under-construction-04a750a15c264df4be5c6769289b99a2?pvs=21">Bing</a> or a ChatGPT plugin like <a href="https://plugin.askyourpdf.com/">AskPDF</a>, which do.</p>
+<p>In order to "extract nuances," you might provide the model with specific examples or more directive prompts. For instance, "Identify the vendor name positioned near the top of the invoice, usually above the billing details."</p>
+<p>Next, you'd "prompt it" with various PDFs to see how it reacts. Based on the outputs, you might notice that it misses handwritten dates or gets confused with certain fonts.</p>
+<p>This is where "<a href="https://www.promptingguide.ai/">prompt engineering</a>" comes in. You might adjust your initial prompt to be more specific or provide additional context. Maybe you now say, "Identify the vendor name and, if you find any handwritten text, treat it as the invoice date."</p>
+<h3 id="22-toward-the-production-code-from-the-chatbot-ux-poc-at-level-0">2.2 <strong>Toward the production code from the chatbot UX</strong> - POC at level 0<a class="headerlink" href="#22-toward-the-production-code-from-the-chatbot-ux-poc-at-level-0" title="Permanent link">&para;</a></h3>
+<p><img alt="Untitled" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/Untitled%202.png" /></p>
+<p>Our POC at this stage consists of simply uploading a PDF and asking it questions until we have better and better answers based on prompt engineering. This exercise shows what is available with the current production systems, to help us set a baseline for the solutions to come.</p>
+<ul>
+<li>If your goal is to understand the content of a PDF, Bing and OpenAI will enable you to upload documents and get explanations of their contents</li>
+<li>Uses basic natural language processing (NLP) prompts without any schema on output data</li>
+<li>Typically “forgets” the data after a query — no notion of storage (LTM)</li>
+<li>In a production environment, data loss can have significant consequences. It can lead to operational disruptions, inaccurate analytics, and loss of valuable insights</li>
+<li>There is no possibility to test the behavior of the system</li>
+</ul>
+<p>Let’s break down the Data Platform component at this stage:</p>
+<table>
+<thead>
+<tr>
+<th>Memory type</th>
+<th>State</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sensory Memory</td>
+<td>Chatbot interface</td>
+<td>Can be interpreted in this context as the interface used for the human input</td>
+</tr>
+<tr>
+<td>STM</td>
+<td>The context window of the chatbot/search. In essence stateless</td>
+<td>The processing layer and a storage of the session/user context</td>
+</tr>
+<tr>
+<td>LTM</td>
+<td>Not present at this stage</td>
+<td>The information storage</td>
+</tr>
+</tbody>
+</table>
+<p>Lacks:</p>
+<ul>
+<li>Decoupling: Separating components to reduce interdependency.</li>
+<li>Portability: Ability to run in different environments.</li>
+<li>Modularity: Breaking down into smaller, independent parts.</li>
+</ul>
+<p>Extendability: Capability to add features or functionality.</p>
+<p><strong>Next Steps</strong>:</p>
+<ol>
+<li>Implement a LTM memory component for information retention.</li>
+<li>Develop an abstraction layer for Sensory Memory input and processing multiple file types.</li>
+</ol>
+<p>Addressing these points will enhance flexibility, reusability, and adaptability.</p>
+<h3 id="23-summary-ask-pdf-questions">2.3 Summary - Ask PDF questions<a class="headerlink" href="#23-summary-ask-pdf-questions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Description</th>
+<th>Use-Case</th>
+<th>Summary</th>
+<th>Memory</th>
+<th>Maturity</th>
+<th>Production readiness</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The Foundational Model</td>
+<td>Extract info from your documents</td>
+<td>ChatGPT prompt engineering as the only way to optimise outputs</td>
+<td>SM, STM are system defined, LTM is not present</td>
+<td>Works 15% of time</td>
+<td>Lacks Decoupling, Portability, Modularity and Extendability</td>
+</tr>
+</tbody>
+</table>
+<h3 id="24-addendum-companies-in-the-space-openai-anthropic-and-cohere">2.4. Addendum - companies in the space: OpenAI, Anthropic, and Cohere<a class="headerlink" href="#24-addendum-companies-in-the-space-openai-anthropic-and-cohere" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A brief on each provider, relevant model and its role in the modern data space.</li>
+<li>
+<p>The list of models and providers in the <a href="https://mindsdb.com/blog/navigating-the-llm-landscape-a-comparative-analysis-of-leading-large-language-models">space</a></p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Provider</th>
+<th>Structured data</th>
+<th>Speed</th>
+<th>Params</th>
+<th>Fine Tunability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>gpt-4</td>
+<td>OpenAI </td>
+<td>Yes</td>
+<td>★☆☆ </td>
+<td> -</td>
+<td>No</td>
+</tr>
+<tr>
+<td>gpt-3.5-turbo</td>
+<td>OpenAI</td>
+<td>Yes</td>
+<td>★★☆ </td>
+<td> 175B</td>
+<td>No</td>
+</tr>
+<tr>
+<td>gpt-3</td>
+<td>OpenAI</td>
+<td>No </td>
+<td> ★☆☆</td>
+<td> 175B</td>
+<td>No</td>
+</tr>
+<tr>
+<td>ada, babbage, curie</td>
+<td> OpenAI</td>
+<td>No</td>
+<td>★★★ </td>
+<td> 350M - 7B</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>claude</td>
+<td>Anthropic </td>
+<td>No</td>
+<td>★★☆ </td>
+<td> 52B</td>
+<td>No </td>
+</tr>
+<tr>
+<td>claude-instant</td>
+<td>Anthropic </td>
+<td>No</td>
+<td>★★★ </td>
+<td> 52B</td>
+<td>No</td>
+</tr>
+<tr>
+<td>command-xlarge</td>
+<td>Cohere</td>
+<td>No</td>
+<td> ★★☆</td>
+<td> 50B</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>command-medium</td>
+<td>Cohere</td>
+<td>No</td>
+<td> ★★★</td>
+<td> 6B</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>BERT</td>
+<td>Google </td>
+<td>No</td>
+<td>★★★ </td>
+<td>345M </td>
+<td>Yes</td>
+</tr>
+<tr>
+<td> T5</td>
+<td>Google </td>
+<td>No</td>
+<td>★★☆ </td>
+<td> 11B</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>PaLM </td>
+<td>Google </td>
+<td>No</td>
+<td> ★☆☆</td>
+<td> 540B</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>LLaMA</td>
+<td>Meta AI </td>
+<td>Yes</td>
+<td>★★☆ </td>
+<td> 65B</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td> CTRL</td>
+<td>Salesforce </td>
+<td>No</td>
+<td>★★★ </td>
+<td>1.6B </td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Dolly 2.0 </td>
+<td>Databricks</td>
+<td>No</td>
+<td>★★☆ </td>
+<td> 12B</td>
+<td>Yes </td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+<h2 id="3-level-1-langchain-weaviate">3**. Level 1:  Langchain &amp; Weaviate**<a class="headerlink" href="#3-level-1-langchain-weaviate" title="Permanent link">&para;</a></h2>
+<h3 id="31-developer-intent-at-level-1-langchain-weaviate-llm-wrapper"><strong>3.1.</strong> Developer Intent at Level 1**: Langchain &amp; Weaviate LLM Wrapper**<a class="headerlink" href="#31-developer-intent-at-level-1-langchain-weaviate-llm-wrapper" title="Permanent link">&para;</a></h3>
+<p><img alt="infographic (2).png" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/infographic_%282%29%202.png" /></p>
+<p>This step is basically an upgrade to the current state of the art LLM UX/UI where we add:</p>
+<ul>
+<li>
+<p>Permanent LTM memory (data store)</p>
+<p>As a developer, I need to answer questions on large PDFs that I can’t simply pass to the LLM due to technical limitations. The primary issue being addressed is the constraint on prompt length. As of now, GPT-4 has a limit of 4k tokens for both the prompt and the response combined. So, if the prompt comprises 3.5k tokens, the response can only be 0.5k tokens long.</p>
+</li>
+<li>
+<p>LLM Framework like Langchain to adapt any document type to vector store</p>
+<p>Using Langchain provides a neat abstraction for me to get started quickly, connect to VectorDB, and get fast results.</p>
+</li>
+<li>
+<p>Some higher level structured storage (dlthub)</p>
+</li>
+</ul>
+<p><img alt="Untitled" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/Untitled%203.png" /></p>
+<h3 id="32-translating-theory-into-practice-poc-at-level-1"><strong>3.2. Translating Theory into Practice: POC at Level 1</strong><a class="headerlink" href="#32-translating-theory-into-practice-poc-at-level-1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>LLMs can’t process all the data that a large PDF could contain. So, we need a place to store the PDF and a way to retrieve relevant information from it, so it can be passed on to the LLM.</li>
+<li>When trying to build and process documents or user inputs, it’s important to store them in a Vector Database to be able to retrieve the information when needed, along with the past context.</li>
+<li>A vector database is the optimal solution because it enables efficient storage, retrieval, and processing of high-dimensional data, making it ideal for applications like document search and user input analysis where context and similarity are important.</li>
+<li>For the past several months, there has been a surge of projects that personalize LLMs by storing user settings and information in a VectorDB so they can be easily retrieved and used as input for the LLM.</li>
+</ul>
+<p>This can be done by storing data in the Weaviate Vector Database; then, we can process our PDF.</p>
+<ul>
+<li>We start by converting the PDF and translating it</li>
+</ul>
+<p><img alt="carbon (5).png" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/carbon_%285%29.png" /></p>
+<ul>
+<li>the next step we store the PDF to Weaviate</li>
+</ul>
+<p><img alt="carbon (6).png" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/carbon_%286%29.png" /></p>
+<ul>
+<li>We load the data into some type of database using dlthub</li>
+</ul>
+<p><img alt="carbon (9).png" src="../Going%20beyond%20Langchain%20%2B%20Weaviate%20and%20towards%20a%20pr%207351d77a1eba40aab4394c24bef3a278/carbon_%289%29.png" /></p>
+<p>The parallel with our memory components becomes clearer at this stage. We have some way to define inputs which correspond to SM, while STM and LTM are starting to become two separate, clearly distinguishable entities. It becomes evident that we need to separate LTM data according to domains it belongs to but, at this point, a clear structure for how that would work has not yet emerged.</p>
+<p>In addition, we can treat GPT as limited working memory and its context size as how much our model can remember during one operation.</p>
+<p>It’s evident that, if we don’t manage the working memory well, we will overload it and fail to retrieve outputs. So, we will need to take a closer look into how humans do the same and how our working memory manages millions of facts, emotions, and senses swirling around our minds.</p>
+<p>Let’s break down the Data Platform components at this stage:</p>
+<table>
+<thead>
+<tr>
+<th>Memory type</th>
+<th>State</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sensory Memory</td>
+<td>Command line interface + arguments</td>
+<td>Can be interpreted in this context as the arguments provided to the script</td>
+</tr>
+<tr>
+<td>STM</td>
+<td>Partially Vector store, partially working memory</td>
+<td>The processing layer and a storage of the session/user context</td>
+</tr>
+<tr>
+<td>LTM</td>
+<td>Vector store</td>
+<td>The raw document storage</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sensory Memory</strong></p>
+<p>Sensory memory can be seen as an input buffer where the information from the environment is stored temporarily. In our case, it’s the arguments we give to the command line script. </p>
+<p><strong>STM</strong></p>
+<p>STM is often associated with the concept of "working memory," which holds and manipulates information for short periods.</p>
+<p>In our case, it is the time during which the process runs. </p>
+<p><strong>LTM</strong></p>
+<p>LTM can be conceptualized as a database in software systems. Databases store, organize, and retrieve data over extended periods. The information in LTM is organized and indexed, similar to how databases use tables, keys, and indexes to categorize and retrieve data efficiently.</p>
+<p><strong>VectorDB: The LTM Storage of Our AI Data Platform</strong></p>
+<p>Unlike traditional relational databases, that store data in tables, and newer NoSQL databases like MongoDB, that use JSON documents, vector databases specifically store and fetch vector embeddings.</p>
+<p>Vector databases are crucial for Large Language Models and other modern, resource-hungry applications. They're designed for handling vector data, commonly used in fields like computer graphics, Machine Learning, and Geographic Information Systems.</p>
+<p>Vector databases hinge on vector embeddings. These embeddings, packed with semantic details, help AI systems to understand data and retain long-term memory. They're condensed snapshots of training data and act as filters when processing new data in the inference stage of machine learning.</p>
+<p><strong>Problems</strong>:</p>
+<ul>
+<li>Interoperability</li>
+<li>Maintainability</li>
+<li>Fault Tolerance</li>
+</ul>
+<p><strong>Next steps:</strong></p>
+<ol>
+<li>Create a standardized data model</li>
+<li>Dockerize the component</li>
+<li>Create a FastAPI endpoint</li>
+</ol>
+<h3 id="34-summary-the-thing-startup-bros-pitch-to-vcs"><strong>3.4. Summary - The thing startup bros pitch to VCs</strong><a class="headerlink" href="#34-summary-the-thing-startup-bros-pitch-to-vcs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Description</th>
+<th>Use-Case</th>
+<th>Summary</th>
+<th>Knowledge</th>
+<th>Maturity</th>
+<th>Production readiness</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Interface Endpoint for the Foundational Model</td>
+<td>Store data and query it for a particular use-case</td>
+<td>Langchain + Weaviate to improve user’s conversations + prompt engineering to get better outputs</td>
+<td>SM is somewhat modifiable, STM is not clearly defined, LTM is a VectorDB</td>
+<td>Works 25% of time</td>
+<td>Lacks Interoperability, Maintainability, Fault Tolerance Has some: Reusability, Portability, Extendability</td>
+</tr>
+</tbody>
+</table>
+<h3 id="35-addendum-frameworks-and-vector-dbs-in-the-space-langchain-weaviate-and-others">3.5. Addendum - Frameworks and Vector DBs in the space: Langchain, Weaviate and others<a class="headerlink" href="#35-addendum-frameworks-and-vector-dbs-in-the-space-langchain-weaviate-and-others" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A brief on each provider, relevant model and its role in the modern data space.</li>
+<li>
+<p>The list of models and providers in the space</p>
+<table>
+<thead>
+<tr>
+<th>Tool/Service</th>
+<th>Tool type</th>
+<th>Ease of use</th>
+<th>Maturity</th>
+<th>Docs</th>
+<th>Production readiness</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Langchain</td>
+<td>Orchestration framework</td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td></td>
+</tr>
+<tr>
+<td>Weaviate</td>
+<td>VectorDB</td>
+<td>★★☆ </td>
+<td>★★☆ </td>
+<td>★★☆ </td>
+<td>★★☆ </td>
+<td></td>
+</tr>
+<tr>
+<td>Pinecone</td>
+<td>VectorDB</td>
+<td>★★☆ </td>
+<td>★★☆ </td>
+<td>★★☆ </td>
+<td>★★☆ </td>
+<td></td>
+</tr>
+<tr>
+<td>ChromaDB</td>
+<td>VectorDB</td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td>★☆☆ </td>
+<td>★☆☆ </td>
+<td></td>
+</tr>
+<tr>
+<td>Haystack</td>
+<td>Orchestration framework</td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td></td>
+</tr>
+<tr>
+<td>Huggingface's New Agent System</td>
+<td>Orchestration framework</td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td></td>
+</tr>
+<tr>
+<td>Milvus</td>
+<td>VectorDB</td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td></td>
+</tr>
+<tr>
+<td><a href="https://gpt-index.readthedocs.io/">https://gpt-index.readthedocs.io/</a></td>
+<td>Orchestration framework</td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td>★★☆ </td>
+<td>★☆☆ </td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+<h2 id="resources"><strong>Resources</strong><a class="headerlink" href="#resources" title="Permanent link">&para;</a></h2>
+<h3 id="blog-posts"><strong>Blog Posts:</strong><a class="headerlink" href="#blog-posts" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://blog.salesforceairesearch.com/large-action-models/">Large Action Models</a></strong></li>
+<li><strong><a href="https://blog.langchain.dev/making-data-ingestion-production-ready-a-langchain-powered-airbyte-destination/">Making Data Ingestion Production-Ready: A LangChain-Powered Airbyte Destination</a></strong></li>
+<li><strong><a href="https://minimaxir.com/2023/07/langchain-problem/">The Problem with LangChain</a></strong></li>
+</ol>
+<h3 id="research-papers-arxiv"><strong>Research Papers (ArXiv):</strong><a class="headerlink" href="#research-papers-arxiv" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://arxiv.org/pdf/2303.17580.pdf">Research Paper 1</a></strong></li>
+<li><strong><a href="https://arxiv.org/abs/2210.03629">Research Paper 2</a></strong></li>
+<li><strong><a href="https://arxiv.org/abs/2302.01560">Research Paper 3</a></strong></li>
+</ol>
+<h3 id="web-comics"><strong>Web Comics:</strong><a class="headerlink" href="#web-comics" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://xkcd.com/927/">xkcd comic</a></strong></li>
+</ol>
+<h3 id="reddit-discussions"><strong>Reddit Discussions:</strong><a class="headerlink" href="#reddit-discussions" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://www.reddit.com/r/MachineLearning/comments/14zlaz6/d_the_problem_with_langchain/">Reddit Discussion: The Problem with LangChain</a></strong></li>
+</ol>
+<h3 id="developer-blog-posts"><strong>Developer Blog Posts:</strong><a class="headerlink" href="#developer-blog-posts" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://developer.nvidia.com/blog/unlocking-the-power-of-enterprise-ready-llms-with-nemo/">Unlocking the Power of Enterprise-Ready LLMS with NeMo</a></strong></li>
+</ol>
+<h3 id="industry-analysis"><strong>Industry Analysis:</strong><a class="headerlink" href="#industry-analysis" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://a16z.com/2023/06/20/emerging-architectures-for-llm-applications/">Emerging Architectures for LLM Applications</a></strong></li>
+</ol>
+<h3 id="prompt-engineering"><strong>Prompt Engineering:</strong><a class="headerlink" href="#prompt-engineering" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><a href="https://www.promptingguide.ai/">Prompting Guide</a></strong></li>
+<li><strong><a href="https://www.promptengineering.org/tree-of-thought-prompting-walking-the-path-of-unique-approach-to-problem-solving/">Tree of Thought Prompting: Walking the Path of Unique Approach to Problem Solving</a></strong></li>
+</ol>
+<h2 id="conclusion">Conclusion<a class="headerlink" href="#conclusion" title="Permanent link">&para;</a></h2>
+<p>If you enjoy the content or want to try out <code>cognee</code> please check out the <a href="https://github.com/topoteretes/cognee">github</a> and give us a star!</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024 cognee
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../../..", "features": ["announce.dismiss", "content.action.edit", "content.action.view", "content.code.annotate", "content.code.copy", "content.code.select", "content.tabs.link", "content.tooltips", "header.autohide", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.instant", "navigation.instant.prefetch", "navigation.instant.progress", "navigation.prune", "navigation.sections", "navigation.tabs", "navigation.top", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.bd41221c.min.js"></script>
+      
+    
+  </body>
+</html>
