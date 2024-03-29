@@ -165,5 +165,6 @@ cython_debug/
 .vscode/
 database/data/
 cognee/data/
+cognee/cache/
 
-.DS_Store
+# .DS_Store

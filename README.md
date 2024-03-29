@@ -105,7 +105,7 @@ pip install "cognee[weaviate]"
 With poetry:
 
 ```bash
-poetry add "cognee["weaviate"]"
+poetry add "cognee[weaviate]"
 ```
 
 ## 💻 Usage

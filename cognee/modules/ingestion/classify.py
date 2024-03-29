@@ -10,4 +10,4 @@ def classify(data: Union[str, BinaryIO]):
     if isinstance(data, BufferedReader):
         return create_binary_data(data)
 
-    raise IngestionException(f"Data sent to cognee.classify(data: any) not supported: {type(data)}")
+    raise IngestionException(f"Type of data sent to cognee.add(data_path: string | List[string]) not supported: {type(data)}")

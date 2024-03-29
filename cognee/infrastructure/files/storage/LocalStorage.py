@@ -1,5 +1,6 @@
 import os
-from typing import BinaryIO
+import shutil
+from typing import BinaryIO, Union
 from .StorageManager import Storage
 
 class LocalStorage(Storage):
@@ -8,13 +9,17 @@ class LocalStorage(Storage):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
 
-    def store(self, file_path: str, data: BinaryIO):
+    def store(self, file_path: str, data: Union[BinaryIO, str]):
         full_file_path = self.storage_path + "/" + file_path
 
         LocalStorage.ensure_directory_exists(self.storage_path)
 
-        with open(full_file_path, "wb") as f:
-            f.write(data.read())
+        with open(
+            full_file_path,
+            mode = "w" if isinstance(data, str) else "wb",
+            encoding = "utf-8" if isinstance(data, str) else None
+        ) as f:
+            f.write(data if isinstance(data, str) else data.read())
 
     def retrieve(self, file_path: str):
         full_file_path = self.storage_path + "/" + file_path
@@ -30,8 +35,6 @@ class LocalStorage(Storage):
     def remove(self, file_path: str):
         os.remove(self.storage_path + "/" + file_path)
 
-    # def get_directory(self, file_path: str):
-    #     [path, __] = file_path.split(".")
-    #     directory = "/".join(path.split("/")[:-1])
-
-    #     return directory if directory != "" else None
+    @staticmethod
+    def copy_file(source_file_path: str, destination_file_path: str):
+        return shutil.copy2(source_file_path, destination_file_path)

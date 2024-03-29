@@ -1,15 +1,7 @@
 from typing import BinaryIO, TypedDict
-import filetype
-from unstructured.cleaners.core import clean
-from unstructured.partition.pdf import partition_pdf
-from .extract_keywords import extract_keywords
-
-
-class FileTypeException(Exception):
-    message: str
-
-    def __init__(self, message: str):
-        self.message = message
+from cognee.infrastructure.data.utils.extract_keywords import extract_keywords
+from .extract_text_from_file import extract_text_from_file
+from .guess_file_type import guess_file_type
 
 
 class FileMetadata(TypedDict):
@@ -19,18 +11,12 @@ class FileMetadata(TypedDict):
     keywords: list[str]
 
 def get_file_metadata(file: BinaryIO) -> FileMetadata:
-    file_type = filetype.guess(file)
+    file.seek(0)
+    file_type = guess_file_type(file)
 
-    if file_type is None:
-        raise FileTypeException("Unknown file detected.")
-
-    keywords: list = []
-
-    if file_type.extension == "pdf":
-        elements = partition_pdf(file = file, strategy = "fast")
-        keywords = extract_keywords(
-            "\n".join(map(lambda element: clean(element.text), elements))
-        )
+    file.seek(0)
+    file_text = extract_text_from_file(file, file_type)
+    keywords = extract_keywords(file_text)
 
     file_path = file.name
     file_name = file_path.split("/")[-1].split(".")[0]
