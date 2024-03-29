@@ -38,12 +38,12 @@ async def process_attribute(graph_client, parent_id: Optional[str], attribute: s
         for item in value:
             await process_attribute(graph_client, parent_id, attribute, item)
 
-async def create_dynamic(graph_model) :
+async def create_dynamic(graph_model, graph_client) :
     root_id = await generate_node_id(graph_model)
 
     node_data = graph_model.model_dump(exclude = {"default_relationship", "id"})
-
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+    #
+    # graph_client = get_graph_client(GraphDBType.NETWORKX)
 
     await graph_client.add_node(root_id, **node_data)
 
@@ -53,9 +53,9 @@ async def create_dynamic(graph_model) :
     return graph_client
 
 
-async def create_semantic_graph(graph_model_instance):
+async def create_semantic_graph(graph_model_instance, graph_client):
     # Dynamic graph creation based on the provided graph model instance
-    graph = await create_dynamic(graph_model_instance)
+    graph = await create_dynamic(graph_model_instance, graph_client)
 
     return graph
 

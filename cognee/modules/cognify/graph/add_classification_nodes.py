@@ -2,11 +2,11 @@
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
 
 
-async def add_classification_nodes(document_id, classification_data):
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-
-    await graph_client.load_graph_from_file()
+async def add_classification_nodes(graph_client, document_id, classification_data):
+    # graph_client = get_graph_client(GraphDBType.NETWORKX)
+    #
+    #
+    # await graph_client.load_graph_from_file()
 
     data_type = classification_data["data_type"]
     layer_name = classification_data["layer_name"]

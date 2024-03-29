@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class Node(BaseModel):
     """Node in a knowledge graph."""
-    id: int
+    id: str
     description: str
     category: str
     color: str = "blue"
@@ -15,8 +15,8 @@ class Node(BaseModel):
 
 class Edge(BaseModel):
     """Edge in a knowledge graph."""
-    source: int
-    target: int
+    source: str
+    target: str
     description: str
     color: str = "blue"
     created_at: Optional[float] = None
@@ -81,6 +81,8 @@ class TextSubclass(str, Enum):
     ANNOTATIONS = "Annotations and metadata for various media"
     VOCAB_LISTS = "Vocabulary lists and grammar rules"
     LANGUAGE_EXERCISES = "Language exercises and quizzes"
+    LEGAL_AND_REGULATORY_DOCUMENTS = "Legal and Regulatory Documents"
+    OTHER_TEXT = "Other types of text data"
 
 class AudioSubclass(str, Enum):
     MUSIC_TRACKS = "Music tracks and albums"
@@ -88,6 +90,7 @@ class AudioSubclass(str, Enum):
     AUDIOBOOKS = "Audiobooks and audio guides"
     INTERVIEWS = "Recorded interviews and speeches"
     SOUND_EFFECTS = "Sound effects and ambient sounds"
+    OTHER_AUDIO = "Other types of audio recordings"
 
 class ImageSubclass(str, Enum):
     PHOTOGRAPHS = "Photographs and digital images"
@@ -95,6 +98,8 @@ class ImageSubclass(str, Enum):
     INFOGRAPHICS = "Infographics and visual data representations"
     ARTWORK = "Artwork and paintings"
     SCREENSHOTS = "Screenshots and graphical user interfaces"
+    OTHER_IMAGES = "Other types of images"
+
 
 class VideoSubclass(str, Enum):
     MOVIES = "Movies and short films"
@@ -102,6 +107,7 @@ class VideoSubclass(str, Enum):
     TUTORIALS = "Video tutorials and how-to guides"
     ANIMATED_FEATURES = "Animated features and cartoons"
     LIVE_EVENTS = "Live event recordings and sports broadcasts"
+    OTHER_VIDEOS = "Other types of video content"
 
 class MultimediaSubclass(str, Enum):
     WEB_CONTENT = "Interactive web content and games"
@@ -109,6 +115,7 @@ class MultimediaSubclass(str, Enum):
     MIXED_MEDIA = "Mixed media presentations and slide decks"
     E_LEARNING_MODULES = "E-learning modules with integrated multimedia"
     DIGITAL_EXHIBITIONS = "Digital exhibitions and virtual tours"
+    OTHER_MULTIMEDIA = "Other types of multimedia content"
 
 class Model3DSubclass(str, Enum):
     ARCHITECTURAL_RENDERINGS = "Architectural renderings and building plans"
@@ -116,12 +123,14 @@ class Model3DSubclass(str, Enum):
     ANIMATIONS = "3D animations and character models"
     SCIENTIFIC_VISUALIZATIONS = "Scientific simulations and visualizations"
     VR_OBJECTS = "Virtual objects for AR/VR applications"
+    OTHER_3D_MODELS = "Other types of 3D models"
 
 class ProceduralSubclass(str, Enum):
     TUTORIALS_GUIDES = "Tutorials and step-by-step guides"
     WORKFLOW_DESCRIPTIONS = "Workflow and process descriptions"
     SIMULATIONS = "Simulation and training exercises"
     RECIPES = "Recipes and crafting instructions"
+    OTHER_PROCEDURAL = "Other types of procedural content"
 
 class ContentType(BaseModel):
     """Base class for different types of content."""

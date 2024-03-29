@@ -14,14 +14,28 @@ import logging
 class NetworXAdapter(GraphDBInterface):
     _instance = None  # Class variable to store the singleton instance
 
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super(NetworXAdapter, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
+
+    # def __new__(cls, *args, **kwargs):
+    #     if cls._instance is None:
+    #         cls._instance = super(NetworXAdapter, cls).__new__(cls)
+    #     return cls._instance
     def __init__(self, filename="cognee_graph.pkl"):
+        # self.load_graph_from_file()
         self.filename = filename
         self.graph = nx.MultiDiGraph()
 
+
+    @classmethod
+    async def async_create(cls, filename="cognee_graph.pkl"):
+        instance = cls()
+        instance.filename = filename
+        await instance.load_graph_from_file()
+        return instance
     async def graph(self):
         return self.graph
         # G = await client.load_graph_from_file()

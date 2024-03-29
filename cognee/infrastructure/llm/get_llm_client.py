@@ -23,7 +23,7 @@ def get_llm_client():
 
     if provider == LLMProvider.OPENAI:
         print("Using OpenAI API")
-        return OpenAIAdapter(config.openai_key, config.model)
+        return OpenAIAdapter(config.openai_key, config.openai_model)
     elif provider == LLMProvider.OLLAMA:
         print("Using Ollama API")
         return GenericAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)

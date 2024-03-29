@@ -9,9 +9,9 @@ def create_category(category_name: str):
         default_relationship = Relationship(type = "belongs_to")
     )
 
-async def add_document_node(parent_id, document_data):
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
-    await graph_client.load_graph_from_file()
+async def add_document_node(graph_client, parent_id, document_data):
+    # graph_client = get_graph_client(GraphDBType.NETWORKX)
+    # await graph_client.load_graph_from_file()
 
     document_id = f"DOCUMENT:{document_data['id']}"
 

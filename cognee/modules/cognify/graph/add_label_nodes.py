@@ -2,10 +2,10 @@
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
 
 
-async def add_label_nodes(document_id, classification_data):
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-    await graph_client.load_graph_from_file()
+async def add_label_nodes(graph_client,document_id, classification_data):
+    # graph_client = get_graph_client(GraphDBType.NETWORKX)
+    #
+    # await graph_client.load_graph_from_file()
 
     # Create the layer classification node ID
     layer_classification_node_id = f"LLM_LAYER_LABEL:{document_id}"

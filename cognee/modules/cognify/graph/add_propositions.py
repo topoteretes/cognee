@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.graph.get_graph_client import get_graph_cli
 from cognee.shared.encode_uuid import encode_uuid
 
 
-async def add_propositions(
+async def add_propositions(graph_client,
     data_type,
     layer_name,
     layer_description,
@@ -15,9 +15,9 @@ async def add_propositions(
     layer_decomposition_uuid
 ):
     """ Add nodes and edges to the graph for the given LLM knowledge graph and the layer"""
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-    await graph_client.load_graph_from_file()
+    # graph_client = get_graph_client(GraphDBType.NETWORKX)
+    #
+    # await graph_client.load_graph_from_file()
 
     layer_node_id = None
     for node_id, data in graph_client.graph.nodes(data = True):
@@ -67,7 +67,7 @@ async def add_propositions(
         else:
             print(f"Could not find mapping for edge from {edge.source} to {edge.target}")
 
-async def append_to_graph(layer_graphs, required_layers):
+async def append_to_graph(graph_client, layer_graphs, required_layers):
     # Generate a UUID for the overall layer
     layer_uuid = uuid.uuid4()
     # Extract category name from required_layers data
@@ -89,6 +89,7 @@ async def append_to_graph(layer_graphs, required_layers):
             # Assuming append_data_to_graph is defined elsewhere and appends data to graph_client
             # You would pass relevant information from knowledge_graph along with other details to this function
             await add_propositions(
+                graph_client,
                 data_type,
                 layer_name,
                 layer_description,

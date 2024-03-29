@@ -36,7 +36,7 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None):
+async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None, classification_model: object = None, summarization_model: object = None, labeling_model: object = None, graph_model: object = None, cognitive_layer_model: object = None, graph_db_type: object = None):
     """This function is responsible for the cognitive processing of the content."""
 
     db = DuckDBAdapter()
@@ -66,30 +66,50 @@ async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: obje
 
     awaitables = []
 
-    await initialize_graph(USER_ID, graph_data_model)
+    if graph_db_type is None:
+        graph_db_type = GraphDBType.NETWORKX
+
+    graph_client = await get_graph_client(graph_db_type)
+
+    await initialize_graph(USER_ID, graph_data_model, graph_client)
 
     for file_metadata in files_metadata:
         with open(file_metadata["file_path"], "rb") as file:
             file_type = guess_file_type(file)
             text = extract_text_from_file(file, file_type)
 
-            awaitables.append(process_text(text, file_metadata))
+            awaitables.append(process_text(text, file_metadata, graph_data_model, classification_model, summarization_model, labeling_model, graph_model, cognitive_layer_model, graph_db_type))
 
     graphs = await asyncio.gather(*awaitables)
 
     return graphs[0]
 
-async def process_text(input_text: str, file_metadata: dict):
+async def process_text(input_text: str, file_metadata: dict, graph_data_model: object=None, classification_model: object=None, summarization_model: object=None, labeling_model: object=None, graph_model: object=None, cognitive_layer_model: object=None, graph_db_type: object=None):
     print(f"Processing document ({file_metadata['id']})")
 
     classified_categories = []
+
+    if classification_model is None:
+        classification_model= DefaultContentPrediction
+
+    if summarization_model is None:
+        summarization_model = SummarizedContent
+    if labeling_model is None:
+        labeling_model = LabeledContent
+    if cognitive_layer_model is None:
+        cognitive_layer_model = DefaultCognitiveLayer
+    if graph_model is None:
+        graph_model = KnowledgeGraph
+
+    if graph_db_type is None:
+        graph_db_type = GraphDBType.NETWORKX
 
     try:
         # Classify the content into categories
         classified_categories = await classify_into_categories(
             input_text,
             "classify_content.txt",
-            DefaultContentPrediction
+            classification_model
         )
         file_metadata["categories"] = list(map(lambda category: category["layer_name"], classified_categories))
     except Exception as e:
@@ -113,24 +133,24 @@ async def process_text(input_text: str, file_metadata: dict):
         content_labels = await label_content(
             input_text,
             "label_content.txt",
-            LabeledContent
+            labeling_model
         )
         file_metadata["content_labels"] = content_labels["content_labels"]
     except Exception as e:
         print(e)
         raise e
-
-    await add_document_node(f"DefaultGraphModel:{USER_ID}", file_metadata)
+    graph_client = await get_graph_client(graph_db_type)
+    await add_document_node(graph_client, f"DefaultGraphModel:{USER_ID}", file_metadata)
     print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
 
     cognitive_layers = await content_to_cog_layers(
         classified_categories[0],
-        response_model = DefaultCognitiveLayer
+        response_model = cognitive_layer_model
     )
 
     cognitive_layers = [layer_subgroup.name for layer_subgroup in cognitive_layers.cognitive_layers]
 
-    async def generate_graph_per_layer(text_input: str, layers: List[str], response_model: KnowledgeGraph = KnowledgeGraph):
+    async def generate_graph_per_layer(text_input: str, layers: List[str], response_model: KnowledgeGraph = graph_model):
         generate_graphs_awaitables = [generate_graph(text_input, "generate_graph_prompt.txt", {"layer": layer}, response_model) for layer in
                 layers]
 
@@ -141,13 +161,14 @@ async def process_text(input_text: str, file_metadata: dict):
 
     print(f"Document ({file_metadata['id']}) layer graphs created")
 
-    await add_classification_nodes(f"DOCUMENT:{file_metadata['id']}", classified_categories[0])
 
-    await add_summary_nodes(f"DOCUMENT:{file_metadata['id']}", {"summary": file_metadata["summary"]})
+    await add_classification_nodes(graph_client,f"DOCUMENT:{file_metadata['id']}", classified_categories[0])
 
-    await add_label_nodes(f"DOCUMENT:{file_metadata['id']}", {"content_labels": file_metadata["content_labels"]})
+    await add_summary_nodes(graph_client,f"DOCUMENT:{file_metadata['id']}", {"summary": file_metadata["summary"]})
 
-    await append_to_graph(layer_graphs, classified_categories[0])
+    await add_label_nodes(graph_client,f"DOCUMENT:{file_metadata['id']}", {"content_labels": file_metadata["content_labels"]})
+
+    await append_to_graph(graph_client, layer_graphs, classified_categories[0])
 
     print(f"Document ({file_metadata['id']}) layers connected")
 
@@ -155,9 +176,9 @@ async def process_text(input_text: str, file_metadata: dict):
 
     print("Document metadata is: ", str(file_metadata))
 
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
 
-    await graph_client.load_graph_from_file()
+
+    # await graph_client.load_graph_from_file()
 
     graph = graph_client.graph
 

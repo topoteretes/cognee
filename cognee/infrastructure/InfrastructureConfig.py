@@ -20,7 +20,7 @@ class InfrastructureConfig():
             self.database_engine = SqliteEngine(config.db_path, config.db_name)
 
         if self.llm_engine is None:
-            self.llm_engine = OpenAIAdapter(config.openai_key, config.model)
+            self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
 
         if self.vector_engine is None:
             self.vector_engine = WeaviateAdapter(

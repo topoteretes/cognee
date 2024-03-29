@@ -52,7 +52,7 @@ class Config:
     ollama_endpoint: str = "http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
     ollama_model: str = "mistral:instruct"
-    model: str = "gpt-4-0125-preview"
+    openai_model: str = "gpt-4-1106-preview"
     # model: str = "gpt-3.5-turbo"
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")

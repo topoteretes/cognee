@@ -10,12 +10,12 @@ config = Config()
 config.load()
 
 
-def get_graph_client(graph_type: GraphDBType, graph_filename: str=None) -> GraphDBInterface :
+async def get_graph_client(graph_type: GraphDBType, graph_filename: str=None) -> GraphDBInterface :
     """Factory function to get the appropriate graph client based on the graph type."""
     if graph_filename is None:
         graph_filename = get_absolute_path(f"./data/cognee/{config.graph_filename}")
     if graph_type == GraphDBType.NETWORKX:
-        return  NetworXAdapter(filename = graph_filename)
+        return  await NetworXAdapter(filename = graph_filename).async_create()
     elif graph_type == GraphDBType.NEO4J:
         # return Neo4jAdapter(config.neo4j_config)  # Uncomment and adjust as needed for Neo4j adapter configuration
         raise NotImplementedError("Neo4j adapter is not implemented yet.")
