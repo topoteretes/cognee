@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",]
 
 [tool.poetry.dependencies]
-python = "~3.10"
+python = "~3.11"
 openai = "1.14.3"
 python-dotenv = "1.0.1"
 fastapi = "^0.109.2"
