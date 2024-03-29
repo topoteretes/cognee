@@ -6,6 +6,7 @@ from .EmbeddingEngine import EmbeddingEngine
 
 config = Config()
 config.load()
+
 class DefaultEmbeddingEngine(EmbeddingEngine):
     async def embed_text(self, text: List[str]) -> List[float]:
         embedding_model = TextEmbedding(model_name = config.embedding_model, cache_dir = get_absolute_path("cache/embeddings"))

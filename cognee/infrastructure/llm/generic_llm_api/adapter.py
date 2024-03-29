@@ -12,7 +12,7 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 
 
-class OllamaAPIAdapter(LLMInterface):
+class GenericAPIAdapter(LLMInterface):
     """Adapter for Ollama's API"""
 
     def __init__(self, ollama_endpoint, api_key: str, model: str):
@@ -89,9 +89,8 @@ class OllamaAPIAdapter(LLMInterface):
                 {
                     "role": "user",
                     "content": f"""Use the given format to
-                    extract information from the following input: {text_input}. """,
-                },
-                {"role": "system", "content": system_prompt},
+                    extract information from the following input: {text_input}. {system_prompt} """,
+                }
             ],
             response_model=response_model,
         )
