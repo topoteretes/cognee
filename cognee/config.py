@@ -19,13 +19,15 @@ load_dotenv(dotenv_path=dotenv_path)
 class Config:
     """ Configuration for cognee - cognitive architecture framework. """
     cognee_dir: str = field(
-        default_factory=lambda: os.getenv("COG_ARCH_DIR", "cognitive_achitecture")
+        default_factory=lambda: os.getenv("COG_ARCH_DIR", "cognee")
     )
     config_path: str = field(
         default_factory=lambda: os.path.join(
-            os.getenv("COG_ARCH_DIR", "cognitive_achitecture"), "config"
+            os.getenv("COG_ARCH_DIR", "cognee"), "config"
         )
     )
+
+    data_path = os.getenv("DATA_PATH", str(Path(__file__).resolve().parent.parent / ".data"))
 
     db_path = str(Path(__file__).resolve().parent / "data/system")
 
@@ -59,7 +61,7 @@ class Config:
     graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
 
     # Embedding parameters
-    embedding_model: str = "openai"
+    embedding_model: str = "BAAI/bge-large-en-v1.5"
     embedding_dim: int = 1536
     embedding_chunk_size: int = 300
 

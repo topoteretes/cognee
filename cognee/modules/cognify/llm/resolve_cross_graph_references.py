@@ -1,5 +1,4 @@
 from typing import Dict, List
-from cognee.infrastructure.databases.vector import get_vector_database
 from cognee.infrastructure import infrastructure_config
 
 async def resolve_cross_graph_references(nodes_by_layer: Dict):

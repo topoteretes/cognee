@@ -2,6 +2,9 @@ import nltk
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 def extract_keywords(text: str) -> list[str]:
+    if len(text) == 0:
+        raise ValueError("extract_keywords cannot extract keywords from empty text.")
+
     tokens = nltk.word_tokenize(text)
 
     tags = nltk.pos_tag(tokens)

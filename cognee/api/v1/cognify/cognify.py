@@ -3,7 +3,6 @@ import asyncio
 from typing import List, Union
 import instructor
 from openai import OpenAI
-from pypdf import PdfReader
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
 from cognee.modules.cognify.llm.label_content import label_content
 from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
@@ -26,6 +25,8 @@ from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.relational import DuckDBAdapter
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.initialize_graph import initialize_graph
+from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
+from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure import infrastructure_config
 
 config = Config()
@@ -35,7 +36,7 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-async def cognify(datasets: Union[str, List[str]] = None, graphdatamodel: object = None):
+async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None):
     """This function is responsible for the cognitive processing of the content."""
 
     db = DuckDBAdapter()
@@ -45,6 +46,7 @@ async def cognify(datasets: Union[str, List[str]] = None, graphdatamodel: object
 
     awaitables = []
 
+    # datasets is a list of dataset names
     if isinstance(datasets, list):
         for dataset in datasets:
             awaitables.append(cognify(dataset))
@@ -52,17 +54,24 @@ async def cognify(datasets: Union[str, List[str]] = None, graphdatamodel: object
         graphs = await asyncio.gather(*awaitables)
         return graphs[0]
 
-    files_metadata = db.get_files_metadata(datasets)
+    # datasets is a dataset name string
+    added_datasets = db.get_datasets()
+
+    files_metadata = []
+    dataset_name = datasets.replace(".", "_").replace(" ", "_")
+
+    for added_dataset in added_datasets:
+        if dataset_name in added_dataset:
+            files_metadata.extend(db.get_files_metadata(added_dataset))
 
     awaitables = []
 
-    await initialize_graph(USER_ID,graphdatamodel)
+    await initialize_graph(USER_ID, graph_data_model)
 
     for file_metadata in files_metadata:
         with open(file_metadata["file_path"], "rb") as file:
-            reader = PdfReader(stream = file)
-            pages = list(reader.pages[:3])
-            text = "\n".join([page.extract_text().strip() for page in pages])
+            file_type = guess_file_type(file)
+            text = extract_text_from_file(file, file_type)
 
             awaitables.append(process_text(text, file_metadata))
 

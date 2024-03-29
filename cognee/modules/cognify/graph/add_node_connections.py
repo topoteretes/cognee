@@ -124,7 +124,7 @@ if __name__ == "__main__":
 
         connect_nodes_in_graph(graph, relationships)
 
-        from cognitive_architecture.utils import render_graph
+        from cognee.utils import render_graph
 
         graph_url = await render_graph(graph, graph_type="networkx")
 

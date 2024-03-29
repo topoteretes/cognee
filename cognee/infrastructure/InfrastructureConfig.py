@@ -1,14 +1,16 @@
 from cognee.config import Config
 from .databases.relational import SqliteEngine, DatabaseEngine
-from .databases.vector import WeaviateAdapter, VectorDBInterface
+from .databases.vector.weaviate_db import WeaviateAdapter
+from .databases.vector.vector_db_interface import VectorDBInterface
+from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
 from .llm.openai.adapter import OpenAIAdapter
-from .databases.vector import WeaviateAdapter, VectorDBInterface, DefaultEmbeddingEngine
 
 config = Config()
 config.load()
 
 class InfrastructureConfig():
+    data_path: str = config.data_path
     database_engine: DatabaseEngine = None
     vector_engine: VectorDBInterface = None
     llm_engine: LLMInterface = None
@@ -28,14 +30,23 @@ class InfrastructureConfig():
             )
 
         return {
-            "database_engine": self.database_engine,
+            "data_path": self.data_path,
+            "llm_engine": self.llm_engine,
             "vector_engine": self.vector_engine,
-            "llm_engine": self.llm_engine
+            "database_engine": self.database_engine,
         }
 
     def set_config(self, new_config: dict):
-        self.database_engine = new_config["database_engine"]
-        self.vector_engine = new_config["vector_engine"]
-        self.llm_engine = new_config["llm_engine"]
+        if "data_path" in new_config:
+            self.data_path = new_config["data_path"]
+
+        if "database_engine" in new_config:
+            self.database_engine = new_config["database_engine"]
+
+        if "vector_engine" in new_config:
+            self.vector_engine = new_config["vector_engine"]
+
+        if "llm_engine" in new_config:
+            self.llm_engine = new_config["llm_engine"]
 
 infrastructure_config = InfrastructureConfig()

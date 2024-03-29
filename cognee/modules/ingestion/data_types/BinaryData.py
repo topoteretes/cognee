@@ -17,11 +17,6 @@ class BinaryData(IngestionData):
 
         return self.metadata["mime_type"] + "_" + "|".join(self.metadata["keywords"])
 
-    def get_extension(self):
-        self.ensure_metadata()
-
-        return self.metadata["extension"]
-
     def ensure_metadata(self):
         if self.metadata is None:
             self.metadata = get_file_metadata(self.data)

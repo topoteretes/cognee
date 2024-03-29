@@ -1,15 +1,13 @@
 import asyncio
 from uuid import UUID, uuid4
-from cognee.infrastructure.files import add_file_to_storage
-from cognee.infrastructure.data import add_data_to_dataset, Data, Dataset
+from cognee.infrastructure.data import Data, Dataset
+from .add_data_to_dataset import add_data_to_dataset
 from .data_types import IngestionData
 
 async def save(dataset_id: UUID, dataset_name: str, data_id: UUID, data: IngestionData):
     file_path = uuid4().hex + "." + data.get_extension()
 
     promises = []
-
-    # promises.append(add_file_to_storage(file_path, data.get_data()))
 
     promises.append(
         add_data_to_dataset(
