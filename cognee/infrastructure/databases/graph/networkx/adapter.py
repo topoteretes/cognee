@@ -24,7 +24,7 @@ class NetworXAdapter(GraphDBInterface):
     #     if cls._instance is None:
     #         cls._instance = super(NetworXAdapter, cls).__new__(cls)
     #     return cls._instance
-    def __init__(self, filename="cognee_graph.pkl"):
+    def __init__(self, filename="cognee_graph.pkl", graph_database_password=None, graph_database_url=None, graph_database_username=None, driver=None):
         # self.load_graph_from_file()
         self.filename = filename
         self.graph = nx.MultiDiGraph()

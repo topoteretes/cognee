@@ -5,7 +5,7 @@ from cognee.modules.cognify.graph.create import create_semantic_graph
 async def initialize_graph(root_id: str, graphdatamodel, graph_client):
     if graphdatamodel:
         graph = graphdatamodel(id= root_id)
-        await create_semantic_graph(graph)
+        await create_semantic_graph(graph, graph_client)
     else:
         graph = DefaultGraphModel(
             id=root_id,

@@ -31,7 +31,6 @@ class GraphDBInterface(Protocol):
     """ CRUD operations on graph nodes """
 
     @abstractmethod
-
     async def add_node(
         self,
         id: str,

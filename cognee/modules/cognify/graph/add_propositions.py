@@ -63,7 +63,7 @@ async def add_propositions(graph_client,
         target_node_id = node_id_mapping.get(edge.target)
 
         if source_node_id and target_node_id:
-            await graph_client.add_edge(source_node_id, target_node_id, description=edge.description, relationship='relation')
+            await graph_client.add_edge(source_node_id, target_node_id, description=edge.description, relationship=edge.description)
         else:
             print(f"Could not find mapping for edge from {edge.source} to {edge.target}")
 
