@@ -14,7 +14,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
-    "Operating System :: Microsoft :: Windows",]
+    "Operating System :: Microsoft :: Windows"
+]
 
 [tool.poetry.dependencies]
 python = "~3.11"

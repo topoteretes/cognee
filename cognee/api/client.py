@@ -1,12 +1,7 @@
 """ FastAPI server for the Cognee API. """
-
-import os
-import json
 from uuid import UUID
 
 import uvicorn
-from fastapi import Depends
-
 import logging
 
 # Set up logging
@@ -23,7 +18,7 @@ config = Config()
 config.load()
 
 from typing import Dict, Any, List, Union, BinaryIO
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -69,12 +64,11 @@ class SearchPayload(BaseModel):
 @app.post("/add", response_model=dict)
 async def add(payload: AddPayload):
     """ This endpoint is responsible for adding data to the graph."""
-    from v1.add.add_standalone import add_standalone
+    from v1.add.add import add
 
     try:
-        await add_standalone(
+        await add(
             payload.data,
-            payload.dataset_id,
             payload.dataset_name,
         )
     except Exception as error:
@@ -89,9 +83,7 @@ async def cognify(payload: CognifyPayload):
     from v1.cognify.cognify import cognify
 
     try:
-        await cognify(
-            payload.datasets,
-        )
+        await cognify(payload.datasets)
     except Exception as error:
         return JSONResponse(
             status_code = 409,
@@ -105,9 +97,8 @@ async def search(payload: SearchPayload):
     from v1.search.search import search
 
     try:
-        await search(
-            payload.query_params,
-        )
+        search_type = 'SIMILARITY'
+        await search(search_type, payload.query_params)
     except Exception as error:
         return JSONResponse(
             status_code = 409,

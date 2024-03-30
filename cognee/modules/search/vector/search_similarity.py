@@ -13,7 +13,7 @@ async def search_similarity(query: str, graph, other_param: str = None):
     for id in unique_layer_uuids:
         vector_engine = infrastructure_config.get_config()["vector_engine"]
 
-        result = await vector_engine.search(id, query, 10)
+        result = await vector_engine.search(id, query_text = query, limit = 10)
 
         if result:
             result_ = [ result_.id for result_ in result]

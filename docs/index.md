@@ -28,29 +28,29 @@ We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've bu
 
 ### Setup
 
-Create `.env` file in your project in order to store environment variables such as API keys.
+Create `.env` file in your project root directory in order to store environment variables such as API keys.
 
 Note: Don't push `.env` file to git repo as it will expose those keys to others.
 
-If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables.
+If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables:
 ```
 WEAVIATE_URL = {YOUR_WEAVIATE_URL}
 WEAVIATE_API_KEY = {YOUR_WEAVIATE_API_KEY}
 ```
 
-Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables.
+Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables:
 ```
 QDRANT_URL = {YOUR_QDRANT_URL}
 QDRANT_API_KEY = {YOUR_QDRANT_API_KEY}
 ```
 
-Add OpenAI API Key environment variable
+Add OpenAI API Key environment variable:
 ```
 OPENAI_API_KEY = {YOUR_OPENAI_API_KEY}
 ```
 
 Cognee stores data and system files inside the library directory, which is lost if the library folder is removed.
-You can change the directories where cognee will store data and system files by calling config functions.
+You can change the directories where cognee will store data and system files by calling config functions:
 ```
 import cognee
 
@@ -61,7 +61,7 @@ cognee.config.data_root_directory(absolute_path_to_directory)
 
 ### Run
 
-Add a new piece of information to storage
+Add a new piece of information to the storage:
 ```
 import cognee
 
@@ -105,12 +105,12 @@ cognee.add("data://{absolute_path_to_directory}", dataset_name)
 # This will add just directory 2024 under reports.
 ```
 
-Use LLMs and cognee to create graphs
+Use LLMs and cognee to create graphs:
 ``` 
 cognee.cognify(dataset_name)
  ``` 
 
-Render the graph with our util function
+Render the graph with our util function:
 
 ```
 from cognee.utils import render_graph
@@ -120,13 +120,9 @@ graph_url = await render_graph(graph)
 print(graph_url)
 ```
 
-Query the graph for a piece of information
+Query the graph for a piece of information:
 ```
-query_params = {
-    SearchType.SIMILARITY: {'query': 'your search query here'}
-}
-
-search_results = cognee.search(graph, query_params)
+search_results = cognee.search('SIMILARITY', "query_search")
 
 print(search_results)
 ```
