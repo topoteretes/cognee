@@ -28,69 +28,12 @@ Make data processing for LLMs easy
   </a>
 </p>
 
-[//]: # (<p>)
-
-[//]: # (  <b>Share cognee Repository</b>)
-
-[//]: # (</p>)
-
-[//]: # (<p>)
-
-[//]: # (  <a href="https://twitter.com/intent/tweet?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee&hashtags=AGI,Autonomics,Cognee,future" target="_blank">)
-
-[//]: # (    <img src="https://img.shields.io/twitter/follow/_promethAI?label=Share Repo on Twitter&style=social" alt="Follow Cognee"/>)
-
-[//]: # (  </a>)
-
-[//]: # (  <a href="https://t.me/share/url?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.&url=https://github.com/topoteretes/cognee" target="_blank">)
-
-[//]: # (    <img src="https://img.shields.io/twitter/url?label=Telegram&logo=Telegram&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Telegram"/>)
-
-[//]: # (  </a>)
-
-[//]: # (  <a href="https://api.whatsapp.com/send?text=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%20https://github.com/topoteretes/cognee" target="_blank">)
-
-[//]: # (    <img src="https://img.shields.io/twitter/url?label=whatsapp&logo=whatsapp&style=social&url=https://github.com/topoteretes/cognee" />)
-
-[//]: # (  </a>)
-
-[//]: # (  <a href="https://www.reddit.com/submit?url=https://github.com/topoteretes/cognee&title=Check%20this%20GitHub%20repository%20out.%20Cognee%20-%20Let's%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.)
-
-[//]: # (  " target="_blank">)
-
-[//]: # (    <img src="https://img.shields.io/twitter/url?label=Reddit&logo=Reddit&style=social&url=https://github.com/topoteretes/cognee" alt="Share on Reddit"/>)
-
-[//]: # (  </a>)
-
-[//]: # (  <a href="mailto:?subject=Check%20this%20GitHub%20repository%20out.&body=Cognee%20-%20Let%27s%20you%20easily%20build,%20manage%20and%20run%20useful%20autonomous%20AI%20agents.%3A%0Ahttps://github.com/topoteretes/cognee" target="_blank">)
-
-[//]: # (    <img src="https://img.shields.io/twitter/url?label=Gmail&logo=Gmail&style=social&url=https://github.com/topoteretes/cognee"/>)
-
-[//]: # (  </a>)
-
-[//]: # (  <a href="https://www.buymeacoffee.com/promethAI" target="_blank">)
-
-[//]: # (    <img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="23" width="100" style="border-radius:1px">)
-
-[//]: # (  </a>)
-
-[//]: # (</p>)
-
-[//]: # ()
-[//]: # (<hr>)
-
-[//]: # ()
-[//]: # ([Star us on Github!]&#40;https://www.github.com/topoteretes/cognee&#41;)
-
-[//]: # ()
-[//]: # (<a href="https://www.cognee.ai" target="_blank">Cognee</a> runs in iterations, from POC towards production-ready code.)
-
 
 ## 🚀 It's alive
-<p>
 
-Try it yourself on Whatsapp with one of our <a href="https://keepi.ai">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
-For more info here are the <a href="https://topoteretes.github.io/cognee/">docs</a>
+<p>
+Try it yourself on Whatsapp with one of our <a href="https://keepi.ai" target="_blank">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
+For more info here are the <a href="https://topoteretes.github.io/cognee">docs</a>
 </p>
 
 
@@ -110,58 +53,121 @@ poetry add "cognee[weaviate]"
 
 ## 💻 Usage
 
-Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee%20-%20Get%20Started.ipynb)
+### Setup
 
+Create `.env` file in your project in order to store environment variables such as API keys.
 
-- Set OpenAI API Key as an environment variable
+Note: Don't push `.env` file to git repo as it will expose those keys to others.
+
+If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables.
 ```
-import os
-
-# Setting an environment variable
-os.environ['OPENAI_API_KEY'] = ''
-
-
+WEAVIATE_URL = {YOUR_WEAVIATE_URL}
+WEAVIATE_API_KEY = {YOUR_WEAVIATE_API_KEY}
 ```
 
+Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables.
+```
+QDRANT_URL = {YOUR_QDRANT_URL}
+QDRANT_API_KEY = {YOUR_QDRANT_API_KEY}
+```
 
-- Add a new piece of information to storage
+Add OpenAI API Key environment variable
+```
+OPENAI_API_KEY = {YOUR_OPENAI_API_KEY}
+```
+
+Cognee stores data and system files inside the library directory, which is lost if the library folder is removed.
+You can change the directories where cognee will store data and system files by calling config functions.
 ```
 import cognee
-cognee.add(absolute_data_path, dataset_name)
+
+cognee.config.system_root_directory(absolute_path_to_directory)
+
+cognee.config.data_root_directory(absolute_path_to_directory)
 ```
 
-- Use LLMs and cognee to create graphs
- 
+### Run
+
+Add a new piece of information to storage
+```
+import cognee
+
+cognee.add("some_text", dataset_name)
+
+cognee.add([
+    "some_text_1",
+    "some_text_2",
+    "some_text_3",
+    ...
+])
+```
+Or
+```
+cognee.add("file://{absolute_path_to_file}", dataset_name)
+
+cognee.add(
+    [
+        "file://{absolute_path_to_file_1}",
+        "file://{absolute_path_to_file_2}",
+        "file://{absolute_path_to_file_3}",
+        ...
+    ],
+    dataset_name
+)
+```
+Or
+```
+cognee.add("data://{absolute_path_to_directory}", dataset_name)
+
+# This is useful if you have a directory with files organized in subdirectories.
+# You can target which directory to add by providing dataset_name.
+# Example:
+#            root
+#           /    \
+#      reports  bills
+#     /       \
+#   2024     2023
+#
+# cognee.add("data://{absolute_path_to_root}", "reports.2024")
+# This will add just directory 2024 under reports.
+```
+
+Use LLMs and cognee to create graphs
 ``` 
 cognee.cognify(dataset_name)
  ``` 
 
-- Render the graph after adding your Graphistry credentials to .env
+Render the graph with our util function
 
 ```
-graph_url = await render_graph(graph, graph_type = "networkx")
+from cognee.utils import render_graph
+
+graph_url = await render_graph(graph)
+
 print(graph_url)
 ```
 
-- Query the graph for a piece of information
-
+Query the graph for a piece of information
 ```
 query_params = {
     SearchType.SIMILARITY: {'query': 'your search query here'}
 }
-cognee.search(graph, query_params) 
-``` 
 
+search_results = cognee.search(graph, query_params)
+
+print(search_results)
+```
 
 
 ## Demo
 
-
-[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
-
+Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee%20-%20Get%20Started.ipynb)
 
 
 ## Architecture
+
+[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
+
 
 ### How Cognee Enhances Your Contextual Memory
 

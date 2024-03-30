@@ -126,7 +126,7 @@ if __name__ == "__main__":
 
         from cognee.utils import render_graph
 
-        graph_url = await render_graph(graph, graph_type="networkx")
+        graph_url = await render_graph(graph)
 
         print(graph_url)
 

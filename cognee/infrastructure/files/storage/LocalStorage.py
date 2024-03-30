@@ -38,3 +38,10 @@ class LocalStorage(Storage):
     @staticmethod
     def copy_file(source_file_path: str, destination_file_path: str):
         return shutil.copy2(source_file_path, destination_file_path)
+
+    @staticmethod
+    def remove_all(tree_path: str):
+        try:
+            shutil.rmtree(tree_path)
+        except FileNotFoundError:
+            pass

@@ -16,11 +16,7 @@ _Open-source framework for creating knowledge graphs and data models for LLMs._
 
 
 
-
-
-
 cognee makes it easy to reliably enrich data for Large Language Models (LLMs) like GPT-3.5, GPT-4, GPT-4-Vision, including in the future the open source models like Mistral/Mixtral from Together, Anyscale, Ollama, and llama-cpp-python.
-
 
 By leveraging various tools like graph databases, function calling, tool calling and Pydantic; cognee stands out for its aim to emulate human memory for LLM apps and frameworks. 
 
@@ -30,88 +26,126 @@ We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've bu
 
 ## Getting Started
 
+### Setup
 
+Create `.env` file in your project in order to store environment variables such as API keys.
+
+Note: Don't push `.env` file to git repo as it will expose those keys to others.
+
+If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables.
+```
+WEAVIATE_URL = {YOUR_WEAVIATE_URL}
+WEAVIATE_API_KEY = {YOUR_WEAVIATE_API_KEY}
 ```
 
-pip install -U cognee["weaviate"]
-
+Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables.
 ```
-Set OpenAI API Key as an environment variable
-
-
-```
-import os
-
-# Setting an environment variable
-os.environ['OPENAI_API_KEY'] = ''
-
-
+QDRANT_URL = {YOUR_QDRANT_URL}
+QDRANT_API_KEY = {YOUR_QDRANT_API_KEY}
 ```
 
-Import cognee and start using it
+Add OpenAI API Key environment variable
+```
+OPENAI_API_KEY = {YOUR_OPENAI_API_KEY}
+```
 
-
+Cognee stores data and system files inside the library directory, which is lost if the library folder is removed.
+You can change the directories where cognee will store data and system files by calling config functions.
 ```
 import cognee
-from os import listdir, path
-from cognee import add
 
-data_path = path.abspath(".data")
+cognee.config.system_root_directory(absolute_path_to_directory)
 
-results = await add(data_path, "izmene")
-for result in results:
-    print(result)
-    
+cognee.config.data_root_directory(absolute_path_to_directory)
 ```
 
-Run the following command to see the graph. 
-Make sure to add your Graphistry credentials to .env beforehand
+### Run
+
+Add a new piece of information to storage
+```
+import cognee
+
+cognee.add("some_text", dataset_name)
+
+cognee.add([
+    "some_text_1",
+    "some_text_2",
+    "some_text_3",
+    ...
+])
+```
+Or
+```
+cognee.add("file://{absolute_path_to_file}", dataset_name)
+
+cognee.add(
+    [
+        "file://{absolute_path_to_file_1}",
+        "file://{absolute_path_to_file_2}",
+        "file://{absolute_path_to_file_3}",
+        ...
+    ],
+    dataset_name
+)
+```
+Or
+```
+cognee.add("data://{absolute_path_to_directory}", dataset_name)
+
+# This is useful if you have a directory with files organized in subdirectories.
+# You can target which directory to add by providing dataset_name.
+# Example:
+#            root
+#           /    \
+#      reports  bills
+#     /       \
+#   2024     2023
+#
+# cognee.add("data://{absolute_path_to_root}", "reports.2024")
+# This will add just directory 2024 under reports.
+```
+
+Use LLMs and cognee to create graphs
+``` 
+cognee.cognify(dataset_name)
+ ``` 
+
+Render the graph with our util function
 
 ```
 from cognee.utils import render_graph
 
-graph = await cognee.cognify("izmene")
-graph_url = await render_graph(graph, graph_type = "networkx")
+graph_url = await render_graph(graph)
+
 print(graph_url)
 ```
 
-
-Search the graph for a piece of information
-
+Query the graph for a piece of information
 ```
-from cognee import search
-from cognee.api.v1.search.search import SearchType
 query_params = {
     SearchType.SIMILARITY: {'query': 'your search query here'}
 }
-out = await search(graph, query_params)
+
+search_results = cognee.search(graph, query_params)
+
+print(search_results)
 ```
-
-
-
-[//]: # (You can also check out our [cookbook](./examples/index.md)  to learn more about how to use cognee.)
-
 
 
 ## Why use cognee?
 
-
 The question of using cognee is fundamentally a question of why to structure data inputs and outputs for your llm workflows.
-
 
 1. **Cost effective** — cognee extends the capabilities of your LLMs without the need for expensive data processing tools.
 
-
 2. **Self contained** — cognee runs as a library and is simple to use
 
-
 3. **Interpretable** — Navigate graphs instead of embeddings to understand your data.
-
 
 4. **User Guided** cognee lets you control your input and provide your own Pydantic data models 
 
 
+
 ## License
 
-
-This project is licensed under the terms of the MIT License.
+This project is licensed under the terms of the Apache License 2.0.
