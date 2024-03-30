@@ -22,16 +22,13 @@ def get_llm_client():
     provider = LLMProvider(config.llm_provider)
 
     if provider == LLMProvider.OPENAI:
-        print("Using OpenAI API")
         return OpenAIAdapter(config.openai_key, config.openai_model)
+
     elif provider == LLMProvider.OLLAMA:
-        print("Using Ollama API")
         return GenericAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
     elif provider == LLMProvider.ANTHROPIC:
-        print("Using Anthropic API")
         return AnthropicAdapter(config.custom_endpoint, config.custom_endpoint, config.custom_model)
     elif provider == LLMProvider.CUSTOM:
-        print("Using Custom API")
         return GenericAPIAdapter(config.custom_endpoint, config.custom_key, config.custom_model)
         # Add your custom LLM provider here
     else:

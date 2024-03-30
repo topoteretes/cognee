@@ -15,4 +15,4 @@ class DefaultEmbeddingEngine(EmbeddingEngine):
         return embeddings_list
 
     def get_vector_size(self) -> int:
-        return 1024
+        return config.embedding_dimensions

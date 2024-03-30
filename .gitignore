@@ -163,8 +163,8 @@ cython_debug/
 #.idea/
 
 .vscode/
-database/data/
 cognee/data/
 cognee/cache/
 
-# .DS_Store
+# Default cognee system directory, used in development
+.cognee_system/

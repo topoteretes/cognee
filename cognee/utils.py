@@ -2,7 +2,8 @@
 
 import os
 import graphistry
-from cognee.root_dir import get_absolute_path
+import pandas as pd
+import matplotlib.pyplot as plt
 
 def get_document_names(doc_input):
     """
@@ -68,22 +69,7 @@ def format_dict(d):
     return formatted_string
 
 
-import graphistry
-import pandas as pd
-import matplotlib.pyplot as plt
-import networkx as nx
-from cognee.config import Config  # Ensure you have this module available or adjust accordingly
 
-# Define the function to generate color palette
-def generate_color_palette(unique_layers):
-    colormap = plt.cm.get_cmap('viridis', len(unique_layers))
-    colors = [colormap(i) for i in range(len(unique_layers))]
-    hex_colors = ['#%02x%02x%02x' % (int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255)) for rgb in colors]
-    return dict(zip(unique_layers, hex_colors))
-
-# Define the function to render the graph
-async def render_graph(graph, graph_type):
-    # Load configuration for Graphistry
     config = Config()
     config.load()
 
@@ -92,26 +78,35 @@ async def render_graph(graph, graph_type):
 
     # Convert your NetworkX graph edges and nodes to Pandas DataFrame
     edges = nx.to_pandas_edgelist(graph)
-    print(edges.head())
 
-    # Prepare nodes DataFrame with 'id' and 'layer_description'
-    nodes_data = [{'id': node, 'layer_description': graph.nodes[node]['layer_description']}
-                  for node in graph.nodes if 'layer_description' in graph.nodes[node]]
+
+    # Prepare nodes DataFrame with "id" and "layer_description"
+    nodes_data = [{"id": node, "layer_description": graph.nodes[node]["layer_description"]}
+                  for node in graph.nodes if "layer_description" in graph.nodes[node]]
     nodes = pd.DataFrame(nodes_data)
-    print(nodes.head())
 
-    # Generate a dynamic color palette based on unique 'layer_description' values
-    unique_layers = nodes['layer_description'].unique()
+    # Visualize the graph using Graphistry
+    plotter = graphistry.edges(edges, "source", "target").nodes(nodes, "id")
+
+    # Generate a dynamic color palette based on unique "layer_description" values
+    unique_layers = nodes["layer_description"].unique()
     color_palette = generate_color_palette(unique_layers)
 
-    # Apply the color encoding using Graphistry's encode_point_color
-    plotter = graphistry.edges(edges, "source", "target").nodes(nodes, 'id')
     plotter = plotter.encode_point_color(
-        'layer_description',
-        categorical_mapping=color_palette,
-        default_mapping='silver'  # Default color if any 'layer_description' is not in the mapping
+        "layer_description",
+        categorical_mapping = color_palette,
+        default_mapping = "silver"  # Default color if any "layer_description" is not in the mapping
     )
 
     # Visualize the graph (this will open a URL in your default web browser)
-    url = plotter.plot(render=False, as_files=True)
-    print(f"Graph visualized at: {url}")
+    url = plotter.plot(render = False, as_files = True)
+    print(f"Graph is visualized at: {url}")
+
+
+def generate_color_palette(unique_layers):
+    colormap = plt.cm.get_cmap("viridis", len(unique_layers))
+    colors = [colormap(i) for i in range(len(unique_layers))]
+    hex_colors = ["#%02x%02x%02x" % (int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255)) for rgb in colors]
+
+    return dict(zip(unique_layers, hex_colors))
+
