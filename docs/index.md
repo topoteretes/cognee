@@ -34,19 +34,19 @@ Note: Don't push `.env` file to git repo as it will expose those keys to others.
 
 If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables:
 ```
-WEAVIATE_URL = {YOUR_WEAVIATE_URL}
-WEAVIATE_API_KEY = {YOUR_WEAVIATE_API_KEY}
+WEAVIATE_URL = "YOUR_WEAVIATE_URL"
+WEAVIATE_API_KEY = "YOUR_WEAVIATE_API_KEY"
 ```
 
 Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables:
 ```
-QDRANT_URL = {YOUR_QDRANT_URL}
-QDRANT_API_KEY = {YOUR_QDRANT_API_KEY}
+QDRANT_URL = "YOUR_QDRANT_URL"
+QDRANT_API_KEY = "YOUR_QDRANT_API_KEY"
 ```
 
 Add OpenAI API Key environment variable:
 ```
-OPENAI_API_KEY = {YOUR_OPENAI_API_KEY}
+OPENAI_API_KEY = "YOUR_OPENAI_API_KEY"
 ```
 
 Cognee stores data and system files inside the library directory, which is lost if the library folder is removed.
@@ -57,6 +57,18 @@ import cognee
 cognee.config.system_root_directory(absolute_path_to_directory)
 
 cognee.config.data_root_directory(absolute_path_to_directory)
+```
+
+#### Without .env file
+
+```
+import os
+
+os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
+os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
+
+os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
+
 ```
 
 ### Run

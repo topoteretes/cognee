@@ -55,65 +55,37 @@ poetry add "cognee[weaviate]"
 
 ### Setup
 
-Create `.env` file in your project root directory in order to store environment variables such as API keys.
-
-Note: Don't push `.env` file to git repo as it will expose those keys to others.
-
-If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables:
 ```
-WEAVIATE_URL = {YOUR_WEAVIATE_URL}
-WEAVIATE_API_KEY = {YOUR_WEAVIATE_API_KEY}
-```
+import os
 
-Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables:
-```
-QDRANT_URL = {YOUR_QDRANT_URL}
-QDRANT_API_KEY = {YOUR_QDRANT_API_KEY}
-```
+os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
+os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
 
-Add OpenAI API Key environment variable:
-```
-OPENAI_API_KEY = {YOUR_OPENAI_API_KEY}
-```
+os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
 
-Cognee stores data and system files inside the library directory, which is lost if the library folder is removed.
-You can change the directories where cognee will store data and system files by calling config functions:
-```
-import cognee
-
-cognee.config.system_root_directory(absolute_path_to_directory)
-
-cognee.config.data_root_directory(absolute_path_to_directory)
 ```
 
 ### Run
 
-Add a new piece of information to the storage:
 ```
 import cognee
 
-cognee.add("some_text", dataset_name)
+text = """Natural language processing (NLP) is an interdisciplinary
+       subfield of computer science and information retrieval"""
 
-cognee.add([
-    "some_text_1",
-    "some_text_2",
-    "some_text_3",
-    ...
-])
+cognee.add(text) # Add a new piece of information
+
+cognee.cognify() # Use LLMs and cognee to create knowledge
+
+search_results = cognee.search("SIMILARITY", "computer science") # Query cognee for the knowledge
+
+for result_text in search_results[0]:
+    print(result_text)
+
 ```
-Or
+Add alternative data types:
 ```
 cognee.add("file://{absolute_path_to_file}", dataset_name)
-
-cognee.add(
-    [
-        "file://{absolute_path_to_file_1}",
-        "file://{absolute_path_to_file_2}",
-        "file://{absolute_path_to_file_3}",
-        ...
-    ],
-    dataset_name
-)
 ```
 Or
 ```
@@ -132,28 +104,7 @@ cognee.add("data://{absolute_path_to_directory}", dataset_name)
 # This will add just directory 2024 under reports.
 ```
 
-Use LLMs and cognee to create graphs:
-``` 
-cognee.cognify(dataset_name)
- ``` 
-
-Render the graph with our util function:
-
-```
-from cognee.utils import render_graph
-
-graph_url = await render_graph(graph)
-
-print(graph_url)
-```
-
-Query the graph for a piece of information:
-```
-search_results = cognee.search('SIMILARITY', "query_search")
-
-print(search_results)
-```
-
+Read more [here](docs/index.md#run).
 
 ## Demo
 
