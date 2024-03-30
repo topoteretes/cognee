@@ -57,7 +57,7 @@ class Config:
     ollama_endpoint: str = os.getenv("CUSTOM_OLLAMA_ENDPOINT", "http://localhost:11434/v1") #"http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
     ollama_model: str = os.getenv("CUSTOM_OLLAMA_MODEL", "mistral:instruct") #"mistral:instruct"
-    model: str = os.getenv("OPENAI_MODEL","gpt-4-1106-preview" ) #"gpt-4-1106-preview"
+    openai_model: str = os.getenv("OPENAI_MODEL","gpt-4-1106-preview" ) #"gpt-4-1106-preview"
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
