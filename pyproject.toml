@@ -54,6 +54,7 @@ fastembed = "^0.2.5"
 pypdf = "^4.1.0"
 anthropic = "^0.21.3"
 xmltodict = "^0.13.0"
+matplotlib = "^3.8.3"
 
 [tool.poetry.extras]
 dbt = ["dbt-core", "dbt-redshift", "dbt-bigquery", "dbt-duckdb", "dbt-snowflake", "dbt-athena-community", "dbt-databricks"]
