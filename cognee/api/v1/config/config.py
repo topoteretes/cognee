@@ -1,9 +1,14 @@
-from typing import Optional
 from cognee.infrastructure import infrastructure_config
 
 class config():
     @staticmethod
-    def data_path(data_path: Optional[str] = None) -> str:
+    def system_root_directory(system_root_directory: str):
         infrastructure_config.set_config({
-            "data_path": data_path
+            "system_root_directory": system_root_directory
+        })
+
+    @staticmethod
+    def data_root_directory(data_root_directory: str):
+        infrastructure_config.set_config({
+            "data_root_directory": data_root_directory
         })

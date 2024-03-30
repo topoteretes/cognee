@@ -1,10 +1,8 @@
 import duckdb
-from cognee.root_dir import get_absolute_path
 
 class DuckDBAdapter():
-    def __init__(self):
-        db_path = get_absolute_path("./data/cognee")
-        db_location = db_path + "/cognee.duckdb"
+    def __init__(self, db_path: str, db_name: str):
+        db_location = db_path + "/" + db_name
 
         self.db_client = duckdb.connect(db_location)
 
@@ -19,4 +17,4 @@ class DuckDBAdapter():
         )
 
     def get_files_metadata(self, dataset_name: str):
-        return self.db_client.sql(f"SELECT * FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
+        return self.db_client.sql(f"SELECT id, name, file_path, extension, mime_type, keywords FROM {dataset_name}.file_metadata;").to_df().to_dict("records")

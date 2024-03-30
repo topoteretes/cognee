@@ -22,7 +22,6 @@ from cognee.shared.data_models import DefaultContentPrediction, KnowledgeGraph, 
     SummarizedContent, LabeledContent
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
-from cognee.infrastructure.databases.relational import DuckDBAdapter
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
@@ -39,10 +38,10 @@ USER_ID = "default_user"
 async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None, classification_model: object = None, summarization_model: object = None, labeling_model: object = None, graph_model: object = None, cognitive_layer_model: object = None, graph_db_type: object = None):
     """This function is responsible for the cognitive processing of the content."""
 
-    db = DuckDBAdapter()
+    db_engine = infrastructure_config.get_config()["database_engine"]
 
     if datasets is None or len(datasets) == 0:
-        datasets = db.get_datasets()
+        datasets = db_engine.get_datasets()
 
     awaitables = []
 
@@ -55,14 +54,14 @@ async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: obje
         return graphs[0]
 
     # datasets is a dataset name string
-    added_datasets = db.get_datasets()
+    added_datasets = db_engine.get_datasets()
 
     files_metadata = []
     dataset_name = datasets.replace(".", "_").replace(" ", "_")
 
     for added_dataset in added_datasets:
         if dataset_name in added_dataset:
-            files_metadata.extend(db.get_files_metadata(added_dataset))
+            files_metadata.extend(db_engine.get_files_metadata(added_dataset))
 
     awaitables = []
 
@@ -189,10 +188,10 @@ async def process_text(input_text: str, file_metadata: dict, graph_data_model: o
     unique_layers = nodes_by_layer.keys()
 
     try:
-        db_engine = infrastructure_config.get_config()["vector_engine"]
+        vector_engine = infrastructure_config.get_config()["vector_engine"]
 
         for layer in unique_layers:
-            await db_engine.create_collection(layer)
+            await vector_engine.create_collection(layer)
     except Exception as e:
         print(e)
 
@@ -220,7 +219,7 @@ if __name__ == "__main__":
 
         graph = await cognify(datasets=['izmene'], graph_db_type=GraphDBType.NEO4J)
         from cognee.utils import render_graph
-        graph_url = await render_graph(graph, graph_type="networkx")
+        graph_url = await render_graph(graph)
         print(graph_url)
 
 

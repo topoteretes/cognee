@@ -1,13 +1,13 @@
 from typing import List, Union
-from os import path, listdir
+from os import path
 import asyncio
 import dlt
 import duckdb
-from cognee.root_dir import get_absolute_path
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.files import get_file_metadata
 from cognee.infrastructure.files.storage import LocalStorage
+from cognee.modules.discovery import discover_directory_datasets
 
 async def add(data_path: Union[str, List[str]], dataset_name: str = None):
     if isinstance(data_path, str):
@@ -21,15 +21,32 @@ async def add(data_path: Union[str, List[str]], dataset_name: str = None):
         else:
             return await add_text(data_path, dataset_name)
 
-    # data_path is a list of file paths
-    return await add_files(data_path, dataset_name)
+    # data_path is a list of file paths or texts
+    file_paths = []
+    texts = []
+
+    for file_path in data_path:
+        if file_path.startswith("/") or file_path.startswith("file://"):
+            file_paths.append(file_path)
+        else:
+            texts.append(file_path)
+
+    awaitables = []
+
+    if len(file_paths) > 0:
+        awaitables.append(add_files(file_paths, dataset_name))
+
+    if len(texts) > 0:
+        for text in texts:
+            awaitables.append(add_text(text, dataset_name))
+
+    return await asyncio.gather(*awaitables)
 
 async def add_files(file_paths: List[str], dataset_name: str):
-    data_directory_path = infrastructure_config.get_config()["data_path"]
-    db_path = get_absolute_path("./data/cognee")
-    db_location = f"{db_path}/cognee.duckdb"
+    infra_config = infrastructure_config.get_config()
+    data_directory_path = infra_config["data_root_directory"]
 
-    LocalStorage.ensure_directory_exists(db_path)
+    LocalStorage.ensure_directory_exists(infra_config["database_directory_path"])
 
     processed_file_paths = []
 
@@ -38,14 +55,17 @@ async def add_files(file_paths: List[str], dataset_name: str):
 
         if data_directory_path not in file_path:
             file_name = file_path.split("/")[-1]
-            dataset_file_path = data_directory_path + "/" + dataset_name.replace('.', "/") + "/" + file_name
+            file_directory_path = data_directory_path + "/" + (dataset_name.replace('.', "/") + "/" if dataset_name != "root" else "")
+            dataset_file_path = path.join(file_directory_path, file_name)
+
+            LocalStorage.ensure_directory_exists(file_directory_path)
 
             LocalStorage.copy_file(file_path, dataset_file_path)
             processed_file_paths.append(dataset_file_path)
         else:
             processed_file_paths.append(file_path)
 
-    db = duckdb.connect(db_location)
+    db = duckdb.connect(infra_config["database_path"])
 
     destination = dlt.destinations.duckdb(
         credentials = db,
@@ -84,29 +104,8 @@ async def add_files(file_paths: List[str], dataset_name: str):
 
     return run_info
 
-def extract_datasets_from_data(root_dir_path: str, parent_dir: str = "root"):
-    datasets = {}
-
-    root_dir_path = root_dir_path.replace("file://", "")
-
-    for file_or_dir in listdir(root_dir_path):
-        if path.isdir(path.join(root_dir_path, file_or_dir)):
-            dataset_name = file_or_dir if parent_dir == "root" else parent_dir + "." + file_or_dir
-
-            nested_datasets = extract_datasets_from_data("file://" + path.join(root_dir_path, file_or_dir), dataset_name)
-
-            for dataset in nested_datasets.keys():
-                datasets[dataset] = nested_datasets[dataset]
-        else:
-            if parent_dir not in datasets:
-                datasets[parent_dir] = []
-
-            datasets[parent_dir].append(path.join(root_dir_path, file_or_dir))
-
-    return datasets
-
 async def add_data_directory(data_path: str, dataset_name: str = None):
-    datasets = extract_datasets_from_data(data_path)
+    datasets = discover_directory_datasets(data_path)
 
     results = []
 
@@ -117,7 +116,7 @@ async def add_data_directory(data_path: str, dataset_name: str = None):
     return await asyncio.gather(*results)
 
 async def add_text(text: str, dataset_name: str):
-    data_directory_path = infrastructure_config.get_config()["data_path"]
+    data_directory_path = infrastructure_config.get_config()["data_root_directory"]
 
     classified_data = ingestion.classify(text)
     data_id = ingestion.identify(classified_data)

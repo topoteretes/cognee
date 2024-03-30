@@ -1,6 +1,6 @@
 """ This module contains the search function that is used to search for nodes in the graph."""
 import asyncio
-from enum import Enum, auto
+from enum import Enum
 from typing import Dict, Any, Callable, List
 from pydantic import BaseModel, field_validator
 from cognee.modules.search.graph.search_adjacent import search_adjacent
@@ -8,7 +8,8 @@ from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.modules.search.graph.search_summary import search_summary
-
+from cognee.shared.data_models import GraphDBType
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
 class SearchType(Enum):
     ADJACENT = 'ADJACENT'
@@ -35,12 +36,16 @@ class SearchParameters(BaseModel):
         return value
 
 
-async def search(graph, search_type: str, params: Dict[str, Any]) -> List:
-    search_params = SearchParameters(search_type=search_type, params=params)
-    return await specific_search(graph, [search_params])
+async def search(search_type: str, params: Dict[str, Any]) -> List:
+    search_params = SearchParameters(search_type = search_type, params = params)
+    return await specific_search([search_params])
 
 
-async def specific_search(graph, query_params: List[SearchParameters]) -> List:
+async def specific_search(query_params: List[SearchParameters]) -> List:
+    graph_client = get_graph_client(GraphDBType.NETWORKX)
+    await graph_client.load_graph_from_file()
+    graph = graph_client.graph
+
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SIMILARITY: search_similarity,
@@ -71,23 +76,16 @@ async def specific_search(graph, query_params: List[SearchParameters]) -> List:
 
 
 if __name__ == "__main__":
-    from cognee.shared.data_models import GraphDBType
-    from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-
-    async def main(graph_client):
-        await graph_client.load_graph_from_file()
-        graph = graph_client.graph
+    async def main():
         # Assuming 'graph' is your graph object, obtained from somewhere
         search_type = 'CATEGORIES'
         params = {'query': 'Ministarstvo', 'other_param': {"node_id": "LLM_LAYER_SUMMARY:DOCUMENT:881ecb36-2819-54c3-8147-ed80293084d6"}}
 
-        results = await search(graph, search_type, params)
+        results = await search(search_type, params)
         print(results)
 
     # Run the async main function
-    asyncio.run(main(graph_client=graph_client))
+    asyncio.run(main())
 # if __name__ == "__main__":
 #     import asyncio
 
