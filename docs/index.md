@@ -33,7 +33,7 @@ We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've bu
 
 ```
 
-pip install -U cognee["weaviate"]
+pip install "cognee[weaviate]"
 
 ```
 Set OpenAI API Key as an environment variable
@@ -42,8 +42,10 @@ Set OpenAI API Key as an environment variable
 ```
 import os
 
-# Setting an environment variable
-os.environ['OPENAI_API_KEY'] = ''
+os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
+os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
+
+os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
 
 
 ```
@@ -53,39 +55,21 @@ Import cognee and start using it
 
 ```
 import cognee
-from os import listdir, path
-from cognee import add
 
-data_path = path.abspath(".data")
+text = """Natural language processing (NLP) is an interdisciplinary
+       subfield of computer science and information retrieval"""
 
-results = await add(data_path, "izmene")
-for result in results:
-    print(result)
+cognee.add(text) # Add a new piece of information
+
+cognee.cognify() # Use LLMs and cognee to create knowledge
+
+search_results = cognee.search("SIMILARITY", "computer science") # Query cognee for the knowledge
+
+for result_text in search_results[0]:
+    print(result_text)
     
 ```
 
-Run the following command to see the graph. 
-Make sure to add your Graphistry credentials to .env beforehand
-
-```
-from cognee.utils import render_graph
-
-graph = await cognee.cognify("izmene")
-graph_url = await render_graph(graph, graph_type = "networkx")
-print(graph_url)
-```
-
-
-Search the graph for a piece of information
-
-```
-from cognee import search
-from cognee.api.v1.search.search import SearchType
-query_params = {
-    SearchType.SIMILARITY: {'query': 'your search query here'}
-}
-out = await search(graph, query_params)
-```
 
 
 
