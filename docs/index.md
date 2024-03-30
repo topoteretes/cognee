@@ -14,14 +14,10 @@ _Open-source framework for creating knowledge graphs and data models for LLMs._
 
 [![Downloads](https://img.shields.io/pypi/dm/cognee.svg)](https://pypi.python.org/pypi/cognee)
 
+[![Star on GitHub](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social)](https://github.com/topoteretes/cognee)
 
-
-cognee makes it easy to reliably enrich data for Large Language Models (LLMs) like GPT-3.5, GPT-4, GPT-4-Vision, including in the future the open source models like Mistral/Mixtral from Together, Anyscale, Ollama, and llama-cpp-python.
-
+cognee makes it easy to reliably enrich data for Large Language Models (LLMs) like GPT-3.5, GPT-4, GPT-4-Vision, and the open source models like Mistral/Mixtral from Together, Anyscale, Ollama, and llama-cpp-python.
 By leveraging various tools like graph databases, function calling, tool calling and Pydantic; cognee stands out for its aim to emulate human memory for LLM apps and frameworks. 
-
-We leverage Neo4j to do the heavy lifting and dlt to load the data, and we've built a simple, easy-to-use API on top of it by helping you manage your context
-
 
 
 ## Getting Started
