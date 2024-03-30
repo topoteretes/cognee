@@ -53,7 +53,7 @@ class Config:
     llm_provider: str = os.getenv("LLM_PROVIDER","openai") #openai, or custom or ollama
     custom_model: str = os.getenv("CUSTOM_LLM_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1") #"mistralai/Mixtral-8x7B-Instruct-v0.1"
     custom_endpoint: str = os.getenv("CUSTOM_ENDPOINT", "https://api.endpoints.anyscale.com/v1") #"https://api.endpoints.anyscale.com/v1" # pass claude endpoint
-    custom_key: Optional[str] = os.getenv("ANYSCALE_API_KEY")
+    custom_key: Optional[str] = os.getenv("CUSTOM_LLM_API_KEY")
     ollama_endpoint: str = os.getenv("CUSTOM_OLLAMA_ENDPOINT", "http://localhost:11434/v1") #"http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
     ollama_model: str = os.getenv("CUSTOM_OLLAMA_MODEL", "mistral:instruct") #"mistral:instruct"
