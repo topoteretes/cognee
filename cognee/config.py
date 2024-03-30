@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
+from cognee.root_dir import get_absolute_path
 
 
 base_dir = Path(__file__).resolve().parent.parent
@@ -27,33 +28,36 @@ class Config:
         )
     )
 
-    data_path = os.getenv("DATA_PATH", str(Path(__file__).resolve().parent.parent / ".data"))
 
-    db_path = str(Path(__file__).resolve().parent / "data/system")
+    system_root_directory = get_absolute_path(".cognee_system")
+    data_root_directory = os.getenv("DATA_PATH", get_absolute_path(".data"))
 
     vectordb: str = os.getenv("VECTORDB", "weaviate")
+
     qdrant_path: str = os.getenv("QDRANT_PATH")
     qdrant_url: str = os.getenv("QDRANT_URL")
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
-    db_type: str = os.getenv("DB_TYPE", "sqlite")
-    db_name: str = os.getenv("DB_NAME", "cognee.sqlite")
+
+    db_path = str = os.getenv("COGNEE_DB_PATH", "cognee")
+    db_name: str = os.getenv("DB_NAME", "cognee.db")
     db_host: str = os.getenv("DB_HOST", "localhost")
     db_port: str = os.getenv("DB_PORT", "5432")
     db_user: str = os.getenv("DB_USER", "cognee")
     db_password: str = os.getenv("DB_PASSWORD", "cognee")
+
     sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
+
     graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
-    llm_provider: str = "openai" #openai, or custom or ollama
-    custom_model: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-    custom_endpoint: str = "https://api.endpoints.anyscale.com/v1" # pass claude endpoint
-    custom_key: Optional[str] = os.getenv("ANYSCALE_API_KEY")
-    ollama_endpoint: str = "http://localhost:11434/v1"
+    llm_provider: str = os.getenv("LLM_PROVIDER","openai") #openai, or custom or ollama
+    custom_model: str = os.getenv("CUSTOM_LLM_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1") #"mistralai/Mixtral-8x7B-Instruct-v0.1"
+    custom_endpoint: str = os.getenv("CUSTOM_ENDPOINT", "https://api.endpoints.anyscale.com/v1") #"https://api.endpoints.anyscale.com/v1" # pass claude endpoint
+    custom_key: Optional[str] = os.getenv("CUSTOM_LLM_API_KEY")
+    ollama_endpoint: str = os.getenv("CUSTOM_OLLAMA_ENDPOINT", "http://localhost:11434/v1") #"http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
-    ollama_model: str = "mistral:instruct"
-    openai_model: str = "gpt-4-1106-preview"
-    # model: str = "gpt-3.5-turbo"
+    ollama_model: str = os.getenv("CUSTOM_OLLAMA_MODEL", "mistral:instruct") #"mistral:instruct"
+    model: str = os.getenv("OPENAI_MODEL","gpt-4-1106-preview" ) #"gpt-4-1106-preview"
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
@@ -63,8 +67,7 @@ class Config:
 
     # Embedding parameters
     embedding_model: str = "BAAI/bge-large-en-v1.5"
-    embedding_dim: int = 1536
-    embedding_chunk_size: int = 300
+    embedding_dimensions: int = 1024
 
     # Database parameters
     if (
@@ -93,7 +96,6 @@ class Config:
         or os.getenv("AWS_ENV") == "prd"
     ):
         load_dotenv()
-        db_type = 'postgresql'
 
         db_host: str = os.getenv("POSTGRES_HOST")
         logging.info("db_host: %s", db_host)

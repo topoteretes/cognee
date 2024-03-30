@@ -38,7 +38,7 @@ class Neo4jAdapter(GraphDBInterface):
             raise
 
 
-    async def add_node(self, id: str, **kwargs)-> None:
+    async def add_node(self, id: str, **kwargs):
         """Asynchronously add a node to the graph if it doesn't already exist, with given properties."""
         properties = ', '.join(f'{k}: ${k}' for k in kwargs.keys())
         query = (
@@ -49,11 +49,13 @@ class Neo4jAdapter(GraphDBInterface):
         params = {'id': id, **kwargs}
         await self.query(query, params)
 
+
     async def delete_node(self, id: str):
         """ Asynchronously delete a node from the graph if it exists."""
         query = "MATCH (n:Node {id: $id}) DETACH DELETE n"
         params = {'id': id}
         await self.query(query, params)
+
 
     async def add_edge(self, from_node: str, to_node: str, **kwargs):
         """Asynchronously add a edges to the graph if it doesn't already exist, with given properties."""

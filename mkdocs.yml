@@ -119,6 +119,8 @@ markdown_extensions:
 nav:
   - Introduction:
     - Welcome to cognee: 'index.md'
+    - Quickstart: 'quickstart.md'
+    - Local models: 'local_models.md'
   - Blog:
       - "blog/index.md"
   - Why cognee:
