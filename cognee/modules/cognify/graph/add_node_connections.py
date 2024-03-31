@@ -1,4 +1,4 @@
-from networkx import Graph
+
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
 
@@ -31,7 +31,7 @@ async def group_nodes_by_layer(node_descriptions):
 
     return grouped_data
 
-def connect_nodes_in_graph(graph: Graph, relationship_dict: dict, score_treshold:float=None) -> Graph:
+def connect_nodes_in_graph(graph: object, relationship_dict: dict, score_treshold:float=None):
     """
     For each relationship in relationship_dict, check if both nodes exist in the graph based on node attributes.
     If they do, create a connection (edge) between them.

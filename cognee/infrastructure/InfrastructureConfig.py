@@ -1,4 +1,6 @@
 from cognee.config import Config
+from .databases.graph.graph_db_interface import GraphDBInterface
+from .databases.graph.networkx.adapter import NetworXAdapter
 from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
 from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
@@ -6,6 +8,9 @@ from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbedding
 from .llm.llm_interface import LLMInterface
 from .llm.openai.adapter import OpenAIAdapter
 from .files.storage import LocalStorage
+from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
+    LabeledContent, DefaultCognitiveLayer
+from pydantic import BaseModel
 
 config = Config()
 config.load()
@@ -13,9 +18,17 @@ config.load()
 class InfrastructureConfig():
     system_root_directory: str = config.system_root_directory
     data_root_directory: str = config.data_root_directory
+    llm_provider: str = config.llm_provider
     database_engine: DatabaseEngine = None
     vector_engine: VectorDBInterface = None
+    graph_engine: GraphDBType = None
     llm_engine: LLMInterface = None
+    classification_model = None
+    summarization_model = None
+    labeling_model = None
+    graph_model = None,
+    cognitive_layer_model = None
+
 
     def get_config(self) -> dict:
         if self.database_engine is None:
@@ -27,6 +40,20 @@ class InfrastructureConfig():
                 db_name = config.db_name,
                 db_path = db_path
             )
+        if self.graph_engine is None:
+            self.graph_engine =  GraphDBType.NETWORKX
+
+        if self.classification_model is None:
+            self.classification_model = DefaultContentPrediction
+
+        if self.summarization_model is None:
+            self.summarization_model = SummarizedContent
+        if self.labeling_model is None:
+            self.labeling_model = LabeledContent
+        if self.graph_model is None:
+            self.graph_model = KnowledgeGraph
+        if self.cognitive_layer_model is None:
+            self.cognitive_layer_model = DefaultCognitiveLayer
 
         if self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
@@ -61,6 +88,14 @@ class InfrastructureConfig():
             "data_root_directory": self.data_root_directory,
             "database_directory_path": self.system_root_directory + "/" + config.db_path,
             "database_path": self.system_root_directory + "/" + config.db_path + "/" + config.db_name,
+            "graph_engine": self.graph_engine,
+            "classification_model": self.classification_model,
+            "summarization_model": self.summarization_model,
+            "labeling_model": self.labeling_model,
+            "graph_model": self.graph_model,
+            "congitive_layer_model": self.cognitive_layer_model,
+            "llm_provider": self.llm_provider
+
         }
 
     def set_config(self, new_config: dict):
@@ -78,5 +113,23 @@ class InfrastructureConfig():
 
         if "llm_engine" in new_config:
             self.llm_engine = new_config["llm_engine"]
+
+        if "graph_engine" in new_config:
+            self.graph_engine = new_config["graph_engine"]
+
+        if "classification_model" in new_config:
+            self.classification_model = new_config["classification_model"]
+
+        if "summarization_model" in new_config:
+            self.summarization_model = new_config["summarization_model"]
+
+        if "labeling_model" in new_config:
+            self.labeling_model = new_config["labeling_model"]
+
+        if "graph_model" in new_config:
+            self.graph_model = new_config["graph_model"]
+
+        if "llm_provider" in new_config:
+            self.llm_provider = new_config["llm_provider"]
 
 infrastructure_config = InfrastructureConfig()

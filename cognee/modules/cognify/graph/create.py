@@ -1,4 +1,5 @@
 """ This module is responsible for creating a semantic graph """
+import logging
 from typing import  Optional, Any
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
@@ -15,7 +16,7 @@ async def add_node_and_edge(client, parent_id: Optional[str], node_id: str, node
     await client.add_node(node_id, **node_data)  # Add the current node with its data
     if parent_id:
         # Add an edge between the parent node and the current node with the correct relationship data
-        await client.add_edge(parent_id, node_id, **relationship_data)
+        await client.add_edge(parent_id, node_id, relationship_type ='connected', **relationship_data)
 
 
 async def process_attribute(graph_client, parent_id: Optional[str], attribute: str, value: Any):
@@ -44,6 +45,11 @@ async def create_dynamic(graph_model, graph_client) :
     node_data = graph_model.model_dump(exclude = {"default_relationship", "id"})
     #
     # graph_client = get_graph_client(GraphDBType.NETWORKX)
+
+
+    print(f"Adding root node with ID: {root_id}")
+    print(f"Node data: {node_data}")
+
 
     await graph_client.add_node(root_id, **node_data)
 

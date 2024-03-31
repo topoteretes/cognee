@@ -10,23 +10,23 @@ class GraphDBInterface(Protocol):
     async def graph(self):
         raise NotImplementedError
 
-    @abstractmethod
-    async def save_graph_to_file(
-        self,
-        file_path: str = None
-    ): raise NotImplementedError
-
-    @abstractmethod
-    async def load_graph_from_file(
-        self,
-        file_path: str = None
-    ): raise NotImplementedError
-
-    @abstractmethod
-    async def delete_graph_from_file(
-        self,
-        path: str = None
-    ): raise NotImplementedError
+    # @abstractmethod
+    # async def save_graph_to_file(
+    #     self,
+    #     file_path: str = None
+    # ): raise NotImplementedError
+    #
+    # @abstractmethod
+    # async def load_graph_from_file(
+    #     self,
+    #     file_path: str = None
+    # ): raise NotImplementedError
+    #
+    # @abstractmethod
+    # async def delete_graph_from_file(
+    #     self,
+    #     path: str = None
+    # ): raise NotImplementedError
 
     """ CRUD operations on graph nodes """
 

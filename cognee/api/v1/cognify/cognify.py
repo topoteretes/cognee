@@ -35,7 +35,7 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None, classification_model: object = None, summarization_model: object = None, labeling_model: object = None, graph_model: object = None, cognitive_layer_model: object = None, graph_db_type: object = None):
+async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None):
     """This function is responsible for the cognitive processing of the content."""
 
     db_engine = infrastructure_config.get_config()["database_engine"]
@@ -65,10 +65,10 @@ async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: obje
 
     awaitables = []
 
-    if graph_db_type is None:
-        graph_db_type = GraphDBType.NETWORKX
+    graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
     graph_client = await get_graph_client(graph_db_type)
+    print(graph_client)
 
     await initialize_graph(USER_ID, graph_data_model, graph_client)
 
@@ -88,27 +88,14 @@ async def process_text(input_text: str, file_metadata: dict, graph_data_model: o
 
     classified_categories = []
 
-    if classification_model is None:
-        classification_model= DefaultContentPrediction
 
-    if summarization_model is None:
-        summarization_model = SummarizedContent
-    if labeling_model is None:
-        labeling_model = LabeledContent
-    if cognitive_layer_model is None:
-        cognitive_layer_model = DefaultCognitiveLayer
-    if graph_model is None:
-        graph_model = KnowledgeGraph
-
-    if graph_db_type is None:
-        graph_db_type = GraphDBType.NETWORKX
 
     try:
         # Classify the content into categories
         classified_categories = await classify_into_categories(
             input_text,
             "classify_content.txt",
-            classification_model
+            infrastructure_config.get_config()["classification_model"]
         )
         file_metadata["categories"] = list(map(lambda category: category["layer_name"], classified_categories))
     except Exception as e:
@@ -132,19 +119,19 @@ async def process_text(input_text: str, file_metadata: dict, graph_data_model: o
         content_labels = await label_content(
             input_text,
             "label_content.txt",
-            labeling_model
+            infrastructure_config.get_config()["labeling_model"]
         )
         file_metadata["content_labels"] = content_labels["content_labels"]
     except Exception as e:
         print(e)
         raise e
-    graph_client = await get_graph_client(graph_db_type)
+    graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
     await add_document_node(graph_client, f"DefaultGraphModel:{USER_ID}", file_metadata)
     print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
 
     cognitive_layers = await content_to_cog_layers(
         classified_categories[0],
-        response_model = cognitive_layer_model
+        response_model = infrastructure_config.get_config()["congitive_layer_model"]
     )
 
     cognitive_layers = [layer_subgroup.name for layer_subgroup in cognitive_layers.cognitive_layers]
@@ -217,10 +204,15 @@ if __name__ == "__main__":
 
     async def main():
 
-        graph = await cognify(datasets=['izmene'], graph_db_type=GraphDBType.NEO4J)
+
+        infrastructure_config.set_config({
+            "graph_engine": GraphDBType.NEO4J
+        })
+        print(infrastructure_config.get_config())
+        graph = await cognify(datasets=['izmene'])
         from cognee.utils import render_graph
-        graph_url = await render_graph(graph)
-        print(graph_url)
+        # graph_url = await render_graph(graph)
+        # print(graph_url)
 
 
     asyncio.run(main())

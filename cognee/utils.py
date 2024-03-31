@@ -110,3 +110,7 @@ def generate_color_palette(unique_layers):
 
     return dict(zip(unique_layers, hex_colors))
 
+
+def render_graph():
+    pass
+

@@ -82,7 +82,7 @@ class Config:
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
     else:
-        logging.info("graph_db_urlvvv: %s", os.getenv("GRAPH_DB_URL"))
+        logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
