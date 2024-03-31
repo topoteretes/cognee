@@ -10,7 +10,7 @@ Make data processing for LLMs easy
 </p>
 
 <p>
-  <i>Open-source framework for creating knowledge graphs and data models for LLMs.</i>
+  <i>Open-source framework for knowledge and memory management for LLMs.</i>
 </p>
 
 <p>
