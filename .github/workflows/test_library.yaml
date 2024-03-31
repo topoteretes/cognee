@@ -47,7 +47,7 @@ jobs:
         run: poetry build
 
       # Run sample script
-      - name: Run Sample Script
+      - name: Run Test Script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run python ./cognee/tests/test_library.py
