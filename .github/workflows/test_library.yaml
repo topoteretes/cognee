@@ -1,7 +1,7 @@
 name: Run All Tests with Poetry
 
 on:
-  push:
+  workflow_dispatch:  # This line enables manual triggering of the workflow
   pull_request:
 
 jobs:
@@ -48,4 +48,6 @@ jobs:
 
       # Run sample script
       - name: Run Sample Script
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run python ./cognee/tests/test_library.py
