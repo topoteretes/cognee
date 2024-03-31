@@ -30,6 +30,7 @@ class InfrastructureConfig():
     cognitive_layer_model = None
 
 
+
     def get_config(self) -> dict:
         if self.database_engine is None:
             db_path = self.system_root_directory + "/" + config.db_path
