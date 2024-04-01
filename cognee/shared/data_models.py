@@ -204,6 +204,8 @@ class GraphDBType(Enum):
 # Models for representing different entities
 class Relationship(BaseModel):
     type: str
+    source: Optional[str] = None
+    target: Optional[str] = None
     properties: Optional[Dict[str, Any]] = None
 
 class DocumentType(BaseModel):
@@ -235,7 +237,8 @@ class UserProperties(BaseModel):
     location: Optional[UserLocation] = None
 
 class DefaultGraphModel(BaseModel):
-    id: str
+    node_id: str
     user_properties: UserProperties = UserProperties()
     documents: List[Document] = []
     default_fields: Optional[Dict[str, Any]] = {}
+    default_relationship: Relationship = Relationship(type="has_properties")

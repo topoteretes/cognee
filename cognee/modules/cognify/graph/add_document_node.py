@@ -1,6 +1,6 @@
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType, Document, DocumentType, Category, Relationship
-from .create import add_node_and_edge
+from .create import add_node, add_edge
 
 def create_category(category_name: str):
     return Category(
@@ -25,4 +25,4 @@ async def add_document_node(graph_client, parent_id, document_data):
     document_dict = document.model_dump()
     relationship = Relationship(type = "has_document").model_dump()
 
-    await add_node_and_edge(graph_client, parent_id, document_id, document_dict, relationship)
+    await add_node(graph_client, parent_id, document_id, document_dict)

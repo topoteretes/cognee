@@ -68,27 +68,30 @@ async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: obje
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
     graph_client = await get_graph_client(graph_db_type)
-    print(graph_client)
+
 
     await initialize_graph(USER_ID, graph_data_model, graph_client)
 
-    # for file_metadata in files_metadata:
-    #     with open(file_metadata["file_path"], "rb") as file:
-    #         file_type = guess_file_type(file)
-    #         text = extract_text_from_file(file, file_type)
-    #
-    #         awaitables.append(process_text(text, file_metadata, graph_data_model, classification_model, summarization_model, labeling_model, graph_model, cognitive_layer_model, graph_db_type))
-    #
-    # graphs = await asyncio.gather(*awaitables)
-    #
-    # return graphs[0]
+    print(files_metadata)
 
-async def process_text(input_text: str, file_metadata: dict, graph_data_model: object=None, classification_model: object=None, summarization_model: object=None, labeling_model: object=None, graph_model: object=None, cognitive_layer_model: object=None, graph_db_type: object=None):
+
+    for file_metadata in files_metadata:
+        with open(file_metadata["file_path"], "rb") as file:
+            file_type = guess_file_type(file)
+            text = extract_text_from_file(file, file_type)
+
+            awaitables.append(process_text(text, file_metadata, graph_data_model))
+
+    graphs = await asyncio.gather(*awaitables)
+
+    return graphs[0]
+
+async def process_text(input_text: str, file_metadata: dict,  graph_model: object=None, ):
     print(f"Processing document ({file_metadata['id']})")
 
     classified_categories = []
 
-
+    print("WE ARE HERE")
 
     try:
         # Classify the content into categories
@@ -126,6 +129,8 @@ async def process_text(input_text: str, file_metadata: dict, graph_data_model: o
         print(e)
         raise e
     graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
+
+
     await add_document_node(graph_client, f"DefaultGraphModel:{USER_ID}", file_metadata)
     print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
 
@@ -206,13 +211,15 @@ if __name__ == "__main__":
 
 
         infrastructure_config.set_config({
-            "graph_engine": GraphDBType.NEO4J
+            "graph_engine": GraphDBType.NETWORKX
         })
         print(infrastructure_config.get_config())
         graph = await cognify(datasets=['izmene'])
+
+        graph_client = await get_graph_client(GraphDBType.NETWORKX)
         from cognee.utils import render_graph
-        # graph_url = await render_graph(graph)
-        # print(graph_url)
+        graph_url = await render_graph(graph_client.graph)
+        print(graph_url)
 
 
     asyncio.run(main())
