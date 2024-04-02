@@ -28,7 +28,9 @@ async def add_propositions(graph_client,
             if layer_name in node_id:
                 layer_node_id = node_id
     elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
-        layer_node_id = await graph_client.filter_nodes(search_node='node_id', search_criteria=layer_name)['d']['node_id']
+        layer_node_id = await graph_client.filter_nodes(search_node='node_id', search_criteria=layer_name)
+        print(layer_node_id)
+        layer_node_id = layer_node_id[0]['d']['node_id']
 
     if not layer_node_id:
         print(f"Subclass '{layer_name}' under category '{data_type}' not found in the graph.")
@@ -69,7 +71,7 @@ async def add_propositions(graph_client,
         target_node_id = node_id_mapping.get(edge.target)
 
         if source_node_id and target_node_id:
-            await graph_client.add_edge(source_node_id, target_node_id, description=edge.description, relationship_type=edge.description)
+            await graph_client.add_edge(source_node_id, target_node_id, relationship_type='connects')
         else:
             print(f"Could not find mapping for edge from {edge.source} to {edge.target}")
 
