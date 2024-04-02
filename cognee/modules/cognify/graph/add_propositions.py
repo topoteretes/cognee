@@ -20,6 +20,7 @@ async def add_propositions(graph_client,
     # await graph_client.load_graph_from_file()
 
     layer_node_id = None
+    print(f"Looking for layer '{layer_name}' under category '{data_type}'")
     for node_id, data in graph_client.graph.nodes(data = True):
         if layer_name in node_id:
             layer_node_id = node_id
@@ -51,7 +52,7 @@ async def add_propositions(graph_client,
             type='detail'
         )
 
-        await graph_client.add_edge(layer_node_id, new_node_id, relationship='detail')
+        await graph_client.add_edge(layer_node_id, new_node_id, relationship_type='detail')
 
         # Store the mapping from old node ID to new node ID
         node_id_mapping[node.id] = new_node_id
@@ -63,13 +64,14 @@ async def add_propositions(graph_client,
         target_node_id = node_id_mapping.get(edge.target)
 
         if source_node_id and target_node_id:
-            await graph_client.add_edge(source_node_id, target_node_id, description=edge.description, relationship=edge.description)
+            await graph_client.add_edge(source_node_id, target_node_id, description=edge.description, relationship_type=edge.description)
         else:
             print(f"Could not find mapping for edge from {edge.source} to {edge.target}")
 
 async def append_to_graph(graph_client, layer_graphs, required_layers):
     # Generate a UUID for the overall layer
     layer_uuid = uuid.uuid4()
+    print("EXAMPLE OF LAYER GRAPHS", required_layers)
     # Extract category name from required_layers data
     data_type = required_layers["data_type"]
 
@@ -88,6 +90,7 @@ async def append_to_graph(graph_client, layer_graphs, required_layers):
 
             # Assuming append_data_to_graph is defined elsewhere and appends data to graph_client
             # You would pass relevant information from knowledge_graph along with other details to this function
+            print("ADDING PROPOSITIONS")
             await add_propositions(
                 graph_client,
                 data_type,
@@ -99,35 +102,33 @@ async def append_to_graph(graph_client, layer_graphs, required_layers):
             )
 
 
-# if __name__ == "__main__":
-#     import asyncio
-
-
-#     # Assuming all necessary imports and GraphDBType, get_graph_client, Document, DocumentType, etc. are defined
-
-#     # Initialize the graph client
-#     graph_client = get_graph_client(GraphDBType.NETWORKX)
-
+# async def bubu():
+#
+#     graph_client = await get_graph_client(GraphDBType.NEO4J)
+#
 #     from typing import List, Type
-
-
+#
+#
 #     # Assuming generate_graph, KnowledgeGraph, and other necessary components are defined elsewhere
-#     async def generate_graphs_for_all_layers(text_input: str, layers: List[str], response_model: Type[BaseModel]):
+#
+#     from cognee.shared.data_models import KnowledgeGraph, DefaultCognitiveLayer, TextContent, TextSubclass, DefaultContentPrediction
+#     from cognee.modules.cognify.llm.generate_graph import generate_graph
+#     async def generate_graphs_for_all_layers(text_input: str, layers: List[str], response_model= KnowledgeGraph):
 #         tasks = [generate_graph(text_input, "generate_graph_prompt.txt", {'layer': layer}, response_model) for layer in
 #                  layers]
 #         return await asyncio.gather(*tasks)
-
-
+#
+#
 #     input_article_one= "The quick brown fox jumps over the lazy dog"
-
-
+#
+#
 #     # Execute the async function and print results for each set of layers
 #     async def async_graph_per_layer(text_input: str, cognitive_layers: List[str]):
 #         graphs = await generate_graphs_for_all_layers(text_input, cognitive_layers, KnowledgeGraph)
 #         # for layer, graph in zip(cognitive_layers, graphs):
 #         #     print(f"{layer}: {graph}")
 #         return graphs
-
+#
 #     cognitive_layers_one = ['Structural Layer', 'Semantic Layer',
 #          'Syntactic Layer',
 #          'Discourse Layer',
@@ -144,8 +145,69 @@ async def append_to_graph(graph_client, layer_graphs, required_layers):
 #     )
 #     # Run the async function for each set of cognitive layers
 #     level_1_graph = asyncio.run( async_graph_per_layer(input_article_one, cognitive_layers_one))
+#
+#     G = await append_to_graph(level_1_graph, required_layers_one, graph_client)
+#
+# if __name__ == "__main__":
+#
+#     import asyncio
+#
+#
+#     # Assuming all necessary imports and GraphDBType, get_graph_client, Document, DocumentType, etc. are defined
+#
+#     # Initialize the graph client
+#
+#
+#
+#     G = asyncio.run(bubu())
 
-#     G = asyncio.run(append_to_graph(level_1_graph, required_layers_one, graph_client))
+
+import asyncio
+from typing import List
+from cognee.shared.data_models import KnowledgeGraph, DefaultCognitiveLayer, TextContent, TextSubclass, DefaultContentPrediction
+from cognee.modules.cognify.llm.generate_graph import generate_graph
+# Assuming get_graph_client, generate_graph, KnowledgeGraph, and other necessary components are defined elsewhere
+
+async def generate_graphs_for_all_layers(text_input: str, layers: List[str], response_model):
+    tasks = [generate_graph(text_input, "generate_graph_prompt.txt", {'layer': layer}, response_model) for layer in layers]
+    return await asyncio.gather(*tasks)
+
+async def async_graph_per_layer(text_input: str, cognitive_layers: List[str], response_model):
+    graphs = await generate_graphs_for_all_layers(text_input, cognitive_layers, response_model)
+    return graphs
+
+# async def append_to_graph(graph_data, prediction_layers, client):
+#     # Your logic to append data to the graph goes here
+#     pass
+
+async def bubu():
+    graph_client = await get_graph_client(GraphDBType.NEO4J)
+
+    input_article_one = "The quick brown fox jumps over the lazy dog"
+    cognitive_layers_one = [
+        'Structural Layer', 'Semantic Layer', 'Syntactic Layer',
+        'Discourse Layer', 'Pragmatic Layer', 'Stylistic Layer',
+        'Referential Layer', 'Citation Layer', 'Metadata Layer'
+    ]
+    required_layers_one = DefaultContentPrediction(
+        label=TextContent(
+            type='TEXT',
+            subclass=[TextSubclass.ARTICLES]
+        )
+    )
+    print("Running async_graph_per_layer", required_layers_one)
+    categories = [subclass_attribute.name for subclass_attribute in required_layers_one.label.subclass]
 
 
+    # Directly await the coroutine for generating and appending to graph
+    level_1_graph = await async_graph_per_layer(input_article_one, cognitive_layers_one, KnowledgeGraph)
 
+    print("GRAPH is ", level_1_graph)
+    await append_to_graph(graph_client= graph_client, layer_graphs=level_1_graph, required_layers={'data_type': 'text', 'layer_name': 'Research papers and academic publications'})
+
+    # Return something if needed, for now just return None
+    return None
+
+# This is the correct place to use asyncio.run() - at the top level of the program
+if __name__ == "__main__":
+    asyncio.run(bubu())

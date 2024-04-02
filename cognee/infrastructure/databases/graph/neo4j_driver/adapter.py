@@ -45,8 +45,12 @@ class Neo4jAdapter(GraphDBInterface):
     async def add_node(self, id: str, **kwargs):
         """Asynchronously add a node to the graph if it doesn't already exist, with given properties."""
 
+
+
         # Serialize complex properties
         node_id = id.replace(":", "_")
+
+
         serialized_properties = {k: json.dumps(v) if isinstance(v, (dict, list)) else v for k, v in kwargs.items()}
         serialized_properties['name'] = node_id
 
@@ -59,7 +63,7 @@ class Neo4jAdapter(GraphDBInterface):
 
 
         query = (
-            f"MERGE (n:{node_id} {{node_id: $node_id}}) "
+            f"MERGE (n:`{node_id}` {{node_id: $node_id}}) "
             f"ON CREATE SET n += {{{properties}}} "
             f"RETURN  ID(n) AS internalId, n.node_id AS nodeId"
         )
@@ -77,6 +81,7 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def delete_node(self, id: str):
         node_id = id.replace(":", "_")
+
         """ Asynchronously delete a node from the graph if it exists."""
         query = "MATCH (n:{node_id} {node_id: node_id}) DETACH DELETE n"
         params = {'node_id': node_id}
@@ -89,15 +94,17 @@ class Neo4jAdapter(GraphDBInterface):
         # Filter out None values and do not serialize; Neo4j can handle complex types like arrays directly
         filtered_properties = {k: v for k, v in kwargs.items() if v is not None}
         from_node = from_node.replace(":", "_")
+
         print("from_node", from_node)
 
         to_node = to_node.replace(":", "_")
+
         print("to_node", to_node)
 
         # If there are no properties to add, simply create the relationship without properties
         if not filtered_properties:
             query = (
-                f"MATCH (a:{from_node} {{node_id: $from_node}}), (b:{to_node} {{node_id: $to_node}}) "
+                f"MATCH (a:`{from_node}` {{node_id: $from_node}}), (b:`{to_node}` {{node_id: $to_node}}) "
                 f"MERGE (a)-[r:{relationship_type}]->(b) "
                 "RETURN r"
             )
@@ -108,7 +115,7 @@ class Neo4jAdapter(GraphDBInterface):
             # Prepare the SET clause to add properties to the relationship
             set_clause = ', '.join(f'r.{k} = ${k}' for k in filtered_properties.keys())
             query = (
-                f"MATCH (a:{from_node} {{node_id: $from_node}}), (b:{to_node}  {{node_id: $to_node}}) "
+                f"MATCH (a:`{from_node}` {{node_id: $from_node}}), (b:`{to_node}`  {{node_id: $to_node}}) "
                 f"MERGE (a)-[r:{relationship_type}]->(b) "
                 f"SET {set_clause} "
                 "RETURN r"

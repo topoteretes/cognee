@@ -6,7 +6,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.prompts import render_prompt
 
-async def generate_graph(text_input: str, filename: str, context, response_model: Type[BaseModel]):
+async def generate_graph(text_input: str, filename: str, context, response_model: object):
     llm_client = get_llm_client()
 
     formatted_text_input = render_prompt(filename, context)

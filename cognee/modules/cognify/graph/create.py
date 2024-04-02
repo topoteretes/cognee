@@ -12,22 +12,25 @@ async def generate_node_id(instance: BaseModel) -> str:
     for field in ["id", "doc_id", "location_id", "type_id", "node_id"]:
         if hasattr(instance, field):
             return f"{instance.__class__.__name__}:{getattr(instance, field)}"
-    return f"{instance.__class__.__name__}:default"
+    return f"{instance.__class__.__name__}_default"
 
 async def add_node(client, parent_id: Optional[str], node_id: str, node_data: dict):
 
-    # print("HERE IS THE NODE ID 2222", node_id)
-    if node_id != "Relationship:default":
+
+    if node_id != "Relationship_default":
+
         result = await client.add_node(node_id, **node_data)
+        return result
     if parent_id:
         # Add an edge between the parent node and the current node with the correct relationship data
         if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-            await client.add_edge(parent_id, node_id, **node_data)
+            if node_id != "Relationship_default":
+                await client.add_edge(parent_id, node_id, **node_data)
 
 
-async def add_edge(client, parent_id: Optional[str], node_id: str,node_data: dict, created_node_ids):
+async def add_edge(client, parent_id: Optional[str], node_id: str,node_data: dict, created_node_ids, custom_match = None):
 
-    if node_id == "Relationship:default" and parent_id:
+    if (custom_match) or (node_id == "Relationship_default" and parent_id):
         # Initialize source and target variables outside the loop
         source, target = None, None
 
@@ -79,6 +82,7 @@ async def process_attribute(graph_client, parent_id: Optional[str], attribute: s
 
 
         created_node_id = await add_node(graph_client, parent_id, node_id, node_data)
+        print("fhdhfdshf", created_node_id)
         created_node_ids.append(created_node_id)
 
         # await add_edge(graph_client, parent_id, node_id, node_data, relationship_data,created_node_ids)
@@ -89,6 +93,7 @@ async def process_attribute(graph_client, parent_id: Optional[str], attribute: s
             # print("HERE IS THE SUB VAL", sub_val)
 
             out = await process_attribute(graph_client, node_id, sub_attr, sub_val)
+            print("OU2222T", out)
             created_node_ids.extend(out)
 
     elif isinstance(value, list) and all(isinstance(item, BaseModel) for item in value):
@@ -144,12 +149,14 @@ async def create_dynamic(graph_model, graph_client) :
     _ = node_data.pop("node_id", None)
 
     created_node_ids = []
+    print("ROOT ID", root_id)
     out = await graph_client.add_node(root_id, **node_data)
     created_node_ids.append(out)
     for attribute_name, attribute_value in graph_model:
         # print("ATTRIB NAME", attribute_name)
         # print("ATTRIB VALUE", attribute_value)
         ids = await process_attribute(graph_client, root_id, attribute_name, attribute_value)
+        print("IDS", ids)
         created_node_ids.extend(ids)
 
     flattened_and_deduplicated = list({

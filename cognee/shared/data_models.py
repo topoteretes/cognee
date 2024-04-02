@@ -7,20 +7,16 @@ class Node(BaseModel):
     """Node in a knowledge graph."""
     id: str
     description: str
-    category: str
-    color: str = "blue"
-    memory_type: str
     created_at: Optional[float] = None
-    summarized: Optional[bool] = None
+
 
 class Edge(BaseModel):
     """Edge in a knowledge graph."""
     source: str
     target: str
     description: str
-    color: str = "blue"
     created_at: Optional[float] = None
-    summarized: Optional[bool] = None
+
 
 class KnowledgeGraph(BaseModel):
     """Knowledge graph."""
@@ -172,9 +168,10 @@ class DefaultContentPrediction(BaseModel):
 
 
 class SummarizedContent(BaseModel):
-    """Class for a single class label summary."""
+    """Class for a single class label summary and description."""
 
     summary: str
+    description: str
 
 class LabeledContent(BaseModel):
     """Class for a single class label summary."""
@@ -221,6 +218,7 @@ class Category(BaseModel):
 class Document(BaseModel):
     doc_id: str
     title: str
+    description: Optional[str] = None
     summary: Optional[str] = None
     content_id: Optional[str] = None
     doc_type: Optional[DocumentType] = None
