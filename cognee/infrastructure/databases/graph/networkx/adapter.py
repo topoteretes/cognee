@@ -47,6 +47,11 @@ class NetworXAdapter(GraphDBInterface):
     async def add_node(self, id: str, **kwargs) -> None:
         """Asynchronously add a node to the graph if it doesn't already exist, with given properties."""
         if not self.graph.has_node(id):
+            current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Add or update the 'created_at' and 'updated_at' timestamps in kwargs
+            kwargs['created_at'] = kwargs.get('created_at', current_timestamp)
+            kwargs['updated_at'] = current_timestamp
             self.graph.add_node(id, **kwargs)
             await self.save_graph_to_file(self.filename)
 

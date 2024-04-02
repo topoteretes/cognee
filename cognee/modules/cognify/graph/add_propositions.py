@@ -2,6 +2,8 @@
 import uuid
 import json
 from datetime import datetime
+
+from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
 from cognee.shared.encode_uuid import encode_uuid
 
@@ -21,9 +23,12 @@ async def add_propositions(graph_client,
 
     layer_node_id = None
     print(f"Looking for layer '{layer_name}' under category '{data_type}'")
-    for node_id, data in graph_client.graph.nodes(data = True):
-        if layer_name in node_id:
-            layer_node_id = node_id
+    if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+        for node_id, data in graph_client.graph.nodes(data = True):
+            if layer_name in node_id:
+                layer_node_id = node_id
+    elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
+        layer_node_id = await graph_client.filter_nodes(search_node='node_id', search_criteria=layer_name)['d']['node_id']
 
     if not layer_node_id:
         print(f"Subclass '{layer_name}' under category '{data_type}' not found in the graph.")
@@ -40,17 +45,17 @@ async def add_propositions(graph_client,
 
         await graph_client.add_node(
             new_node_id,
-            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             description=node.description,
-            category=node.category,
-            memory_type=node.memory_type,
             layer_uuid=str(layer_uuid),
             layer_description=str(layer_description),
             layer_decomposition_uuid=str(layer_decomposition_uuid),
             unique_id=str(unique_node_id),
             type='detail'
         )
+
+        print("HERE IS LAYER NODE ID", layer_node_id)
+
+        print("HERE IS NEW NODE ID", new_node_id)
 
         await graph_client.add_edge(layer_node_id, new_node_id, relationship_type='detail')
 
@@ -181,6 +186,9 @@ async def async_graph_per_layer(text_input: str, cognitive_layers: List[str], re
 #     pass
 
 async def bubu():
+    infrastructure_config.set_config({
+        "graph_engine": GraphDBType.NEO4J
+    })
     graph_client = await get_graph_client(GraphDBType.NEO4J)
 
     input_article_one = "The quick brown fox jumps over the lazy dog"

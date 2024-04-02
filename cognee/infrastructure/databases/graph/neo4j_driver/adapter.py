@@ -127,6 +127,21 @@ class Neo4jAdapter(GraphDBInterface):
 
         await self.query(query, params)
         await self.close()
+
+
+    async def filter_nodes(self, search_node, search_criteria, **kwargs):
+
+        """Asynchronously filter nodes in the graph based on the given properties."""
+
+        query = f""" MATCH (d)
+                WHERE d.{search_node} CONTAINS '{search_criteria}'
+                RETURN d"""
+
+
+        result = await self.query(query)
+        await self.close()
+        return result
+
     #
     # async def add_node(self, id: str, **kwargs) -> None:
     #     properties = ', '.join(f'{key}: ${key}' for key in kwargs)
