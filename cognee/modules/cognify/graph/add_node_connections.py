@@ -77,7 +77,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                 elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
                     # Neo4j specific logic to add an edge
                     # This is just a placeholder, replace it with actual Neo4j logic
-                    await graph.query(f"""MATCH (a), (b) WHERE a.id = {relationship['searched_node_id']} AND b.id = {relationship['original_id_for_search']}
+                    await graph.query(f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}'
                               CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")
     return graph
 
@@ -172,7 +172,7 @@ def graph_ready_output(results):
 if __name__ == "__main__":
 
     async def main():
-        graph_client = get_graph_client(GraphDBType.NETWORKX)
+        graph_client = get_graph_client(GraphDBType.NEO4J)
 
         await graph_client.load_graph_from_file()
 
