@@ -4,6 +4,8 @@ import os
 import graphistry
 import pandas as pd
 import matplotlib.pyplot as plt
+from nltk.sentiment import SentimentIntensityAnalyzer
+
 
 def get_document_names(doc_input):
     """
@@ -128,9 +130,16 @@ async def render_graph(graph):
 
     # Convert the NetworkX graph to a Pandas DataFrame representing the edge list
     edges = nx.to_pandas_edgelist(graph)
+    # nodes = pd.DataFrame.from_dict(dict(graph.nodes(data=True)), orient='index')
+    #
+    # df['named_entities'] = df['named_entities'].apply(lambda x: x if isinstance(x, list) else [x])
 
     # Visualize the graph using Graphistry
     plotter = graphistry.edges(edges, "source", "target")
+    # .nodes(nodes, 'index'))
+
+    # Bind the 'name' column as the node label
+    # plotter = plotter.bind(node='index', point_title='name')
 
     # Visualize the graph (this will open a URL in your default web browser)
     url = plotter.plot(render = False, as_files = True)
@@ -176,4 +185,65 @@ async def render_graph(graph):
 #     # Visualize the graph (this will open a URL in your default web browser)
 #     url = plotter.plot(render=False, as_files=True)
 #     print(f"Graph is visualized at: {url}")
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.tag import pos_tag
+from nltk.chunk import ne_chunk
 
+# Ensure that the necessary NLTK resources are downloaded
+nltk.download('maxent_ne_chunker')
+nltk.download('words')
+
+# The sentence you want to tag and recognize entities in
+sentence = "Apple Inc. is an American multinational technology company headquartered in Cupertino, California."
+
+
+async def extract_pos_tags(sentence):
+    """Extract Part-of-Speech (POS) tags for words in a sentence."""
+    # Tokenize the sentence into words
+    tokens = word_tokenize(sentence)
+
+    # Tag each word with its corresponding POS tag
+    pos_tags = pos_tag(tokens)
+
+    return pos_tags
+
+
+async def extract_named_entities(sentence):
+    """Extract Named Entities from a sentence."""
+    # Tokenize the sentence into words
+    tokens = word_tokenize(sentence)
+
+    # Perform POS tagging on the tokenized sentence
+    tagged = pos_tag(tokens)
+
+    # Perform Named Entity Recognition (NER) on the tagged tokens
+    entities = ne_chunk(tagged)
+
+    return entities
+
+nltk.download('vader_lexicon')
+
+async def extract_sentiment_vader(text):
+    """
+    Analyzes the sentiment of a given text using the VADER Sentiment Intensity Analyzer.
+
+    Parameters:
+    text (str): The text to analyze.
+
+    Returns:
+    dict: A dictionary containing the polarity scores for the text.
+    """
+    # Initialize the VADER Sentiment Intensity Analyzer
+    sia = SentimentIntensityAnalyzer()
+
+    # Obtain the polarity scores for the text
+    polarity_scores = sia.polarity_scores(text)
+
+    return polarity_scores
+
+
+if __name__ == "__main__":
+    sample_text = "I love sunny days, but I hate the rain."
+    sentiment_scores = extract_sentiment_vader(sample_text)
+    print("Sentiment analysis results:", sentiment_scores)

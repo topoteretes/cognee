@@ -43,6 +43,12 @@ class GraphDBInterface(Protocol):
         id: str
     ): raise NotImplementedError
 
+    @abstractmethod
+    async def extract_node(
+        self,
+        id: str
+    ): raise NotImplementedError
+
 
     """ CRUD operations on graph edges """
 

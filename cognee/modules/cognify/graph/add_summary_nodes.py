@@ -3,10 +3,6 @@ from cognee.infrastructure.databases.graph.get_graph_client import get_graph_cli
 
 
 async def add_summary_nodes(graph_client,document_id, classification_data):
-    # graph_client = get_graph_client(GraphDBType.NETWORKX)
-    #
-    # await graph_client.load_graph_from_file()
-
 
     # Create the layer classification node ID
     layer_classification_node_id = f"LLM_LAYER_SUMMARY_{document_id}"

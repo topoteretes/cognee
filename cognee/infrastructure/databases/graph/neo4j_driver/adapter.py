@@ -52,7 +52,8 @@ class Neo4jAdapter(GraphDBInterface):
 
 
         serialized_properties = {k: json.dumps(v) if isinstance(v, (dict, list)) else v for k, v in kwargs.items()}
-        serialized_properties['name'] = node_id
+        if 'name' not in serialized_properties:
+            serialized_properties['name'] = node_id
 
         serialized_properties['created_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         serialized_properties['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -76,6 +77,47 @@ class Neo4jAdapter(GraphDBInterface):
     async def create_base_model_from_pydantic_object(self, id: str, pydantic_object: object):
         """Asynchronously add a node to the graph if it doesn't already exist, with given properties."""
         pass
+
+
+
+    async def extract_node_description(self, id: str):
+        """Extract node from the graph if it doesn't already exist, with given properties."""
+        query= f"""     MATCH (n)-[r]->(m)
+                        WHERE n.node_id = '{id}'
+                        AND NOT m.node_id CONTAINS 'DOCUMENT'
+                        AND m.layer_decomposition_uuid IS NOT NULL
+                        RETURN m
+
+                        """
+        result = await self.query(query)
+        await self.close()
+        descriptions = []
+        for node in result:
+            # Assuming 'm' is a consistent key in your data structure
+            attributes = node.get('m', {})
+
+            # Ensure all required attributes are present
+            if all(key in attributes for key in ['description', 'unique_id', 'layer_uuid', 'layer_decomposition_uuid']):
+                descriptions.append({
+                    "node_id": attributes["unique_id"],
+                    "description": attributes["description"],
+                    "layer_uuid": attributes["layer_uuid"],
+                    "layer_decomposition_uuid": attributes["layer_decomposition_uuid"]
+                })
+
+        return descriptions
+
+
+
+    async def extract_node(self, id: str):
+        """Extract node from the graph if it doesn't already exist, with given properties."""
+        query= f"""    MATCH(n)
+                        WHERE
+                        ID(n) = {id}
+                       RETURN n"""
+        result = await self.query(query)
+        await self.close()
+        return result
 
 
 
@@ -105,7 +147,7 @@ class Neo4jAdapter(GraphDBInterface):
         if not filtered_properties:
             query = (
                 f"MATCH (a:`{from_node}` {{node_id: $from_node}}), (b:`{to_node}` {{node_id: $to_node}}) "
-                f"MERGE (a)-[r:{relationship_type}]->(b) "
+                f"MERGE (a)-[r:`{relationship_type}`]->(b) "
                 "RETURN r"
             )
             params = {'from_node': from_node, 'to_node': to_node}
@@ -116,7 +158,7 @@ class Neo4jAdapter(GraphDBInterface):
             set_clause = ', '.join(f'r.{k} = ${k}' for k in filtered_properties.keys())
             query = (
                 f"MATCH (a:`{from_node}` {{node_id: $from_node}}), (b:`{to_node}`  {{node_id: $to_node}}) "
-                f"MERGE (a)-[r:{relationship_type}]->(b) "
+                f"MERGE (a)-[r:`{relationship_type}`]->(b) "
                 f"SET {set_clause} "
                 "RETURN r"
             )
@@ -134,7 +176,7 @@ class Neo4jAdapter(GraphDBInterface):
         """Asynchronously filter nodes in the graph based on the given properties."""
 
         query = f""" MATCH (d)
-                WHERE d.{search_node} CONTAINS '{search_criteria}'
+                WHERE d.node_id CONTAINS '{search_criteria}'
                 RETURN d"""
 
 

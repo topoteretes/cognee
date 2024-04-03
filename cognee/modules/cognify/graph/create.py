@@ -71,29 +71,21 @@ async def process_attribute(graph_client, parent_id: Optional[str], attribute: s
         created_node_ids = []
     if isinstance(value, BaseModel):
         node_id = await generate_node_id(value)
-
-        # print("HERE IS THE NODE ID", node_id)
-
         node_data = value.model_dump()
 
         # Use the specified default relationship for the edge between the parent node and the current node
 
-
-
-
         created_node_id = await add_node(graph_client, parent_id, node_id, node_data)
-        print("fhdhfdshf", created_node_id)
+
         created_node_ids.append(created_node_id)
 
         # await add_edge(graph_client, parent_id, node_id, node_data, relationship_data,created_node_ids)
 
         # Recursively process nested attributes to ensure all nodes and relationships are added to the graph
         for sub_attr, sub_val in value.__dict__.items():  # Access attributes and their values directly
-            # print("HERE IS THE SUB ATTR", sub_attr)
-            # print("HERE IS THE SUB VAL", sub_val)
 
             out = await process_attribute(graph_client, node_id, sub_attr, sub_val)
-            print("OU2222T", out)
+
             created_node_ids.extend(out)
 
     elif isinstance(value, list) and all(isinstance(item, BaseModel) for item in value):
@@ -110,7 +102,6 @@ async def process_attribute_edge(graph_client, parent_id: Optional[str], attribu
     if isinstance(value, BaseModel):
         node_id = await generate_node_id(value)
 
-        # print("HERE IS THE NODE ID", node_id)
 
         node_data = value.model_dump()
         relationship_data = {}
@@ -119,8 +110,6 @@ async def process_attribute_edge(graph_client, parent_id: Optional[str], attribu
 
         # Recursively process nested attributes to ensure all nodes and relationships are added to the graph
         for sub_attr, sub_val in value.__dict__.items():  # Access attributes and their values directly
-            # print("HERE IS THE SUB ATTR", sub_attr)
-            # print("HERE IS THE SUB VAL", sub_val)
 
             await process_attribute_edge(graph_client, node_id, sub_attr, sub_val, created_node_ids)
 
@@ -141,22 +130,15 @@ async def create_dynamic(graph_model, graph_client) :
 
     root_id = root_id.replace(":", "_")
 
-
-    # print(f"Adding root node with ID: {root_id}")
-    # print(f"Node data: {node_data}")
-
-
     _ = node_data.pop("node_id", None)
 
     created_node_ids = []
-    print("ROOT ID", root_id)
     out = await graph_client.add_node(root_id, **node_data)
     created_node_ids.append(out)
     for attribute_name, attribute_value in graph_model:
         # print("ATTRIB NAME", attribute_name)
         # print("ATTRIB VALUE", attribute_value)
         ids = await process_attribute(graph_client, root_id, attribute_name, attribute_value)
-        print("IDS", ids)
         created_node_ids.extend(ids)
 
     flattened_and_deduplicated = list({
@@ -166,17 +148,8 @@ async def create_dynamic(graph_model, graph_client) :
                                           for item in sublist  # Iterate over items in the sublist
                                       }.values())
 
-    print("OOOOO", flattened_and_deduplicated)
-
-
     for attribute_name, attribute_value in graph_model:
-        # print("ATTRIB NAME", attribute_name)
-        # print("ATTRIB VALUE", attribute_value)
         ids = await process_attribute_edge(graph_client, root_id, attribute_name, attribute_value, flattened_and_deduplicated)
-
-
-
-
 
     return graph_client
 
@@ -189,143 +162,6 @@ async def create_semantic_graph(graph_model_instance, graph_client):
 
 
 
-# if __name__ == "__main__":
-#     import asyncio
-
-#     # Assuming all necessary imports and GraphDBType, get_graph_client, Document, DocumentType, etc. are defined
-
-#     # Initialize the graph client
-#     graph_client = get_graph_client(GraphDBType.NETWORKX)
-
-#     # Define a GraphModel instance with example data
-#     graph_model_instance = DefaultGraphModel(
-#         id="user123",
-#         documents=[
-#             Document(
-#                 doc_id="doc1",
-#                 title="Document 1",
-#                 summary="Summary of Document 1",
-#                 content_id="content_id_for_doc1",
-#                 doc_type=DocumentType(type_id="PDF", description="Portable Document Format"),
-#                 categories=[
-#                     Category(category_id="finance", name="Finance", default_relationship=Relationship(type="belongs_to")),
-#                     Category(category_id="tech", name="Technology", default_relationship=Relationship(type="belongs_to"))
-#                 ],
-#                 default_relationship=Relationship(type="has_document")
-#             ),
-#             Document(
-#                 doc_id="doc2",
-#                 title="Document 2",
-#                 summary="Summary of Document 2",
-#                 content_id="content_id_for_doc2",
-#                 doc_type=DocumentType(type_id="TXT", description="Text File"),
-#                 categories=[
-#                     Category(category_id="health", name="Health", default_relationship=Relationship(type="belongs_to")),
-#                     Category(category_id="wellness", name="Wellness", default_relationship=Relationship(type="belongs_to"))
-#                 ],
-#                 default_relationship=Relationship(type="has_document")
-#             )
-#         ],
-#         user_properties=UserProperties(
-#             custom_properties={"age": "30"},
-#             location=UserLocation(location_id="ny", description="New York", default_relationship=Relationship(type="located_in"))
-#         ),
-#         default_fields={
-#             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-#         }
-#     )
-
-#     # Run the graph creation asynchronously
-#     G = asyncio.run(create_semantic_graph(graph_model_instance, graph_client))
-
-#     # Optionally, here you can add more nodes, edges, or perform other operations on the graph G
-
-# async def create_semantic_graph(
-# ):
-#     graph_type = GraphDBType.NETWORKX
-#
-#     # Call the get_graph_client function with the selected graph type
-#     graph_client = get_graph_client(graph_type)
-#
-#     print(graph_client)
-#
-#     await graph_client.load_graph_from_file()
-#     #
-#     #
-#     #
-#     # b = await graph_client.add_node("23ds",     {
-#     #     "username": "exampleUser",
-#     #     "email": "user@example.com"
-#     # })
-#     #
-#     # await graph_client.save_graph_to_file(b)
-#     graph_model_instance = DefaultGraphModel(
-#         id="user123",
-#         documents=[
-#             Document(
-#                 doc_id="doc1",
-#                 title="Document 1",
-#                 summary="Summary of Document 1",
-#                 content_id="content_id_for_doc1",  # Assuming external content storage ID
-#                 doc_type=DocumentType(type_id="PDF", description="Portable Document Format"),
-#                 categories=[
-#                     Category(category_id="finance", name="Finance",
-#                              default_relationship=Relationship(type="belongs_to")),
-#                     Category(category_id="tech", name="Technology",
-#                              default_relationship=Relationship(type="belongs_to"))
-#                 ],
-#                 default_relationship=Relationship(type='has_document')
-#             ),
-#             Document(
-#                 doc_id="doc2",
-#                 title="Document 2",
-#                 summary="Summary of Document 2",
-#                 content_id="content_id_for_doc2",
-#                 doc_type=DocumentType(type_id="TXT", description="Text File"),
-#                 categories=[
-#                     Category(category_id="health", name="Health", default_relationship=Relationship(type="belongs_to")),
-#                     Category(category_id="wellness", name="Wellness",
-#                              default_relationship=Relationship(type="belongs_to"))
-#                 ],
-#                 default_relationship=Relationship(type='has_document')
-#             )
-#         ],
-#         user_properties=UserProperties(
-#             custom_properties={"age": "30"},
-#             location=UserLocation(location_id="ny", description="New York",
-#                                   default_relationship=Relationship(type='located_in'))
-#         ),
-#         default_fields={
-#             'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#             'updated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-#         }
-#     )
-#
-#     G = await create_dynamic(graph_model_instance, graph_client)
-#
-#     # print("Nodes and their data:")
-#     # for node, data in G.graph.nodes(data=True):
-#     #     print(node, data)
-#     #
-#     # # Print edges with their data
-#     # print("\nEdges and their data:")
-#     # for source, target, data in G.graph.edges(data=True):
-#     #     print(f"{source} -> {target} {data}")
-#     # print(G)
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#     # return await graph_client.create( user_id = user_id, custom_user_properties=custom_user_properties, required_layers=required_layers, default_fields=default_fields, existing_graph=existing_graph)
-#
-#
 # if __name__ == "__main__":
 #     import asyncio
 #

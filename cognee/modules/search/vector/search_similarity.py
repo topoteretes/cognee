@@ -1,10 +1,16 @@
 
-from cognee.modules.cognify.graph.add_node_connections import extract_node_descriptions
+
 from cognee.infrastructure import infrastructure_config
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
 
-async def search_similarity(query: str, graph, other_param: str = None):
-    node_descriptions = await extract_node_descriptions(graph.nodes(data = True))
+async def search_similarity(query: str, graph, other_param: str = None, node_descriptions: list = None):
+    base_node_for_graph = "LLM_CLASSIFICATION_LAYER_"  ### TO FIX
+    graph_db_type = infrastructure_config.get_config()["graph_engine"]
+
+    graph_client = await get_graph_client(graph_db_type)
+
+    node_descriptions = await graph_client.extract_node_description(base_node_for_graph)
 
     unique_layer_uuids = set(node["layer_decomposition_uuid"] for node in node_descriptions)
 

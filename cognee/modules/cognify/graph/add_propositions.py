@@ -39,25 +39,33 @@ async def add_propositions(graph_client,
     # Mapping from old node IDs to new node IDs
     node_id_mapping = {}
 
+
+
     # Add nodes from the Pydantic object
     for node in new_data.nodes:
         unique_node_id = uuid.uuid4()
 
         new_node_id = f"{node.description} - {str(layer_uuid)}  - {str(layer_decomposition_uuid)} - {str(unique_node_id)}"
 
+        from cognee.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
+
+        extract_pos_tags = await extract_pos_tags(node.description)
+        extract_named_entities = await extract_named_entities(node.description)
+        extract_sentiment = await extract_sentiment_vader(node.description)
+
         await graph_client.add_node(
             new_node_id,
+            name = node.description,
             description=node.description,
             layer_uuid=str(layer_uuid),
             layer_description=str(layer_description),
             layer_decomposition_uuid=str(layer_decomposition_uuid),
             unique_id=str(unique_node_id),
+            pos_tags =extract_pos_tags,
+            named_entities = extract_named_entities,
+            sentiment = extract_sentiment,
             type='detail'
         )
-
-        print("HERE IS LAYER NODE ID", layer_node_id)
-
-        print("HERE IS NEW NODE ID", new_node_id)
 
         await graph_client.add_edge(layer_node_id, new_node_id, relationship_type='detail')
 
@@ -70,15 +78,15 @@ async def add_propositions(graph_client,
         source_node_id = node_id_mapping.get(edge.source)
         target_node_id = node_id_mapping.get(edge.target)
 
+
         if source_node_id and target_node_id:
-            await graph_client.add_edge(source_node_id, target_node_id, relationship_type='connects')
+            await graph_client.add_edge(source_node_id, target_node_id, relationship_type=edge.description)
         else:
             print(f"Could not find mapping for edge from {edge.source} to {edge.target}")
 
 async def append_to_graph(graph_client, layer_graphs, required_layers):
     # Generate a UUID for the overall layer
     layer_uuid = uuid.uuid4()
-    print("EXAMPLE OF LAYER GRAPHS", required_layers)
     # Extract category name from required_layers data
     data_type = required_layers["data_type"]
 

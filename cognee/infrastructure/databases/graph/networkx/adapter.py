@@ -67,6 +67,39 @@ class NetworXAdapter(GraphDBInterface):
             self.graph.remove_node(id)
             await self.save_graph_to_file(self.filename)
 
+    async def extract_node_description(self, node_string_id):
+        descriptions = []
+
+        if self.graph.has_node(node_string_id):
+            # Get the attributes of the node
+            for neighbor in self.graph.neighbors(node_string_id):
+                # Get the attributes of the neighboring node
+                attributes = self.graph.nodes[neighbor]
+
+                # Ensure all required attributes are present before extracting description
+                if all(key in attributes for key in
+                       ['description', 'unique_id', 'layer_uuid', 'layer_decomposition_uuid']):
+                    descriptions.append({
+                        "node_id": attributes["unique_id"],
+                        "description": attributes["description"],
+                        "layer_uuid": attributes["layer_uuid"],
+                        "layer_decomposition_uuid": attributes["layer_decomposition_uuid"]
+                    })
+
+        return descriptions
+
+
+    async def extract_node(self, node_string_id):
+
+
+        if self.graph.has_node(node_string_id):
+            # Get the attributes of the node
+            attributes = self.graph.nodes[node_string_id]
+
+            print(attributes)
+
+        return attributes
+
 
     async def save_graph_to_file(self, file_path: str=None) -> None:
         """Asynchronously save the graph to a file in JSON format."""

@@ -9,7 +9,7 @@ from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
 from cognee.modules.cognify.llm.summarize_content import summarize_content
 from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, graph_ready_output, \
-    connect_nodes_in_graph, extract_node_descriptions
+    connect_nodes_in_graph
 from cognee.modules.cognify.graph.add_propositions import append_to_graph
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
 from cognee.modules.cognify.vector.add_propositions import add_propositions
@@ -87,128 +87,159 @@ async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: obje
     return graphs[0]
 
 async def process_text(input_text: str, file_metadata: dict):
-    print(f"Processing document ({file_metadata['id']})")
-
-    classified_categories = []
-
-    print("WE ARE HERE")
-
-    try:
-        # Classify the content into categories
-        classified_categories = await classify_into_categories(
-            input_text,
-            "classify_content.txt",
-            infrastructure_config.get_config()["classification_model"]
-        )
-        file_metadata["categories"] = list(map(lambda category: category["layer_name"], classified_categories))
-    except Exception as e:
-        print(e)
-        raise e
-
-    try:
-        # Classify the content into categories
-        content_summary = await summarize_content(
-            input_text,
-            "summarize_content.txt",
-            SummarizedContent
-        )
-        file_metadata["summary"] = content_summary["summary"]
-        file_metadata["description"] = content_summary["description"]
-    except Exception as e:
-        print(e)
-        raise e
-
-    try:
-        # Classify the content into categories
-        content_labels = await label_content(
-            input_text,
-            "label_content.txt",
-            infrastructure_config.get_config()["labeling_model"]
-        )
-        file_metadata["content_labels"] = content_labels["content_labels"]
-    except Exception as e:
-        print(e)
-        raise e
+    # print(f"Processing document ({file_metadata['id']})")
+    #
+    # classified_categories = []
+    #
+    # print("WE ARE HERE")
+    #
+    # try:
+    #     # Classify the content into categories
+    #     classified_categories = await classify_into_categories(
+    #         input_text,
+    #         "classify_content.txt",
+    #         infrastructure_config.get_config()["classification_model"]
+    #     )
+    #     file_metadata["categories"] = list(map(lambda category: category["layer_name"], classified_categories))
+    # except Exception as e:
+    #     print(e)
+    #     raise e
+    #
+    # try:
+    #     # Classify the content into categories
+    #     content_summary = await summarize_content(
+    #         input_text,
+    #         "summarize_content.txt",
+    #         SummarizedContent
+    #     )
+    #     file_metadata["summary"] = content_summary["summary"]
+    #     file_metadata["description"] = content_summary["description"]
+    # except Exception as e:
+    #     print(e)
+    #     raise e
+    #
+    # try:
+    #     # Classify the content into categories
+    #     content_labels = await label_content(
+    #         input_text,
+    #         "label_content.txt",
+    #         infrastructure_config.get_config()["labeling_model"]
+    #     )
+    #     file_metadata["content_labels"] = content_labels["content_labels"]
+    # except Exception as e:
+    #     print(e)
+    #     raise e
     graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
-
-
-    await add_document_node(graph_client, f"DefaultGraphModel_{USER_ID}", file_metadata)
-    print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
-
-    cognitive_layers = await content_to_cog_layers(
-        classified_categories[0],
-        response_model = infrastructure_config.get_config()["congitive_layer_model"]
-    )
-
-    cognitive_layers = [layer_subgroup.name for layer_subgroup in cognitive_layers.cognitive_layers]
-    import tracemalloc
-
-    tracemalloc.start()
-
-
-    async def generate_graph_per_layer(text_input: str, layers: List[str], response_model: KnowledgeGraph = KnowledgeGraph):
-        generate_graphs_awaitables = [generate_graph(text_input, "generate_graph_prompt.txt", {"layer": layer}, response_model) for layer in
-                layers]
-
-        return await asyncio.gather(*generate_graphs_awaitables)
-
-    # Run the async function for each set of cognitive layers
-    layer_graphs = await generate_graph_per_layer(input_text, cognitive_layers)
-
-    print("Layer graphs generated %s", layer_graphs)
-
-    print(f"Document ({file_metadata['id']}) layer graphs created")
-
-
-    await add_classification_nodes(graph_client,f"DOCUMENT_{file_metadata['id']}", classified_categories[0])
-
-    await add_summary_nodes(graph_client,f"DOCUMENT_{file_metadata['id']}", {"summary": file_metadata["summary"]})
-
-    await add_label_nodes(graph_client,f"DOCUMENT_{file_metadata['id']}", {"content_labels": file_metadata["content_labels"]})
-
-    await append_to_graph(graph_client, layer_graphs, classified_categories[0])
-
-    print(f"Document ({file_metadata['id']}) layers connected")
-
-    print("Document categories, summaries and metadata are: ", str(classified_categories))
-
-    print("Document metadata is: ", str(file_metadata))
-
-
+    #
+    #
+    # await add_document_node(graph_client, f"DefaultGraphModel_{USER_ID}", file_metadata)
+    # print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
+    #
+    # cognitive_layers = await content_to_cog_layers(
+    #     classified_categories[0],
+    #     response_model = infrastructure_config.get_config()["congitive_layer_model"]
+    # )
+    #
+    # cognitive_layers = [layer_subgroup.name for layer_subgroup in cognitive_layers.cognitive_layers]
+    # import tracemalloc
+    #
+    # tracemalloc.start()
+    #
+    #
+    # async def generate_graph_per_layer(text_input: str, layers: List[str], response_model: KnowledgeGraph = KnowledgeGraph):
+    #     generate_graphs_awaitables = [generate_graph(text_input, "generate_graph_prompt.txt", {"layer": layer}, response_model) for layer in
+    #             layers]
+    #
+    #     return await asyncio.gather(*generate_graphs_awaitables)
+    #
+    # # Run the async function for each set of cognitive layers
+    # layer_graphs = await generate_graph_per_layer(input_text, cognitive_layers)
+    #
+    # print("Layer graphs generated %s", layer_graphs)
+    #
+    # print(f"Document ({file_metadata['id']}) layer graphs created")
+    #
+    #
+    # base_node_for_graph = await add_classification_nodes(graph_client,f"DOCUMENT_{file_metadata['id']}", classified_categories[0])
+    #
+    # await add_summary_nodes(graph_client,f"DOCUMENT_{file_metadata['id']}", {"summary": file_metadata["summary"]})
+    #
+    # await add_label_nodes(graph_client,f"DOCUMENT_{file_metadata['id']}", {"content_labels": file_metadata["content_labels"]})
+    #
+    # await append_to_graph(graph_client, layer_graphs, classified_categories[0])
+    #
+    # print(f"Document ({file_metadata['id']}) layers connected")
+    #
+    # print("Document categories, summaries and metadata are: ", str(classified_categories))
+    #
+    # print("Document metadata is: ", str(file_metadata))
+    #
+    # print("Base nodes for a graph : ", base_node_for_graph)
+    #
+    # base_node_for_graph = 'LLM_CLASSIFICATION_LAYER_Research papers and academic publications_DOCUMENT_062c22df-d99b-599f-90cd-2d325c8bcf69'
+    # #
+    # # base_node_for_graph ='LLM_CLASSIFICATION_LAYER_Research papers and academic publications_DOCUMENT_062c22df-d99b-599f-90cd-2d325c8bcf69'
+    #
+    # node_descriptions = await graph_client.extract_node_description(base_node_for_graph)
+    #
+    # # print("Node descriptions are: ", str(node_descriptions))
+    #
+    # #
+    # #
+    # # graph = graph_client.graph
+    # #
+    # # node_descriptions = await extract_node_descriptions(base_node_for_graph)
+    # #
+    # nodes_by_layer = await group_nodes_by_layer(node_descriptions)
+    #
+    # # print("HERE ARE THE NODES BY LAYER", nodes_by_layer)
+    # #
+    # unique_layers = nodes_by_layer.keys()
+    #
+    # try:
+    #     vector_engine = infrastructure_config.get_config()["vector_engine"]
+    #
+    #     for layer in unique_layers:
+    #         await vector_engine.create_collection(layer)
+    # except Exception as e:
+    #     print(e)
+    #
+    # await add_propositions(nodes_by_layer)
+    # #
+    # results = await resolve_cross_graph_references(nodes_by_layer)
+    # #
+    # relationships = graph_ready_output(results)
+    # print("RELATIONSHIPS", str(relationships)[:3000])
 
     # await graph_client.load_graph_from_file()
+    #
+    # graph = graph_client.graph
+    relationships = {
+    'SSiKOqSiaGySGeumaeSueGmGOCyyGOKKWmeQ': [
+        {
+            'collection_id': 'SSiKOqSiaGySGeumaeSueGmGOCyyGOKKWmeQ',
+            'searched_node_id': 'f8bc9327-df8d-4b15-bf99-7717688a8140',
+            'score': 1.0,
+            'score_metadata': {'text': 'A computer that takes advantage of quantum mechanical phenomena'},
+            'original_id_for_search': 'e8d509ee-9233-4e6c-9e6b-6ed9e9cbbc20'
+        },
+        {
+            'collection_id': 'SSiKOqSiaGySGeumaeSueGmGOCyyGOKKWmeQ',
+            'searched_node_id': '30ad4c83-9ec6-444a-b0a5-42029ef843c5',
+            'score': 1.0,
+            'score_metadata': {'text': 'Phenomena exhibited by physical matter at small scales, showing properties of both particles and waves'},
+            'original_id_for_search': '851d7f0f-5e9d-414d-9cb1-48b616c3f0d5'
+        },
+        # Additional relationships as needed
+    ]
+    # Additional collections as needed
+}
 
-    graph = graph_client.graph
+    await connect_nodes_in_graph(graph_client, relationships)
+    #
+    # print(f"Document ({file_metadata['id']}) processed")
 
-    node_descriptions = await extract_node_descriptions(graph.nodes(data = True))
-
-    nodes_by_layer = await group_nodes_by_layer(node_descriptions)
-
-    unique_layers = nodes_by_layer.keys()
-
-    try:
-        vector_engine = infrastructure_config.get_config()["vector_engine"]
-
-        for layer in unique_layers:
-            await vector_engine.create_collection(layer)
-    except Exception as e:
-        print(e)
-
-    await add_propositions(nodes_by_layer)
-
-    results = await resolve_cross_graph_references(nodes_by_layer)
-
-    relationships = graph_ready_output(results)
-    # print(relationships)
-    await graph_client.load_graph_from_file()
-
-    graph = graph_client.graph
-
-    connect_nodes_in_graph(graph, relationships)
-
-    print(f"Document ({file_metadata['id']}) processed")
-
-    return graph
+    # return graph
 
 
 
@@ -218,7 +249,7 @@ if __name__ == "__main__":
 
 
         infrastructure_config.set_config({
-            "graph_engine": GraphDBType.NEO4J
+            "graph_engine": GraphDBType.NETWORKX
         })
         # print(infrastructure_config.get_config())
         text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
@@ -229,20 +260,22 @@ if __name__ == "__main__":
         In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
         """
         dataset_name = "explanations"
-        from cognee.api.v1.add.add import add
-        await add(
-            [
-                text_1
-
-            ],
-            dataset_name
-        )
+        # from cognee.api.v1.add.add import add
+        # await add(
+        #     [
+        #         text_1
+        #
+        #     ],
+        #     dataset_name
+        # )
         graph = await cognify(datasets=dataset_name)
 
-        # graph_client = await get_graph_client(GraphDBType.NEO4J)
-        # from cognee.utils import render_graph
-        # graph_url = await render_graph(graph_client.graph)
-        # print(graph_url)
+        if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+
+            graph_client = await get_graph_client(GraphDBType.NETWORKX)
+            from cognee.utils import render_graph
+            graph_url = await render_graph(graph_client.graph)
+            print(graph_url)
 
 
     asyncio.run(main())
