@@ -1,6 +1,8 @@
 from typing import List
 
 import instructor
+from openai import AsyncOpenAI
+from fastembed import TextEmbedding
 from fastembed import TextEmbedding
 from openai import AsyncOpenAI
 
