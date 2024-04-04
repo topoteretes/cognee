@@ -91,8 +91,6 @@ async def process_text(input_text: str, file_metadata: dict):
 
     classified_categories = []
 
-    print("WE ARE HERE")
-
     try:
         # Classify the content into categories
         classified_categories = await classify_into_categories(
