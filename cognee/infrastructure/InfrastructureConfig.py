@@ -28,6 +28,7 @@ class InfrastructureConfig():
     labeling_model = None
     graph_model = None,
     cognitive_layer_model = None
+    intra_layer_score_treshold = None
 
 
 
@@ -46,7 +47,6 @@ class InfrastructureConfig():
 
         if self.classification_model is None:
             self.classification_model = DefaultContentPrediction
-
         if self.summarization_model is None:
             self.summarization_model = SummarizedContent
         if self.labeling_model is None:
@@ -55,6 +55,10 @@ class InfrastructureConfig():
             self.graph_model = KnowledgeGraph
         if self.cognitive_layer_model is None:
             self.cognitive_layer_model = DefaultCognitiveLayer
+
+        if self.intra_layer_score_treshold is None:
+            self.intra_layer_score_treshold = config.intra_layer_score_treshold
+
 
         if self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
@@ -95,7 +99,8 @@ class InfrastructureConfig():
             "labeling_model": self.labeling_model,
             "graph_model": self.graph_model,
             "congitive_layer_model": self.cognitive_layer_model,
-            "llm_provider": self.llm_provider
+            "llm_provider": self.llm_provider,
+            "intra_layer_score_treshold": self.intra_layer_score_treshold
 
         }
 
@@ -132,5 +137,11 @@ class InfrastructureConfig():
 
         if "llm_provider" in new_config:
             self.llm_provider = new_config["llm_provider"]
+
+        if "cognitive_layer_model" in new_config:
+            self.cognitive_layer_model = new_config["cognitive_layer_model"]
+
+        if "intra_layer_score_treshold" in new_config:
+            self.intra_layer_score_treshold = new_config["intra_layer_score_treshold"]
 
 infrastructure_config = InfrastructureConfig()

@@ -103,6 +103,9 @@ class Config:
         db_password: str = os.getenv("POSTGRES_PASSWORD")
         db_name: str = os.getenv("POSTGRES_DB")
 
+    # Model parameters and configuration for interlayer scoring
+    intra_layer_score_treshold: float = 0.5
+
 
     # Client ID
     anon_clientid: Optional[str] = field(default_factory=lambda: uuid.uuid4().hex)

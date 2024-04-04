@@ -1,37 +1,19 @@
+import uuid
+
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
 
 
-# async def extract_node_descriptions(node):
-#     descriptions = []
-#
-#     if G.has_node(node_id):
-#         # Get the attributes of the node
-#         attributes = G.nodes[node_id]
-#
-#
-#     for node_id, attributes in node:
-#         if "description" in attributes and "unique_id" in attributes:
-#             descriptions.append({
-#                 "node_id": attributes["unique_id"],
-#                 "description": attributes["description"],
-#                 "layer_uuid": attributes["layer_uuid"],
-#                 "layer_decomposition_uuid": attributes["layer_decomposition_uuid"]
-#             })
-#
-#     return descriptions
-
 
 async def group_nodes_by_layer(node_descriptions):
+    """ Group nodes by layer decomposition uuid """
     grouped_data = {}
 
     for item in node_descriptions:
         uuid = item["layer_decomposition_uuid"]
-
         if uuid not in grouped_data:
             grouped_data[uuid] = []
-
         grouped_data[uuid].append(item)
 
     print("GROUPED DATA", grouped_data)
@@ -40,6 +22,7 @@ async def group_nodes_by_layer(node_descriptions):
 
 
 async def get_node_by_unique_id(graph, unique_id):
+    """ Get a node by its unique_id"""
     # Iterate through all nodes and their attributes in the graph
     for node, attrs in graph.nodes(data=True):
         # Check if the current node's attributes contain the unique_id we're looking for
@@ -48,100 +31,38 @@ async def get_node_by_unique_id(graph, unique_id):
     return None
 
 async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
+    """ Connect nodes in the graph based on the relationship_dict and score_threshold"""
     if not graph or not relationship_dict:
         return graph
 
     for _, relationships in relationship_dict.items():
         for relationship in relationships:
+            print("RELATIONSHIPssc", relationship['score'])
 
             if relationship['score'] > score_threshold:
 
                 # For NetworkX
                 if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-
                     searched_node_id_found = await get_node_by_unique_id(graph.graph, relationship['searched_node_id'])
-
-
                     original_id_for_search_found = await get_node_by_unique_id(graph.graph, relationship['original_id_for_search'])
-
-
                     if searched_node_id_found and original_id_for_search_found:
                         print("NETWORKX adding edgedsadas", searched_node_id_found, original_id_for_search_found)
                         await graph.add_edge(
                             relationship['searched_node_id'],
                             relationship['original_id_for_search'],
                             weight=relationship['score'],
-                            score_metadata=relationship.get('score_metadata', {})
+                            score_metadata=relationship.get('score_metadata', {}),
+                            id = f""" {relationship['searched_node_id']}_{relationship['original_id_for_search']}_{str(uuid.uuid4())}"""
                         )
+                    return graph
                 # For Neo4j
                 elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
                     # Neo4j specific logic to add an edge
                     # This is just a placeholder, replace it with actual Neo4j logic
-                    await graph.query(f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}'
+                    print("query is ", f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}' CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")
+                    result = await graph.query(f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}'
                               CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")
-    return graph
-
-# async def connect_nodes_in_graph(graph=None, relationship_dict: dict=None, score_treshold:float=None):
-#     """
-#     For each relationship in relationship_dict, check if both nodes exist in the graph based on node attributes.
-#     If they do, create a connection (edge) between them.
-#
-#     :param graph: A NetworkX graph object
-#     :param relationship_dict: A dictionary containing relationships between nodes
-#     """
-#     if score_treshold is None:
-#         score_treshold = 0.9
-#     for id, relationships in relationship_dict.items():
-#         for relationship in relationships:
-#             searched_node_attr_id = relationship["searched_node_id"]
-#             score_attr_id = relationship["original_id_for_search"]
-#             score = relationship["score"]
-#
-#             if score> score_treshold:
-#                 # Initialize node keys for both searched_node and score_node
-#                 searched_node_key, score_node_key = None, None
-#
-#                 # Find nodes in the graph that match the searched_node_id and score_id from their attributes
-#
-#                 if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-#                     searched_node_key = await graph.extract_node(node_string_id=searched_node_attr_id)
-#                     print("NETWORKX SEARCHED NODE KEY", searched_node_key)
-#                     score_node_key = await graph.extract_node(node_string_id=searched_node_attr_id)
-#                     print("NETWORKX SCORE NODE KEY", score_node_key)
-#
-#                 elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
-#                     searched_node_key = await graph.extract_node(node_string_id=searched_node_attr_id)
-#                     print("NEO4J SEARCHED NODE KEY", searched_node_key)
-#                     score_node_key = await graph.extract_node(node_string_id=searched_node_attr_id)
-#                     print("NEO4J SCORE NODE KEY", score_node_key)
-#
-#
-#                 # for node, attrs in graph.nodes(data = True):
-#                 #     if "unique_id" in attrs:  # Ensure there is an "id" attribute
-#                 #         if attrs["unique_id"] == searched_node_attr_id:
-#                 #             searched_node_key = node
-#                 #         elif attrs["unique_id"] == score_attr_id:
-#                 #             score_node_key = node
-#
-#                     # If both nodes are found, no need to continue checking other nodes
-#                     if searched_node_key and score_node_key:
-#                         break
-#
-#                 # Check if both nodes were found in the graph
-#                 if searched_node_key is not None and score_node_key is not None:
-#                     # print(f"Connecting {searched_node_key} to {score_node_key}")
-#                     # If both nodes exist, create an edge between them
-#                     # You can customize the edge attributes as needed, here we use "score" as an attribute
-#                     graph.add_edge(
-#                         searched_node_key,
-#                         score_node_key,
-#                         weight = score,
-#                         score_metadata = relationship.get("score_metadata")
-#                     )
-#             else:
-#                 pass
-#
-#     return graph
+                    await graph.close()
 
 
 def graph_ready_output(results):

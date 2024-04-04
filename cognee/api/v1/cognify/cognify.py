@@ -200,35 +200,44 @@ async def process_text(input_text: str, file_metadata: dict):
     relationships = graph_ready_output(results)
     print("RELATIONSHIPS", str(relationships)[:8000])
 
-    # await graph_client.load_graph_from_file()
-    #
-    # graph = graph_client.graph
-    relationships = {
-    'SSiKOqSiaGySGeumaeSueGmGOCyyGOKKWmeQ': [
-        {
-            'collection_id': 'SSiKOqSiaGySGeumaeSueGmGOCyyGOKKWmeQ',
-            'searched_node_id': 'f8bc9327-df8d-4b15-bf99-7717688a8140',
-            'score': 1.0,
-            'score_metadata': {'text': 'A computer that takes advantage of quantum mechanical phenomena'},
-            'original_id_for_search': 'e8d509ee-9233-4e6c-9e6b-6ed9e9cbbc20'
-        },
-        {
-            'collection_id': 'SSiKOqSiaGySGeumaeSueGmGOCyyGOKKWmeQ',
-            'searched_node_id': '30ad4c83-9ec6-444a-b0a5-42029ef843c5',
-            'score': 1.0,
-            'score_metadata': {'text': 'Phenomena exhibited by physical matter at small scales, showing properties of both particles and waves'},
-            'original_id_for_search': '851d7f0f-5e9d-414d-9cb1-48b616c3f0d5'
-        },
-        # Additional relationships as needed
-    ]
-    # Additional collections as needed
-}
+    # relationships = {
+    #     'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS': [
+    #         {
+    #             'collection_id': 'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS',
+    #             'searched_node_id': '77a0bbb3-dc13-4fb8-a665-aadcfc04a05f',
+    #             'score': 1.0,
+    #             'score_metadata': {
+    #                 'text': 'A computer that exploits quantum mechanical phenomena to perform computations.'
+    #             },
+    #             'original_id_for_search': '7393e6e0-6515-46c4-b927-f99b4f635823'
+    #         },
+    #         {
+    #             'collection_id': 'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS',
+    #             'searched_node_id': '77a0bbb3-dc13-4fb8-a665-aadcfc04a05f',
+    #             'score': 0.7439015507698059,
+    #             'score_metadata': {
+    #                 'text': 'The potential ability of quantum computing devices to solve problems that classical computers cannot.'
+    #             },
+    #             'original_id_for_search': 'b239c21a-0278-4223-8985-20962087c39e'
+    #         },
+    #         # Additional entries would follow the same structure...
+    #         {
+    #             'collection_id': 'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS',
+    #             'searched_node_id': 'de774e2a-4d86-4542-8074-c077ad50c1a5',
+    #             'score': 1.0,
+    #             'score_metadata': {
+    #                 'text': 'A computer that exploits quantum mechanical phenomena to perform computations.'
+    #             },
+    #             'original_id_for_search': '7393e6e0-6515-46c4-b927-f99b4f635823'
+    #         }
+    #     ]
+    # }
 
-    await connect_nodes_in_graph(graph_client, relationships)
-    #
-    # print(f"Document ({file_metadata['id']}) processed")
+    graph = await connect_nodes_in_graph(graph_client, relationships, score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"] )
 
-    # return graph
+    print(f"Document ({file_metadata['id']}) processed")
+
+    return graph
 
 
 
