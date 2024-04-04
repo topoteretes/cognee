@@ -61,6 +61,8 @@ class Config:
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
+    openai_embedding_model = "text-embedding-3-large"
+    openai_embedding_dimensions = 3072
 
     graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
@@ -104,7 +106,7 @@ class Config:
         db_name: str = os.getenv("POSTGRES_DB")
 
     # Model parameters and configuration for interlayer scoring
-    intra_layer_score_treshold: float = 0.5
+    intra_layer_score_treshold: float = 0.8
 
 
     # Client ID

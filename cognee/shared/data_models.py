@@ -27,6 +27,15 @@ class GraphQLQuery(BaseModel):
     """GraphQL query."""
     query: str
 
+from enum import Enum
+
+class ChunkStrategy(Enum):
+    EXACT = 'exact'
+    PARAGRAPH = 'paragraph'
+    SENTENCE = 'sentence'
+    VANILLA = 'vanilla'
+    SUMMARY = 'summary'
+
 class MemorySummary(BaseModel):
     """ Memory summary. """
     nodes: List[Node] = Field(..., default_factory=list)

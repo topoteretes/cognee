@@ -180,6 +180,8 @@ async def process_text(input_text: str, file_metadata: dict):
 
     node_descriptions = await graph_client.extract_node_description(base_node_for_graph)
 
+    print("Node descriptions are: ", str(node_descriptions))
+
 
     #
     nodes_by_layer = await group_nodes_by_layer(node_descriptions)
@@ -265,7 +267,7 @@ if __name__ == "__main__":
         await add(
             [
                 text_1,
-                # text_2
+                text_2
 
             ],
             dataset_name

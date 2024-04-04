@@ -29,6 +29,7 @@ class InfrastructureConfig():
     graph_model = None,
     cognitive_layer_model = None
     intra_layer_score_treshold = None
+    embedding_engine = None
 
 
 
@@ -58,6 +59,8 @@ class InfrastructureConfig():
 
         if self.intra_layer_score_treshold is None:
             self.intra_layer_score_treshold = config.intra_layer_score_treshold
+        if self.embedding_engine is None:
+            self.embedding_engine = DefaultEmbeddingEngine()
 
 
         if self.llm_engine is None:
@@ -73,7 +76,7 @@ class InfrastructureConfig():
                 self.vector_engine = WeaviateAdapter(
                     config.weaviate_url,
                     config.weaviate_api_key,
-                    embedding_engine = DefaultEmbeddingEngine()
+                    embedding_engine = self.embedding_engine
                 )
             except ImportError:
                 if config.qdrant_url is None and config.qdrant_api_key is None:
@@ -82,7 +85,7 @@ class InfrastructureConfig():
                 self.vector_engine = QDrantAdapter(
                     qdrant_url = config.qdrant_url,
                     qdrant_api_key = config.qdrant_api_key,
-                    embedding_engine = DefaultEmbeddingEngine()
+                    embedding_engine = self.embedding_engine
                 )
 
         return {
@@ -100,7 +103,8 @@ class InfrastructureConfig():
             "graph_model": self.graph_model,
             "congitive_layer_model": self.cognitive_layer_model,
             "llm_provider": self.llm_provider,
-            "intra_layer_score_treshold": self.intra_layer_score_treshold
+            "intra_layer_score_treshold": self.intra_layer_score_treshold,
+            "embedding_engine": self.embedding_engine,
 
         }
 
@@ -143,5 +147,8 @@ class InfrastructureConfig():
 
         if "intra_layer_score_treshold" in new_config:
             self.intra_layer_score_treshold = new_config["intra_layer_score_treshold"]
+
+        if "embedding_engine" in new_config:
+            self.embedding_engine = new_config["embedding_engine"]
 
 infrastructure_config = InfrastructureConfig()
