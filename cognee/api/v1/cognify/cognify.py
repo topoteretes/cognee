@@ -247,7 +247,7 @@ if __name__ == "__main__":
 
 
         infrastructure_config.set_config({
-            "graph_engine": GraphDBType.NEO4J
+            "graph_engine": GraphDBType.NETWORKX
         })
         # print(infrastructure_config.get_config())
         text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.

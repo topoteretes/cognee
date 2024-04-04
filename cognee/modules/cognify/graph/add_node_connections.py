@@ -52,7 +52,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                             relationship['original_id_for_search'],
                             weight=relationship['score'],
                             score_metadata=relationship.get('score_metadata', {}),
-                            id = f""" {relationship['searched_node_id']}_{relationship['original_id_for_search']}_{str(uuid.uuid4())}"""
+                            id = f""" SEMANTIC_CONNECTION_{relationship['searched_node_id']}_{relationship['original_id_for_search']}_{str(uuid.uuid4())}"""
                         )
                     return graph
                 # For Neo4j
@@ -61,11 +61,12 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                     # This is just a placeholder, replace it with actual Neo4j logic
                     print("query is ", f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}' CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")
                     result = await graph.query(f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}'
-                              CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")
+                              CREATE (a)-[:SEMANTIC_CONNECTION {{weight:{relationship['score']}}}]->(b)""")
                     await graph.close()
 
 
 def graph_ready_output(results):
+    """ Generate a dictionary of relationships from the results of the graph search."""
     relationship_dict = {}
 
     for result in results:
