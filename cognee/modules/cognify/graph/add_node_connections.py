@@ -37,7 +37,6 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
 
     for _, relationships in relationship_dict.items():
         for relationship in relationships:
-            print("RELATIONSHIPssc", relationship['score'])
 
             if relationship['score'] > score_threshold:
 
@@ -54,7 +53,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                             score_metadata=relationship.get('score_metadata', {}),
                             id = f""" SEMANTIC_CONNECTION_{relationship['searched_node_id']}_{relationship['original_id_for_search']}_{str(uuid.uuid4())}"""
                         )
-                    return graph
+
                 # For Neo4j
                 elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
                     # Neo4j specific logic to add an edge
