@@ -110,6 +110,18 @@ class RecursiveCharacterTextSplitter(TextSplitter):
         return self._split_text(text, self._separators)
 
 def chunk_data(chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
+    """
+    Chunk data based on the specified strategy.
+
+    Parameters:
+    - chunk_strategy: The strategy to use for chunking.
+    - source_data: The data to be chunked.
+    - chunk_size: The size of each chunk.
+    - chunk_overlap: The overlap between chunks.
+
+    Returns:
+    - The chunked data.
+    """
 
     if chunk_strategy == ChunkStrategy.VANILLA:
         chunked_data = vanilla_chunker(source_data, chunk_size, chunk_overlap)
