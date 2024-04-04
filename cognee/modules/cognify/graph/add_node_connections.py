@@ -45,13 +45,12 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                     searched_node_id_found = await get_node_by_unique_id(graph.graph, relationship['searched_node_id'])
                     original_id_for_search_found = await get_node_by_unique_id(graph.graph, relationship['original_id_for_search'])
                     if searched_node_id_found and original_id_for_search_found:
-                        print("NETWORKX adding edgedsadas", searched_node_id_found, original_id_for_search_found)
                         await graph.add_edge(
-                            relationship['searched_node_id'],
-                            relationship['original_id_for_search'],
+                            searched_node_id_found,
+                            original_id_for_search_found,
                             weight=relationship['score'],
                             score_metadata=relationship.get('score_metadata', {}),
-                            id = f""" SEMANTIC_CONNECTION_{relationship['searched_node_id']}_{relationship['original_id_for_search']}_{str(uuid.uuid4())}"""
+                            id = f""" SEMANTIC_CONNECTION_{searched_node_id_found}_{original_id_for_search_found}_{str(uuid.uuid4())}"""
                         )
 
                 # For Neo4j
