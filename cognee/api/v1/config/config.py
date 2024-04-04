@@ -1,3 +1,4 @@
+""" This module is used to set the configuration of the system."""
 from cognee.infrastructure import infrastructure_config
 
 class config():
@@ -53,5 +54,12 @@ class config():
         infrastructure_config.set_config({
             "llm_provider": llm_provider
         })
+
+    @staticmethod
+    def intra_layer_score_treshold(intra_layer_score_treshold: str):
+        infrastructure_config.set_config({
+            "intra_layer_score_treshold": intra_layer_score_treshold
+        })
+
 
 
