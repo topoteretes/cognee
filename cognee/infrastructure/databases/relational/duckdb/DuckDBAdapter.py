@@ -27,7 +27,9 @@ class DuckDBAdapter():
                 document_id STRING,
                 layer_id STRING,
                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT NULL
+                updated_at TIMESTAMP DEFAULT NULL,
+                processed BOOLEAN DEFAULT FALSE,
+                document_id_target STRING NULL
             );
         """)
 
@@ -51,17 +53,31 @@ class DuckDBAdapter():
             document_id STRING,
             layer_id STRING,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT NULL 
+            updated_at TIMESTAMP DEFAULT NULL,
+            processed BOOLEAN DEFAULT FALSE,
+            document_id_target STRING NULL
         );
         """
         # Execute the SQL command to create the table
         self.db_client.execute(create_table_sql)
 
         # SQL command to select data from the 'cognify' table
-        select_data_sql = f"SELECT document_id, layer_id, created_at, updated_at FROM cognify WHERE document_id != '{excluded_document_id}';"
+        select_data_sql = f"SELECT document_id, layer_id, created_at, updated_at, processed FROM cognify WHERE document_id != '{excluded_document_id}' AND processed = FALSE;"
 
-        # Execute the query and return the results as a list of dictionaries
-        return self.db_client.sql(select_data_sql).to_df().to_dict("records")
+        # Execute the query and fetch the results
+        records = self.db_client.sql(select_data_sql).to_df().to_dict("records")
+
+        # If records are fetched, update the 'processed' column to 'True'
+        if records:
+            # Fetching document_ids from the records to update the 'processed' column
+            document_ids = tuple(record['document_id'] for record in records)
+            # SQL command to update the 'processed' column to 'True' for fetched records
+            update_data_sql = f"UPDATE cognify SET processed = TRUE, document_id_target = {excluded_document_id} WHERE document_id IN {document_ids};"
+            # Execute the update query
+            self.db_client.execute(update_data_sql)
+
+        # Return the fetched records
+        return records
 
 
     def delete_cognify_data(self):
@@ -71,7 +87,9 @@ class DuckDBAdapter():
             document_id STRING,
             layer_id STRING,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT NULL 
+            updated_at TIMESTAMP DEFAULT NULL,
+            processed BOOLEAN DEFAULT FALSE,
+            document_id_target STRING NULL
         );
         """
         # Execute the SQL command to create the table
@@ -79,6 +97,11 @@ class DuckDBAdapter():
 
         # SQL command to select data from the 'cognify' table
         select_data_sql = "DELETE FROM cognify;"
+        self.db_client.sql(select_data_sql)
+        drop_data_sql = "DROP TABLE cognify;"
+        self.db_client.sql(drop_data_sql)
 
         # Execute the query and return the results as a list of dictionaries
-        return self.db_client.sql(select_data_sql).to_df().to_dict("records")
+        return
+
+

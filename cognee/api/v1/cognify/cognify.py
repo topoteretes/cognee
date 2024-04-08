@@ -190,8 +190,6 @@ async def process_text(input_text: str, file_metadata: dict):
 
     print("Node descriptions are: ", str(node_descriptions_for_processing_doc))
 
-
-    #
     nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_for_processing_doc)
     unique_layers = nodes_by_layer_for_processing_doc.keys()
 
@@ -207,21 +205,59 @@ async def process_text(input_text: str, file_metadata: dict):
 
     relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
     list_of_nodes =[]
-
+    #
+    # relevant_documents_to_connect=[  {'document_id': '6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7', 'layer_id': 'LLM_CLASSIFICATION_LAYER_Articles, essays, and reports_DOCUMENT_6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7', 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'}]
+    relevant_documents_to_connect.append({'document_id': file_metadata['id'], 'layer_id': base_node_for_graph, 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'})
     for document in relevant_documents_to_connect:
         node_descriptions_to_match =await graph_client.extract_node_description(document['layer_id'])
-        list_of_nodes.append(node_descriptions_to_match)
+        # list_of_nodes.append(node_descriptions_to_match)
+        list_of_nodes.extend(node_descriptions_to_match)
 
-    for node_group in list_of_nodes:
-        nodes_by_layer = await group_nodes_by_layer(node_group)
-        results = await resolve_cross_graph_references(nodes_by_layer)
-        relationships = graph_ready_output(results)
-        await connect_nodes_in_graph(graph_client, relationships,
-                                     score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
+    print("List of nodes are: ", len(list_of_nodes))
+
+
+
+
+    nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+    print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
+    # nodes_by_layer = {
+    #     'uuuOmeKGCeuiOqqemWiOyuaaeaKWKOiiKSGf': [
+    #         {'node_id': '1ace9d1a-273e-4466-b9c1-d3889957033d',
+    #          'description': 'A language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification',
+    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
+    #          'layer_decomposition_uuid': 'uuuOmeKGCeuiOqqemWiOyuaaeaKWKOiiKSGf'},
+    #         {'node_id': '735305a9-15ed-41de-9fd8-66ce5dc4f111',
+    #          'description': 'A computationally intensive process that involves learning statistical relationships from text documents to acquire abilities for natural language processing tasks',
+    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
+    #          'layer_decomposition_uuid': 'uuuOmeKGCeuiOqqemWiOyuaaeaKWKOiiKSGf'}
+    #     ],
+    #     'qySSyOCOKuiGKKeyaaaGuKmqWKOiaiCWCGKE': [
+    #         {'node_id': '6ecb5771-78fe-4866-a8d7-62a299212b97',
+    #          'description': 'A language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification',
+    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
+    #          'layer_decomposition_uuid': 'qySSyOCOKuiGKKeyaaaGuKmqWKOiaiCWCGKE'},
+    #         {'node_id': '5fcdbaad-2de0-4882-b6d2-0846ac74d19f',
+    #          'description': 'Relationships learned by language models from text documents',
+    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
+    #          'layer_decomposition_uuid': 'qySSyOCOKuiGKKeyaaaGuKmqWKOiaiCWCGKE'}
+    #     ]
+    #     # More layers...
+    # }
+    results = await resolve_cross_graph_references(nodes_by_layer)
+    print("Results are: ", str(results)[:3000])
+    relationships = graph_ready_output(results)
+    await connect_nodes_in_graph(graph_client, relationships,
+                                 score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
 
     # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_to_match)
-    #
-    # results = await resolve_cross_graph_references(nodes_by_layer)
+
+    results = await resolve_cross_graph_references(nodes_by_layer)
+
+
+
+
+
+
     # relationships = graph_ready_output(results)
     # print("RELATIONSHIPS", str(relationships)[:8000])
 
@@ -275,18 +311,9 @@ if __name__ == "__main__":
             "graph_engine": GraphDBType.NETWORKX
         })
         # print(infrastructure_config.get_config())
-        text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
-        At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
-        Classical physics cannot explain the operation of these quantum devices, and a scalable quantum computer could perform some calculations exponentially faster (with respect to input size scaling) than any modern "classical" computer. In particular, a large-scale quantum computer could break widely used encryption schemes and aid physicists in performing physical simulations; however, the current state of the technology is largely experimental and impractical, with several obstacles to useful applications. Moreover, scalable quantum computers do not hold promise for many practical tasks, and for many important tasks quantum speedups are proven impossible.
-        The basic unit of information in quantum computing is the qubit, similar to the bit in traditional digital electronics. Unlike a classical bit, a qubit can exist in a superposition of its two "basis" states. When measuring a qubit, the result is a probabilistic output of a classical bit, therefore making quantum computers nondeterministic in general. If a quantum computer manipulates the qubit in a particular way, wave interference effects can amplify the desired measurement results. The design of quantum algorithms involves creating procedures that allow a quantum computer to perform calculations efficiently and quickly.
-        Physically engineering high-quality qubits has proven challenging. If a physical qubit is not sufficiently isolated from its environment, it suffers from quantum decoherence, introducing noise into calculations. Paradoxically, perfectly isolating qubits is also undesirable because quantum computations typically need to initialize qubits, perform controlled qubit interactions, and measure the resulting quantum states. Each of those operations introduces errors and suffers from noise, and such inaccuracies accumulate.
-        In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
+        text_1 = """Thomas Mann wrote German novels about horses and nature. Hello novels
         """
-        text_2 = """A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification. LLMs acquire these abilities by learning statistical relationships from text documents during a computationally intensive self-supervised and semi-supervised training process. LLMs can be used for text generation, a form of generative AI, by taking an input text and repeatedly predicting the next token or word.
-        LLMs are artificial neural networks. The largest and most capable, as of March 2024, are built with a decoder-only transformer-based architecture while some recent implementations are based on other architectures, such as recurrent neural network variants and Mamba (a state space model).
-        Up to 2020, fine tuning was the only way a model could be adapted to be able to accomplish specific tasks. Larger sized models, such as GPT-3, however, can be prompt-engineered to achieve similar results.[6] They are thought to acquire knowledge about syntax, semantics and "ontology" inherent in human language corpora, but also inaccuracies and biases present in the corpora.
-        Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
-        """
+        text_2 = """German novels are fun to read and talk about nature"""
         dataset_name = "explanations"
         from cognee.api.v1.add.add import add
         await add(

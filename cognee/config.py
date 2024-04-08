@@ -106,7 +106,7 @@ class Config:
         db_name: str = os.getenv("POSTGRES_DB")
 
     # Model parameters and configuration for interlayer scoring
-    intra_layer_score_treshold: float = 0.8
+    intra_layer_score_treshold: float = 0.9
 
 
     # Client ID

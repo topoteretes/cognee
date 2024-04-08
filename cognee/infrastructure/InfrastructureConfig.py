@@ -78,7 +78,7 @@ class InfrastructureConfig():
                     config.weaviate_api_key,
                     embedding_engine = self.embedding_engine
                 )
-            except ImportError:
+            except EnvironmentError:
                 if config.qdrant_url is None and config.qdrant_api_key is None:
                     raise EnvironmentError("Qdrant is not configured!")
 
