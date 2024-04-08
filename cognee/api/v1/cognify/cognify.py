@@ -180,6 +180,8 @@ async def process_text(input_text: str, file_metadata: dict):
             'document_id': file_metadata['id'],
             'layer_id': base_node_for_graph
         },]
+
+
     db_engine.load_cognify_data(data)
 
 
@@ -204,6 +206,8 @@ async def process_text(input_text: str, file_metadata: dict):
     await add_propositions(nodes_by_layer_for_processing_doc)
 
     relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
+
+    print("Relevant documents to connect are: ", relevant_documents_to_connect)
     list_of_nodes =[]
     #
     # relevant_documents_to_connect=[  {'document_id': '6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7', 'layer_id': 'LLM_CLASSIFICATION_LAYER_Articles, essays, and reports_DOCUMENT_6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7', 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'}]

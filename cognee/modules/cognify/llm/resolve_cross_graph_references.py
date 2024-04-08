@@ -43,7 +43,7 @@ async def get_nodes_by_layer(layer_id: str, layer_nodes: List):
     score_points = await vector_engine.batch_search(
         layer_id,
         list(map(lambda node: node["description"], layer_nodes)),
-        limit = 3
+        limit = 2
     )
 
     return {

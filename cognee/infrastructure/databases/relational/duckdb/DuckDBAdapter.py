@@ -62,7 +62,7 @@ class DuckDBAdapter():
         self.db_client.execute(create_table_sql)
 
         # SQL command to select data from the 'cognify' table
-        select_data_sql = f"SELECT document_id, layer_id, created_at, updated_at, processed FROM cognify WHERE document_id != '{excluded_document_id}' AND processed = FALSE;"
+        select_data_sql = f"SELECT document_id, layer_id, created_at, updated_at, processed FROM cognify WHERE document_id != '{excluded_document_id}' AND processed = FALSE  ;"
 
         # Execute the query and fetch the results
         records = self.db_client.sql(select_data_sql).to_df().to_dict("records")
@@ -72,7 +72,7 @@ class DuckDBAdapter():
             # Fetching document_ids from the records to update the 'processed' column
             document_ids = tuple(record['document_id'] for record in records)
             # SQL command to update the 'processed' column to 'True' for fetched records
-            update_data_sql = f"UPDATE cognify SET processed = TRUE, document_id_target = {excluded_document_id} WHERE document_id IN {document_ids};"
+            update_data_sql = f"UPDATE cognify SET processed = TRUE WHERE document_id IN {document_ids};"
             # Execute the update query
             self.db_client.execute(update_data_sql)
 
