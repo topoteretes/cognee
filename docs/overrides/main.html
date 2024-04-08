@@ -1,19 +1,17 @@
-{% extends "base.html" %} {% block announce %} For updates follow
-<strong>@tricalt</strong> on
-<a href="https://twitter.com/tricalt">
-  <span class="twemoji twitter">
-    {% include ".icons/fontawesome/brands/twitter.svg" %}
-  </span>
-  <strong>Twitter</strong>
-</a>
-and
-<span class="twemoji star">
-  {% include ".icons/fontawesome/solid/star.svg" %}
-</span>
-us on
-<a href="https://github.com/topoteretes/cognee">
-  <span class="twemoji github">
-    {% include ".icons/fontawesome/brands/github.svg" %}
-  </span>
-  <strong>GitHub</strong> </a
->. If you don't like python, too bad. JS, Elixir, and Rust are coming soon. {% endblock %}
+{% extends "base.html" %}
+
+{% block meta %}
+  {{ super() }}
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="cognee" />
+  <meta property="og:description" content="desc" />
+  <meta property="og:title" content="{{ page.title|striptags }}" />
+  <meta property="og:url" content="{{ page.canonical_url }}" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@tricalt" />
+  <meta name="twitter:creator" content="@tricalt" />
+  <meta name="twitter:title" content="{{ page.title|striptags }}" />
+  <meta name="twitter:description" content="desc" />
+
+{% endblock %}
