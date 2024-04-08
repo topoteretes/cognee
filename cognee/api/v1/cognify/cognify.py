@@ -173,17 +173,27 @@ async def process_text(input_text: str, file_metadata: dict):
     print("Document metadata is: ", str(file_metadata))
 
     print("Base nodes for a graph : ", base_node_for_graph)
+    infra_config = infrastructure_config.get_config()
+    db_engine = infra_config["database_engine"]
+    data = [
+        {
+            'document_id': file_metadata['id'],
+            'layer_id': base_node_for_graph
+        },]
+    db_engine.load_cognify_data(data)
+
+
 
     # base_node_for_graph ='LLM_CLASSIFICATION_LAYER_Research papers and academic publications_DOCUMENT_062c22df-d99b-599f-90cd-2d325c8bcf69'
 
-    node_descriptions = await graph_client.extract_node_description(base_node_for_graph)
+    node_descriptions_for_processing_doc = await graph_client.extract_node_description(base_node_for_graph)
 
-    print("Node descriptions are: ", str(node_descriptions))
+    print("Node descriptions are: ", str(node_descriptions_for_processing_doc))
 
 
     #
-    nodes_by_layer = await group_nodes_by_layer(node_descriptions)
-    unique_layers = nodes_by_layer.keys()
+    nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_for_processing_doc)
+    unique_layers = nodes_by_layer_for_processing_doc.keys()
 
     try:
         vector_engine = infrastructure_config.get_config()["vector_engine"]
@@ -193,10 +203,27 @@ async def process_text(input_text: str, file_metadata: dict):
     except Exception as e:
         print(e)
 
-    await add_propositions(nodes_by_layer)
-    results = await resolve_cross_graph_references(nodes_by_layer)
-    relationships = graph_ready_output(results)
-    print("RELATIONSHIPS", str(relationships)[:8000])
+    await add_propositions(nodes_by_layer_for_processing_doc)
+
+    relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
+    list_of_nodes =[]
+
+    for document in relevant_documents_to_connect:
+        node_descriptions_to_match =await graph_client.extract_node_description(document['layer_id'])
+        list_of_nodes.append(node_descriptions_to_match)
+
+    for node_group in list_of_nodes:
+        nodes_by_layer = await group_nodes_by_layer(node_group)
+        results = await resolve_cross_graph_references(nodes_by_layer)
+        relationships = graph_ready_output(results)
+        await connect_nodes_in_graph(graph_client, relationships,
+                                     score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
+
+    # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_to_match)
+    #
+    # results = await resolve_cross_graph_references(nodes_by_layer)
+    # relationships = graph_ready_output(results)
+    # print("RELATIONSHIPS", str(relationships)[:8000])
 
     # relationships = {
     #     'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS': [
@@ -230,12 +257,12 @@ async def process_text(input_text: str, file_metadata: dict):
     #         }
     #     ]
     # }
-
-    graph = await connect_nodes_in_graph(graph_client, relationships, score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"] )
-
-    print(f"Document ({file_metadata['id']}) processed")
-
-    return graph
+    #
+    # await connect_nodes_in_graph(graph_client, relationships, score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"] )
+    #
+    # print(f"Document ({file_metadata['id']}) processed")
+    #
+    # return graph
 
 
 

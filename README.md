@@ -1,16 +1,17 @@
 # cognee
 
-Make data processing for LLMs easy
+Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrieval
 
 
 <p>
   <a href="https://cognee.ai" target="_blank">
-    <img src="assets/cognee-logo.png" width="160px" alt="Cognee logo" />
+    <img src="https://raw.githubusercontent.com/topoteretes/cognee/main/assets/cognee-logo.png" width="160px" alt="Cognee logo" />
   </a>
 </p>
 
+
 <p>
-  <i>Open-source framework for creating knowledge graphs and data models for LLMs.</i>
+  <i>Open-source framework for creating self-improving deterministic outputs for LLMs.</i>
 </p>
 
 <p>
@@ -111,19 +112,21 @@ Read more [here](docs/index.md#run).
 Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee%20-%20Get%20Started.ipynb)
 
 
-## Architecture
 
 [<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
 
 
 ### How Cognee Enhances Your Contextual Memory
 
-Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases introduces three key enhancements:
+Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases helps you create deterministic outputs for LLMs:
 
 - Query Classifiers: Navigate information graph using Pydantic OpenAI classifiers.
+- Linguistic Analysis: Use NLP and LLMs to analyze and score text.
+- Graph Structure: Define relationships between facts and concepts.
 - Document Topology: Structure and store documents in public and private domains.
-- Personalized Context: Provide a context object to the LLM for a better response.
 
+
+## Architecture
 
 ![Image](assets/architecture.png)
 

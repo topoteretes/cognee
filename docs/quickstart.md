@@ -1,6 +1,14 @@
 # QUICKSTART
 
-Setup
+!!! tip "To understand how cognee works check out the [conceptual overview](conceptual_overview.md)"
+
+## Setup
+
+You will need a Weaviate instance and an OpenAI API key to use cognee.
+Weaviate let's you run an instance for 14 days for free. You can sign up at their website: [Weaviate](https://www.semi.technology/products/weaviate.html)
+
+
+You can also use Ollama or Anyscale as your LLM provider. For more info on local models check [here](local_models.md)
 
 ```
 import os
@@ -10,7 +18,7 @@ os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
 
 os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
-Run
+## Run
 
 ```
 import cognee

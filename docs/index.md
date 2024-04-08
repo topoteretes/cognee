@@ -1,10 +1,10 @@
 # cognee 
 
 
-## Make data processing for LLMs easy
+####  Deterministic LLMs Outputs for AI Engineers
 
 
-_Open-source framework for creating knowledge graphs and data models for LLMs._
+_Open-source framework for loading and structuring LLM context to create accurate and explainable AI solutions using knowledge graphs and vector stores_
 
 
 ---
@@ -16,96 +16,33 @@ _Open-source framework for creating knowledge graphs and data models for LLMs._
 
 [![Star on GitHub](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social)](https://github.com/topoteretes/cognee)
 
-cognee makes it easy to reliably enrich data for Large Language Models (LLMs) like GPT-3.5, GPT-4, GPT-4-Vision, and the open source models like Mistral/Mixtral from Together, Anyscale, Ollama, and llama-cpp-python.
-By leveraging various tools like graph databases, function calling, tool calling and Pydantic; cognee stands out for its aim to emulate human memory for LLM apps and frameworks. 
+### Let's learn about cogneeHub!
+
+cogneeHub is a free and open-sourced learning platform for those interested in creating deterministic LLM outputs.
+We help people with using graphs, LLMs and adding vector retrieval to their ML stack. 
+
+- **Get started** — [Get started with cognee quickly and try it out for yourself.](quickstart.md)
+- **Conceptual Overview** — Learn about the [core concepts](conceptual_overview.md) of cognee and how it fits into your projects.
+- **Data Engineering and LLMOps** — Learn about some [data engineering and llmops](data_engineering_llm_ops.md) core concepts that will help you build better AI apps.
+- **RAGs** — We provide easy-to-follow [learning materials](rags.md) to help you learn about RAGs.
+- **Research** — A list of resources to help you learn more about [cognee and LLM memory research](research.md)
+- **Blog** — A blog where you can read about the [latest news and updates](blog/index.md) about cognee.
+- **Support** — [Book time](https://www.cognee.ai/#bookTime) with our team.
+
+[//]: # (- **Case Studies** — Read about [case studies]&#40;case_studies.md&#41; that show how cognee can be used in real-world applications.)
 
 
-## Getting Started
+### Why use cognee?
 
-### Setup
+The question of using cognee is fundamentally a question of why to have deterministic outputs for your llm workflows.
 
-Create `.env` file in your project root directory in order to store environment variables such as API keys.
+1. **Cost-effective** — cognee extends the capabilities of your LLMs without the need for expensive data processing tools.
 
-
-pip install "cognee[weaviate]"
-
-
-If cognee is installed with Weaviate as a vector database provider, add Weaviate environment variables:
-```
-WEAVIATE_URL = "YOUR_WEAVIATE_URL"
-WEAVIATE_API_KEY = "YOUR_WEAVIATE_API_KEY"
-```
-
-Otherwise if cognee is installed with a default (Qdrant) vector database provider, add Qdrant environment variables:
-```
-QDRANT_URL = "YOUR_QDRANT_URL"
-QDRANT_API_KEY = "YOUR_QDRANT_API_KEY"
-```
-
-Add OpenAI API Key environment variable:
-```
-OPENAI_API_KEY = "YOUR_OPENAI_API_KEY"
-```
-
-os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
-os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
-
-os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
-
-
-cognee.config.system_root_directory(absolute_path_to_directory)
-
-cognee.config.data_root_directory(absolute_path_to_directory)
-```
-
-#### Without .env file
-
-```
-
-import cognee
-
-text = """Natural language processing (NLP) is an interdisciplinary
-       subfield of computer science and information retrieval"""
-
-cognee.add(text) # Add a new piece of information
-
-cognee.cognify() # Use LLMs and cognee to create knowledge
-
-search_results = cognee.search("SIMILARITY", "computer science") # Query cognee for the knowledge
-
-for result_text in search_results[0]:
-    print(result_text)
-    
-
-Use LLMs and cognee to create graphs:
-``` 
-cognee.cognify(dataset_name)
- ``` 
-
-
-
-print(graph_url)
-```
-
-Query the graph for a piece of information:
-```
-search_results = cognee.search('SIMILARITY', "query_search")
-
-print(search_results)
-```
-
-
-## Why use cognee?
-
-The question of using cognee is fundamentally a question of why to structure data inputs and outputs for your llm workflows.
-
-1. **Cost effective** — cognee extends the capabilities of your LLMs without the need for expensive data processing tools.
-
-2. **Self contained** — cognee runs as a library and is simple to use
+2. **Self-contained** — cognee runs as a library and is simple to use
 
 3. **Interpretable** — Navigate graphs instead of embeddings to understand your data.
 
-4. **User Guided** cognee lets you control your input and provide your own Pydantic data models 
+4. **User Guided** —  cognee lets you control your input and provide your own Pydantic data models 
 
 
 
