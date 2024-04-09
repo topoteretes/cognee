@@ -205,104 +205,35 @@ async def process_text(input_text: str, file_metadata: dict):
 
     await add_propositions(nodes_by_layer_for_processing_doc)
 
-    relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
-
-    print("Relevant documents to connect are: ", relevant_documents_to_connect)
-    list_of_nodes =[]
+    # relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
     #
-    # relevant_documents_to_connect=[  {'document_id': '6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7', 'layer_id': 'LLM_CLASSIFICATION_LAYER_Articles, essays, and reports_DOCUMENT_6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7', 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'}]
-    relevant_documents_to_connect.append({'document_id': file_metadata['id'], 'layer_id': base_node_for_graph, 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'})
-    for document in relevant_documents_to_connect:
-        node_descriptions_to_match =await graph_client.extract_node_description(document['layer_id'])
-        # list_of_nodes.append(node_descriptions_to_match)
-        list_of_nodes.extend(node_descriptions_to_match)
-
-    print("List of nodes are: ", len(list_of_nodes))
-
-
-
-
-    nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
-    print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
-    # nodes_by_layer = {
-    #     'uuuOmeKGCeuiOqqemWiOyuaaeaKWKOiiKSGf': [
-    #         {'node_id': '1ace9d1a-273e-4466-b9c1-d3889957033d',
-    #          'description': 'A language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification',
-    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
-    #          'layer_decomposition_uuid': 'uuuOmeKGCeuiOqqemWiOyuaaeaKWKOiiKSGf'},
-    #         {'node_id': '735305a9-15ed-41de-9fd8-66ce5dc4f111',
-    #          'description': 'A computationally intensive process that involves learning statistical relationships from text documents to acquire abilities for natural language processing tasks',
-    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
-    #          'layer_decomposition_uuid': 'uuuOmeKGCeuiOqqemWiOyuaaeaKWKOiiKSGf'}
-    #     ],
-    #     'qySSyOCOKuiGKKeyaaaGuKmqWKOiaiCWCGKE': [
-    #         {'node_id': '6ecb5771-78fe-4866-a8d7-62a299212b97',
-    #          'description': 'A language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification',
-    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
-    #          'layer_decomposition_uuid': 'qySSyOCOKuiGKKeyaaaGuKmqWKOiaiCWCGKE'},
-    #         {'node_id': '5fcdbaad-2de0-4882-b6d2-0846ac74d19f',
-    #          'description': 'Relationships learned by language models from text documents',
-    #          'layer_uuid': 'd8f31061-0bb8-4312-9f40-d4622c2a89d9',
-    #          'layer_decomposition_uuid': 'qySSyOCOKuiGKKeyaaaGuKmqWKOiaiCWCGKE'}
-    #     ]
-    #     # More layers...
-    # }
-    results = await resolve_cross_graph_references(nodes_by_layer)
-    print("Results are: ", str(results)[:3000])
-    relationships = graph_ready_output(results)
-    await connect_nodes_in_graph(graph_client, relationships,
-                                 score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
-
-    # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_to_match)
-
-    results = await resolve_cross_graph_references(nodes_by_layer)
-
-
-
-
-
-
+    # print("Relevant documents to connect are: ", relevant_documents_to_connect)
+    # list_of_nodes =[]
+    # relevant_documents_to_connect.append({'document_id': file_metadata['id'], 'layer_id': base_node_for_graph, 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'})
+    # for document in relevant_documents_to_connect:
+    #     node_descriptions_to_match =await graph_client.extract_node_description(document['layer_id'])
+    #     # list_of_nodes.append(node_descriptions_to_match)
+    #     list_of_nodes.extend(node_descriptions_to_match)
+    #
+    # print("List of nodes are: ", len(list_of_nodes))
+    # nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+    # print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
+    #
+    # results = await resolve_cross_graph_references(nodes_by_layer)
+    # print("Results are: ", str(results)[:3000])
     # relationships = graph_ready_output(results)
-    # print("RELATIONSHIPS", str(relationships)[:8000])
+    # await connect_nodes_in_graph(graph_client, relationships,
+    #                              score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
+    #
+    # # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_to_match)
+    #
+    # results = await resolve_cross_graph_references(nodes_by_layer)
 
-    # relationships = {
-    #     'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS': [
-    #         {
-    #             'collection_id': 'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS',
-    #             'searched_node_id': '77a0bbb3-dc13-4fb8-a665-aadcfc04a05f',
-    #             'score': 1.0,
-    #             'score_metadata': {
-    #                 'text': 'A computer that exploits quantum mechanical phenomena to perform computations.'
-    #             },
-    #             'original_id_for_search': '7393e6e0-6515-46c4-b927-f99b4f635823'
-    #         },
-    #         {
-    #             'collection_id': 'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS',
-    #             'searched_node_id': '77a0bbb3-dc13-4fb8-a665-aadcfc04a05f',
-    #             'score': 0.7439015507698059,
-    #             'score_metadata': {
-    #                 'text': 'The potential ability of quantum computing devices to solve problems that classical computers cannot.'
-    #             },
-    #             'original_id_for_search': 'b239c21a-0278-4223-8985-20962087c39e'
-    #         },
-    #         # Additional entries would follow the same structure...
-    #         {
-    #             'collection_id': 'emmquuaCWiCGOuqiSaOGSiOyWyKuGWeiKquS',
-    #             'searched_node_id': 'de774e2a-4d86-4542-8074-c077ad50c1a5',
-    #             'score': 1.0,
-    #             'score_metadata': {
-    #                 'text': 'A computer that exploits quantum mechanical phenomena to perform computations.'
-    #             },
-    #             'original_id_for_search': '7393e6e0-6515-46c4-b927-f99b4f635823'
-    #         }
-    #     ]
-    # }
-    #
-    # await connect_nodes_in_graph(graph_client, relationships, score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"] )
-    #
-    # print(f"Document ({file_metadata['id']}) processed")
-    #
-    # return graph
+
+
+
+
+
 
 
 
@@ -328,7 +259,7 @@ if __name__ == "__main__":
             ],
             dataset_name
         )
-        graph = await cognify(datasets=dataset_name)
+        # graph = await cognify(datasets=dataset_name)
 
         if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
 
