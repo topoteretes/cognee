@@ -205,29 +205,31 @@ async def process_text(input_text: str, file_metadata: dict):
 
     await add_propositions(nodes_by_layer_for_processing_doc)
 
-    # relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
-    #
-    # print("Relevant documents to connect are: ", relevant_documents_to_connect)
-    # list_of_nodes =[]
-    # relevant_documents_to_connect.append({'document_id': file_metadata['id'], 'layer_id': base_node_for_graph, 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'})
-    # for document in relevant_documents_to_connect:
-    #     node_descriptions_to_match =await graph_client.extract_node_description(document['layer_id'])
-    #     # list_of_nodes.append(node_descriptions_to_match)
-    #     list_of_nodes.extend(node_descriptions_to_match)
-    #
-    # print("List of nodes are: ", len(list_of_nodes))
-    # nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
-    # print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
-    #
-    # results = await resolve_cross_graph_references(nodes_by_layer)
-    # print("Results are: ", str(results)[:3000])
-    # relationships = graph_ready_output(results)
-    # await connect_nodes_in_graph(graph_client, relationships,
-    #                              score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
-    #
-    # # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_to_match)
-    #
-    # results = await resolve_cross_graph_references(nodes_by_layer)
+    if infrastructure_config.get_config()["connect_documents"] == True:
+
+        relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata['id'])
+
+        print("Relevant documents to connect are: ", relevant_documents_to_connect)
+        list_of_nodes =[]
+        relevant_documents_to_connect.append({'document_id': file_metadata['id'], 'layer_id': base_node_for_graph, 'created_at': '2024-04-05 16:47:09.651000', 'updated_at': '2024-04-05 16:47:09.651000'})
+        for document in relevant_documents_to_connect:
+            node_descriptions_to_match =await graph_client.extract_node_description(document['layer_id'])
+            # list_of_nodes.append(node_descriptions_to_match)
+            list_of_nodes.extend(node_descriptions_to_match)
+
+        print("List of nodes are: ", len(list_of_nodes))
+        nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+        print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
+
+        results = await resolve_cross_graph_references(nodes_by_layer)
+        print("Results are: ", str(results)[:3000])
+        relationships = graph_ready_output(results)
+        await connect_nodes_in_graph(graph_client, relationships,
+                                     score_threshold=infrastructure_config.get_config()["intra_layer_score_treshold"])
+
+        # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_to_match)
+
+        results = await resolve_cross_graph_references(nodes_by_layer)
 
 
 

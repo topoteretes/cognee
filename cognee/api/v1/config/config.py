@@ -62,4 +62,9 @@ class config():
         })
 
 
+    @staticmethod
+    def connect_documents(connect_documents: bool):
+        infrastructure_config.set_config({
+            "connect_documents": connect_documents
+        })
 

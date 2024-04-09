@@ -30,6 +30,7 @@ class InfrastructureConfig():
     cognitive_layer_model = None
     intra_layer_score_treshold = None
     embedding_engine = None
+    connect_documents = config.connect_documents
 
 
 
@@ -61,6 +62,8 @@ class InfrastructureConfig():
             self.intra_layer_score_treshold = config.intra_layer_score_treshold
         if self.embedding_engine is None:
             self.embedding_engine = DefaultEmbeddingEngine()
+        if self.connect_documents is None:
+            self.connect_documents = config.connect_documents
 
 
         if self.llm_engine is None:
@@ -105,6 +108,7 @@ class InfrastructureConfig():
             "llm_provider": self.llm_provider,
             "intra_layer_score_treshold": self.intra_layer_score_treshold,
             "embedding_engine": self.embedding_engine,
+            "connect_documents": self.connect_documents,
 
         }
 
@@ -150,5 +154,7 @@ class InfrastructureConfig():
 
         if "embedding_engine" in new_config:
             self.embedding_engine = new_config["embedding_engine"]
+        if "connect_documents" in new_config:
+            self.connect_documents = new_config["connect_documents"]
 
 infrastructure_config = InfrastructureConfig()

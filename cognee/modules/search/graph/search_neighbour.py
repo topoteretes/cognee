@@ -1,5 +1,5 @@
 """ Fetches the context of a given node in the graph"""
-from typing import Union
+from typing import Union, Dict
 
 from neo4j import AsyncSession
 

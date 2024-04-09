@@ -70,6 +70,7 @@ class Config:
     # Embedding parameters
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     embedding_dimensions: int = 1024
+    connect_documents: bool = False
 
     # Database parameters
     if (

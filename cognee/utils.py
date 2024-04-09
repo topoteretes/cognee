@@ -2,9 +2,16 @@
 
 import os
 import graphistry
+import networkx as nx
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from nltk.sentiment import SentimentIntensityAnalyzer
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.tag import pos_tag
+from nltk.chunk import ne_chunk
+from cognee.config import Config
 
 
 def get_document_names(doc_input):
@@ -71,41 +78,8 @@ def format_dict(d):
     return formatted_string
 
 
-    #
-    # config = Config()
-    # config.load()
-    #
-    # # Register with Graphistry using API key
-    # graphistry.register(api=3, username=config.graphistry_username, password=config.graphistry_password)
-    #
-    # # Convert your NetworkX graph edges and nodes to Pandas DataFrame
-    # edges = nx.to_pandas_edgelist(graph)
-    #
-    #
-    # # Prepare nodes DataFrame with "id" and "layer_description"
-    # nodes_data = [{"id": node, "layer_description": graph.nodes[node]["layer_description"]}
-    #               for node in graph.nodes if "layer_description" in graph.nodes[node]]
-    # nodes = pd.DataFrame(nodes_data)
-    #
-    # # Visualize the graph using Graphistry
-    # plotter = graphistry.edges(edges, "source", "target").nodes(nodes, "id")
-    #
-    # # Generate a dynamic color palette based on unique "layer_description" values
-    # if nodes["layer_description"]:
-    #     unique_layers = nodes["layer_description"].unique()
-    #     color_palette = generate_color_palette(unique_layers)
-    #
-    #     plotter = plotter.encode_point_color(
-    #         "layer_description",
-    #         categorical_mapping = color_palette,
-    #         default_mapping = "silver"  # Default color if any "layer_description" is not in the mapping
-    #     )
-    #
-    # # Visualize the graph (this will open a URL in your default web browser)
-    # url = plotter.plot(render = False, as_files = True)
-    # print(f"Graph is visualized at: {url}")
-
-
+config = Config()
+config.load()
 def generate_color_palette(unique_layers):
     colormap = plt.cm.get_cmap("viridis", len(unique_layers))
     colors = [colormap(i) for i in range(len(unique_layers))]
@@ -113,82 +87,76 @@ def generate_color_palette(unique_layers):
 
     return dict(zip(unique_layers, hex_colors))
 
-async def render_graph(graph):
-    # Authenticate with your Graphistry API key
 
-    import networkx as nx
-    from cognee.config import Config
-
+async def register_graphistry():
     config = Config()
     config.load()
+    graphistry.register(api=3, username=config.graphistry_username, password=config.graphistry_password)
 
-    graphistry.register(
-        api = 3,
-        username = config.graphistry_username,
-        password = config.graphistry_password
-    )
 
-    # Convert the NetworkX graph to a Pandas DataFrame representing the edge list
-    edges = nx.to_pandas_edgelist(graph)
-    # nodes = pd.DataFrame.from_dict(dict(graph.nodes(data=True)), orient='index')
-    #
-    # df['named_entities'] = df['named_entities'].apply(lambda x: x if isinstance(x, list) else [x])
+def prepare_edges(graph):
+    return nx.to_pandas_edgelist(graph)
 
-    # Visualize the graph using Graphistry
+
+def prepare_nodes(graph, include_size=False):
+    nodes_data = []
+    for node in graph.nodes:
+        node_info = graph.nodes[node]
+        description = node_info.get('layer_description', {}).get('layer', 'Default Layer') if isinstance(
+            node_info.get('layer_description'), dict) else node_info.get('layer_description', 'Default Layer')
+        # description = node_info['layer_description']['layer'] if isinstance(node_info.get('layer_description'), dict) and 'layer' in node_info['layer_description'] else node_info.get('layer_description', node)
+        # if isinstance(node_info.get('layer_description'), dict) and 'layer' in node_info.get('layer_description'):
+        #     description = node_info['layer_description']['layer']
+        # # Use 'layer_description' directly if it's not a dictionary, otherwise default to node ID
+        # else:
+        #     description = node_info.get('layer_description', node)
+
+        node_data = {"id": node, "layer_description": description}
+        if include_size:
+            default_size = 10  # Default node size
+            larger_size = 20  # Size for nodes with specific keywords in their ID
+            keywords = ["DOCUMENT", "User", "LAYER"]
+            node_size = larger_size if any(keyword in str(node) for keyword in keywords) else default_size
+            node_data["size"] = node_size
+        nodes_data.append(node_data)
+
+    return pd.DataFrame(nodes_data)
+
+
+
+
+async def render_graph(graph, include_nodes=False, include_color=False, include_size=False):
+    await register_graphistry()
+    edges = prepare_edges(graph)
     plotter = graphistry.edges(edges, "source", "target")
-    # .nodes(nodes, 'index'))
 
-    # Bind the 'name' column as the node label
-    # plotter = plotter.bind(node='index', point_title='name')
+    if include_nodes:
+        nodes = prepare_nodes(graph, include_size=include_size)
+        plotter = plotter.nodes(nodes, "id")
+        plotter = plotter.bind(point_label='layer_description')
 
-    # Visualize the graph (this will open a URL in your default web browser)
-    url = plotter.plot(render = False, as_files = True)
+        if include_size:
+            plotter = plotter.bind(point_size='size')
+
+        if include_color:
+            unique_layers = nodes["layer_description"].unique()
+            color_palette = generate_color_palette(unique_layers)
+            plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
+                                                 default_mapping="silver")
+
+
+
+    # Visualization
+    url = plotter.plot(render=False, as_files=True, memoize=False)
     print(f"Graph is visualized at: {url}")
 
-# async def render_graph(graph):
-#     # Authenticate with your Graphistry API key
-#
-#     import networkx as nx
-#     from cognee.config import Config
-#
-#     config = Config()
-#     config.load()
-#
-#     graphistry.register(
-#         api=3,
-#         username=config.graphistry_username,
-#         password=config.graphistry_password
-#     )
-#
-#     # Convert the NetworkX graph to a Pandas DataFrame representing the edge list
-#     edges = nx.to_pandas_edgelist(graph)
-#
-#     # Prepare nodes DataFrame with "id" and "layer_description"
-#     nodes_data = [{"id": node, "layer_description": graph.nodes[node]["layer_description"]}
-#                   for node in graph.nodes if "layer_description" in graph.nodes[node]]
-#     nodes = pd.DataFrame(nodes_data)
-#
-#     # Visualize the graph using Graphistry
-#     plotter = graphistry.edges(edges, "source", "target").nodes(nodes, "id")
-#
-#     # Generate a dynamic color palette based on unique "layer_description" values
-#     if 'layer_description' in nodes:
-#         unique_layers = nodes["layer_description"].unique()
-#         color_palette = generate_color_palette(unique_layers)
-#
-#         plotter = plotter.encode_point_color(
-#             "layer_description",
-#             categorical_mapping=color_palette,
-#             default_mapping="silver"  # Default color if any "layer_description" is not in the mapping
-#         )
-#
-#     # Visualize the graph (this will open a URL in your default web browser)
-#     url = plotter.plot(render=False, as_files=True)
-#     print(f"Graph is visualized at: {url}")
-import nltk
-from nltk.tokenize import word_tokenize
-from nltk.tag import pos_tag
-from nltk.chunk import ne_chunk
+
+def sanitize_df(df):
+    """Replace NaNs and infinities in a DataFrame with None, making it JSON compliant."""
+    return df.replace([np.inf, -np.inf, np.nan], None)
+
+
+
 
 # Ensure that the necessary NLTK resources are downloaded
 nltk.download('maxent_ne_chunker')
