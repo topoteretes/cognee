@@ -5,7 +5,8 @@ The page is dedicated to collecting all research that was collected in the past 
 This is not an exhaustive list, and any PRs would be welcome
 
 ### Research Papers
-
+- [2024/03/24] [Graph Chain-of-Thought: Augmenting Large Language Models by Reasoning on Graphs](https://arxiv.org/abs/2404.07103)
+- [2024/03/24] [Leave No Context Behind: Efficient Infinite Context Transformers with Infini-attention](https://arxiv.org/abs/2404.07143)
 - [2024/03/24] [Compound AI systems](https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/)
 - [2015/07/30] [Multilayer Network of Language](https://arxiv.org/abs/1507.08539)
 - [2023/12/12]  [Dense X Retrieval: What Retrieval Granularity Should We Use?](https://arxiv.org/pdf/2312.06648.pdf)
@@ -38,6 +39,11 @@ This is not an exhaustive list, and any PRs would be welcome
 - [2021/06/17] 📚[LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685), Edward J. Hu, et al.
 - [2023/04/03] [Generative Agents](https://arxiv.org/abs/2304.03442)
 - [2023/05/17] [Three of thought: Deliberate Problem Solving with Large Language Mode](https://arxiv.org/abs/2305.10601)ls
+
+
+### Knowledge Graphs
+
+- [2023/06/09] [Taxonomies: Overview](https://www.brighttalk.com/webcast/9273/605659?utm_source=brighttalk-portal&utm_medium=web&utm_campaign=topic&utm_content=upcoming)
 
 ### Blog Articles
 
