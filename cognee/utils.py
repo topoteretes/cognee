@@ -80,6 +80,7 @@ def format_dict(d):
 
 config = Config()
 config.load()
+
 def generate_color_palette(unique_layers):
     colormap = plt.cm.get_cmap("viridis", len(unique_layers))
     colors = [colormap(i) for i in range(len(unique_layers))]
@@ -89,9 +90,7 @@ def generate_color_palette(unique_layers):
 
 
 async def register_graphistry():
-    config = Config()
-    config.load()
-    graphistry.register(api=3, username=config.graphistry_username, password=config.graphistry_password)
+    graphistry.register(api = 3, username = config.graphistry_username, password = config.graphistry_password)
 
 
 def prepare_edges(graph):
@@ -157,13 +156,9 @@ def sanitize_df(df):
 
 
 
-
-# Ensure that the necessary NLTK resources are downloaded
-nltk.download('maxent_ne_chunker')
-nltk.download('words')
-
-# The sentence you want to tag and recognize entities in
-sentence = "Apple Inc. is an American multinational technology company headquartered in Cupertino, California."
+# # Ensure that the necessary NLTK resources are downloaded
+# nltk.download('maxent_ne_chunker')
+# nltk.download('words')
 
 
 async def extract_pos_tags(sentence):

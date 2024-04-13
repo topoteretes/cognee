@@ -4,8 +4,6 @@ from cognee.config import Config
 from .anthropic.adapter import AnthropicAdapter
 from .openai.adapter import OpenAIAdapter
 from .generic_llm_api.adapter import GenericAPIAdapter
-import logging
-logging.basicConfig(level=logging.INFO)
 
 # Define an Enum for LLM Providers
 class LLMProvider(Enum):
@@ -23,16 +21,11 @@ def get_llm_client():
 
     if provider == LLMProvider.OPENAI:
         return OpenAIAdapter(config.openai_key, config.openai_model)
-
     elif provider == LLMProvider.OLLAMA:
         return GenericAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
     elif provider == LLMProvider.ANTHROPIC:
-        return AnthropicAdapter(config.custom_endpoint, config.custom_endpoint, config.custom_model)
+        return AnthropicAdapter(config.custom_model)
     elif provider == LLMProvider.CUSTOM:
         return GenericAPIAdapter(config.custom_endpoint, config.custom_key, config.custom_model)
-        # Add your custom LLM provider here
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
-
-# Usage example
-llm_client = get_llm_client()

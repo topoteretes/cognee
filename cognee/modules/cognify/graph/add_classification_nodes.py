@@ -1,30 +1,24 @@
-""" Here we update semantic graph with content that classifier produced"""
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+from typing import List
 
+async def add_classification_nodes(graph_client, parent_node_id: str, categories: List) -> None:
+    for category in categories:
+        data_type = category["data_type"]
+        category_name = category["category_name"]
 
-async def add_classification_nodes(graph_client, document_id, classification_data):
+        data_type_node_id = f"DATA_TYPE-{data_type.upper().replace(' ', '_')}"
 
-    data_type = classification_data["data_type"]
-    layer_name = classification_data["layer_name"]
-    classification_data["name"] =f"LLM_CLASSIFICATION_LAYER_{data_type}"
+        data_type_node = await graph_client.extract_node(data_type_node_id)
 
+        if not data_type_node:
+            data_type_node = await graph_client.add_node(data_type_node_id, dict(name = data_type))
 
-    # Create the layer classification node ID
-    layer_classification_node_id = f"LLM_CLASSIFICATION_LAYER_{data_type}_{document_id}"
+        await graph_client.add_edge(parent_node_id, data_type_node_id, relationship_name = "classified_as")
 
-    # Add the node to the graph, unpacking the node data from the dictionary
-    await graph_client.add_node(layer_classification_node_id, **classification_data)
+        category_node_id = f"DATA_CATEGORY-{category_name.upper().replace(' ', '_')}"
 
-    # Link this node to the corresponding document node
-    await graph_client.add_edge(document_id, layer_classification_node_id, relationship_type = "classified_as")
+        category_node = await graph_client.extract_node(category_node_id)
 
-    # Create the detailed classification node ID
-    detailed_classification_node_id = f"LLM_CLASSIFICATION_LAYER_{layer_name}_{document_id}"
+        if not category_node:
+            category_node = await graph_client.add_node(category_node_id, dict(name = category_name))
 
-    # Add the detailed classification node, reusing the same node data
-    await graph_client.add_node(detailed_classification_node_id, **classification_data)
-
-    # Link the detailed classification node to the layer classification node
-    await graph_client.add_edge(layer_classification_node_id, detailed_classification_node_id, relationship_type = "contains_analysis")
-
-    return detailed_classification_node_id
+        await graph_client.add_edge(parent_node_id, category_node_id, relationship_name = "classified_as")

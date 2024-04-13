@@ -1,4 +1,3 @@
-"""Adapter for OpenAI's GPT-3, GPT=4 API."""
 import asyncio
 from typing import List, Type
 import openai
@@ -8,13 +7,10 @@ from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
-import logging
-logging.basicConfig(level=logging.DEBUG)
 
 class OpenAIAdapter(LLMInterface):
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
     def __init__(self, api_key: str, model:str):
-        logging.basicConfig(level=logging.DEBUG)
         openai.api_key = api_key
         self.aclient = instructor.patch(AsyncOpenAI())
         self.model = model
@@ -22,7 +18,6 @@ class OpenAIAdapter(LLMInterface):
     @retry(stop = stop_after_attempt(5))
     def completions_with_backoff(self, **kwargs):
         """Wrapper around ChatCompletion.create w/ backoff"""
-        # Local model
         return openai.chat.completions.create(**kwargs)
 
     @retry(stop = stop_after_attempt(5))
@@ -75,7 +70,6 @@ class OpenAIAdapter(LLMInterface):
     @retry(stop = stop_after_attempt(5))
     async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
-        logging.basicConfig(level=logging.DEBUG)
         return await self.aclient.chat.completions.create(
             model = self.model,
             messages = [

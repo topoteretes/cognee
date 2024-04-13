@@ -42,7 +42,7 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+    graph_client = await get_graph_client(GraphDBType.NETWORKX)
     await graph_client.load_graph_from_file()
     graph = graph_client.graph
 

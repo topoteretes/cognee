@@ -1,4 +1,5 @@
 """Data models for the cognitive architecture."""
+
 from enum import Enum, auto
 from typing import Optional, List, Union, Dict, Any
 from pydantic import BaseModel, Field
@@ -6,17 +7,14 @@ from pydantic import BaseModel, Field
 class Node(BaseModel):
     """Node in a knowledge graph."""
     id: str
-    description: str
-    created_at: Optional[float] = None
-
+    entity_name: str
+    entity_type: str
 
 class Edge(BaseModel):
     """Edge in a knowledge graph."""
-    source: str
-    target: str
-    description: str
-    created_at: Optional[float] = None
-
+    source_node_id: str
+    target_node_id: str
+    relationship_name: str
 
 class KnowledgeGraph(BaseModel):
     """Knowledge graph."""
@@ -27,19 +25,18 @@ class GraphQLQuery(BaseModel):
     """GraphQL query."""
     query: str
 
-from enum import Enum
-
 class ChunkStrategy(Enum):
-    EXACT = 'exact'
-    PARAGRAPH = 'paragraph'
-    SENTENCE = 'sentence'
-    VANILLA = 'vanilla'
-    SUMMARY = 'summary'
+    EXACT = "exact"
+    PARAGRAPH = "paragraph"
+    SENTENCE = "sentence"
+    VANILLA = "vanilla"
+    SUMMARY = "summary"
 
 class MemorySummary(BaseModel):
     """ Memory summary. """
     nodes: List[Node] = Field(..., default_factory=list)
     edges: List[Edge] = Field(..., default_factory=list)
+
 
 class TextSubclass(str, Enum):
     ARTICLES = "Articles, essays, and reports"
@@ -142,49 +139,53 @@ class ContentType(BaseModel):
     type: str
 
 class TextContent(ContentType):
-    type:str = "TEXT"
+    type: str = "TEXT"
     subclass: List[TextSubclass]
 
 class AudioContent(ContentType):
-    type:str = "AUDIO"
+    type: str = "AUDIO"
     subclass: List[AudioSubclass]
 
 class ImageContent(ContentType):
-    type:str = "IMAGE"
+    type: str = "IMAGE"
     subclass: List[ImageSubclass]
 
 class VideoContent(ContentType):
-    type:str = "VIDEO"
+    type: str = "VIDEO"
     subclass: List[VideoSubclass]
 
 class MultimediaContent(ContentType):
-    type:str = "MULTIMEDIA"
+    type: str = "MULTIMEDIA"
     subclass: List[MultimediaSubclass]
 
 class Model3DContent(ContentType):
-    type:str = "3D_MODEL"
+    type: str = "3D_MODEL"
     subclass: List[Model3DSubclass]
 
 class ProceduralContent(ContentType):
-    type:str = "PROCEDURAL"
+    type: str = "PROCEDURAL"
     subclass: List[ProceduralSubclass]
 
 class DefaultContentPrediction(BaseModel):
     """Class for a single class label prediction."""
-
-    label: Union[TextContent, AudioContent, ImageContent, VideoContent, MultimediaContent, Model3DContent, ProceduralContent]
-
+    label: Union[
+        TextContent,
+        AudioContent,
+        ImageContent,
+        VideoContent,
+        MultimediaContent,
+        Model3DContent,
+        ProceduralContent,
+    ]
 
 
 class SummarizedContent(BaseModel):
     """Class for a single class label summary and description."""
-
     summary: str
     description: str
 
 class LabeledContent(BaseModel):
     """Class for a single class label summary."""
-
     content_labels: str
 
 
@@ -192,13 +193,13 @@ class LabeledContent(BaseModel):
 class CognitiveLayerSubgroup(BaseModel):
     """ CognitiveLayerSubgroup in a general layer """
     id: int
-    name:str
+    name: str
     description: str
 
 
 class DefaultCognitiveLayer(BaseModel):
     """Cognitive  layer"""
-    category_name:str
+    category_name: str
     cognitive_layers: List[CognitiveLayerSubgroup] = Field(..., default_factory=list)
 
 
@@ -225,14 +226,9 @@ class Category(BaseModel):
     default_relationship: Relationship = Relationship(type = "categorized_as")
 
 class Document(BaseModel):
-    doc_id: str
+    id: str
     title: str
     description: Optional[str] = None
-    summary: Optional[str] = None
-    content_id: Optional[str] = None
-    doc_type: Optional[DocumentType] = None
-    categories: List[Category] = []
-    default_relationship: Relationship = Relationship(type = "has_document")
 
 class UserLocation(BaseModel):
     location_id: str
@@ -248,4 +244,4 @@ class DefaultGraphModel(BaseModel):
     user_properties: UserProperties = UserProperties()
     documents: List[Document] = []
     default_fields: Optional[Dict[str, Any]] = {}
-    default_relationship: Relationship = Relationship(type="has_properties")
+    default_relationship: Relationship = Relationship(type = "has_properties")

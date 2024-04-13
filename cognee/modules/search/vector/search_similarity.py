@@ -4,7 +4,7 @@ from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
 
-async def search_similarity(query: str, graph, other_param: str = None, node_descriptions: list = None):
+async def search_similarity(query: str, graph):
     base_node_for_graph = "LLM_CLASSIFICATION_LAYER_"  ### TO FIX
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
 

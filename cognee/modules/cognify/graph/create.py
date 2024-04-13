@@ -1,11 +1,8 @@
 """ This module is responsible for creating a semantic graph """
-import logging
 from typing import  Optional, Any
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
 
 from cognee.infrastructure import infrastructure_config
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
 
 
@@ -43,11 +40,11 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
     if node_id != "Relationship_default":
         try:
             # Attempt to add the node to the graph database
-            result = await client.add_node(node_id, **node_data)
+            result = await client.add_node(node_id, node_properties = node_data)
 
             # Add an edge if a parent ID is provided and the graph engine is NETWORKX
-            if parent_id and infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-                await client.add_edge(parent_id, node_id, **node_data)
+            if parent_id and "default_relationship" in node_data and infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+                await client.add_edge(parent_id, node_id, relationship_name = node_data["default_relationship"]["type"], edge_properties = node_data)
         except Exception as e:
             # Log the exception; consider a logging framework for production use
             print(f"Error adding node or edge: {e}")
@@ -101,11 +98,11 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
 #             }
 #
 #             # Add an edge between the source and target nodes using the client
-#             await client.add_edge(source, target, relationship_type=relationship_details['type'])
+#             await client.add_edge(source, target, relationship_name=relationship_details['type'])
 
 
 
-async def add_edge(client, parent_id: Optional[str], node_id: str,node_data: dict, created_node_ids):
+async def add_edge(client, parent_id: Optional[str], node_id: str, node_data: dict, created_node_ids):
 
     if node_id == "Relationship_default" and parent_id:
         # Initialize source and target variables outside the loop
@@ -137,7 +134,7 @@ async def add_edge(client, parent_id: Optional[str], node_id: str,node_data: dic
             # For demonstration, we'll just print the results
             print("RELATIONSHIP DETAILS", relationship_details)
 
-            await client.add_edge(relationship_details['source'], relationship_details['target'], relationship_type=relationship_details['type'])
+            await client.add_edge(relationship_details['source'], relationship_details['target'], relationship_name = relationship_details['type'])
 
 
 
@@ -200,30 +197,29 @@ async def process_attribute_edge(graph_client, parent_id: Optional[str], attribu
 async def create_dynamic(graph_model, graph_client) :
     root_id = await generate_node_id(graph_model)
 
-
     # node_data = graph_model.model_dump(exclude = {"default_relationship", "id"})
     node_data = graph_model.model_dump()
-
 
     root_id = root_id.replace(":", "_")
 
     _ = node_data.pop("node_id", None)
 
     created_node_ids = []
-    out = await graph_client.add_node(root_id, **node_data)
+
+    out = await graph_client.add_node(root_id, node_properties = node_data)
+
     created_node_ids.append(out)
+
     for attribute_name, attribute_value in graph_model:
-        # print("ATTRIB NAME", attribute_name)
-        # print("ATTRIB VALUE", attribute_value)
         ids = await process_attribute(graph_client, root_id, attribute_name, attribute_value)
         created_node_ids.extend(ids)
 
     flattened_and_deduplicated = list({
-                                          item['nodeId']: item
-                                          # Use the 'nodeId' as the unique key in the dictionary comprehension
-                                          for sublist in created_node_ids if sublist  # Ensure sublist is not None
-                                          for item in sublist  # Iterate over items in the sublist
-                                      }.values())
+        item["nodeId"]: item
+            # Use the 'nodeId' as the unique key in the dictionary comprehension
+            for sublist in created_node_ids if sublist  # Ensure sublist is not None
+            for item in sublist  # Iterate over items in the sublist
+    }.values())
 
     for attribute_name, attribute_value in graph_model:
         ids = await process_attribute_edge(graph_client, root_id, attribute_name, attribute_value, flattened_and_deduplicated)
@@ -233,18 +229,4 @@ async def create_dynamic(graph_model, graph_client) :
 
 async def create_semantic_graph(graph_model_instance, graph_client):
     # Dynamic graph creation based on the provided graph model instance
-    graph = await create_dynamic(graph_model_instance, graph_client)
-
-    return graph
-
-
-
-# if __name__ == "__main__":
-#     import asyncio
-#
-#     user_id = 'user123'
-#     custom_user_properties = {
-#         'username': 'exampleUser',
-#         'email': 'user@example.com'
-#     }
-#     asyncio.run(create_semantic_graph())
+    return await create_dynamic(graph_model_instance, graph_client)

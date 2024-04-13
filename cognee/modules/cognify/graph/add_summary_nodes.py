@@ -1,25 +1,27 @@
-""" Here we update semantic graph with content that classifier produced"""
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+"""Here we update the graph with content summary that summarizer produced"""
+
+async def add_summary_nodes(graph_client, document_id, summary):
+    summary_node_id = f"DATA_SUMMARY-{document_id}"
+
+    await graph_client.add_node(
+        summary_node_id,
+        dict(
+            name = "Summary",
+            summary = summary["summary"],
+        ),
+    )
+
+    await graph_client.add_edge(document_id, summary_node_id, relationship_name = "summarized_as")
 
 
-async def add_summary_nodes(graph_client,document_id, classification_data):
+    description_node_id = f"DATA_DESCRIPTION-{document_id}"
 
-    # Create the layer classification node ID
-    layer_classification_node_id = f"LLM_LAYER_SUMMARY_{document_id}"
+    await graph_client.add_node(
+        description_node_id,
+        dict(
+            name = "Description",
+            summary = summary["description"],
+        ),
+    )
 
-    # Add the node to the graph, unpacking the node data from the dictionary
-    await graph_client.add_node(layer_classification_node_id, **classification_data)
-
-    # Link this node to the corresponding document node
-    await graph_client.add_edge(document_id, layer_classification_node_id, relationship_type = "summarized_as")
-
-    # Create the detailed classification node ID
-    detailed_classification_node_id = f"LLM_SUMMARY_LAYER_{document_id}"
-
-    # Add the detailed classification node, reusing the same node data
-    await graph_client.add_node(detailed_classification_node_id, **classification_data)
-
-    # Link the detailed classification node to the layer classification node
-    await graph_client.add_edge(layer_classification_node_id, detailed_classification_node_id, relationship_type = "contains_summary")
-
-    return True
+    await graph_client.add_edge(document_id, description_node_id, relationship_name = "described_as")

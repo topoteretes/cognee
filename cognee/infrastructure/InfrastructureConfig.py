@@ -1,6 +1,4 @@
 from cognee.config import Config
-from .databases.graph.graph_db_interface import GraphDBInterface
-from .databases.graph.networkx.adapter import NetworXAdapter
 from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
 from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
@@ -10,7 +8,6 @@ from .llm.openai.adapter import OpenAIAdapter
 from .files.storage import LocalStorage
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
     LabeledContent, DefaultCognitiveLayer
-from pydantic import BaseModel
 
 config = Config()
 config.load()
@@ -31,11 +28,11 @@ class InfrastructureConfig():
     intra_layer_score_treshold = None
     embedding_engine = None
     connect_documents = config.connect_documents
+    database_directory_path: str = None
+    database_file_path: str = None
 
-
-
-    def get_config(self) -> dict:
-        if self.database_engine is None:
+    def get_config(self, config_entity: str = None) -> dict:
+        if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
             db_path = self.system_root_directory + "/" + config.db_path
 
             LocalStorage.ensure_directory_exists(db_path)
@@ -45,7 +42,7 @@ class InfrastructureConfig():
                 db_path = db_path
             )
         if self.graph_engine is None:
-            self.graph_engine =  GraphDBType.NETWORKX
+            self.graph_engine = GraphDBType.NETWORKX
 
         if self.classification_model is None:
             self.classification_model = DefaultContentPrediction
@@ -66,10 +63,10 @@ class InfrastructureConfig():
             self.connect_documents = config.connect_documents
 
 
-        if self.llm_engine is None:
+        if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
 
-        if self.vector_engine is None:
+        if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
                 from .databases.vector.weaviate_db import WeaviateAdapter
 
@@ -91,25 +88,33 @@ class InfrastructureConfig():
                     embedding_engine = self.embedding_engine
                 )
 
+        if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
+            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+
+        if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
+            self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
+
+        if config_entity is not None:
+            return getattr(self, config_entity)
+
         return {
             "llm_engine": self.llm_engine,
             "vector_engine": self.vector_engine,
             "database_engine": self.database_engine,
             "system_root_directory": self.system_root_directory,
             "data_root_directory": self.data_root_directory,
-            "database_directory_path": self.system_root_directory + "/" + config.db_path,
-            "database_path": self.system_root_directory + "/" + config.db_path + "/" + config.db_name,
             "graph_engine": self.graph_engine,
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
             "labeling_model": self.labeling_model,
             "graph_model": self.graph_model,
-            "congitive_layer_model": self.cognitive_layer_model,
+            "cognitive_layer_model": self.cognitive_layer_model,
             "llm_provider": self.llm_provider,
             "intra_layer_score_treshold": self.intra_layer_score_treshold,
             "embedding_engine": self.embedding_engine,
             "connect_documents": self.connect_documents,
-
+            "database_directory_path": self.database_directory_path,
+            "database_path": self.database_file_path
         }
 
     def set_config(self, new_config: dict):
@@ -154,6 +159,7 @@ class InfrastructureConfig():
 
         if "embedding_engine" in new_config:
             self.embedding_engine = new_config["embedding_engine"]
+
         if "connect_documents" in new_config:
             self.connect_documents = new_config["connect_documents"]
 
