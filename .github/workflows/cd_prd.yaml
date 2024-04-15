@@ -7,32 +7,32 @@ on:
       - 'examples/**'
 name: Publishing promethai-backend Docker image to prd ECR
 #
-#env:
-#  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/promethai-dev-base-role-github-ci-cd"
-#  AWS_ACCOUNT_ID_DEV: "463722570299"
-#  ENVIRONMENT: prd
-#
-#jobs:
-#
-#  publish_docker_to_ecr:
-#    name: Publish Docker PromethAI image
-#    runs-on: ubuntu-latest
-#    permissions:
-#      id-token: write
-#      contents: read
-#    steps:
-#      - name: Take code from repo
-#        uses: actions/checkout@v3
-#      - name: Set environment variable for stage
-#        id: set-env
-#        run: |
-#          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-#            echo "STAGE=prd" >> $GITHUB_ENV
-#            echo "::set-output name=stage::prd"
-#          else
-#            echo "STAGE=dev" >> $GITHUB_ENV
-#            echo "::set-output name=stage::dev"
-#          fi
+env:
+  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/promethai-dev-base-role-github-ci-cd"
+  AWS_ACCOUNT_ID_DEV: "463722570299"
+  ENVIRONMENT: prd
+
+jobs:
+
+  publish_docker_to_ecr:
+    name: Publish Docker PromethAI image
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Take code from repo
+        uses: actions/checkout@v3
+      - name: Set environment variable for stage
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "STAGE=prd" >> $GITHUB_ENV
+            echo "::set-output name=stage::prd"
+          else
+            echo "STAGE=dev" >> $GITHUB_ENV
+            echo "::set-output name=stage::dev"
+          fi
 #      - name: Use output
 #        run: echo "The stage is ${{ steps.set-env.outputs.stage }}"
 #      - name: Configure AWS credentials
