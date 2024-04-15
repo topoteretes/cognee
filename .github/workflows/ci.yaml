@@ -1,4 +1,4 @@
-name: Test build docker image for PromethAI backend app
+name: build test |  Docker image
 
 on: pull_request
 

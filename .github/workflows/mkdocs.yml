@@ -1,4 +1,4 @@
-name: Deploy MkDocs
+name: util docs |  build and deploy
 
 on:
   push:
@@ -8,10 +8,16 @@ permissions:
   contents: write
 
 jobs:
+  get_docs_changes:
+    name: docs changes
+    uses: ./.github/workflows/get_docs_changes.yml
   deploy:
     runs-on: ubuntu-latest
+    needs: get_docs_changes
+    if: needs.get_docs_changes.outputs.changes_outside_docs == 'false'
 
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v2
 
