@@ -64,7 +64,13 @@ jobs:
       - name: Run make lint
         run: |
           export PATH=$PATH:"/c/Program Files/usr/bin" # needed for Windows
-          make lint
+          ./tools/check-package.sh
+          poetry run python ./tools/check-lockfile.py
+          poetry run mypy --config-file mypy.ini cognee
+          poetry run flake8 --max-line-length=200 cognee
+          poetry run black cognee docs tests --diff --extend-exclude=".*syntax_error.py"
+          # poetry run isort ./ --diff
+              poetry run bandit -r cognee/ -n 3 -l
 
   matrix_job_required_check:
     name: lint | code & tests
