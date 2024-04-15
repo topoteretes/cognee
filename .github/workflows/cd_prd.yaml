@@ -1,11 +1,11 @@
-#on:
-#  push:
-#    branches:
-#        - main
-#    paths-ignore:
-#      - '**.md'
-#      - 'examples/**'
-#name: Publishing promethai-backend Docker image to prd ECR
+on:
+  push:
+    branches:
+        - main
+    paths-ignore:
+      - '**.md'
+      - 'examples/**'
+name: Publishing promethai-backend Docker image to prd ECR
 #
 #env:
 #  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/promethai-dev-base-role-github-ci-cd"
