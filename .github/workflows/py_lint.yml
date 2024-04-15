@@ -4,7 +4,7 @@ name: lint | code & tests
 on:
   pull_request:
     branches:
-      - master
+      - main
       - devel
   workflow_dispatch:
 

@@ -3,7 +3,7 @@ name: common | common
 on:
   pull_request:
     branches:
-      - master
+      - main
       - devel
   workflow_dispatch:
 
