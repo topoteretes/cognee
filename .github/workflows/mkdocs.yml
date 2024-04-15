@@ -4,7 +4,14 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
 
 permissions:
   contents: write
