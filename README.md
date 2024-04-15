@@ -29,6 +29,7 @@ Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrie
   </a>
 </p>
 
+![Cognee Demo](assets/cognee_demo.gif)
 
 ## 🚀 It's alive
 
