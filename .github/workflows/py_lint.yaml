@@ -1,32 +1,78 @@
-#name: Python Linting
-#
-#on:
-#  push:
-#    branches: [ main ]  # This will trigger the workflow on pushes to the main branch
-#  pull_request:  # This will trigger the workflow on any pull request to any branch
-#
-#jobs:
-#  lint:
-#    runs-on: ubuntu-latest
-#    steps:
-#    - uses: actions/checkout@v3
-#    - name: Set up Python
-#      uses: actions/setup-python@v4
-#      with:
-#        python-version: '3.11'  # Specify the Python version you want to use
-#
-#    - name: Install Poetry
-#      run: |
-#        curl -sSL https://install.python-poetry.org | python3 -  # Install Poetry
-#
-#    - name: Configure Poetry
-#      run: |
-#        poetry config virtualenvs.create false  # Configure poetry to not create a new virtual environment
-#
-#    - name: Install dependencies
-#      run: |
-#        poetry install  # Install the dependencies specified in pyproject.toml
-#
-#    - name: Run pylint
-#      run: |
-#        pylint $(git ls-files '*.py')  # Run pylint on all Python files in the repository
+
+name: lint | code & tests
+
+on:
+  pull_request:
+    branches:
+      - master
+      - devel
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  get_docs_changes:
+    name: docs changes
+    uses: ./.github/workflows/get_docs_changes.yml
+
+  run_lint:
+    name: lint
+    needs: get_docs_changes
+    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+        python-version: ["3.8.x", "3.9.x", "3.10.x", "3.11.x"]
+
+    defaults:
+      run:
+        shell: bash
+    runs-on: ${{ matrix.os }}
+
+    steps:
+
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ matrix.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        # if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --all-extras
+
+      - name: Run make lint
+        run: |
+          export PATH=$PATH:"/c/Program Files/usr/bin" # needed for Windows
+          make lint
+
+  matrix_job_required_check:
+    name: lint | code & tests
+    needs: run_lint
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check matrix job results
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "One or more matrix job tests failed or were cancelled. You may need to re-run them." && exit 1
