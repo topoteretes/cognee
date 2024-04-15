@@ -1,7 +1,9 @@
 name: util docs |  build and deploy
 
 on:
-  push:
+  pull_request:
+    branches:
+      - main
 
 
 permissions:
