@@ -117,17 +117,14 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 [<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
 
 
-### How Cognee Enhances Your Contextual Memory
-
-Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases helps you create deterministic outputs for LLMs:
-
-- Query Classifiers: Navigate information graph using Pydantic OpenAI classifiers.
-- Linguistic Analysis: Use NLP and LLMs to analyze and score text.
-- Graph Structure: Define relationships between facts and concepts.
-- Document Topology: Structure and store documents in public and private domains.
 
 
-## Architecture
+
+## How it works
+
+
+
+
 
 ![Image](assets/architecture.png)
 
