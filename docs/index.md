@@ -32,6 +32,14 @@ We help people with using graphs, LLMs and adding vector retrieval to their ML s
 [//]: # (- **Case Studies** — Read about [case studies]&#40;case_studies.md&#41; that show how cognee can be used in real-world applications.)
 
 
+### Vision
+
+![Vision](img/roadmap.png)
+
+
+### Architecture
+
+![Architecture](img/architecture.png)
 ### Why use cognee?
 
 The question of using cognee is fundamentally a question of why to have deterministic outputs for your llm workflows.

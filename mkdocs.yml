@@ -139,6 +139,8 @@ nav:
       - "research.md"
   - Api reference:
       - 'api_reference.md'
+  - Team:
+      - "team.md"
 
 plugins:
   - mkdocs-jupyter:
