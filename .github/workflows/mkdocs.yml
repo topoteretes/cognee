@@ -25,7 +25,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 #    needs: get_docs_changes
-    if: needs.get_docs_changes.outputs.changes_outside_docs == 'false'
 
     steps:
 
