@@ -17,20 +17,14 @@ permissions:
   contents: write
 
 jobs:
-  check_output:
-    name: see_github_out
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-  get_docs_changes:
-    name: run docs changes
-    uses: ./.github/workflows/get_docs_changes.yml
+
+
+#  get_docs_changes:
+#    name: run docs changes
+#    uses: ./.github/workflows/get_docs_changes.yml
   deploy:
     runs-on: ubuntu-latest
-    needs: get_docs_changes
+#    needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'false'
 
     steps:
