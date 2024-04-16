@@ -15,3 +15,13 @@ class prune():
 
         vector_engine = infra_config["vector_engine"]
         await vector_engine.prune()
+
+
+if __name__ == "__main__":
+    import asyncio
+    async def main():
+        await prune.prune_data()
+        await prune.prune_system()
+
+
+    asyncio.run(main())

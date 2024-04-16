@@ -261,13 +261,13 @@ if __name__ == "__main__":
             ],
             dataset_name
         )
-        # graph = await cognify(datasets=dataset_name)
+        #graph = await cognify(datasets=dataset_name)
 
         if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
 
             graph_client = await get_graph_client(GraphDBType.NETWORKX)
             from cognee.utils import render_graph
-            graph_url = await render_graph(graph_client.graph)
+            graph_url = await render_graph(graph_client.graph, include_nodes=True, include_color=True, include_size=True,include_labels=False)
             print(graph_url)
 
 

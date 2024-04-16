@@ -125,7 +125,7 @@ def prepare_nodes(graph, include_size=False):
 
 
 
-async def render_graph(graph, include_nodes=False, include_color=False, include_size=False):
+async def render_graph(graph, include_nodes=False, include_color=False, include_size=False, include_labels=False):
     await register_graphistry()
     edges = prepare_edges(graph)
     plotter = graphistry.edges(edges, "source", "target")
@@ -133,16 +133,21 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
     if include_nodes:
         nodes = prepare_nodes(graph, include_size=include_size)
         plotter = plotter.nodes(nodes, "id")
-        plotter = plotter.bind(point_label='layer_description')
+
 
         if include_size:
             plotter = plotter.bind(point_size='size')
+
 
         if include_color:
             unique_layers = nodes["layer_description"].unique()
             color_palette = generate_color_palette(unique_layers)
             plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
                                                  default_mapping="silver")
+
+
+        if include_labels:
+            plotter = plotter.bind(point_label='layer_description')
 
 
 
