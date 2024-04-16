@@ -81,6 +81,10 @@ jobs:
         run: |
           cd dist
           pip install *.whl
+
+      - name: Download NLTK Punkt Tokenizer Models
+        run: |
+          python -m nltk.downloader punkt
       - name: Run test script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -116,7 +120,9 @@ jobs:
           cd dist
           pip install *.whl
           
-
+      - name: Download NLTK Punkt Tokenizer Models
+        run: |
+          python -m nltk.downloader punkt
       - run: |
           poetry run python ./cognee/tests/test_library.py
         if: runner.os != 'Windows'
@@ -125,6 +131,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+
+      - name: Download NLTK Punkt Tokenizer Models
+        run: |
+          python -m nltk.downloader punkt
       - run: |
           poetry run python ./cognee/tests/test_library.py
         if: runner.os == 'Windows'
