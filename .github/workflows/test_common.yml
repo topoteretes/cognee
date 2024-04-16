@@ -85,6 +85,9 @@ jobs:
       - name: Download NLTK Punkt Tokenizer Models
         run: |
           python -m nltk.downloader punkt
+          python -m nltk.downloader stopwords
+          python -m nltk.downloader wordnet
+          python -m nltk.downloader averaged_perceptron_tagger
       - name: Run test script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
