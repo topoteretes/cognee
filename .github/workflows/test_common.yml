@@ -72,78 +72,72 @@ jobs:
       - name: Install dependencies
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         run: poetry install --no-interaction
+      - name: Build with Poetry
+        run: poetry build
+      - name: Install Package
+        run: |
+          cd dist
+          pip install *.whl
       - name: Run test script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         run: poetry run python ./cognee/tests/test_library.py
-
       - run: |
           poetry run
         if: runner.os != 'Windows'
         name: Run common tests with minimum dependencies Linux/MAC
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
       - run: |
-          poetry run pytest tests/common tests/normalize tests/reflection tests/sources tests/load/test_dummy_client.py tests/extract/test_extract.py tests/extract/test_sources.py tests/pipeline/test_pipeline_state.py -m "not forked"
+          poetry run python ./cognee/tests/test_library.py
         if: runner.os == 'Windows'
         name: Run common tests with minimum dependencies Windows
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         shell: cmd
 
-      - name: Install duckdb dependencies
+      - name: Install  dependencies
         run: poetry install --no-interaction
 
+      - name: Build with Poetry
+        run: poetry build
+
+      - name: Install Package
+        run: |
+          cd dist
+          pip install *.whl
+          
+
       - run: |
-          poetry run pytest tests/pipeline/test_pipeline.py tests/pipeline/test_import_export_schema.py
+          poetry run python ./cognee/tests/test_library.py
         if: runner.os != 'Windows'
         name: Run pipeline smoke tests with minimum deps Linux/MAC
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
       - run: |
-          poetry run pytest tests/pipeline/test_pipeline.py tests/pipeline/test_import_export_schema.py
+          poetry run python ./cognee/tests/test_library.py
         if: runner.os == 'Windows'
         name: Run smoke tests with minimum deps Windows
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         shell: cmd
 
-      - name: Install pyarrow
-        run: poetry install --no-interaction
 
-      - run: |
-          poetry run python ./cognee/tests/test_library.py
-        if: runner.os != 'Windows'
-        name: Run pipeline tests with pyarrow but no pandas installed
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      - run: |
-          poetry run python ./cognee/tests/test_library.py
-        if: runner.os == 'Windows'
-        name: Run pipeline tests with pyarrow but no pandas installed Windows
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        shell: cmd
 
-      - name: Install pipeline dependencies
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: poetry install --no-interaction
 
-      - run: |
-          poetry run python ./cognee/tests/test_library.py
-        if: runner.os != 'Windows'
-        name: Run extract and pipeline tests Linux/MAC
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-#      - run: |
-#          poetry run python ./cognee/tests/test_library.py
-#        if: runner.os == 'Windows'
-#        name: Run extract tests Windows
-#        env:
-#          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-#        shell: cmd
 
 
   matrix_job_required_check:

@@ -1,3 +1,5 @@
+name: publish prd |  Docker image
+
 on:
   push:
     branches:
@@ -5,8 +7,7 @@ on:
     paths-ignore:
       - '**.md'
       - 'examples/**'
-name: publish prd |  Docker image
-#
+
 env:
   AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/promethai-dev-base-role-github-ci-cd"
   AWS_ACCOUNT_ID_DEV: "463722570299"
