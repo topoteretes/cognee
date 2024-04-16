@@ -24,6 +24,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "$GITHUB_CONTEXT"
+
       - name: Check changes outside docs
         id: check_changes
         run: |
