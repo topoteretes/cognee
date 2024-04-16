@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   get_docs_changes:
-    name: docs changes
+    name: run docs changes
     uses: ./.github/workflows/get_docs_changes.yml
   deploy:
     runs-on: ubuntu-latest
