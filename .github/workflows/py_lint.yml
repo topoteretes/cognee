@@ -61,6 +61,10 @@ jobs:
         # if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: poetry install --all-extras
 
+      - name: Set Script Permissions
+        run: chmod +x ./tools/check-package.sh
+
+
       - name: Run make lint
         run: |
           export PATH=$PATH:"/c/Program Files/usr/bin" # needed for Windows
