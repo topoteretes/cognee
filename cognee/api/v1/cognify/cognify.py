@@ -208,41 +208,38 @@ async def process_text(input_text: str, file_metadata: dict):
     #     )
 
     #     results = await resolve_cross_graph_references(nodes_by_layer)
+    
+
+if __name__ == "__main__":
+
+    async def main():
 
 
+        infrastructure_config.set_config({
+            "graph_engine": GraphDBType.NETWORKX
+        })
+        # print(infrastructure_config.get_config())
+        text_1 = """Thomas Mann wrote German novels about horses and nature. Hello novels
+        """
+        text_2 = """German novels are fun to read and talk about nature"""
+        dataset_name = "explanations"
+        from cognee.api.v1.add.add import add
+        await add(
+            [
+                text_1,
+                text_2
+
+            ],
+            dataset_name
+        )
+        #graph = await cognify(datasets=dataset_name)
+
+        if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+
+            graph_client = await get_graph_client(GraphDBType.NETWORKX)
+            from cognee.utils import render_graph
+            graph_url = await render_graph(graph_client.graph, include_nodes=True, include_color=True, include_size=True,include_labels=False)
+            print(graph_url)
 
 
-
-# if __name__ == "__main__":
-
-#     async def main():
-
-
-#         infrastructure_config.set_config({
-#             "graph_engine": GraphDBType.NETWORKX
-#         })
-#         # print(infrastructure_config.get_config())
-#         text_1 = """Thomas Mann wrote German novels about horses and nature. Hello novels
-#         """
-#         text_2 = """German novels are fun to read and talk about nature"""
-#         dataset_name = "explanations"
-#         from cognee.api.v1.add.add import add
-#         await add(
-#             [
-#                 text_1,
-#                 text_2
-
-#             ],
-#             dataset_name
-#         )
-#         # graph = await cognify(datasets=dataset_name)
-
-#         if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-
-#             graph_client = await get_graph_client(GraphDBType.NETWORKX)
-#             from cognee.utils import render_graph
-#             graph_url = await render_graph(graph_client.graph)
-#             print(graph_url)
-
-
-#     asyncio.run(main())
+    asyncio.run(main())
