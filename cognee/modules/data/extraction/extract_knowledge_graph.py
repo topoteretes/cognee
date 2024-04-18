@@ -3,6 +3,8 @@ import dspy
 from cognee.config import Config
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge
 
+
+
 config = Config()
 config.load()
 
@@ -37,15 +39,15 @@ class GraphTextFromText(dspy.Signature):
 
     text: str = dspy.InputField()
     cognitive_layer: Optional[str] = dspy.InputField(desc = "Name of the cognitive layer for which the graph should be created.")
-    graph_text: str = dspy.OutputField(desc = "Knowledge graph generated from text, based on the provided cognitive layer.")
-
-class GraphFromText(dspy.Signature):
-    """Instructions:
-    Take "graph_text" input and verify that it is a valid knowledge graph.
-    Correct mistakes that lead to incorrect knowledge graph."""
-
-    graph_text: str = dspy.InputField()
     graph: KnowledgeGraph = dspy.OutputField(desc = "Knowledge graph generated from text, based on the provided cognitive layer.")
+
+# class GraphFromText(dspy.Signature):
+#     """Instructions:
+#     Take "graph_text" input and verify that it is a valid knowledge graph.
+#     Correct mistakes that lead to incorrect knowledge graph."""
+#
+#     graph_text: str = dspy.InputField()
+#     graph: KnowledgeGraph = dspy.OutputField(desc = "Knowledge graph generated from text, based on the provided cognitive layer.")
 
 
 def are_all_nodes_and_edges_valid(graph: KnowledgeGraph) -> bool:
@@ -62,18 +64,21 @@ def are_all_nodes_connected(graph: KnowledgeGraph) -> bool:
 
 class ExtractKnowledgeGraph(dspy.Module):
     def __init__(self, lm = dspy.OpenAI(
-        model = "gpt-4-1106-preview",
-        max_tokens = 4096
+        model = "gpt-4-turbo",
+        max_tokens = 12000
     )):
         super().__init__()
         self.lm = lm
-        self.generate_graph_text = dspy.TypedChainOfThought(GraphTextFromText)
-        self.generate_graph = dspy.TypedChainOfThought(GraphFromText)
+
+        # self.generate_graph_text = dspy.TypedChainOfThought(GraphTextFromText)
+        self.generate_graph = dspy.TypedChainOfThought(GraphTextFromText)
 
     def forward(self, layer: str, text: str):
-        with dspy.context(lm = self.lm):
-            graph_text = self.generate_graph_text(text = text, cognitive_layer = layer).graph_text
-            graph = self.generate_graph(graph_text = graph_text).graph
+        # dspy.configure(lm=self.lm)
+        with dspy.settings.context(lm = self.lm):
+
+            # graph_text = self.generate_graph_text(text = text, cognitive_layer = layer).graph_text
+            graph = self.generate_graph(text = text, cognitive_layer = layer).graph
 
             not_valid_nodes_or_edges_message = """
                 All nodes must contain 'entity_name'.
@@ -89,3 +94,14 @@ class ExtractKnowledgeGraph(dspy.Module):
             # dspy.Suggest(are_all_nodes_connected(graph), not_connected_graph_message)
 
         return graph
+
+
+if __name__ == "__main__":
+    gpt_4_turbo = dspy.OpenAI(model="gpt-4-1106-preview", max_tokens=32000, api_key=config.openai_key)
+    dspy.settings.configure(lm=gpt_4_turbo)
+    extract_knowledge_graph = ExtractKnowledgeGraph(lm=gpt_4_turbo)
+    # graph_text = extract_knowledge_graph("cognitive_layer", "text")
+    graph = extract_knowledge_graph("analysis_layer", """A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification. LLMs acquire these abilities by learning statistical relationships from text documents during a computationally intensive self-supervised and semi-supervised training process. LLMs can be used for text generation, a form of generative AI, by taking an input text and repeatedly predicting the next token or word.
+LLMs are artificial neural networks. The largest and most capable, as of March 2024""")
+    # print(graph_text)
+    print(graph)
