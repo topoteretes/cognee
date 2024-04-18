@@ -8,6 +8,9 @@ logger = logging.getLogger(__name__)
 
 async def get_layer_graphs(content: str, cognitive_layers: List[Tuple[str, dict]]):
     try:
+        print("content: ", content)
+        print("cognitive_layers: ", cognitive_layers)
+
         graph_awaitables = [
             extract_content_graph(
                 content,

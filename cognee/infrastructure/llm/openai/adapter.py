@@ -12,7 +12,7 @@ class OpenAIAdapter(LLMInterface):
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
     def __init__(self, api_key: str, model:str):
         openai.api_key = api_key
-        self.aclient = instructor.patch(AsyncOpenAI())
+        self.aclient = instructor.from_openai(AsyncOpenAI())
         self.model = model
 
     @retry(stop = stop_after_attempt(5))
@@ -70,6 +70,7 @@ class OpenAIAdapter(LLMInterface):
     @retry(stop = stop_after_attempt(5))
     async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
+
         return await self.aclient.chat.completions.create(
             model = self.model,
             messages = [

@@ -29,6 +29,7 @@ from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
+from cognee.shared.data_models import GraphDBType
 
 config = Config()
 config.load()
@@ -132,7 +133,8 @@ async def process_text(input_text: str, file_metadata: dict):
     cognitive_layers = await add_cognitive_layers(graph_client, document_id, cognitive_layers)
 
     layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
-    await add_cognitive_layer_graphs(graph_client, document_id, layer_graphs)
+    print("Layer graphs are: ", layer_graphs)
+    # await add_cognitive_layer_graphs(graph_client, document_id, layer_graphs)
 
     print(f"Document ({document_id}) cognified.")
 
@@ -232,14 +234,14 @@ if __name__ == "__main__":
             ],
             dataset_name
         )
-        #graph = await cognify(datasets=dataset_name)
+        graph = await cognify(datasets=dataset_name)
 
-        if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-
-            graph_client = await get_graph_client(GraphDBType.NETWORKX)
-            from cognee.utils import render_graph
-            graph_url = await render_graph(graph_client.graph, include_nodes=True, include_color=True, include_size=True,include_labels=False)
-            print(graph_url)
+        # if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+        #
+        #     graph_client = await get_graph_client(GraphDBType.NETWORKX)
+        #     from cognee.utils import render_graph
+        #     graph_url = await render_graph(graph_client.graph, include_nodes=True, include_color=True, include_size=True,include_labels=False)
+        #     print(graph_url)
 
 
     asyncio.run(main())
