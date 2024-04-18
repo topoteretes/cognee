@@ -2,10 +2,14 @@ from uuid import uuid4
 from typing import List, Tuple, Dict, TypedDict
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
-
+from cognee.shared.data_models import KnowledgeGraph
 class GraphLike(TypedDict):
     nodes: List
     edges: List
+
+from pydantic import BaseModel
+from typing import List
+
 
 async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_graphs: List[Tuple[str, GraphLike]]):
     vector_client = infrastructure_config.get_config("vector_engine")
@@ -15,8 +19,16 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
         graph_edges = []
         graph_entity_types: Dict[str, Tuple] = {}
 
+        if not isinstance(layer_graph, KnowledgeGraph):
+
+            # print("Layer graph: ", layer_graph)
+            layer_graph = KnowledgeGraph.parse_obj(layer_graph)
+
+        print("Layer graph: ", layer_graph)
+
         for node in layer_graph.nodes:
             node_id = generate_node_id(node.id)
+            print("Node id:  222", node_id)
 
             if node.entity_type not in graph_entity_types:
                 entity_type_node_id = generate_node_id(node.entity_type)
@@ -94,4 +106,4 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
 
 
 def generate_node_id(node_id: str) -> str:
-    return f"COGNITIVE_LAYER_NODE-{node_id.upper().replace(' ', '_')}"
+    return f"COGNITIVE_LAYER_NODE_{node_id.upper().replace(' ', '_')}"

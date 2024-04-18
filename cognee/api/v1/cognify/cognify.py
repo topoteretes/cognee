@@ -133,8 +133,8 @@ async def process_text(input_text: str, file_metadata: dict):
     cognitive_layers = await add_cognitive_layers(graph_client, document_id, cognitive_layers)
 
     layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
-    print("Layer graphs are: ", layer_graphs)
-    # await add_cognitive_layer_graphs(graph_client, document_id, layer_graphs)
+    # print("Layer graphs are: ", layer_graphs)
+    await add_cognitive_layer_graphs(graph_client, document_id, layer_graphs)
 
     print(f"Document ({document_id}) cognified.")
 
@@ -240,7 +240,7 @@ if __name__ == "__main__":
         #
         #     graph_client = await get_graph_client(GraphDBType.NETWORKX)
         #     from cognee.utils import render_graph
-        #     graph_url = await render_graph(graph_client.graph, include_nodes=True, include_color=True, include_size=True,include_labels=False)
+        #     graph_url = await render_graph(graph_client.graph, include_nodes=False, include_color=False, include_size=False,include_labels=False)
         #     print(graph_url)
 
 
