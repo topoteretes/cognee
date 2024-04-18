@@ -8,10 +8,10 @@ from cognee.modules.cognify.graph.add_cognitive_layer_graphs import add_cognitiv
 # from cognee.modules.cognify.llm.label_content import label_content
 # from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
 from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
-# from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, graph_ready_output, \
-    # connect_nodes_in_graph
-# from cognee.modules.cognify.graph.add_propositions import append_to_graph
-# from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
+from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, graph_ready_output, \
+    connect_nodes_in_graph
+from cognee.modules.cognify.graph.add_propositions import append_to_graph
+from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
 # from cognee.modules.cognify.vector.add_propositions import add_propositions
 
 from cognee.config import Config
@@ -19,7 +19,7 @@ from cognee.config import Config
 # from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.modules.cognify.graph.add_document_node import add_document_node
-from cognee.modules.cognify.graph.add_keywords_nodes import add_keywords_nodes
+from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
 from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_layers
 from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
@@ -97,11 +97,11 @@ async def process_text(input_text: str, file_metadata: dict):
 
     document_id = await add_document_node(
         graph_client,
-        parent_node_id = f"DefaultGraphModel_{USER_ID}",
+        parent_node_id = f"DefaultGraphModel_{USER_ID}", #make a param of defaultgraph model to make sure when user passes his stuff, it doesn't break pipeline
         document_metadata = file_metadata,
     )
 
-    # await add_keywords_nodes(graph_client, document_id, file_metadata["keywords"].split("|"))
+    await add_label_nodes(graph_client, document_id, file_metadata["keywords"].split("|"))
 
     classified_categories = await get_content_categories(input_text)
     await add_classification_nodes(
@@ -110,106 +110,60 @@ async def process_text(input_text: str, file_metadata: dict):
         categories = classified_categories,
     )
 
-    # print(f"Document ({document_id}) classified.")
+    print(f"Document ({document_id}) classified.")
 
-    # content_summary = await get_content_summary(input_text)
-    # await add_summary_nodes(graph_client, document_id, content_summary)
+    content_summary = await get_content_summary(input_text)
+    await add_summary_nodes(graph_client, document_id, content_summary)
 
-    # print(f"Document ({document_id}) summarized.")
-
-    # try:
-    #     # Classify the content into categories
-    #     content_labels = await label_content(
-    #         input_text,
-    #         infrastructure_config.get_config()["labeling_model"]
-    #     )
-    #     file_metadata["content_labels"] = content_labels["content_labels"]
-    # except Exception as e:
-    #     print(e)
-    #     raise e
-
+    print(f"Document ({document_id}) summarized.")
 
     cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
     cognitive_layers = await add_cognitive_layers(graph_client, document_id, cognitive_layers)
 
     layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
-    # print("Layer graphs are: ", layer_graphs)
     await add_cognitive_layer_graphs(graph_client, document_id, layer_graphs)
 
     print(f"Document ({document_id}) cognified.")
+    node_descriptions_for_processing_doc = await graph_client.extract_node_description(document_id)
 
-    # await add_label_nodes(
-    #     graph_client,
-    #     f"DOCUMENT_{file_metadata['id']}",
-    #     { "content_labels": file_metadata["content_labels"] }
-    # )
+    print("Node descriptions are: ", str(node_descriptions_for_processing_doc))
 
-    # await append_to_graph(graph_client, layer_graphs, classified_categories[0])
+    if infrastructure_config.get_config()["connect_documents"] == True:
+        db_engine = infrastructure_config.get_config()["database_engine"]
+        relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata["id"])
 
-    # infra_config = infrastructure_config.get_config()
+        print("Relevant documents to connect are: ", relevant_documents_to_connect)
 
-    # db_engine = infra_config["database_engine"]
+        list_of_nodes = []
 
-    # data = [{
-    #     "document_id": file_metadata["id"],
-    #     "layer_id": base_node_for_graph
-    # }]
+        relevant_documents_to_connect.append({
+            "document_id": file_metadata["id"],
+            "layer_id": document_id,
+            "created_at": "2024-04-05 16:47:09.651000",
+            "updated_at": "2024-04-05 16:47:09.651000",
+        })
 
-    # db_engine.load_cognify_data(data)
+        for document in relevant_documents_to_connect:
+            node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
+            list_of_nodes.extend(node_descriptions_to_match)
 
-    # node_descriptions_for_processing_doc = await graph_client.extract_node_description(base_node_for_graph)
+        print("List of nodes are: ", len(list_of_nodes))
 
-    # print("Node descriptions are: ", str(node_descriptions_for_processing_doc))
+        nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+        print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
 
-    # nodes_by_layer_for_processing_doc = await group_nodes_by_layer(node_descriptions_for_processing_doc)
-    # unique_layers = nodes_by_layer_for_processing_doc.keys()
+        results = await resolve_cross_graph_references(nodes_by_layer)
+        print("Results are: ", str(results)[:3000])
 
-    # try:
-    #     vector_engine = infrastructure_config.get_config()["vector_engine"]
+        relationships = graph_ready_output(results)
 
-    #     for layer in unique_layers:
-    #         await vector_engine.create_collection(layer)
-    # except Exception as e:
-    #     print(e)
+        await connect_nodes_in_graph(
+            graph_client,
+            relationships,
+            score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
+        )
 
-    # await add_propositions(nodes_by_layer_for_processing_doc)
-
-    # if infrastructure_config.get_config()["connect_documents"] == True:
-    #     relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id=file_metadata["id"])
-
-    #     print("Relevant documents to connect are: ", relevant_documents_to_connect)
-
-    #     list_of_nodes = []
-
-    #     relevant_documents_to_connect.append({
-    #         "document_id": file_metadata["id"],
-    #         "layer_id": base_node_for_graph,
-    #         "created_at": "2024-04-05 16:47:09.651000",
-    #         "updated_at": "2024-04-05 16:47:09.651000",
-    #     })
-
-    #     for document in relevant_documents_to_connect:
-    #         node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
-    #         # list_of_nodes.append(node_descriptions_to_match)
-    #         list_of_nodes.extend(node_descriptions_to_match)
-
-    #     print("List of nodes are: ", len(list_of_nodes))
-
-    #     nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
-    #     print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
-
-    #     results = await resolve_cross_graph_references(nodes_by_layer)
-    #     print("Results are: ", str(results)[:3000])
-
-    #     relationships = graph_ready_output(results)
-
-    #     await connect_nodes_in_graph(
-    #         graph_client,
-    #         relationships,
-    #         score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
-    #     )
-
-    #     results = await resolve_cross_graph_references(nodes_by_layer)
+        results = await resolve_cross_graph_references(nodes_by_layer)
     
 
 if __name__ == "__main__":
@@ -236,12 +190,12 @@ if __name__ == "__main__":
         )
         graph = await cognify(datasets=dataset_name)
 
-        # if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-        #
-        #     graph_client = await get_graph_client(GraphDBType.NETWORKX)
-        #     from cognee.utils import render_graph
-        #     graph_url = await render_graph(graph_client.graph, include_nodes=False, include_color=False, include_size=False,include_labels=False)
-        #     print(graph_url)
+        if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+
+            graph_client = await get_graph_client(GraphDBType.NETWORKX)
+            from cognee.utils import render_graph
+            graph_url = await render_graph(graph_client.graph, include_nodes=False, include_color=False, include_size=False,include_labels=False)
+            print(graph_url)
 
 
     asyncio.run(main())

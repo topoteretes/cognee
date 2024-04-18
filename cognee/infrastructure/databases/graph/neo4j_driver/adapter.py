@@ -2,7 +2,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Tuple
 from contextlib import asynccontextmanager
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
@@ -78,11 +78,38 @@ class Neo4jAdapter(GraphDBInterface):
 
         return result
 
+    async def add_nodes(self, nodes: List[Tuple[str, Dict[str, Any]]]) -> None:
+        nodes_data = []
+        for node in nodes:
+            node_id, node_properties = node
+            node_id = node_id.replace(":", "_")
+
+            # Serialize complex properties
+            serialized_properties = {
+                property_key: json.dumps(property_value)
+                if isinstance(property_value, (dict, list))
+                else property_value for property_key, property_value in node_properties.items()
+            }
+
+            if "name" not in serialized_properties:
+                serialized_properties["name"] = node_id
+
+            nodes_data.append({"node_id": node_id, "properties": serialized_properties})
+
+        query = (
+            "UNWIND $nodes_data AS node_data "
+            "MERGE (n:`{node_data.node_id}` {node_id: node_data.node_id}) "
+            "ON CREATE SET n += node_data.properties "
+            "RETURN  ID(n) AS internalId, n.node_id AS nodeId"
+        )
+        params = {"nodes_data": nodes_data}
+        result = await self.query(query, params)
+
+        await self.close()
     async def extract_node_description(self, id: str):
         query = f"""MATCH (n)-[r]->(m)
                     WHERE n.node_id = '{id}'
-                    AND NOT m.node_id CONTAINS 'DOCUMENT'
-                    AND m.layer_decomposition_uuid IS NOT NULL
+                    AND NOT m.node_id CONTAINS 'DefaultGraphModel'
                     RETURN m
                     """
 
@@ -155,6 +182,38 @@ class Neo4jAdapter(GraphDBInterface):
             params = { "from_node": from_node, "to_node": to_node, **filtered_properties }
 
         await self.query(query, params)
+        await self.close()
+
+    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+        edges_data = []
+        for edge in edges:
+            from_node, to_node, relationship_name, edge_properties = edge
+            from_node = from_node.replace(":", "_")
+            to_node = to_node.replace(":", "_")
+
+            # Filter out None values and do not serialize; Neo4j can handle complex types like arrays directly
+            filtered_properties = {
+                property_name: property_value
+                for property_name, property_value in edge_properties.items() if property_value is not None
+            }
+
+            edges_data.append({
+                "from_node": from_node,
+                "to_node": to_node,
+                "relationship_name": relationship_name,
+                "properties": filtered_properties
+            })
+
+        query = (
+            "UNWIND $edges_data AS edge_data "
+            "MATCH (a:`{edge_data.from_node}` {node_id: edge_data.from_node}), (b:`{edge_data.to_node}` {node_id: edge_data.to_node}) "
+            "MERGE (a)-[r:`{edge_data.relationship_name}`]->(b) "
+            "ON CREATE SET r += edge_data.properties "
+            "RETURN r"
+        )
+        params = {"edges_data": edges_data}
+        result = await self.query(query, params)
+
         await self.close()
 
 

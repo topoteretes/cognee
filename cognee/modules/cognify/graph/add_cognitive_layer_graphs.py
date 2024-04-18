@@ -1,3 +1,5 @@
+import uuid
+from datetime import datetime
 from uuid import uuid4
 from typing import List, Tuple, Dict, TypedDict
 from cognee.infrastructure import infrastructure_config
@@ -10,6 +12,9 @@ class GraphLike(TypedDict):
 from pydantic import BaseModel
 from typing import List
 
+from cognee.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
+
+
 
 async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_graphs: List[Tuple[str, GraphLike]]):
     vector_client = infrastructure_config.get_config("vector_engine")
@@ -20,15 +25,14 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
         graph_entity_types: Dict[str, Tuple] = {}
 
         if not isinstance(layer_graph, KnowledgeGraph):
-
-            # print("Layer graph: ", layer_graph)
             layer_graph = KnowledgeGraph.parse_obj(layer_graph)
 
         print("Layer graph: ", layer_graph)
 
+        layer_uuid = uuid4()
+
         for node in layer_graph.nodes:
             node_id = generate_node_id(node.id)
-            print("Node id:  222", node_id)
 
             if node.entity_type not in graph_entity_types:
                 entity_type_node_id = generate_node_id(node.entity_type)
@@ -52,12 +56,31 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
 
                 graph_entity_types[node.entity_type] = entity_type_node
 
+            extract_pos_tags = await extract_pos_tags(node.description)
+            extract_named_entities = await extract_named_entities(node.description)
+            extract_sentiment = await extract_sentiment_vader(node.description)
+            unique_node_id = uuid.uuid4()
+
+            compound_id = f"{node.description} - {str(layer_uuid)} - {str(unique_node_id)}"
+
             graph_nodes.append((
                 node_id,
                 dict(
                     label = node.entity_name,
+                    name = node.description,
                     entity_name = node.entity_name,
                     entity_type = node.entity_type.lower().capitalize(),
+                    description = node.description,
+                    pos_tags = extract_pos_tags,
+                    named_entities = extract_named_entities,
+                    sentiment = extract_sentiment,
+                    unique_id = str(unique_node_id),
+                    type = "detail",
+                    created_at = datetime.now(),
+                    updated_at = datetime.now(),
+                    node_id = unique_node_id,
+                    layer_id = layer_uuid,
+                    compound_id = compound_id
                 )
             ))
 
@@ -106,4 +129,4 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
 
 
 def generate_node_id(node_id: str) -> str:
-    return f"COGNITIVE_LAYER_NODE_{node_id.upper().replace(' ', '_')}"
+    return f"PROPOSITION_NODE__{node_id.upper().replace(' ', '_')}"
