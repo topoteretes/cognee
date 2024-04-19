@@ -61,6 +61,7 @@ dspy = { git = "https://github.com/stanfordnlp/dspy.git", branch = "main" }
 
 nest-asyncio = "^1.6.0"
 structlog = "^24.1.0"
+tiktoken = "^0.6.0"
 
 
 [tool.poetry.extras]
