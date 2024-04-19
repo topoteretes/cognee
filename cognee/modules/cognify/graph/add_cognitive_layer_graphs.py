@@ -1,47 +1,48 @@
-import uuid
 from datetime import datetime
 from uuid import uuid4
-from typing import List, Tuple, Dict, TypedDict
+from typing import List, Tuple, TypedDict
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
+
 class GraphLike(TypedDict):
     nodes: List
     edges: List
 
-from pydantic import BaseModel
-from typing import List
 
-from cognee.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
-
-
-
-async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_graphs: List[Tuple[str, GraphLike]]):
+async def add_cognitive_layer_graphs(
+    graph_client,
+    chunk_collection: str,
+    chunk_id: str,
+    layer_graphs: List[Tuple[str, GraphLike]],
+):
     vector_client = infrastructure_config.get_config("vector_engine")
 
     for (layer_id, layer_graph) in layer_graphs:
         graph_nodes = []
         graph_edges = []
-        graph_entity_types: Dict[str, Tuple] = {}
 
         if not isinstance(layer_graph, KnowledgeGraph):
             layer_graph = KnowledgeGraph.parse_obj(layer_graph)
 
-        print("Layer graph: ", layer_graph)
-
-        layer_uuid = uuid4()
-
         for node in layer_graph.nodes:
-            node_id = generate_node_id(node.id)
+            node_id = generate_proposition_node_id(node.id)
 
-            if node.entity_type not in graph_entity_types:
-                entity_type_node_id = generate_node_id(node.entity_type)
+            entity_type_node_id = generate_type_node_id(node.entity_type)
+            entity_type_node = graph_client.extract_node(entity_type_node_id)
 
+            if not entity_type_node:
+                node_name = node.entity_type.lower().capitalize()
+              
                 entity_type_node = (
                     entity_type_node_id,
                     dict(
-                        label = node.entity_type.lower().capitalize(),
-                        entity_type = node.entity_type.lower().capitalize(),
+                        id = entity_type_node_id,
+                        name = node_name,
+                        entity_type = node_name,
+                        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     )
                 )
 
@@ -49,59 +50,55 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
 
                 # Add relationship between document and entity type: "Document contains Person"
                 graph_edges.append((
-                    parent_node_id,
+                    layer_id,
                     entity_type_node_id,
+                    "contains",
                     dict(relationship_name = "contains"),
                 ))
 
-                graph_entity_types[node.entity_type] = entity_type_node
-
-            extract_pos_tags = await extract_pos_tags(node.description)
-            extract_named_entities = await extract_named_entities(node.description)
-            extract_sentiment = await extract_sentiment_vader(node.description)
-            unique_node_id = uuid.uuid4()
-
-            compound_id = f"{node.description} - {str(layer_uuid)} - {str(unique_node_id)}"
+            pos_tags = await extract_pos_tags(node.entity_description)
+            named_entities = await extract_named_entities(node.entity_description)
+            sentiment = await extract_sentiment_vader(node.entity_description)
 
             graph_nodes.append((
                 node_id,
                 dict(
-                    label = node.entity_name,
-                    name = node.description,
-                    entity_name = node.entity_name,
+                    id = node_id,
+                    layer_id = layer_id,
+                    chunk_id = chunk_id,
+                    chunk_collection = chunk_collection,
+                    name = node.entity_name,
                     entity_type = node.entity_type.lower().capitalize(),
-                    description = node.description,
-                    pos_tags = extract_pos_tags,
-                    named_entities = extract_named_entities,
-                    sentiment = extract_sentiment,
-                    unique_id = str(unique_node_id),
-                    type = "detail",
-                    created_at = datetime.now(),
-                    updated_at = datetime.now(),
-                    node_id = unique_node_id,
-                    layer_id = layer_uuid,
-                    compound_id = compound_id
+                    description = node.entity_description,
+                    pos_tags = pos_tags,
+                    sentiment = sentiment,
+                    named_entities = named_entities,
+                    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 )
             ))
 
             # Add relationship between entity type and entity itself: "Jake is Person"
             graph_edges.append((
                 node_id,
-                graph_entity_types[node.entity_type][0],
+                entity_type_node_id,
+                "is",
                 dict(relationship_name = "is"),
             ))
 
             graph_edges.append((
                 layer_id,
                 node_id,
-                dict(relationship_name = "decomposed_as"),
+                "contains",
+                dict(relationship_name = "contains"),
             ))
 
         # Add relationship that came from graphs.
         for edge in layer_graph.edges:
             graph_edges.append((
-                generate_node_id(edge.source_node_id),
-                generate_node_id(edge.target_node_id),
+                generate_proposition_node_id(edge.source_node_id),
+                generate_proposition_node_id(edge.target_node_id),
+                edge.relationship_name,
                 dict(relationship_name = edge.relationship_name),
             ))
 
@@ -119,14 +116,24 @@ async def add_cognitive_layer_graphs(graph_client, parent_node_id: str, layer_gr
             DataPoint(
                 id = str(uuid4()),
                 payload = dict(
-                    value = node_data["entity_name"]
+                    value = node_data["name"],
+                    references = dict(
+                        node_id = node_id,
+                        cognitive_layer = layer_id,
+                    ),
                 ),
                 embed_field = "value"
-            ) for (node_id, node_data) in graph_nodes if "entity_name" in node_data
+            ) for (node_id, node_data) in graph_nodes
         ]
+
+        print("DATA_POINTS")
+        print(data_points)
 
         await vector_client.create_data_points(layer_id, data_points)
 
 
-def generate_node_id(node_id: str) -> str:
+def generate_proposition_node_id(node_id: str) -> str:
     return f"PROPOSITION_NODE__{node_id.upper().replace(' ', '_')}"
+
+def generate_type_node_id(node_id: str) -> str:
+    return f"PROPOSITION_TYPE_NODE__{node_id.upper().replace(' ', '_')}"

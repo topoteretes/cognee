@@ -23,7 +23,7 @@ class InfrastructureConfig():
     classification_model = None
     summarization_model = None
     labeling_model = None
-    graph_model = None,
+    graph_model = None
     cognitive_layer_model = None
     intra_layer_score_treshold = None
     embedding_engine = None
@@ -41,27 +41,33 @@ class InfrastructureConfig():
                 db_name = config.db_name,
                 db_path = db_path
             )
+
         if self.graph_engine is None:
             self.graph_engine = GraphDBType.NETWORKX
 
         if self.classification_model is None:
             self.classification_model = DefaultContentPrediction
+
         if self.summarization_model is None:
             self.summarization_model = SummarizedContent
+
         if self.labeling_model is None:
             self.labeling_model = LabeledContent
+
         if self.graph_model is None:
             self.graph_model = KnowledgeGraph
+
         if self.cognitive_layer_model is None:
             self.cognitive_layer_model = DefaultCognitiveLayer
 
         if self.intra_layer_score_treshold is None:
             self.intra_layer_score_treshold = config.intra_layer_score_treshold
+
         if self.embedding_engine is None:
             self.embedding_engine = DefaultEmbeddingEngine()
+
         if self.connect_documents is None:
             self.connect_documents = config.connect_documents
-
 
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)

@@ -1,16 +1,12 @@
 import logging
 import asyncio
-from typing import List, Tuple
 from cognee.infrastructure import infrastructure_config
 from .extraction.extract_content_graph import extract_content_graph
 
 logger = logging.getLogger(__name__)
 
-async def get_layer_graphs(content: str, cognitive_layers: List[Tuple[str, dict]]):
+async def get_layer_graphs(content: str, cognitive_layers: list[tuple[str, dict]]):
     try:
-        print("content: ", content)
-        print("cognitive_layers: ", cognitive_layers)
-
         graph_awaitables = [
             extract_content_graph(
                 content,

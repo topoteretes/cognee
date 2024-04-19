@@ -2,14 +2,14 @@
 import json
 import logging
 from datetime import datetime
-from typing import Optional, Any, List, Dict, Tuple
+from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("Neo4jAdapter")
 
 class Neo4jAdapter(GraphDBInterface):
     def __init__(
@@ -78,7 +78,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return result
 
-    async def add_nodes(self, nodes: List[Tuple[str, Dict[str, Any]]]) -> None:
+    async def add_nodes(self, nodes: list[tuple[str, dict[str, Any]]]) -> None:
         nodes_data = []
         for node in nodes:
             node_id, node_properties = node
@@ -103,12 +103,16 @@ class Neo4jAdapter(GraphDBInterface):
             "RETURN  ID(n) AS internalId, n.node_id AS nodeId"
         )
         params = {"nodes_data": nodes_data}
+
         result = await self.query(query, params)
 
         await self.close()
-    async def extract_node_description(self, id: str):
+
+        return result
+
+    async def extract_node_description(self, node_id: str):
         query = f"""MATCH (n)-[r]->(m)
-                    WHERE n.node_id = '{id}'
+                    WHERE n.node_id = '{node_id}'
                     AND NOT m.node_id CONTAINS 'DefaultGraphModel'
                     RETURN m
                     """
@@ -124,26 +128,30 @@ class Neo4jAdapter(GraphDBInterface):
             attributes = node.get("m", {})
 
             # Ensure all required attributes are present
-            if all(key in attributes for key in ["description", "unique_id", "layer_uuid", "layer_decomposition_uuid"]):
+            if all(key in attributes for key in ["id", "layer_id", "description"]):
                 descriptions.append({
-                    "node_id": attributes["unique_id"],
+                    "id": attributes["id"],
+                    "layer_id": attributes["layer_id"],
                     "description": attributes["description"],
-                    "layer_uuid": attributes["layer_uuid"],
-                    "layer_decomposition_uuid": attributes["layer_decomposition_uuid"]
                 })
 
         return descriptions
 
-
-
-    async def extract_node(self, id: str):
-        query= f"""MATCH(n) WHERE ID(n) = {id} RETURN n"""
+    async def get_layer_nodes(self):
+        query = "MATCH (node) WHERE exists(node.layer_id) RETURN node"
 
         result = await self.query(query)
         await self.close()
         return result
 
-    async def delete_node(self, id: str):
+    async def extract_node(self, node_id: str):
+        query= f"""MATCH(n) WHERE ID(n) = {node_id} RETURN n"""
+
+        result = await self.query(query)
+        await self.close()
+        return result
+
+    async def delete_node(self, node_id: str):
         node_id = id.replace(":", "_")
 
         query = "MATCH (n:{node_id} {node_id: node_id}) DETACH DELETE n"
@@ -181,10 +189,13 @@ class Neo4jAdapter(GraphDBInterface):
 
             params = { "from_node": from_node, "to_node": to_node, **filtered_properties }
 
-        await self.query(query, params)
+        result = await self.query(query, params)
         await self.close()
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+        return result
+
+
+    async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         edges_data = []
         for edge in edges:
             from_node, to_node, relationship_name, edge_properties = edge
@@ -212,9 +223,12 @@ class Neo4jAdapter(GraphDBInterface):
             "RETURN r"
         )
         params = {"edges_data": edges_data}
+
         result = await self.query(query, params)
 
         await self.close()
+
+        return result
 
 
     async def filter_nodes(self, search_criteria):
@@ -222,6 +236,15 @@ class Neo4jAdapter(GraphDBInterface):
                 WHERE d.node_id CONTAINS '{search_criteria}'
                 RETURN d"""
 
+
+        result = await self.query(query)
+        await self.close()
+        return result
+
+
+    async def delete_graph(self):
+        query = """MATCH (n)
+                DETACH DELETE n;"""
 
         result = await self.query(query)
         await self.close()

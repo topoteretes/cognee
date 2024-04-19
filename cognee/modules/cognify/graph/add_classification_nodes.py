@@ -5,7 +5,7 @@ async def add_classification_nodes(graph_client, parent_node_id: str, categories
         data_type = category["data_type"]
         category_name = category["category_name"]
 
-        data_type_node_id = f"DATA_TYPE-{data_type.upper().replace(' ', '_')}"
+        data_type_node_id = f"DATA_TYPE__{data_type.upper().replace(' ', '_')}"
 
         data_type_node = await graph_client.extract_node(data_type_node_id)
 
@@ -14,7 +14,7 @@ async def add_classification_nodes(graph_client, parent_node_id: str, categories
 
         await graph_client.add_edge(parent_node_id, data_type_node_id, relationship_name = "classified_as")
 
-        category_node_id = f"DATA_CATEGORY-{category_name.upper().replace(' ', '_')}"
+        category_node_id = f"DATA_CATEGORY__{category_name.upper().replace(' ', '_')}"
 
         category_node = await graph_client.extract_node(category_node_id)
 

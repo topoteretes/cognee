@@ -31,6 +31,7 @@ class config():
         infrastructure_config.set_config({
             "labeling_model": labeling_model
         })
+
     @staticmethod
     def set_graph_model(graph_model: object):
         infrastructure_config.set_config({
@@ -60,7 +61,6 @@ class config():
         infrastructure_config.set_config({
             "intra_layer_score_treshold": intra_layer_score_treshold
         })
-
 
     @staticmethod
     def connect_documents(connect_documents: bool):

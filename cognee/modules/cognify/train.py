@@ -2,7 +2,7 @@ import dsp
 import dspy
 from dspy.datasets import HotPotQA
 from dspy.teleprompt import BootstrapFewShot
-from .dspy import GenerateKnowledgeGraph
+from cognee.modules.data.extraction.extract_knowledge_graph import ExtractKnowledgeGraph
 
 def train():
     colbertv2_wiki17_abstracts = dspy.ColBERTv2(url = "http://20.102.90.50:2017/wiki17_abstracts")
@@ -24,6 +24,6 @@ def train():
 
     trainset = [x.with_inputs("question") for x in dataset.train][:30]
 
-    compiled_rag = teleprompter.compile(GenerateKnowledgeGraph(), trainset = trainset)
+    compiled_rag = teleprompter.compile(ExtractKnowledgeGraph(), trainset = trainset)
 
     return compiled_rag

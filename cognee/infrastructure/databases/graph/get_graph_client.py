@@ -21,7 +21,6 @@ async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None)
         return graph_client
     elif graph_type == GraphDBType.NEO4J:
         return Neo4jAdapter(
-            filename = "",
             graph_database_url = config.graph_database_url,
             graph_database_username = config.graph_database_username,
             graph_database_password = config.graph_database_password

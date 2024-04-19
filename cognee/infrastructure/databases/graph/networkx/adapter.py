@@ -5,10 +5,11 @@ import json
 import logging
 from typing import Dict, Any, List
 import aiofiles
+import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("NetworkXAdapter")
 
 class NetworkXAdapter(GraphDBInterface):
     _instance = None  # Class variable to store the singleton instance
@@ -32,8 +33,6 @@ class NetworkXAdapter(GraphDBInterface):
         node_properties,
     ) -> None:
         if not self.graph.has_node(id):
-            # current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
             self.graph.add_node(node_id, **node_properties)
             await self.save_graph_to_file(self.filename)
 
@@ -56,7 +55,7 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def add_edges(
         self,
-        edges: tuple[str, str, dict],
+        edges: tuple[str, str, str, dict],
     ) -> None:
         self.graph.add_edges_from(edges)
         await self.save_graph_to_file(self.filename)
@@ -77,17 +76,23 @@ class NetworkXAdapter(GraphDBInterface):
                 attributes = self.graph.nodes[neighbor]
 
                 # Ensure all required attributes are present before extracting description
-                if all(key in attributes for key in
-                       ["description", "unique_id", "layer_uuid", "layer_decomposition_uuid"]):
+                if all(key in attributes for key in ["id", "layer_id", "description"]):
                     descriptions.append({
-                        "node_id": attributes["unique_id"],
+                        "id": attributes["id"],
+                        "layer_id": attributes["layer_id"],
                         "description": attributes["description"],
-                        "layer_uuid": attributes["layer_uuid"],
-                        "layer_decomposition_uuid": attributes["layer_decomposition_uuid"]
                     })
 
         return descriptions
 
+    async def get_layer_nodes(self):
+        layer_nodes = []
+
+        for _, data in self.graph.nodes(data = True):
+            if "layer_id" in data:
+                layer_nodes.append(data)
+
+        return layer_nodes
 
     async def extract_node(self, node_id: str) -> dict:
         if self.graph.has_node(node_id):
@@ -127,12 +132,12 @@ class NetworkXAdapter(GraphDBInterface):
             self.graph = nx.MultiDiGraph()
             return self.graph
 
-    async def delete_graph_from_file(self, path: str = None):
+    async def delete_graph(self, path: str = None):
         """Asynchronously delete the graph file from the filesystem."""
         if path is None:
             path = self.filename  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
-            await aiofiles.os.remove(path)
+            await aiofiles_os.remove(path)
             logger.info("Graph deleted successfully.")
         except Exception as error:
             logger.error("Failed to delete graph: %s", error)

@@ -9,6 +9,7 @@ class Node(BaseModel):
     id: str
     entity_name: str
     entity_type: str
+    entity_description: str
 
 class Edge(BaseModel):
     """Edge in a knowledge graph."""

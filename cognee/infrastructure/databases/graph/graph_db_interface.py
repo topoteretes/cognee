@@ -14,6 +14,12 @@ class GraphDBInterface(Protocol):
     ): raise NotImplementedError
 
     @abstractmethod
+    async def add_nodes(
+        self,
+        nodes: list[tuple[str, dict]]
+    ): raise NotImplementedError
+
+    @abstractmethod
     async def delete_node(
         self,
         node_id: str
@@ -32,4 +38,15 @@ class GraphDBInterface(Protocol):
         to_node: str,
         relationship_name: str,
         edge_properties: Optional[Dict[str, Any]] = None
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def add_edges(
+        self,
+        edges: tuple[str, str, str, dict]
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def delete_graph(
+        self,
     ): raise NotImplementedError

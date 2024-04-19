@@ -1,9 +1,7 @@
-import asyncio
 from typing import List, Dict, Optional
 from qdrant_client import AsyncQdrantClient, models
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
-from ..models.CollectionConfig import CollectionConfig
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
 # class CollectionConfig(BaseModel, extra = "forbid"):
@@ -79,11 +77,9 @@ class QDrantAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         client = self.get_qdrant_client()
 
-        awaitables = []
+        data_vectors = await self.embed_data([data_point.get_embeddable_data() for data_point in data_points])
 
-        data_vectors = await self.embed_data(list(map(lambda data_point: data_point.get_embeddable_data(), data_points)))
-
-        async def convert_to_qdrant_point(data_point: DataPoint):
+        def convert_to_qdrant_point(data_point: DataPoint):
             return models.PointStruct(
                 id = data_point.id,
                 payload = data_point.payload,
@@ -92,15 +88,15 @@ class QDrantAdapter(VectorDBInterface):
                 }
             )
 
-        for point in data_points:
-            awaitables.append(convert_to_qdrant_point(point))
-
-        points = await asyncio.gather(*awaitables)
+        points = [convert_to_qdrant_point(point) for point in data_points]
 
         return await client.upload_points(
             collection_name = collection_name,
             points = points
         )
+
+    async def retrieve(self, collection_name: str, data_id: str):
+        return await self.get_qdrant_client().retrieve(collection_name, [data_id], with_payload = True)
 
     async def search(
         self,

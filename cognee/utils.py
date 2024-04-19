@@ -190,8 +190,6 @@ async def extract_named_entities(sentence):
 
     return entities
 
-nltk.download('vader_lexicon')
-
 async def extract_sentiment_vader(text):
     """
     Analyzes the sentiment of a given text using the VADER Sentiment Intensity Analyzer.
@@ -202,6 +200,9 @@ async def extract_sentiment_vader(text):
     Returns:
     dict: A dictionary containing the polarity scores for the text.
     """
+
+    nltk.download("vader_lexicon")
+
     # Initialize the VADER Sentiment Intensity Analyzer
     sia = SentimentIntensityAnalyzer()
 

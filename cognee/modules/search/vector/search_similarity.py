@@ -1,51 +1,44 @@
-
-
+from dsp.utils import deduplicate
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
 
-async def search_similarity(query: str, graph):
-    base_node_for_graph = "LLM_CLASSIFICATION_LAYER_"  ### TO FIX
+async def search_similarity(query: str):
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
     graph_client = await get_graph_client(graph_db_type)
 
-    node_descriptions = await graph_client.extract_node_description(base_node_for_graph)
+    layer_nodes = await graph_client.get_layer_nodes()
 
-    unique_layer_uuids = set(node["layer_decomposition_uuid"] for node in node_descriptions)
+    unique_layer_uuids = set(node["layer_id"] for node in layer_nodes)
 
-    out = []
+    graph_nodes = []
 
-    for id in unique_layer_uuids:
+    for layer_id in unique_layer_uuids:
         vector_engine = infrastructure_config.get_config()["vector_engine"]
 
-        result = await vector_engine.search(id, query_text = query, limit = 10)
+        results = await vector_engine.search(layer_id, query_text = query, limit = 10)
 
-        if result:
-            result_ = [ result_.id for result_ in result]
-            score_ = [ result_.score for result_ in result]
+        if len(results) > 0:
+            graph_nodes.extend([
+                dict(
+                    layer_id = result.payload["references"]["cognitive_layer"],
+                    node_id = result.payload["references"]["node_id"],
+                    score = result.score,
+                ) for result in results if result.score > 0.5
+            ])
 
-            out.append([result_, score_])
+    if len(graph_nodes) == 0:
+        return []
 
     relevant_context = []
 
-    if len(out) == 0:
-        return []
+    for graph_node_data in graph_nodes:
+        graph_node = await graph_client.extract_node(graph_node_data["node_id"])
 
-    for proposition_id in out[0][0]:
-        for n, attr in graph.nodes(data = True):
-            if str(proposition_id) in str(n):
-                for n_, attr_ in graph.nodes(data=True):
-                    relevant_layer = attr["layer_uuid"]
+        vector_points = await vector_engine.retrieve(graph_node["chunk_collection"], graph_node["chunk_id"])
 
-                    if attr_.get("layer_uuid") == relevant_layer:
-                        relevant_context.append(attr_["description"])
+        for vector_point in vector_points:
+            relevant_context.append(vector_point.payload["text"])
 
-    def deduplicate_list(original_list):
-        seen = set()
-        deduplicated_list = [x for x in original_list if not (x in seen or seen.add(x))]
-        return deduplicated_list
-
-    relevant_context = deduplicate_list(relevant_context)
-
-    return relevant_context
+    return deduplicate(relevant_context)

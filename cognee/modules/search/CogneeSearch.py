@@ -1,9 +1,8 @@
 import asyncio
+import nest_asyncio
 import dspy
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
 from cognee.modules.search.vector.search_similarity import search_similarity
 
-import nest_asyncio
 nest_asyncio.apply()
 
 class AnswerFromContext(dspy.Signature):
@@ -19,12 +18,7 @@ class CogneeSearch(dspy.Module):
         self.generate_answer = dspy.TypedChainOfThought(AnswerFromContext)
 
     def forward(self, question):
-        loop = asyncio.get_running_loop()
-
-        graph_client = loop.run_until_complete(get_graph_client(GraphDBType.NETWORKX))
-        graph = graph_client.graph
-
-        context = loop.run_until_complete(search_similarity(question, graph))
+        context = asyncio.run(search_similarity(question))
 
         context_text = "\n".join(context)
         print(f"Context: {context_text}")
