@@ -26,6 +26,12 @@ class GraphQLQuery(BaseModel):
     """GraphQL query."""
     query: str
 
+
+
+class Answer(BaseModel):
+    """Answer."""
+    answer: str
+
 class ChunkStrategy(Enum):
     EXACT = "exact"
     PARAGRAPH = "paragraph"

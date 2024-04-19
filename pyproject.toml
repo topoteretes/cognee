@@ -18,7 +18,7 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.10.0,<3.13"
+python = ">=3.9.0,<3.12"
 openai = "1.14.3"
 pydantic = "^2.5.0"
 python-dotenv = "1.0.1"
@@ -57,9 +57,11 @@ xmltodict = "^0.13.0"
 neo4j = "^5.18.0"
 jinja2 = "^3.1.3"
 matplotlib = "^3.8.3"
-dspy-ai = "2.4.3"
+dspy = { git = "https://github.com/stanfordnlp/dspy.git", branch = "main" }
+
 nest-asyncio = "^1.6.0"
 structlog = "^24.1.0"
+tiktoken = "^0.6.0"
 
 
 [tool.poetry.extras]

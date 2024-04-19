@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import tiktoken
 from nltk.sentiment import SentimentIntensityAnalyzer
 import nltk
 from nltk.tokenize import word_tokenize
@@ -54,6 +55,44 @@ def get_document_names(doc_input):
     else:
         # doc_input is not valid
         return []
+
+def num_tokens_from_string(string: str, encoding_name: str) -> int:
+    """Returns the number of tokens in a text string."""
+
+    # tiktoken.get_encoding("cl100k_base")
+    encoding = tiktoken.encoding_for_model(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
+
+def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
+    """
+    Trims the text so that the number of tokens does not exceed max_tokens.
+
+    Args:
+    text (str): Original text string to be trimmed.
+    max_tokens (int): Maximum number of tokens allowed.
+    encoding_name (str): The name of the token encoding to use.
+
+    Returns:
+    str: Trimmed version of text or original text if under the limit.
+    """
+    # First check the number of tokens
+    num_tokens = num_tokens_from_string(text, encoding_name)
+
+    # If the number of tokens is within the limit, return the text as is
+    if num_tokens <= max_tokens:
+        return text
+
+    # If the number exceeds the limit, trim the text
+    # This is a simple trim, it may cut words in half; consider using word boundaries for a cleaner cut
+    encoded_text = tiktoken.get_encoding(encoding_name).encode(text)
+    trimmed_encoded_text = encoded_text[:max_tokens]
+    # Decoding the trimmed text
+    trimmed_text = tiktoken.get_encoding(encoding_name).decode(trimmed_encoded_text)
+    return trimmed_text
+
+
 
 
 def format_dict(d):

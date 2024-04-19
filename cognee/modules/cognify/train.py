@@ -6,10 +6,13 @@ from cognee.modules.data.extraction.extract_knowledge_graph import ExtractKnowle
 
 def train():
     colbertv2_wiki17_abstracts = dspy.ColBERTv2(url = "http://20.102.90.50:2017/wiki17_abstracts")
+
     dspy.configure(rm = colbertv2_wiki17_abstracts)
 
-    def evaluate_answer(example, prediction, frac = 0.8):
-        return dsp.answer_match(example.answer, [prediction.answer], frac = frac) or \
+    def evaluate_answer(example, prediction):
+        print("example", example)
+        print("prediction", prediction)
+        return dsp.answer_match(example.answer, [prediction.answer], frac = 0.8) or \
             dsp.passage_match([example.answer], [prediction.answer])
 
     teleprompter = BootstrapFewShot(metric = evaluate_answer)
@@ -19,11 +22,21 @@ def train():
         train_size = 30,
         eval_seed = 2023,
         dev_size = 50,
-        test_size = 0
+        test_size = 0,
+        keep_details = True
     )
 
-    trainset = [x.with_inputs("question") for x in dataset.train][:30]
+
+    for x in dataset.train:
+        x.__setattr__("layer", "semantic_layer")
+        print(x.question, x.context, x.answer,x.layer)
+
+    trainset = [x.with_inputs("question", "context", "layer") for x in dataset.train][:30]
 
     compiled_rag = teleprompter.compile(ExtractKnowledgeGraph(), trainset = trainset)
 
     return compiled_rag
+
+
+if __name__ == "__main__":
+    train()
