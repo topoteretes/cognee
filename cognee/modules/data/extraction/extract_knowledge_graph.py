@@ -2,6 +2,12 @@ from typing import List, Optional
 import dspy
 from cognee.config import Config
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge
+import dotenv
+dotenv.load_dotenv()
+from cognee.utils import num_tokens_from_string, trim_text_to_max_tokens
+
+from dsp.modules.cache_utils import CacheMemory
+print(CacheMemory)
 
 
 
@@ -65,17 +71,17 @@ def are_all_nodes_connected(graph: KnowledgeGraph) -> bool:
 class ExtractKnowledgeGraph(dspy.Module):
     def __init__(self, lm = dspy.OpenAI(
         model = "gpt-4-turbo",
-        max_tokens = 12000
+        max_tokens = 4000
     )):
         super().__init__()
         self.lm = lm
-
+        dspy.settings.configure(lm=self.lm)
         # self.generate_graph_text = dspy.TypedChainOfThought(GraphTextFromText)
         self.generate_graph = dspy.TypedChainOfThought(GraphTextFromText)
 
     def forward(self, layer: str, text: str):
-        # dspy.configure(lm=self.lm)
-        with dspy.settings.context(lm = self.lm):
+        text = trim_text_to_max_tokens(text, 2500, config.openai_model)
+        with dspy.settings.context(lm=self.lm):
 
             # graph_text = self.generate_graph_text(text = text, cognitive_layer = layer).graph_text
             graph = self.generate_graph(text = text, cognitive_layer = layer).graph
@@ -97,7 +103,7 @@ class ExtractKnowledgeGraph(dspy.Module):
 
 
 if __name__ == "__main__":
-    gpt_4_turbo = dspy.OpenAI(model="gpt-4-1106-preview", max_tokens=32000, api_key=config.openai_key)
+    gpt_4_turbo = dspy.OpenAI(model="gpt-4", max_tokens=6000, api_key=config.openai_key, model_type="chat")
     dspy.settings.configure(lm=gpt_4_turbo)
     extract_knowledge_graph = ExtractKnowledgeGraph(lm=gpt_4_turbo)
     # graph_text = extract_knowledge_graph("cognitive_layer", "text")
