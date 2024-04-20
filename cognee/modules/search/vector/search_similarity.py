@@ -3,7 +3,7 @@ from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
 
-async def search_similarity(query: str):
+async def search_similarity(query: str, graph):
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
     graph_client = await get_graph_client(graph_db_type)
@@ -35,7 +35,7 @@ async def search_similarity(query: str):
 
     for graph_node_data in graph_nodes:
         graph_node = await graph_client.extract_node(graph_node_data["node_id"])
-        
+
         if "chunk_collection" not in graph_node and "chunk_id" not in graph_node:
             continue
 

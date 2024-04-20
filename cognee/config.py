@@ -73,6 +73,8 @@ class Config:
     connect_documents: bool = False
 
     # Database parameters
+    graph_database_provider: str = os.getenv("GRAPH_DB_PROVIDER", "NETWORKX")
+
     if (
         os.getenv("ENV") == "prod"
         or os.getenv("ENV") == "dev"

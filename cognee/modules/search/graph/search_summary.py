@@ -3,10 +3,9 @@
 
 from typing import Union, Dict
 import networkx as nx
-from neo4j import AsyncSession
 from cognee.shared.data_models import GraphDBType
 
-async def search_summary(graph: Union[nx.Graph, AsyncSession], query: str, infrastructure_config: Dict, other_param: str = None) -> Dict[str, str]:
+async def search_summary(graph: Union[nx.Graph, any], query: str, infrastructure_config: Dict, other_param: str = None) -> Dict[str, str]:
     """
     Filter nodes based on a condition (such as containing 'SUMMARY' in their identifiers) and return their summary attributes.
     Supports both NetworkX graphs and Neo4j graph databases based on the configuration.

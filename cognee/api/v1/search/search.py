@@ -8,8 +8,8 @@ from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.modules.search.graph.search_summary import search_summary
-from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure import infrastructure_config
 
 class SearchType(Enum):
     ADJACENT = 'ADJACENT'
@@ -42,8 +42,7 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
-    graph_client = await get_graph_client(GraphDBType.NETWORKX)
-    await graph_client.load_graph_from_file()
+    graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
     graph = graph_client.graph
 
     search_functions: Dict[SearchType, Callable] = {
@@ -61,8 +60,7 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
         search_func = search_functions.get(search_param.search_type)
         if search_func:
             # Schedule the coroutine for execution and store the task
-            full_params = {**search_param.params, 'graph': graph}
-            task = search_func(**full_params)
+            task = search_func(**search_param.params, graph = graph)
             search_tasks.append(task)
 
     # Use asyncio.gather to run all scheduled tasks concurrently

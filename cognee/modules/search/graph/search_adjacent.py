@@ -3,9 +3,8 @@
 
 from typing import Union, Dict
 import networkx as nx
-from neo4j import AsyncSession
 from cognee.shared.data_models import GraphDBType
-async def search_adjacent(graph: Union[nx.Graph, AsyncSession], query: str, infrastructure_config: Dict, other_param: dict = None) -> Dict[str, str]:
+async def search_adjacent(graph: Union[nx.Graph, any], query: str, infrastructure_config: Dict, other_param: dict = None) -> Dict[str, str]:
     """
     Find the neighbours of a given node in the graph and return their descriptions.
     Supports both NetworkX graphs and Neo4j graph databases based on the configuration.

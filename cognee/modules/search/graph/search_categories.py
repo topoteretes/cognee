@@ -2,11 +2,10 @@ from typing import Union, Dict
 
 """ Search categories in the graph and return their summary attributes. """
 
-from neo4j import AsyncSession
 from cognee.shared.data_models import GraphDBType
 import networkx as nx
 
-async def search_categories(graph: Union[nx.Graph, AsyncSession], query_label: str, infrastructure_config: Dict):
+async def search_categories(graph: Union[nx.Graph, any], query_label: str, infrastructure_config: Dict):
     """
     Filter nodes in the graph that contain the specified label and return their summary attributes.
     This function supports both NetworkX graphs and Neo4j graph databases.

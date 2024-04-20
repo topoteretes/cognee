@@ -1,13 +1,11 @@
 """ Fetches the context of a given node in the graph"""
 from typing import Union, Dict
 
-from neo4j import AsyncSession
-
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 import networkx as nx
 from cognee.shared.data_models import GraphDBType
 
-async def search_neighbour(graph: Union[nx.Graph, AsyncSession], id: str, infrastructure_config: Dict,
+async def search_neighbour(graph: Union[nx.Graph, any], id: str, infrastructure_config: Dict,
                            other_param: dict = None):
     """
     Search for nodes that share the same 'layer_uuid' as the specified node and return their descriptions.

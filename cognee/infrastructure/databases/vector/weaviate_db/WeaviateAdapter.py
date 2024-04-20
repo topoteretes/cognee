@@ -2,10 +2,6 @@ import asyncio
 from uuid import UUID
 from typing import List, Optional
 from multiprocessing import Pool
-import weaviate
-import weaviate.classes as wvc
-import weaviate.classes.config as wvcc
-from weaviate.classes.data import DataObject
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
 from ..models.ScoredResult import ScoredResult
@@ -17,6 +13,9 @@ class WeaviateAdapter(VectorDBInterface):
     embedding_engine: EmbeddingEngine = None
 
     def __init__(self, url: str, api_key: str, embedding_engine: EmbeddingEngine):
+        import weaviate
+        import weaviate.classes as wvc
+      
         self.embedding_engine = embedding_engine
 
         self.client = weaviate.connect_to_wcs(
@@ -32,6 +31,8 @@ class WeaviateAdapter(VectorDBInterface):
         return await self.embedding_engine.embed_text(data)
 
     async def create_collection(self, collection_name: str):
+        import weaviate.classes.config as wvcc
+
         event_loop = asyncio.get_event_loop()
 
         def sync_create_collection():
@@ -57,6 +58,8 @@ class WeaviateAdapter(VectorDBInterface):
         return self.client.collections.get(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        from weaviate.classes.data import DataObject
+
         data_vectors = await self.embed_data(
             list(map(lambda data_point: data_point.get_embeddable_data(), data_points)))
 
@@ -95,6 +98,8 @@ class WeaviateAdapter(VectorDBInterface):
             limit: int = None,
             with_vector: bool = False
     ):
+        import weaviate.classes as wvc
+
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
 
