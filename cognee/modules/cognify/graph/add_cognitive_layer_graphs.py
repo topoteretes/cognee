@@ -30,7 +30,7 @@ async def add_cognitive_layer_graphs(
             node_id = generate_proposition_node_id(node.id)
 
             entity_type_node_id = generate_type_node_id(node.entity_type)
-            entity_type_node = graph_client.extract_node(entity_type_node_id)
+            entity_type_node = await graph_client.extract_node(entity_type_node_id)
 
             if not entity_type_node:
                 node_name = node.entity_type.lower().capitalize()
@@ -126,14 +126,11 @@ async def add_cognitive_layer_graphs(
             ) for (node_id, node_data) in graph_nodes
         ]
 
-        print("DATA_POINTS")
-        print(data_points)
-
         await vector_client.create_data_points(layer_id, data_points)
 
 
 def generate_proposition_node_id(node_id: str) -> str:
-    return f"PROPOSITION_NODE__{node_id.upper().replace(' ', '_')}"
+    return f"PROPOSITION_NODE__{node_id.upper().replace(' ', '_')}".replace("'", "")
 
 def generate_type_node_id(node_id: str) -> str:
-    return f"PROPOSITION_TYPE_NODE__{node_id.upper().replace(' ', '_')}"
+    return f"PROPOSITION_TYPE_NODE__{node_id.upper().replace(' ', '_')}".replace("'", "")

@@ -13,10 +13,10 @@ async def add_document_node(graph_client: GraphDBInterface, parent_node_id, docu
             file_path = document_metadata["file_path"],
         ).model_dump()
 
-    document["label"] = document_id
+    document["entity_type"] = "Document"
 
     await graph_client.add_node(document_id, document)
 
-    await graph_client.add_edge(parent_node_id, document_id, "has_document")
+    await graph_client.add_edge(parent_node_id, document_id, "has_document", dict(relationship_name = "has_document"))
 
     return document_id

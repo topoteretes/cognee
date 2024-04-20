@@ -35,10 +35,12 @@ async def search_similarity(query: str):
 
     for graph_node_data in graph_nodes:
         graph_node = await graph_client.extract_node(graph_node_data["node_id"])
+        
+        if "chunk_collection" not in graph_node and "chunk_id" not in graph_node:
+            continue
 
-        vector_points = await vector_engine.retrieve(graph_node["chunk_collection"], graph_node["chunk_id"])
+        vector_point = await vector_engine.retrieve(graph_node["chunk_collection"], graph_node["chunk_id"])
 
-        for vector_point in vector_points:
-            relevant_context.append(vector_point.payload["text"])
+        relevant_context.append(vector_point.payload["text"])
 
     return deduplicate(relevant_context)

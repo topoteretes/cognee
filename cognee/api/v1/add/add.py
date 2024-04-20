@@ -125,7 +125,7 @@ def save_text_to_file(text: str, dataset_name: str):
     storage_path = data_directory_path + "/" + dataset_name.replace(".", "/")
     LocalStorage.ensure_directory_exists(storage_path)
 
-    text_file_name = str(data_id) + ".txt"
+    text_file_name = data_id + ".txt"
     LocalStorage(storage_path).store(text_file_name, classified_data.get_data())
 
     return "file://" + storage_path + "/" + text_file_name

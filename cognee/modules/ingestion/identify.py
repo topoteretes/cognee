@@ -1,9 +1,9 @@
-from uuid import UUID, uuid5
+from uuid import uuid5, UUID
 from .data_types import IngestionData
 
 null_uuid: UUID = UUID("00000000-0000-0000-0000-000000000000")
 
-def identify(data: IngestionData) -> UUID:
+def identify(data: IngestionData) -> str:
     data_id: str = data.get_identifier()
 
-    return uuid5(null_uuid, data_id)
+    return str(uuid5(null_uuid, data_id)).replace("-", "")

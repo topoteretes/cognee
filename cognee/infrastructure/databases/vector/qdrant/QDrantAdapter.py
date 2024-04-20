@@ -96,7 +96,8 @@ class QDrantAdapter(VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_id: str):
-        return await self.get_qdrant_client().retrieve(collection_name, [data_id], with_payload = True)
+        results = await self.get_qdrant_client().retrieve(collection_name, [data_id], with_payload = True)
+        return results[0] if len(results) > 0 else None
 
     async def search(
         self,

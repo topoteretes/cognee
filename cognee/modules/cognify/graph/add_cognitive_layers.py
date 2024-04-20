@@ -21,4 +21,4 @@ async def add_cognitive_layers(graph_client, parent_node_id: str, cognitive_laye
     return cognitive_layer_nodes
 
 def generate_cognitive_layer_id(layer_id: str) -> str:
-    return f"COGNITIVE_LAYER__{layer_id.upper().replace(' ', '_')}"
+    return f"COGNITIVE_LAYER__{layer_id.upper().replace(' ', '_')}".replace("'", "").replace("/", "_")
