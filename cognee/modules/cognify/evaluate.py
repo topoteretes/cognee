@@ -36,7 +36,8 @@ def evaluate():
 
     evaluate_on_hotpotqa = Evaluate(devset = devset, num_threads = 1, display_progress = True, display_table = 5, max_tokens = 4096)
 
-    compiled_extract_knowledge_graph = ExtractKnowledgeGraph()
+    gpt4 = dspy.OpenAI(model = config.openai_model, api_key = config.openai_key, model_type = "chat", max_tokens = 4096)
+    compiled_extract_knowledge_graph = ExtractKnowledgeGraph(lm = gpt4)
     compiled_extract_knowledge_graph.load(get_absolute_path("./programs/extract_knowledge_graph/extract_knowledge_graph.json"))
 
     def evaluate_answer(example, graph_prediction, trace = None):
