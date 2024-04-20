@@ -1,4 +1,18 @@
-# Cognee - library release
+---
+draft: False
+date: 2024-04-02
+tags:
+  - pydantic
+  - langchain
+  - llm
+  - openai 
+  - functions
+  - pdfs
+authors:
+  - tricalt
+---
+
+# Cognee -  release v0.1.0
 
 ### **Preface**
 

@@ -1,16 +1,17 @@
 # cognee
 
-Make data processing for LLMs easy
+Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrieval
 
 
 <p>
   <a href="https://cognee.ai" target="_blank">
-    <img src="assets/cognee-logo.png" width="160px" alt="Cognee logo" />
+    <img src="https://raw.githubusercontent.com/topoteretes/cognee/main/assets/cognee-logo.png" width="160px" alt="Cognee logo" />
   </a>
 </p>
 
+
 <p>
-  <i>Open-source framework for knowledge and memory management for LLMs.</i>
+  <i>Open-source framework for creating self-improving deterministic outputs for LLMs.</i>
 </p>
 
 <p>
@@ -28,13 +29,9 @@ Make data processing for LLMs easy
   </a>
 </p>
 
+![Cognee Demo](assets/cognee_demo.gif)
 
-## 🚀 It's alive
-
-<p>
-Try it yourself on Whatsapp with one of our <a href="https://keepi.ai" target="_blank">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
-For more info here are the <a href="https://topoteretes.github.io/cognee">docs</a>
-</p>
+If you need details, have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
 
 ## 📦 Installation
@@ -64,6 +61,7 @@ os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
 os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
 
 ```
+You can also use Ollama or Anyscale as your LLM provider. For more info on local models check our [docs](https://topoteretes.github.io/cognee)
 
 ### Run
 
@@ -111,19 +109,25 @@ Read more [here](docs/index.md#run).
 Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee%20-%20Get%20Started.ipynb)
 
 
-## Architecture
 
-[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
+[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=BDFt4xVPmro "Learn about cognee: 55")
 
 
-### How Cognee Enhances Your Contextual Memory
 
-Our framework for the OpenAI, Graph (Neo4j) and Vector (Weaviate) databases introduces three key enhancements:
 
-- Query Classifiers: Navigate information graph using Pydantic OpenAI classifiers.
-- Document Topology: Structure and store documents in public and private domains.
-- Personalized Context: Provide a context object to the LLM for a better response.
+
+## How it works
+
+
+
 
 
 ![Image](assets/architecture.png)
 
+
+## 🚀 It's alive
+
+<p>
+Try it yourself on Whatsapp with one of our <a href="https://keepi.ai" target="_blank">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
+For more info here are the <a href="https://topoteretes.github.io/cognee">docs</a>
+</p>

@@ -1,3 +1,5 @@
+import asyncio
+from uuid import UUID
 from typing import List, Optional
 from multiprocessing import Pool
 import weaviate
@@ -30,16 +32,26 @@ class WeaviateAdapter(VectorDBInterface):
         return await self.embedding_engine.embed_text(data)
 
     async def create_collection(self, collection_name: str):
-        return self.client.collections.create(
-            name=collection_name,
-            properties=[
-                wvcc.Property(
-                    name="text",
-                    data_type=wvcc.DataType.TEXT,
-                    skip_vectorization=True
-                )
-            ]
-        )
+        event_loop = asyncio.get_event_loop()
+
+        def sync_create_collection():
+            return self.client.collections.create(
+                name=collection_name,
+                properties=[
+                    wvcc.Property(
+                        name="text",
+                        data_type=wvcc.DataType.TEXT,
+                        skip_vectorization=True
+                    )
+                ]
+            )
+
+        # try:
+        result = await event_loop.run_in_executor(None, sync_create_collection)
+        # finally:
+        #     event_loop.shutdown_executor()
+
+        return result
 
     def get_collection(self, collection_name: str):
         return self.client.collections.get(collection_name)
@@ -59,6 +71,22 @@ class WeaviateAdapter(VectorDBInterface):
 
         return self.get_collection(collection_name).data.insert_many(objects)
 
+    async def retrieve(self, collection_name: str, data_id: str):
+        def sync_retrieve():
+            return self.get_collection(collection_name).query.fetch_object_by_id(UUID(data_id))
+
+        event_loop = asyncio.get_event_loop()
+
+        # try:
+        data_point = await event_loop.run_in_executor(None, sync_retrieve)
+        # finally:
+            # event_loop.shutdown_executor()
+
+        data_point.payload = data_point.properties
+        del data_point.properties
+
+        return data_point
+
     async def search(
             self,
             collection_name: str,
@@ -70,19 +98,25 @@ class WeaviateAdapter(VectorDBInterface):
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
 
+        if query_vector is None:
+            query_vector = (await self.embed_data([query_text]))[0]
+
+        # def sync_search():
         search_result = self.get_collection(collection_name).query.hybrid(
-            query=None,
-            vector=query_vector if query_vector is not None else (await self.embed_data([query_text]))[0],
-            limit=limit,
-            include_vector=with_vector,
-            return_metadata=wvc.query.MetadataQuery(score=True),
+            query = None,
+            vector = query_vector,
+            limit = limit,
+            include_vector = with_vector,
+            return_metadata = wvc.query.MetadataQuery(score=True),
         )
 
-        return list(map(lambda result: ScoredResult(
-            id=str(result.uuid),
-            payload=result.properties,
-            score=float(result.metadata.score)
-        ), search_result.objects))
+        return [
+            ScoredResult(
+                id=str(result.uuid),
+                payload=result.properties,
+                score=float(result.metadata.score)
+            ) for result in search_result.objects
+        ]
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False):
         def query_search(query_vector):

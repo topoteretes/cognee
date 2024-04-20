@@ -21,10 +21,10 @@ class LocalStorage(Storage):
         ) as f:
             f.write(data if isinstance(data, str) else data.read())
 
-    def retrieve(self, file_path: str):
+    def retrieve(self, file_path: str, mode: str = "rb"):
         full_file_path = self.storage_path + "/" + file_path
 
-        with open(full_file_path, "rb") as f:
+        with open(full_file_path, mode = mode) as f:
             return f.read()
 
     @staticmethod

@@ -38,7 +38,7 @@ class Config:
     qdrant_url: str = os.getenv("QDRANT_URL")
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
 
-    db_path = str = os.getenv("COGNEE_DB_PATH", "cognee")
+    db_path = str = os.getenv("COGNEE_DB_PATH", "databases")
     db_name: str = os.getenv("DB_NAME", "cognee.db")
     db_host: str = os.getenv("DB_HOST", "localhost")
     db_port: str = os.getenv("DB_PORT", "5432")
@@ -57,10 +57,12 @@ class Config:
     ollama_endpoint: str = os.getenv("CUSTOM_OLLAMA_ENDPOINT", "http://localhost:11434/v1") #"http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
     ollama_model: str = os.getenv("CUSTOM_OLLAMA_MODEL", "mistral:instruct") #"mistral:instruct"
-    model: str = os.getenv("OPENAI_MODEL","gpt-4-1106-preview" ) #"gpt-4-1106-preview"
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4-1106-preview" ) #"gpt-4-1106-preview"
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
+    openai_embedding_model = "text-embedding-3-large"
+    openai_embedding_dimensions = 3072
 
     graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
@@ -68,6 +70,7 @@ class Config:
     # Embedding parameters
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     embedding_dimensions: int = 1024
+    connect_documents: bool = False
 
     # Database parameters
     if (
@@ -82,10 +85,11 @@ class Config:
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
     else:
-        logging.info("graph_db_urlvvv: %s", os.getenv("GRAPH_DB_URL"))
+        logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL"))
         graph_database_url: str = os.getenv("GRAPH_DB_URL")
         graph_database_username: str = os.getenv("GRAPH_DB_USER")
         graph_database_password: str = os.getenv("GRAPH_DB_PW")
+
     weaviate_url: str = os.getenv("WEAVIATE_URL")
     weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY")
 
@@ -102,6 +106,9 @@ class Config:
         db_user: str = os.getenv("POSTGRES_USER")
         db_password: str = os.getenv("POSTGRES_PASSWORD")
         db_name: str = os.getenv("POSTGRES_DB")
+
+    # Model parameters and configuration for interlayer scoring
+    intra_layer_score_treshold: float = 0.98
 
 
     # Client ID

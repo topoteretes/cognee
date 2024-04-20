@@ -1,32 +1,24 @@
-""" Here we update semantic graph with content that classifier produced"""
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+from typing import List
 
+async def add_classification_nodes(graph_client, parent_node_id: str, categories: List) -> None:
+    for category in categories:
+        data_type = category["data_type"].upper().replace(' ', '_')
+        category_name = category["category_name"].upper().replace(' ', '_').replace("'", "").replace("/", "_")
 
-async def add_classification_nodes(document_id, classification_data):
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+        data_type_node_id = f"DATA_TYPE__{data_type}"
 
+        data_type_node = await graph_client.extract_node(data_type_node_id)
 
-    await graph_client.load_graph_from_file()
+        if not data_type_node:
+            data_type_node = await graph_client.add_node(data_type_node_id, dict(name = data_type, entity_type = "DataType"))
 
-    data_type = classification_data["data_type"]
-    layer_name = classification_data["layer_name"]
+        await graph_client.add_edge(data_type_node_id, parent_node_id, "classified_as", dict(relationship_name = "classified_as"))
 
-    # Create the layer classification node ID
-    layer_classification_node_id = f"LLM_LAYER_CLASSIFICATION:{data_type}:{document_id}"
+        category_node_id = f"DATA_CATEGORY__{category_name}"
 
-    # Add the node to the graph, unpacking the node data from the dictionary
-    await graph_client.add_node(layer_classification_node_id, **classification_data)
+        category_node = await graph_client.extract_node(category_node_id)
 
-    # Link this node to the corresponding document node
-    await graph_client.add_edge(document_id, layer_classification_node_id, relationship = "classified_as")
+        if not category_node:
+            category_node = await graph_client.add_node(category_node_id, dict(name = category_name, entity_type = "DataCategory"))
 
-    # Create the detailed classification node ID
-    detailed_classification_node_id = f"LLM_CLASSIFICATION:LAYER:{layer_name}:{document_id}"
-
-    # Add the detailed classification node, reusing the same node data
-    await graph_client.add_node(detailed_classification_node_id, **classification_data)
-
-    # Link the detailed classification node to the layer classification node
-    await graph_client.add_edge(layer_classification_node_id, detailed_classification_node_id, relationship = "contains_analysis")
-
-    return True
+        await graph_client.add_edge(category_node_id, parent_node_id, "classified_as", dict(relationship_name = "classified_as"))

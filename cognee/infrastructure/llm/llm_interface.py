@@ -1,6 +1,6 @@
 """ LLM Interface """
 
-from typing import List, Type, Protocol
+from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
 class LLMInterface(Protocol):

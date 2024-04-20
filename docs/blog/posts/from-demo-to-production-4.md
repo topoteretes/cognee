@@ -1,5 +1,3 @@
-
-
 ---
 draft: False
 date: 2023-12-05

@@ -19,7 +19,8 @@ async def add(data_path: Union[str, List[str]], dataset_name: str = None):
             return await add([data_path], dataset_name)
         # data_path is a text
         else:
-            return await add_text(data_path, dataset_name)
+            file_path = save_text_to_file(data_path, dataset_name)
+            return await add([file_path], dataset_name)
 
     # data_path is a list of file paths or texts
     file_paths = []
@@ -33,12 +34,12 @@ async def add(data_path: Union[str, List[str]], dataset_name: str = None):
 
     awaitables = []
 
-    if len(file_paths) > 0:
-        awaitables.append(add_files(file_paths, dataset_name))
-
     if len(texts) > 0:
         for text in texts:
-            awaitables.append(add_text(text, dataset_name))
+            file_paths.append(save_text_to_file(text, dataset_name))
+
+    if len(file_paths) > 0:
+        awaitables.append(add_files(file_paths, dataset_name))
 
     return await asyncio.gather(*awaitables)
 
@@ -115,7 +116,7 @@ async def add_data_directory(data_path: str, dataset_name: str = None):
 
     return await asyncio.gather(*results)
 
-async def add_text(text: str, dataset_name: str):
+def save_text_to_file(text: str, dataset_name: str):
     data_directory_path = infrastructure_config.get_config()["data_root_directory"]
 
     classified_data = ingestion.classify(text)
@@ -124,7 +125,7 @@ async def add_text(text: str, dataset_name: str):
     storage_path = data_directory_path + "/" + dataset_name.replace(".", "/")
     LocalStorage.ensure_directory_exists(storage_path)
 
-    text_file_name = str(data_id) + ".txt"
+    text_file_name = data_id + ".txt"
     LocalStorage(storage_path).store(text_file_name, classified_data.get_data())
 
-    return await add(["file://" + storage_path + "/" + text_file_name], dataset_name)
+    return "file://" + storage_path + "/" + text_file_name

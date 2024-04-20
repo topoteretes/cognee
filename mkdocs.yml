@@ -119,6 +119,13 @@ markdown_extensions:
 nav:
   - Introduction:
     - Welcome to cognee: 'index.md'
+    - Quickstart: 'quickstart.md'
+    - Conceptual overview: 'conceptual_overview.md'
+    - Learning materials: 'rags.md'
+    - Blog: 'blog/index.md'
+    - Research: 'research.md'
+    - Local models: 'local_models.md'
+    - Api reference: 'api_reference.md'
   - Blog:
       - "blog/index.md"
   - Why cognee:
@@ -128,5 +135,36 @@ nav:
     - Multilayer graph network: 'concepts/multilayer_graph_networks.md'
     - Data models: 'concepts/graph_data_models.md'
     - LLM structured Outputs: "concepts/llm_structured_outputs.md"
-  - Research: "research.md"
+  - Research:
+      - "research.md"
+  - Api reference:
+      - 'api_reference.md'
+  - Team:
+      - "team.md"
+
+plugins:
+  - mkdocs-jupyter:
+      ignore_h1_titles: true
+      execute: false
+  - social
+  - search:
+      separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - minify:
+      minify_html: true
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            members_order: alphabetical
+            allow_inspection: true
+            show_bases: true
+  - blog:
+      enabled: !ENV CI
+      blog_dir: "blog"
+      blog_toc: true
+      post_dir: blog/posts
+      post_date_format: yyyy/MM/dd
+      post_url_format: "{date}/{slug}"
+      authors_file: "{blog}/.authors.yml"
+
 

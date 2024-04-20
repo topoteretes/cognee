@@ -4,7 +4,7 @@ from cognee.infrastructure import infrastructure_config
 class datasets():
     @staticmethod
     def list_datasets():
-        db = infrastructure_config.get_config()["database_engine"]
+        db = infrastructure_config.get_config("database_engine")
         return db.get_datasets()
 
     @staticmethod
@@ -13,5 +13,5 @@ class datasets():
 
     @staticmethod
     def query_data(dataset_name: str):
-        db = infrastructure_config.get_config()["database_engine"]
+        db = infrastructure_config.get_config("database_engine")
         return db.get_files_metadata(dataset_name)

@@ -1,17 +1,33 @@
-name: Deploy MkDocs
+name: util docs |  build and deploy
 
 on:
-  push:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
 
 permissions:
   contents: write
 
 jobs:
+
+
+#  get_docs_changes:
+#    name: run docs changes
+#    uses: ./.github/workflows/get_docs_changes.yml
   deploy:
     runs-on: ubuntu-latest
+#    needs: get_docs_changes
 
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v2
 

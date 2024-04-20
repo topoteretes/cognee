@@ -1,32 +1,30 @@
 import asyncio
-# import logging
 from typing import List, Union
+import logging
 import instructor
 from openai import OpenAI
+from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks
+from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
-from cognee.modules.cognify.llm.label_content import label_content
-from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
-from cognee.modules.cognify.llm.summarize_content import summarize_content
+from cognee.modules.cognify.graph.add_cognitive_layer_graphs import add_cognitive_layer_graphs
 from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
-from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, graph_ready_output, \
-    connect_nodes_in_graph, extract_node_descriptions
-from cognee.modules.cognify.graph.add_propositions import append_to_graph
+from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
+    graph_ready_output, connect_nodes_in_graph
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
-from cognee.modules.cognify.vector.add_propositions import add_propositions
 
 from cognee.config import Config
-from cognee.modules.cognify.llm.classify_content import classify_into_categories
-from cognee.modules.cognify.llm.content_to_cog_layers import content_to_cog_layers
-from cognee.modules.cognify.llm.generate_graph import generate_graph
-from cognee.shared.data_models import DefaultContentPrediction, KnowledgeGraph, DefaultCognitiveLayer, \
-    SummarizedContent, LabeledContent
+
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognee.shared.data_models import GraphDBType
-from cognee.modules.cognify.graph.add_document_node import add_document_node
-from cognee.modules.cognify.graph.initialize_graph import initialize_graph
-from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
+from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
+from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_layers
+# from cognee.modules.cognify.graph.initialize_graph import initialize_graph
+from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure import infrastructure_config
+from cognee.modules.data.get_content_categories import get_content_categories
+from cognee.modules.data.get_content_summary import get_content_summary
+from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
+from cognee.modules.data.get_layer_graphs import get_layer_graphs
 
 config = Config()
 config.load()
@@ -35,7 +33,9 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: object = None):
+logger = logging.getLogger(__name__)
+
+async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
 
     db_engine = infrastructure_config.get_config()["database_engine"]
@@ -56,149 +56,108 @@ async def cognify(datasets: Union[str, List[str]] = None, graph_data_model: obje
     # datasets is a dataset name string
     added_datasets = db_engine.get_datasets()
 
-    files_metadata = []
+    dataset_files = []
     dataset_name = datasets.replace(".", "_").replace(" ", "_")
 
     for added_dataset in added_datasets:
         if dataset_name in added_dataset:
-            files_metadata.extend(db_engine.get_files_metadata(added_dataset))
+            dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
     awaitables = []
 
-    await initialize_graph(USER_ID, graph_data_model)
+    graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
-    for file_metadata in files_metadata:
-        with open(file_metadata["file_path"], "rb") as file:
-            file_type = guess_file_type(file)
-            text = extract_text_from_file(file, file_type)
+    graph_client = await get_graph_client(graph_db_type)
 
-            awaitables.append(process_text(text, file_metadata))
+    # await initialize_graph(USER_ID, graph_data_model, graph_client)
 
-    graphs = await asyncio.gather(*awaitables)
+    data_chunks = {}
 
-    return graphs[0]
+    for (dataset_name, files) in dataset_files:
+        for file_metadata in files[:3]:
+            with open(file_metadata["file_path"], "rb") as file:
+                try:
+                    file_type = guess_file_type(file)
+                    text = extract_text_from_file(file, file_type)
 
-async def process_text(input_text: str, file_metadata: dict):
-    print(f"Processing document ({file_metadata['id']})")
+                    if dataset_name not in data_chunks:
+                        data_chunks[dataset_name] = []
 
-    classified_categories = []
+                    data_chunks[dataset_name].append(dict(text = text, file_metadata = file_metadata))
+                except FileTypeException:
+                    logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
-    try:
-        # Classify the content into categories
-        classified_categories = await classify_into_categories(
-            input_text,
-            "classify_content.txt",
-            DefaultContentPrediction
-        )
-        file_metadata["categories"] = list(map(lambda category: category["layer_name"], classified_categories))
-    except Exception as e:
-        print(e)
-        raise e
+    added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
 
-    try:
-        # Classify the content into categories
-        content_summary = await summarize_content(
-            input_text,
-            "summarize_content.txt",
-            SummarizedContent
-        )
-        file_metadata["summary"] = content_summary["summary"]
-    except Exception as e:
-        print(e)
-        raise e
-
-    try:
-        # Classify the content into categories
-        content_labels = await label_content(
-            input_text,
-            "label_content.txt",
-            LabeledContent
-        )
-        file_metadata["content_labels"] = content_labels["content_labels"]
-    except Exception as e:
-        print(e)
-        raise e
-
-    await add_document_node(f"DefaultGraphModel:{USER_ID}", file_metadata)
-    print(f"Document ({file_metadata['id']}) categorized: {file_metadata['categories']}")
-
-    cognitive_layers = await content_to_cog_layers(
-        classified_categories[0],
-        response_model = DefaultCognitiveLayer
+    await asyncio.gather(
+        *[process_text(chunk["collection"], chunk["id"], chunk["text"], chunk["file_metadata"]) for chunk in added_chunks]
     )
 
-    cognitive_layers = [layer_subgroup.name for layer_subgroup in cognitive_layers.cognitive_layers]
+    return graph_client.graph
 
-    async def generate_graph_per_layer(text_input: str, layers: List[str], response_model: KnowledgeGraph = KnowledgeGraph):
-        generate_graphs_awaitables = [generate_graph(text_input, "generate_graph_prompt.txt", {"layer": layer}, response_model) for layer in
-                layers]
+async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict):
+    print(f"Processing document ({file_metadata['id']}).")
 
-        return await asyncio.gather(*generate_graphs_awaitables)
+    graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
 
-    # Run the async function for each set of cognitive layers
-    layer_graphs = await generate_graph_per_layer(input_text, cognitive_layers)
+    document_id = await add_document_node(
+        graph_client,
+        parent_node_id = f"DefaultGraphModel__{USER_ID}", #make a param of defaultgraph model to make sure when user passes his stuff, it doesn't break pipeline
+        document_metadata = file_metadata,
+    )
 
-    print(f"Document ({file_metadata['id']}) layer graphs created")
+    await add_label_nodes(graph_client, document_id, chunk_id, file_metadata["keywords"].split("|"))
 
-    await add_classification_nodes(f"DOCUMENT:{file_metadata['id']}", classified_categories[0])
+    classified_categories = await get_content_categories(input_text)
+    await add_classification_nodes(
+        graph_client,
+        parent_node_id = document_id,
+        categories = classified_categories,
+    )
 
-    await add_summary_nodes(f"DOCUMENT:{file_metadata['id']}", {"summary": file_metadata["summary"]})
+    print(f"Document ({document_id}) classified.")
 
-    await add_label_nodes(f"DOCUMENT:{file_metadata['id']}", {"content_labels": file_metadata["content_labels"]})
+    content_summary = await get_content_summary(input_text)
+    await add_summary_nodes(graph_client, document_id, content_summary)
 
-    await append_to_graph(layer_graphs, classified_categories[0])
+    print(f"Document ({document_id}) summarized.")
 
-    print(f"Document ({file_metadata['id']}) layers connected")
+    cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
+    cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
 
-    print("Document categories, summaries and metadata are: ", str(classified_categories))
+    layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
+    await add_cognitive_layer_graphs(graph_client, chunk_collection, chunk_id, layer_graphs)
 
-    print("Document metadata is: ", str(file_metadata))
+    if infrastructure_config.get_config()["connect_documents"] is True:
+        db_engine = infrastructure_config.get_config()["database_engine"]
+        relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = file_metadata["id"])
 
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+        print("Relevant documents to connect are: ", relevant_documents_to_connect)
 
-    await graph_client.load_graph_from_file()
+        list_of_nodes = []
 
-    graph = graph_client.graph
+        relevant_documents_to_connect.append({
+            "layer_id": document_id,
+        })
 
-    node_descriptions = await extract_node_descriptions(graph.nodes(data = True))
+        for document in relevant_documents_to_connect:
+            node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
+            list_of_nodes.extend(node_descriptions_to_match)
 
-    nodes_by_layer = await group_nodes_by_layer(node_descriptions)
+        print("List of nodes are: ", len(list_of_nodes))
 
-    unique_layers = nodes_by_layer.keys()
+        nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+        print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
 
-    try:
-        vector_engine = infrastructure_config.get_config()["vector_engine"]
+        results = await resolve_cross_graph_references(nodes_by_layer)
+        print("Results are: ", str(results)[:3000])
 
-        for layer in unique_layers:
-            await vector_engine.create_collection(layer)
-    except Exception as e:
-        print(e)
+        relationships = graph_ready_output(results)
 
-    await add_propositions(nodes_by_layer)
+        await connect_nodes_in_graph(
+            graph_client,
+            relationships,
+            score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
+        )
 
-    results = await resolve_cross_graph_references(nodes_by_layer)
-
-    relationships = graph_ready_output(results)
-    # print(relationships)
-    await graph_client.load_graph_from_file()
-
-    graph = graph_client.graph
-
-    connect_nodes_in_graph(graph, relationships)
-
-    print(f"Document ({file_metadata['id']}) processed")
-
-    return graph
-
-
-
-if __name__ == "__main__":
-
-    async def main():
-        graph = await cognify(datasets=['izmene'])
-        from cognee.utils import render_graph
-        graph_url = await render_graph(graph)
-        print(graph_url)
-
-
-    asyncio.run(main())
+        print(f"Document ({document_id}) cognified.")

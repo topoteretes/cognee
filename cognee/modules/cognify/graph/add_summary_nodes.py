@@ -1,29 +1,27 @@
-""" Here we update semantic graph with content that classifier produced"""
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+"""Here we update the graph with content summary that summarizer produced"""
+
+async def add_summary_nodes(graph_client, document_id, summary):
+    summary_node_id = f"DATA_SUMMARY__{document_id}"
+
+    await graph_client.add_node(
+        summary_node_id,
+        dict(
+            name = "Summary",
+            summary = summary["summary"],
+        ),
+    )
+
+    await graph_client.add_edge(document_id, summary_node_id, relationship_name = "summarized_as")
 
 
-async def add_summary_nodes(document_id, classification_data):
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+    description_node_id = f"DATA_DESCRIPTION__{document_id}"
 
-    await graph_client.load_graph_from_file()
+    await graph_client.add_node(
+        description_node_id,
+        dict(
+            name = "Description",
+            summary = summary["description"],
+        ),
+    )
 
-
-    # Create the layer classification node ID
-    layer_classification_node_id = f"LLM_LAYER_SUMMARY:{document_id}"
-
-    # Add the node to the graph, unpacking the node data from the dictionary
-    await graph_client.add_node(layer_classification_node_id, **classification_data)
-
-    # Link this node to the corresponding document node
-    await graph_client.add_edge(document_id, layer_classification_node_id, relationship = "summarized_as")
-
-    # Create the detailed classification node ID
-    detailed_classification_node_id = f"LLM_SUMMARY:LAYER:{document_id}"
-
-    # Add the detailed classification node, reusing the same node data
-    await graph_client.add_node(detailed_classification_node_id, **classification_data)
-
-    # Link the detailed classification node to the layer classification node
-    await graph_client.add_edge(layer_classification_node_id, detailed_classification_node_id, relationship = "contains_summary")
-
-    return True
+    await graph_client.add_edge(document_id, description_node_id, relationship_name = "described_as")

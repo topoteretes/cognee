@@ -1,28 +1,60 @@
-""" Here we update semantic graph with content that classifier produced"""
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client, GraphDBType
+from uuid import uuid4
+from typing import List
+from datetime import datetime
+from cognee.infrastructure import infrastructure_config
+from cognee.infrastructure.databases.vector import DataPoint
 
+async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keywords: List[str]) -> None:
+    vector_client = infrastructure_config.get_config("vector_engine")
 
-async def add_label_nodes(document_id, classification_data):
-    graph_client = get_graph_client(GraphDBType.NETWORKX)
+    keyword_nodes = []
 
-    await graph_client.load_graph_from_file()
+    for keyword in keywords:
+        keyword_id = f"DATA_LABEL_{keyword.upper().replace(' ', '_')}"
 
-    # Create the layer classification node ID
-    layer_classification_node_id = f"LLM_LAYER_LABEL:{document_id}"
+        keyword_nodes.append((
+            keyword_id,
+            dict(
+                id = keyword_id,
+                chunk_id = chunk_id,
+                name = keyword.lower().capitalize(),
+                keyword = keyword.lower(),
+                entity_type = "Keyword",
+                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        ))
 
-    # Add the node to the graph, unpacking the node data from the dictionary
-    await graph_client.add_node(layer_classification_node_id, **classification_data)
+    # Add data to graph
+    await graph_client.add_nodes(keyword_nodes)
+    await graph_client.add_edges([
+        (
+            parent_node_id,
+            keyword_id,
+            "refers_to",
+            dict(relationship_name = "refers_to"),
+        ) for (keyword_id, __) in keyword_nodes
+    ])
 
-    # Link this node to the corresponding document node
-    await graph_client.add_edge(document_id, layer_classification_node_id, relationship = "summarized_as")
+    # Add data to vector
+    keyword_data_points = [
+        DataPoint(
+            id = str(uuid4()),
+            payload = dict(
+                value = keyword_data["keyword"],
+                references = dict(
+                    node_id = keyword_node_id,
+                    cognitive_layer = parent_node_id,
+                ),
+            ),
+            embed_field = "value"
+        ) for (keyword_node_id, keyword_data) in keyword_nodes
+    ]
 
-    # Create the detailed classification node ID
-    detailed_classification_node_id = f"LLM_SUMMARY:LABEL:{document_id}"
+    try:
+        await vector_client.create_collection(parent_node_id)
+    except Exception:
+        # It's ok if the collection already exists.
+        pass
 
-    # Add the detailed classification node, reusing the same node data
-    await graph_client.add_node(detailed_classification_node_id, **classification_data)
-
-    # Link the detailed classification node to the layer classification node
-    await graph_client.add_edge(layer_classification_node_id, detailed_classification_node_id, relationship = "contains_label")
-
-    return True
+    await vector_client.create_data_points(parent_node_id, keyword_data_points)

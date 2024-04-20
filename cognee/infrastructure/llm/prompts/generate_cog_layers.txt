@@ -6,9 +6,9 @@ Your objective is to extract meaningful layers of information that will contribu
 
 Approach this task by considering the unique characteristics and inherent properties of the data at hand.
 
-VERY IMPORTANT: The context you are working in is `{{ layer_name }}` and the specific domain you are extracting data on is `{{ layer_name }}`.
+VERY IMPORTANT: The context you are working in is `{{ category_name }}` and the specific domain you are extracting data on is `{{ category_name }}`.
 
 Guidelines for Layer Extraction:
-Take into account: The content type, in this case, is: `{{ layer_name }}`, should play a major role in how you decompose into layers.
+Take into account: The content type, in this case, is: `{{ category_name }}`, should play a major role in how you decompose into layers.
 
 Based on your analysis, define and describe the layers you've identified, explaining their relevance and contribution to understanding the dataset. Your independent identification of layers will enable a nuanced and multifaceted representation of the data, enhancing applications in knowledge discovery, content analysis, and information retrieval.
