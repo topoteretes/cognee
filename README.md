@@ -31,12 +31,7 @@ Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrie
 
 ![Cognee Demo](assets/cognee_demo.gif)
 
-## 🚀 It's alive
-
-<p>
-Try it yourself on Whatsapp with one of our <a href="https://keepi.ai" target="_blank">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
-For more info here are the <a href="https://topoteretes.github.io/cognee">docs</a>
-</p>
+If you need details, have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
 
 ## 📦 Installation
@@ -115,7 +110,7 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 
 
 
-[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://youtu.be/-ARUfIzhzC4 "Learn about cognee: 55")
+[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=BDFt4xVPmro "Learn about cognee: 55")
 
 
 
@@ -129,3 +124,10 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 
 ![Image](assets/architecture.png)
 
+
+## 🚀 It's alive
+
+<p>
+Try it yourself on Whatsapp with one of our <a href="https://keepi.ai" target="_blank">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
+For more info here are the <a href="https://topoteretes.github.io/cognee">docs</a>
+</p>
