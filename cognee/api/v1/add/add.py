@@ -5,7 +5,6 @@ import dlt
 import duckdb
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure import infrastructure_config
-from cognee.infrastructure.files import get_file_metadata
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.discovery import discover_directory_datasets
 
@@ -85,7 +84,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
 
                 data_id = ingestion.identify(classified_data)
 
-                file_metadata = get_file_metadata(classified_data.get_data())
+                file_metadata = classified_data.get_metadata()
 
                 yield {
                     "id": data_id,

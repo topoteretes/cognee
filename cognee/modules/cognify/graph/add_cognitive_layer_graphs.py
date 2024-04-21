@@ -56,9 +56,9 @@ async def add_cognitive_layer_graphs(
                     dict(relationship_name = "contains"),
                 ))
 
-            pos_tags = await extract_pos_tags(node.entity_description)
-            named_entities = await extract_named_entities(node.entity_description)
-            sentiment = await extract_sentiment_vader(node.entity_description)
+            pos_tags = extract_pos_tags(node.entity_description)
+            named_entities = extract_named_entities(node.entity_description)
+            sentiment = extract_sentiment_vader(node.entity_description)
 
             graph_nodes.append((
                 node_id,

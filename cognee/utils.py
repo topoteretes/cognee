@@ -7,13 +7,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tiktoken
-from nltk.sentiment import SentimentIntensityAnalyzer
 import nltk
-from nltk.tokenize import word_tokenize
-from nltk.tag import pos_tag
-from nltk.chunk import ne_chunk
 from cognee.config import Config
 
+config = Config()
+config.load()
 
 def get_document_names(doc_input):
     """
@@ -93,8 +91,6 @@ def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> s
     return trimmed_text
 
 
-
-
 def format_dict(d):
     """Format a dictionary as a string."""
     # Initialize an empty list to store formatted items
@@ -117,9 +113,6 @@ def format_dict(d):
     return formatted_string
 
 
-config = Config()
-config.load()
-
 def generate_color_palette(unique_layers):
     colormap = plt.cm.get_cmap("viridis", len(unique_layers))
     colors = [colormap(i) for i in range(len(unique_layers))]
@@ -140,8 +133,8 @@ def prepare_nodes(graph, include_size=False):
     nodes_data = []
     for node in graph.nodes:
         node_info = graph.nodes[node]
-        description = node_info.get('layer_description', {}).get('layer', 'Default Layer') if isinstance(
-            node_info.get('layer_description'), dict) else node_info.get('layer_description', 'Default Layer')
+        description = node_info.get("layer_description", {}).get("layer", "Default Layer") if isinstance(
+            node_info.get("layer_description"), dict) else node_info.get("layer_description", "Default Layer")
         # description = node_info['layer_description']['layer'] if isinstance(node_info.get('layer_description'), dict) and 'layer' in node_info['layer_description'] else node_info.get('layer_description', node)
         # if isinstance(node_info.get('layer_description'), dict) and 'layer' in node_info.get('layer_description'):
         #     description = node_info['layer_description']['layer']
@@ -161,8 +154,6 @@ def prepare_nodes(graph, include_size=False):
     return pd.DataFrame(nodes_data)
 
 
-
-
 async def render_graph(graph, include_nodes=False, include_color=False, include_size=False, include_labels=False):
     await register_graphistry()
     edges = prepare_edges(graph)
@@ -174,7 +165,7 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
 
 
         if include_size:
-            plotter = plotter.bind(point_size='size')
+            plotter = plotter.bind(point_size="size")
 
 
         if include_color:
@@ -185,7 +176,7 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
 
 
         if include_labels:
-            plotter = plotter.bind(point_label='layer_description')
+            plotter = plotter.bind(point_label = "layer_description")
 
 
 
@@ -199,14 +190,23 @@ def sanitize_df(df):
     return df.replace([np.inf, -np.inf, np.nan], None)
 
 
+def get_entities(tagged_tokens):
+    nltk.download("maxent_ne_chunker")
+    from nltk.chunk import ne_chunk
+    return ne_chunk(tagged_tokens)
 
-# # Ensure that the necessary NLTK resources are downloaded
-# nltk.download('maxent_ne_chunker')
-# nltk.download('words')
 
-
-async def extract_pos_tags(sentence):
+def extract_pos_tags(sentence):
     """Extract Part-of-Speech (POS) tags for words in a sentence."""
+
+    # Ensure that the necessary NLTK resources are downloaded
+    nltk.download("words")
+    nltk.download("punkt")
+    nltk.download("averaged_perceptron_tagger")
+
+    from nltk.tag import pos_tag
+    from nltk.tokenize import word_tokenize
+
     # Tokenize the sentence into words
     tokens = word_tokenize(sentence)
 
@@ -216,20 +216,18 @@ async def extract_pos_tags(sentence):
     return pos_tags
 
 
-async def extract_named_entities(sentence):
+def extract_named_entities(sentence):
     """Extract Named Entities from a sentence."""
     # Tokenize the sentence into words
-    tokens = word_tokenize(sentence)
-
-    # Perform POS tagging on the tokenized sentence
-    tagged = pos_tag(tokens)
+    tagged_tokens = extract_pos_tags(sentence)
 
     # Perform Named Entity Recognition (NER) on the tagged tokens
-    entities = ne_chunk(tagged)
+    entities = get_entities(tagged_tokens)
 
     return entities
 
-async def extract_sentiment_vader(text):
+
+def extract_sentiment_vader(text):
     """
     Analyzes the sentiment of a given text using the VADER Sentiment Intensity Analyzer.
 
@@ -239,6 +237,7 @@ async def extract_sentiment_vader(text):
     Returns:
     dict: A dictionary containing the polarity scores for the text.
     """
+    from nltk.sentiment import SentimentIntensityAnalyzer
 
     nltk.download("vader_lexicon")
 

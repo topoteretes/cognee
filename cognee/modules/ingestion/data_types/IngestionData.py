@@ -8,3 +8,6 @@ class IngestionData(Protocol):
 
     def get_identifier(self):
         raise NotImplementedError()
+
+    def get_metadata(self):
+        raise NotImplementedError()
