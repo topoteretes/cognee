@@ -57,10 +57,10 @@ xmltodict = "^0.13.0"
 neo4j = "^5.18.0"
 jinja2 = "^3.1.3"
 matplotlib = "^3.8.3"
-dspy = { git = "https://github.com/Vasilije1990/dspy.git", branch = "main" }
 nest-asyncio = "^1.6.0"
 structlog = "^24.1.0"
 tiktoken = "^0.6.0"
+dspy-ai = "2.4.3"
 
 
 [tool.poetry.extras]

@@ -1,6 +1,5 @@
 import dsp
 import dspy
-from dspy.datasets import HotPotQA
 from dspy.teleprompt import BootstrapFewShot
 from dspy.primitives.example import Example
 from cognee.config import Config
@@ -9,6 +8,7 @@ from cognee.root_dir import get_absolute_path
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.shared.data_models import Answer
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.cognify.dataset import HotPotQA
 
 config = Config()
 config.load()

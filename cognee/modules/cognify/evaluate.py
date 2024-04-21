@@ -1,6 +1,5 @@
 import dsp
 import dspy
-from dspy.datasets import HotPotQA
 from dspy.evaluate.evaluate import Evaluate
 from dspy.primitives.example import Example
 from cognee.modules.data.extraction.knowledge_graph.extract_knowledge_graph_module import ExtractKnowledgeGraph
@@ -8,6 +7,7 @@ from cognee.root_dir import get_absolute_path
 from cognee.config import Config
 from cognee.shared.data_models import Answer
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.cognify.dataset import HotPotQA
 
 config = Config()
 config.load()
