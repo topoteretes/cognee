@@ -33,6 +33,10 @@ Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrie
 
 Try it in a Google collab  <a href="https://colab.research.google.com/drive/11k0GtbrKRVGTxhcgad4Wl8YvCnWJVWPl?usp=sharing">notebook</a>  or more details, have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
+Join our  <a href="https://topoteretes.github.io/cognee](https://discord.gg/NQPKmU5CCg">Discord</a> community
+
+
+
 
 
 ## 📦 Installation
