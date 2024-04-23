@@ -1,10 +1,11 @@
 import asyncio
-import uuid
-from os import path
+from uuid import uuid4
 from typing import List, Union
 import logging
 import instructor
 from openai import OpenAI
+from nltk.corpus import stopwords
+from cognee.config import Config
 from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
@@ -13,9 +14,6 @@ from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
-
-from cognee.config import Config
-
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
 from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_layers
@@ -27,8 +25,7 @@ from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
-from cognee.modules.ingestion.chunkers import chunk_data
-from cognee.shared.data_models import ChunkStrategy
+
 
 config = Config()
 config.load()
@@ -37,10 +34,12 @@ aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cognify")
 
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
+    # Has to be loaded in advance, multithreading doesn't work without it.
+    stopwords.ensure_loaded()
 
     db_engine = infrastructure_config.get_config()["database_engine"]
 
@@ -57,10 +56,10 @@ async def cognify(datasets: Union[str, List[str]] = None):
         graphs = await asyncio.gather(*awaitables)
         return graphs[0]
 
-    # datasets is a dataset name string
     added_datasets = db_engine.get_datasets()
 
     dataset_files = []
+    # datasets is a dataset name string
     dataset_name = datasets.replace(".", "_").replace(" ", "_")
 
     for added_dataset in added_datasets:
@@ -77,28 +76,26 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     data_chunks = {}
 
+    chunk_engine = infrastructure_config.get_config()["chunk_engine"]
     chunk_strategy = infrastructure_config.get_config()["chunk_strategy"]
 
     for (dataset_name, files) in dataset_files:
-        for file_metadata in files[:3]:
+        for file_metadata in files:
             with open(file_metadata["file_path"], "rb") as file:
                 try:
                     file_type = guess_file_type(file)
                     text = extract_text_from_file(file, file_type)
-                    subchunks = chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
+                    subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
 
                     if dataset_name not in data_chunks:
                         data_chunks[dataset_name] = []
 
                     for subchunk in subchunks:
-
-                        data_chunks[dataset_name].append(dict(text = subchunk, chunk_id=str(uuid.uuid4()), file_metadata = file_metadata))
+                        data_chunks[dataset_name].append(dict(text = subchunk, chunk_id = str(uuid4()), file_metadata = file_metadata))
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
-    print("Added chunks are: ", data_chunks)
+
     added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
-
-
 
     await asyncio.gather(
         *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in added_chunks]
@@ -107,7 +104,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
     return graph_client.graph
 
 async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict):
-    print(f"Processing document ({file_metadata['id']}).")
+    print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
     graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
 
@@ -126,12 +123,12 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
         categories = classified_categories,
     )
 
-    print(f"Document ({document_id}) classified.")
+    print(f"Chunk ({chunk_id}) classified.")
 
     content_summary = await get_content_summary(input_text)
     await add_summary_nodes(graph_client, document_id, content_summary)
 
-    print(f"Document ({document_id}) summarized.")
+    print(f"Chunk ({chunk_id}) summarized.")
 
     cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
     cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
@@ -143,8 +140,6 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
         db_engine = infrastructure_config.get_config()["database_engine"]
         relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = file_metadata["id"])
 
-        print("Relevant documents to connect are: ", relevant_documents_to_connect)
-
         list_of_nodes = []
 
         relevant_documents_to_connect.append({
@@ -155,13 +150,9 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
             node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
             list_of_nodes.extend(node_descriptions_to_match)
 
-        print("List of nodes are: ", len(list_of_nodes))
-
         nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
-        print("Nodes by layer are: ", str(nodes_by_layer)[:5000])
 
         results = await resolve_cross_graph_references(nodes_by_layer)
-        print("Results are: ", str(results)[:3000])
 
         relationships = graph_ready_output(results)
 
@@ -171,35 +162,4 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
         )
 
-        print(f"Document ({document_id}) cognified.")
-
-
-if __name__ == "__main__":
-    text = """Natural language processing (NLP) is an interdisciplinary
-           subfield of computer science and information retrieval"""
-
-    from cognee.api.v1.add.add import add
-
-    data_path = path.abspath(".data")
-    async def add_(text):
-        await add("data://" + "/Users/vasa/Projects/cognee/cognee/.data", "explanations")
-
-
-    asyncio.run(add_(text))
-    asyncio.run(cognify("explanations"))
-
-    import cognee
-
-    # datasets = cognee.datasets.list_datasets()
-    # print(datasets)
-    # # print(vv)
-    # for dataset in datasets:
-    #     print(dataset)
-    #     data_from_dataset = cognee.datasets.query_data(dataset)
-    #     for file_info in data_from_dataset:
-    #         print(file_info)
-
-
-
-
-
+    print(f"Chunk ({chunk_id}) cognified.")
