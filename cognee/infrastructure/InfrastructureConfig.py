@@ -30,6 +30,7 @@ class InfrastructureConfig():
     connect_documents = config.connect_documents
     database_directory_path: str = None
     database_file_path: str = None
+    chunk_strategy = config.chunk_strategy
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
@@ -68,6 +69,9 @@ class InfrastructureConfig():
 
         if self.connect_documents is None:
             self.connect_documents = config.connect_documents
+
+        if self.chunk_strategy is None:
+            self.chunk_strategy = config.chunk_strategy
 
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
@@ -120,7 +124,8 @@ class InfrastructureConfig():
             "embedding_engine": self.embedding_engine,
             "connect_documents": self.connect_documents,
             "database_directory_path": self.database_directory_path,
-            "database_path": self.database_file_path
+            "database_path": self.database_file_path,
+            "chunk_strategy": self.chunk_strategy
         }
 
     def set_config(self, new_config: dict):
@@ -168,5 +173,8 @@ class InfrastructureConfig():
 
         if "connect_documents" in new_config:
             self.connect_documents = new_config["connect_documents"]
+
+        if "chunk_strategy" in new_config:
+            self.chunk_strategy = new_config["chunk_strategy"]
 
 infrastructure_config = InfrastructureConfig()

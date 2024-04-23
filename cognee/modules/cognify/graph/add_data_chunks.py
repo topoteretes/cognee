@@ -33,7 +33,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
             dataset_name,
             [
                 DataPoint(
-                    id = chunk["id"],
+                    id = chunk["chunk_id"],
                     payload = dict(text = chunk["text"]),
                     embed_field = "text"
                 ) for chunk in dataset_chunks
