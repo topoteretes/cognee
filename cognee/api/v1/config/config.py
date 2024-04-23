@@ -67,4 +67,8 @@ class config():
         infrastructure_config.set_config({
             "connect_documents": connect_documents
         })
-
+    @staticmethod
+    def set_chunk_strategy(chunk_strategy: object):
+        infrastructure_config.set_config({
+            "chunk_strategy": chunk_strategy
+        })

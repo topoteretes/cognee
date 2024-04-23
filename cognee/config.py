@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
 from cognee.root_dir import get_absolute_path
-
+from cognee.shared.data_models import ChunkStrategy
 
 base_dir = Path(__file__).resolve().parent.parent
 # Load the .env file from the base directory
@@ -115,6 +115,11 @@ class Config:
 
     # Client ID
     anon_clientid: Optional[str] = field(default_factory=lambda: uuid.uuid4().hex)
+
+    #Chunking parameters
+    chunk_size: int = 1500
+    chunk_overlap: int = 0
+    chunk_strategy: str = ChunkStrategy.PARAGRAPH
 
     def load(self):
         """Loads the configuration from a file or environment variables."""

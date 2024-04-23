@@ -55,7 +55,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
 
         if data_directory_path not in file_path:
             file_name = file_path.split("/")[-1]
-            file_directory_path = data_directory_path + "/" + (dataset_name.replace('.', "/") + "/" if dataset_name != "root" else "")
+            file_directory_path = data_directory_path + "/" + (dataset_name.replace(".", "/") + "/" if dataset_name != "root" else "")
             dataset_file_path = path.join(file_directory_path, file_name)
 
             LocalStorage.ensure_directory_exists(file_directory_path)

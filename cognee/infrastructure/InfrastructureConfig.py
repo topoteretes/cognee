@@ -6,6 +6,7 @@ from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbedding
 from .llm.llm_interface import LLMInterface
 from .llm.openai.adapter import OpenAIAdapter
 from .files.storage import LocalStorage
+from .data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
     LabeledContent, DefaultCognitiveLayer
 
@@ -30,6 +31,8 @@ class InfrastructureConfig():
     connect_documents = config.connect_documents
     database_directory_path: str = None
     database_file_path: str = None
+    chunk_strategy = config.chunk_strategy
+    chunk_engine = None
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
@@ -68,6 +71,12 @@ class InfrastructureConfig():
 
         if self.connect_documents is None:
             self.connect_documents = config.connect_documents
+
+        if self.chunk_strategy is None:
+            self.chunk_strategy = config.chunk_strategy
+
+        if self.chunk_engine is None:
+            self.chunk_engine = DefaultChunkEngine()
 
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
@@ -120,16 +129,18 @@ class InfrastructureConfig():
             "embedding_engine": self.embedding_engine,
             "connect_documents": self.connect_documents,
             "database_directory_path": self.database_directory_path,
-            "database_path": self.database_file_path
+            "database_path": self.database_file_path,
+            "chunk_strategy": self.chunk_strategy,
+            "chunk_engine": self.chunk_engine,
         }
 
     def set_config(self, new_config: dict):
         if "system_root_directory" in new_config:
             self.system_root_directory = new_config["system_root_directory"]
-      
+
         if "data_root_directory" in new_config:
             self.data_root_directory = new_config["data_root_directory"]
-      
+
         if "database_engine" in new_config:
             self.database_engine = new_config["database_engine"]
 
@@ -168,5 +179,11 @@ class InfrastructureConfig():
 
         if "connect_documents" in new_config:
             self.connect_documents = new_config["connect_documents"]
+
+        if "chunk_strategy" in new_config:
+            self.chunk_strategy = new_config["chunk_strategy"]
+
+        if "chunk_engine" in new_config:
+            self.chunk_engine = new_config["chunk_engine"]
 
 infrastructure_config = InfrastructureConfig()
