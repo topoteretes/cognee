@@ -76,7 +76,7 @@ import cognee
 text = """Natural language processing (NLP) is an interdisciplinary
        subfield of computer science and information retrieval"""
 
-cognee.add(text) # Add a new piece of information
+cognee.add([text], "example_dataset") # Add a new piece of information
 
 cognee.cognify() # Use LLMs and cognee to create knowledge
 
