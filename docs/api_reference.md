@@ -31,8 +31,10 @@ from cognee.config import config
 
 
 ### system_root_directory(system_root_directory: str)
-Sets the root directory of the system where essential system files and operations are managed.  Parameters:  
+Sets the root directory of the system where essential system files and operations are managed. 
+Parameters:  
 system_root_directory (str): The path to set as the system's root directory.
+
 Example:
 ```python
 config.system_root_directory('/path/to/system/root')
@@ -53,6 +55,7 @@ config.data_root_directory('/path/to/data/root')
 Assigns a machine learning model for classification tasks within the system.  
 Parameters:  
 classification_model (object): The Pydantic model to use for classification.
+
 Check cognee.shared.data_models for existing models.
 Example:
 ```python
@@ -63,6 +66,7 @@ set_summarization_model(summarization_model: object)
 Sets the Pydantic model to be used for summarization tasks.  
 Parameters:  
 summarization_model (object): The model to use for summarization.
+
 Check cognee.shared.data_models for existing models.
 Example:
 ```python
@@ -81,6 +85,7 @@ config.set_llm_model("OpenAI")
 Sets the engine to manage graph processing tasks. 
 Parameters:  
 graph_engine (object): The engine for graph tasks.
+
 Example:
 ```python
 from cognee.shared.data_models import GraphDBType
