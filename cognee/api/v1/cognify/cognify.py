@@ -25,12 +25,8 @@ from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
-
-from posthog import Posthog
-
 from cognee.utils import send_telemetry
 
-posthog = Posthog(project_api_key='phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3', host='https://eu.i.posthog.com')
 
 config = Config()
 config.load()
@@ -167,6 +163,6 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
         )
 
-    send_telemetry(posthog, "COGNEE_COGNIFY")
+    send_telemetry( "COGNEE_COGNIFY")
 
     print(f"Chunk ({chunk_id}) cognified.")

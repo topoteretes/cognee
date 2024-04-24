@@ -8,6 +8,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tiktoken
 import nltk
+from posthog import Posthog
+
 from cognee.config import Config
 import uuid
 import datetime
@@ -19,6 +21,9 @@ config.load()
 def send_telemetry( posthog, event_name="COGNEE_ADD"):
     if os.getenv("TELEMETRY_DISABLED"):
         return
+
+    posthog = Posthog(project_api_key='phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3',
+                      host='https://eu.i.posthog.com')
 
     user_id = str(uuid.uuid4())
     current_time = datetime.datetime.now()

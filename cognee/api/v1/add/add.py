@@ -7,11 +7,9 @@ import cognee.modules.ingestion as ingestion
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.discovery import discover_directory_datasets
-from posthog import Posthog
 
 from cognee.utils import send_telemetry
 
-posthog = Posthog(project_api_key='phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3', host='https://eu.i.posthog.com')
 
 
 async def add(data_path: Union[str, List[str]], dataset_name: str = None):
@@ -107,7 +105,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
         dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset",
         write_disposition = "merge",
     )
-    send_telemetry(posthog, "COGNEE_ADD")
+    send_telemetry( "COGNEE_ADD")
 
     return run_info
 

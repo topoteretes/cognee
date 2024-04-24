@@ -10,13 +10,7 @@ from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.modules.search.graph.search_summary import search_summary
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.infrastructure import infrastructure_config
-
-from posthog import Posthog
-
 from cognee.utils import send_telemetry
-
-posthog = Posthog(project_api_key='phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3', host='https://eu.i.posthog.com')
-
 
 class SearchType(Enum):
     ADJACENT = 'ADJACENT'
@@ -76,7 +70,7 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
     # Update the results set with the results from all tasks
     results.extend(search_results)
 
-    send_telemetry(posthog, "COGNEE_SEARCH")
+    send_telemetry( "COGNEE_SEARCH")
 
     return results
 
