@@ -9,10 +9,28 @@ import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 from cognee.config import Config
+import uuid
+import datetime
 
 config = Config()
 config.load()
 
+
+def send_telemetry( posthog, event_name="COGNEE_ADD"):
+    if os.getenv("TELEMETRY_DISABLED"):
+        return
+
+    user_id = str(uuid.uuid4())
+    current_time = datetime.datetime.now()
+    properties = {
+        "time": current_time.strftime('%m/%d/%Y')
+
+    }
+
+    try:
+        posthog.capture(user_id, event_name, properties)
+    except Exception as e:
+        print('ERROR sending telemetric data to Posthog. See exception: %s', e)
 def get_document_names(doc_input):
     """
     Get a list of document names.
