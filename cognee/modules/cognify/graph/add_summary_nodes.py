@@ -20,7 +20,7 @@ async def add_summary_nodes(graph_client, document_id, summary):
         description_node_id,
         dict(
             name = "Description",
-            summary = summary["description"],
+            description = summary["description"],
         ),
     )
 

@@ -13,7 +13,7 @@ async def add_document_node(graph_client: GraphDBInterface, parent_node_id, docu
             file_path = document_metadata["file_path"],
         ).model_dump()
 
-    document["entity_type"] = "Document"
+    document["type"] = "Document"
 
     await graph_client.add_node(document_id, document)
 

@@ -19,7 +19,7 @@ async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keyw
                 chunk_id = chunk_id,
                 name = keyword.lower().capitalize(),
                 keyword = keyword.lower(),
-                entity_type = "Keyword",
+                type = "Keyword",
                 created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),

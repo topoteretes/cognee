@@ -29,8 +29,8 @@ class GraphFromText(dspy.Signature):
 
 
 def are_all_nodes_and_edges_valid(graph: KnowledgeGraph) -> bool:
-    return all([getattr(node, "entity_type", "").strip() != "" for node in graph.nodes]) and \
-        all([getattr(node, "entity_name", "").strip() != "" for node in graph.nodes]) and \
+    return all([getattr(node, "type", "").strip() != "" for node in graph.nodes]) and \
+        all([getattr(node, "name", "").strip() != "" for node in graph.nodes]) and \
         all([getattr(edge, "relationship_name", "").strip() != "" for edge in graph.edges])
 
 def is_node_connected(node: Node, edges: List[Edge]) -> bool:
@@ -56,7 +56,7 @@ class ExtractKnowledgeGraph(dspy.Module):
             graph = self.generate_graph(text = context).graph
 
             not_valid_nodes_or_edges_message = """
-                All nodes must contain "entity_name".
+                All nodes must contain "name".
                 All edges must contain "relationship_name".
                 Please add mandatory fields to nodes and edges."""
 
