@@ -75,6 +75,10 @@ async def add(payload: AddPayload):
                 # Perform git clone if the URL is from GitHub
                 repo_name = data.split('/')[-1].replace('.git', '')
                 os.system(f'git clone {data} .data/{repo_name}')
+                await add(
+                    "data://.data/",
+                    f"{repo_name}",
+                )
             else:
                 # Fetch and store the data from other types of URL using curl
                 async with aiohttp.ClientSession() as session:
@@ -83,6 +87,10 @@ async def add(payload: AddPayload):
                             file_data = await resp.read()
                             with open(f'.data/{data.split("/")[-1]}', 'wb') as f:
                                 f.write(file_data)
+                            await add(
+                                f"data://.data/",
+                                f"{data.split('/')[-1]}",
+                            )
         else:
             await add(
                 payload.data,
