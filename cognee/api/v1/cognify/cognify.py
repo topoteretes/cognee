@@ -25,6 +25,7 @@ from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
+from cognee.utils import send_telemetry
 
 
 config = Config()
@@ -161,5 +162,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
             relationships,
             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
         )
+
+    send_telemetry( "COGNEE_COGNIFY")
 
     print(f"Chunk ({chunk_id}) cognified.")
