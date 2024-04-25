@@ -4,5 +4,5 @@ class EmbeddingEngine(Protocol):
     async def embed_text(self, text: str) -> List[float]:
         raise NotImplementedError()
 
-    async def get_vector_size(self) -> int:
+    def get_vector_size(self) -> int:
         raise NotImplementedError()
