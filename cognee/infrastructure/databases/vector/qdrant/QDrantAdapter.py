@@ -43,12 +43,13 @@ class QDrantAdapter(VectorDBInterface):
     def get_qdrant_client(self) -> AsyncQdrantClient:
         if self.qdrant_path is not None:
             return AsyncQdrantClient(
-                path = self.qdrant_path,
+                path = self.qdrant_path, port=6333
             )
         elif self.qdrant_url is not None:
             return AsyncQdrantClient(
                 url = self.qdrant_url,
                 api_key = self.qdrant_api_key,
+                port = 6333
             )
 
         return AsyncQdrantClient(
