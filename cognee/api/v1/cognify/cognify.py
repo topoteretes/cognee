@@ -41,7 +41,7 @@ logger = logging.getLogger("cognify")
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
     # Has to be loaded in advance, multithreading doesn't work without it.
-    nltk.download('stopwords')
+    nltk.download('stopwords', quiet=True)
     stopwords.ensure_loaded()
 
     db_engine = infrastructure_config.get_config()["database_engine"]

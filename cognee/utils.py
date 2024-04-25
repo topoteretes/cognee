@@ -220,7 +220,7 @@ def sanitize_df(df):
 
 
 def get_entities(tagged_tokens):
-    nltk.download("maxent_ne_chunker")
+    nltk.download("maxent_ne_chunker", quiet=True)
     from nltk.chunk import ne_chunk
     return ne_chunk(tagged_tokens)
 
@@ -229,9 +229,9 @@ def extract_pos_tags(sentence):
     """Extract Part-of-Speech (POS) tags for words in a sentence."""
 
     # Ensure that the necessary NLTK resources are downloaded
-    nltk.download("words")
-    nltk.download("punkt")
-    nltk.download("averaged_perceptron_tagger")
+    nltk.download("words", quiet=True)
+    nltk.download("punkt", quiet=True)
+    nltk.download("averaged_perceptron_tagger", quiet=True)
 
     from nltk.tag import pos_tag
     from nltk.tokenize import word_tokenize
@@ -268,7 +268,7 @@ def extract_sentiment_vader(text):
     """
     from nltk.sentiment import SentimentIntensityAnalyzer
 
-    nltk.download("vader_lexicon")
+    nltk.download("vader_lexicon", quiet=True)
 
     # Initialize the VADER Sentiment Intensity Analyzer
     sia = SentimentIntensityAnalyzer()
