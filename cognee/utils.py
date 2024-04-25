@@ -18,7 +18,7 @@ config = Config()
 config.load()
 
 
-def send_telemetry( posthog, event_name="COGNEE_ADD"):
+def send_telemetry( event_name="COGNEE_ADD"):
     if os.getenv("TELEMETRY_DISABLED"):
         return
 

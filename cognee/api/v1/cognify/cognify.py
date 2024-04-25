@@ -3,6 +3,7 @@ from uuid import uuid4
 from typing import List, Union
 import logging
 import instructor
+import nltk
 from openai import OpenAI
 from nltk.corpus import stopwords
 from cognee.config import Config
@@ -40,6 +41,7 @@ logger = logging.getLogger("cognify")
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
     # Has to be loaded in advance, multithreading doesn't work without it.
+    nltk.download('stopwords')
     stopwords.ensure_loaded()
 
     db_engine = infrastructure_config.get_config()["database_engine"]
