@@ -1,6 +1,8 @@
 """ This module contains utility functions for the cognee. """
 
 import os
+import uuid
+import datetime
 import graphistry
 import networkx as nx
 import numpy as np
@@ -11,16 +13,12 @@ import nltk
 from posthog import Posthog
 
 from cognee.config import Config
-import uuid
-import datetime
 
 config = Config()
 config.load()
 
 
-
-def send_telemetry( event_name="COGNEE_ADD"):
-
+def send_telemetry(event_name: str):
     if os.getenv("TELEMETRY_DISABLED"):
         return
 
@@ -28,20 +26,22 @@ def send_telemetry( event_name="COGNEE_ADD"):
     if env in ["local", "test", "dev"]:
         return
 
-    posthog = Posthog(project_api_key='phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3',
-                      host='https://eu.i.posthog.com')
+    posthog = Posthog(
+        project_api_key = "phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3",
+        host="https://eu.i.posthog.com"
+    )
 
     user_id = str(uuid.uuid4())
     current_time = datetime.datetime.now()
     properties = {
-        "time": current_time.strftime('%m/%d/%Y')
-
+        "time": current_time.strftime("%m/%d/%Y")
     }
 
     try:
         posthog.capture(user_id, event_name, properties)
     except Exception as e:
-        print('ERROR sending telemetric data to Posthog. See exception: %s', e)
+        print("ERROR sending telemetric data to Posthog. See exception: %s", e)
+
 def get_document_names(doc_input):
     """
     Get a list of document names.

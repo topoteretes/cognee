@@ -7,9 +7,7 @@ import cognee.modules.ingestion as ingestion
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.discovery import discover_directory_datasets
-
 from cognee.utils import send_telemetry
-
 
 
 async def add(data_path: Union[str, List[str]], dataset_name: str = None):
@@ -105,7 +103,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
         dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset",
         write_disposition = "merge",
     )
-    send_telemetry( "COGNEE_ADD")
+    send_telemetry("cognee.add")
 
     return run_info
 

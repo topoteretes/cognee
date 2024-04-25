@@ -70,7 +70,7 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
     # Update the results set with the results from all tasks
     results.extend(search_results)
 
-    send_telemetry( "COGNEE_SEARCH")
+    send_telemetry("cognee.search")
 
     return results
 

@@ -165,6 +165,6 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
         )
 
-    send_telemetry( "COGNEE_COGNIFY")
+    send_telemetry("cognee.cognify")
 
     print(f"Chunk ({chunk_id}) cognified.")

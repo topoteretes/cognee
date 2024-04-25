@@ -76,13 +76,13 @@ jobs:
           QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         run: poetry install --no-interaction --no-root
 
-      - name: Build with Poetry
-        run: poetry build
+      # - name: Build with Poetry
+      #   run: poetry build
 
-      - name: Install Package
-        run: |
-          cd dist
-          pip install *.whl
+      # - name: Install Package
+      #   run: |
+      #     cd dist
+      #     pip install *.whl
 
       # - name: Download NLTK Punkt Tokenizer Models
       #   run: |
@@ -90,6 +90,10 @@ jobs:
       #     python -m nltk.downloader stopwords
       #     python -m nltk.downloader wordnet
       #     python -m nltk.downloader averaged_perceptron_tagger
+
+      - name: Install cognee package
+        run: |
+          pip install .
 
       - name: Run test script
         env:
