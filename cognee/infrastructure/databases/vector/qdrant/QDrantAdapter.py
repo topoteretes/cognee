@@ -78,7 +78,7 @@ class QDrantAdapter(VectorDBInterface):
             }
         )
 
-        client.close()
+        await client.close()
 
         return result
 
@@ -103,14 +103,14 @@ class QDrantAdapter(VectorDBInterface):
             points = points
         )
 
-        client.close()
+        await client.close()
 
         return result
 
     async def retrieve(self, collection_name: str, data_id: str):
         client = await self.get_qdrant_client()
         results = client.retrieve(collection_name, [data_id], with_payload = True)
-        client.close()
+        await client.close()
         return results[0] if len(results) > 0 else None
 
     async def search(
@@ -136,7 +136,7 @@ class QDrantAdapter(VectorDBInterface):
             with_vectors = with_vector
         )
 
-        client.close()
+        await client.close()
 
         return result
 
@@ -177,7 +177,7 @@ class QDrantAdapter(VectorDBInterface):
             requests = requests
         )
 
-        client.close()
+        await client.close()
 
         return [filter(lambda result: result.score > 0.9, result_group) for result_group in results]
 
@@ -189,4 +189,4 @@ class QDrantAdapter(VectorDBInterface):
         for collection in response.collections:
             await client.delete_collection(collection.name)
 
-        client.close()
+        await client.close()
