@@ -3,6 +3,7 @@ async def  main():
     from os import path
     import pathlib
     import cognee
+    import time
 
     data_directory_path = path.abspath("../.data")
     cognee.config.data_root_directory(data_directory_path)
@@ -11,14 +12,16 @@ async def  main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_system()
-    #
-    # dataset_name = "explanations"
-    # explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
-    # await cognee.add([explanation_file_path], dataset_name)
-    #
-    # dataset_name = "short_stories"
-    # # data_directory_path is defined above
-    # await cognee.add("data://" + data_directory_path, dataset_name)
+
+    time.sleep(5)
+    
+    dataset_name = "cs_explanations"
+    explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
+    await cognee.add([explanation_file_path], dataset_name)
+    
+    dataset_name = "short_stories"
+    # data_directory_path is defined above
+    await cognee.add("data://" + data_directory_path, dataset_name)
 
     text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -33,8 +36,8 @@ async def  main():
     Up to 2020, fine tuning was the only way a model could be adapted to be able to accomplish specific tasks. Larger sized models, such as GPT-3, however, can be prompt-engineered to achieve similar results.[6] They are thought to acquire knowledge about syntax, semantics and "ontology" inherent in human language corpora, but also inaccuracies and biases present in the corpora.
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
-    #
-    dataset_name = "explanations"
+
+    dataset_name = "cs_explanations"
     await cognee.add(
         [
             text_1,
@@ -43,7 +46,7 @@ async def  main():
         dataset_name
     )
 
-    await cognee.cognify(dataset_name)
+    await cognee.cognify(["cs_explanations", "short_stories"])
 
 
 if __name__ == "__main__":
