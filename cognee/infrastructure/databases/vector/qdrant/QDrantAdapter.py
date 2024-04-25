@@ -72,7 +72,7 @@ class QDrantAdapter(VectorDBInterface):
             collection_name = collection_name,
             vectors_config = {
                 "text": models.VectorParams(
-                    size = self.embedding_engine.get_vector_size(),
+                    size = await self.embedding_engine.get_vector_size(),
                     distance = "Cosine"
                 )
             }
