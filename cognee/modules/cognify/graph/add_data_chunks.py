@@ -1,3 +1,4 @@
+import time
 from typing import TypedDict
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
@@ -18,6 +19,8 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
         except Exception as error:
             print(error)
             pass
+
+    time.sleep(5)
 
     for (dataset_name, chunks) in dataset_data_chunks.items():
         dataset_chunks = [
