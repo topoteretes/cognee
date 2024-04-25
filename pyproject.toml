@@ -44,7 +44,7 @@ dlt = "^0.4.7"
 duckdb = {version = "^0.10.0", extras = ["dlt"]}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
-qdrant-client = "^1.8.0"
+qdrant-client = "^1.9.0"
 duckdb-engine = "^0.11.2"
 graphistry = "^0.33.5"
 tenacity = "^8.2.3"
@@ -62,6 +62,7 @@ structlog = "^24.1.0"
 tiktoken = "^0.6.0"
 dspy-ai = "2.4.3"
 posthog = "^3.5.0"
+lancedb = "^0.6.10"
 
 
 [tool.poetry.extras]

@@ -1,21 +1,23 @@
-
 async def  main():
     from os import path
-    from cognee import config, prune
-
-    data_directory_path = path.abspath("../.data")
-    config.data_root_directory(data_directory_path)
-
-    cognee_directory_path = path.abspath("../.cognee_system")
-    config.system_root_directory(cognee_directory_path)
-
-    await prune.prune_system()
-    from os import path
+    import pathlib
     import cognee
 
-    dataset_name = "explanations"
-    await cognee.add([path.abspath("../cognee/.test_data/Natural language processing.txt")], dataset_name)
+    print("Working dir: ", str(pathlib.Path(__file__).parent))
+    data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
+    print("Data dir: ", data_directory_path)
+    cognee.config.data_root_directory(data_directory_path)
 
+    cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.cognee_system")).resolve())
+    print("System dir: ", cognee_directory_path)
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_system()
+
+    dataset_name = "cs_explanations"
+    explanation_file_path = path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+    await cognee.add([explanation_file_path], dataset_name)
+    
     dataset_name = "short_stories"
     # data_directory_path is defined above
     await cognee.add("data://" + data_directory_path, dataset_name)
@@ -34,7 +36,8 @@ async def  main():
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
 
-    dataset_name = "explanations"
+
+    dataset_name = "cs_explanations"
     await cognee.add(
         [
             text_1,
@@ -43,11 +46,9 @@ async def  main():
         dataset_name
     )
 
-    graph = await cognee.cognify(dataset_name)
+    await cognee.cognify(["short_stories", "cs_explanations"])
 
 
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
-
-

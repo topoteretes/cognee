@@ -1,6 +1,8 @@
 """ FastAPI server for the Cognee API. """
+import os
 from uuid import UUID
 
+import aiohttp
 import uvicorn
 import logging
 
@@ -67,14 +69,37 @@ async def add(payload: AddPayload):
     from v1.add.add import add
 
     try:
-        await add(
-            payload.data,
-            payload.dataset_name,
-        )
+        data = payload.data
+        if isinstance(data, str) and data.startswith('http'):
+            if 'github' in data:
+                # Perform git clone if the URL is from GitHub
+                repo_name = data.split('/')[-1].replace('.git', '')
+                os.system(f'git clone {data} .data/{repo_name}')
+                await add(
+                    "data://.data/",
+                    f"{repo_name}",
+                )
+            else:
+                # Fetch and store the data from other types of URL using curl
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(data) as resp:
+                        if resp.status == 200:
+                            file_data = await resp.read()
+                            with open(f'.data/{data.split("/")[-1]}', 'wb') as f:
+                                f.write(file_data)
+                            await add(
+                                f"data://.data/",
+                                f"{data.split('/')[-1]}",
+                            )
+        else:
+            await add(
+                payload.data,
+                payload.dataset_name,
+            )
     except Exception as error:
         return JSONResponse(
             status_code = 409,
-            content = { "error": error }
+            content = { "error": str(error) }
         )
 
 @app.post("/cognify", response_model=dict)
