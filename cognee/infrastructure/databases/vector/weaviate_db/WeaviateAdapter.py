@@ -30,6 +30,9 @@ class WeaviateAdapter(VectorDBInterface):
     async def embed_data(self, data: List[str]) -> List[float]:
         return await self.embedding_engine.embed_text(data)
 
+    async def collection_exists(self, collection_name: str) -> bool:
+        return self.client.collections.exists(collection_name)
+
     async def create_collection(self, collection_name: str):
         import weaviate.classes.config as wvcc
 

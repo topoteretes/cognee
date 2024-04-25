@@ -1,4 +1,3 @@
-import time
 from typing import TypedDict
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
@@ -13,16 +12,12 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
     identified_chunks = []
 
-    for dataset_name in dataset_data_chunks.keys():
+    for (dataset_name, chunks) in dataset_data_chunks.items():
         try:
             await vector_client.create_collection(dataset_name)
-        except Exception as error:
-            print(error)
+        except Exception:
             pass
 
-    time.sleep(5)
-
-    for (dataset_name, chunks) in dataset_data_chunks.items():
         dataset_chunks = [
             dict(
                 chunk_id = chunk["chunk_id"],
@@ -33,6 +28,9 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
         ]
 
         identified_chunks.extend(dataset_chunks)
+
+        if not await vector_client.collection_exists(dataset_name):
+            await vector_client.create_collection(dataset_name)
 
         await vector_client.create_data_points(
             dataset_name,
