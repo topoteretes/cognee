@@ -1,20 +1,18 @@
 
 async def  main():
     from os import path
-    from cognee import config, prune
-
-    data_directory_path = path.abspath("../.data")
-    config.data_root_directory(data_directory_path)
-
-    cognee_directory_path = path.abspath("../.cognee_system")
-    config.system_root_directory(cognee_directory_path)
-
-    await prune.prune_system()
-    from os import path
     import cognee
 
+    data_directory_path = path.abspath("../.data")
+    cognee.config.data_root_directory(data_directory_path)
+
+    cognee_directory_path = path.abspath("./.cognee_system")
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_system()
+
     dataset_name = "explanations"
-    await cognee.add([path.abspath("../cognee/.test_data/Natural language processing.txt")], dataset_name)
+    await cognee.add([path.abspath("./test_data/Natural language processing.txt")], dataset_name)
 
     dataset_name = "short_stories"
     # data_directory_path is defined above
@@ -43,11 +41,9 @@ async def  main():
         dataset_name
     )
 
-    graph = await cognee.cognify(dataset_name)
+    await cognee.cognify(dataset_name)
 
 
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
-
-

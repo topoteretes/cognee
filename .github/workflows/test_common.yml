@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - devel
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +37,7 @@ jobs:
     defaults:
       run:
         shell: bash
+
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -74,83 +74,84 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction --no-root
+
       - name: Build with Poetry
         run: poetry build
+
       - name: Install Package
         run: |
           cd dist
           pip install *.whl
 
-      - name: Download NLTK Punkt Tokenizer Models
-        run: |
-          python -m nltk.downloader punkt
-          python -m nltk.downloader stopwords
-          python -m nltk.downloader wordnet
-          python -m nltk.downloader averaged_perceptron_tagger
+      # - name: Download NLTK Punkt Tokenizer Models
+      #   run: |
+      #     python -m nltk.downloader punkt
+      #     python -m nltk.downloader stopwords
+      #     python -m nltk.downloader wordnet
+      #     python -m nltk.downloader averaged_perceptron_tagger
+
       - name: Run test script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         run: poetry run python ./cognee/tests/test_library.py
-      - run: |
-          poetry run
-        if: runner.os != 'Windows'
-        name: Run common tests with minimum dependencies Linux/MAC
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-      - run: |
-          poetry run python ./cognee/tests/test_library.py
-        if: runner.os == 'Windows'
-        name: Run common tests with minimum dependencies Windows
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-        shell: cmd
 
-      - name: Install  dependencies
-        run: poetry install --no-interaction
+      # - run: |
+      #     poetry run
+      #   if: runner.os != 'Windows'
+      #   name: Run common tests with minimum dependencies Linux/MAC
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
 
-      - name: Build with Poetry
-        run: poetry build
+      # - run: |
+      #     poetry run python ./cognee/tests/test_library.py
+      #   if: runner.os == 'Windows'
+      #   name: Run common tests with minimum dependencies Windows
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+      #   shell: cmd
 
-      - name: Install Package
-        run: |
-          cd dist
-          pip install *.whl
+      # - name: Install  dependencies
+      #   run: poetry install --no-interaction
+
+      # - name: Build with Poetry
+      #   run: poetry build
+
+      # - name: Install Package
+      #   run: |
+      #     cd dist
+      #     pip install *.whl
           
-      - name: Download NLTK Punkt Tokenizer Models
-        run: |
-          python -m nltk.downloader punkt
-      - run: |
-          poetry run python ./cognee/tests/test_library.py
-        if: runner.os != 'Windows'
-        name: Run pipeline smoke tests with minimum deps Linux/MAC
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+      # - name: Download NLTK Punkt Tokenizer Models
+      #   run: |
+      #     python -m nltk.downloader punkt
+      # - run: |
+      #     poetry run python ./cognee/tests/test_library.py
+      #   if: runner.os != 'Windows'
+      #   name: Run pipeline smoke tests with minimum deps Linux/MAC
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
 
-      - name: Download NLTK Punkt Tokenizer Models
-        run: |
-          python -m nltk.downloader punkt
-      - run: |
-          poetry run python ./cognee/tests/test_library.py
-        if: runner.os == 'Windows'
-        name: Run smoke tests with minimum deps Windows
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-        shell: cmd
-
-
-
-
+      # - name: Download NLTK Punkt Tokenizer Models
+      #   run: |
+      #     python -m nltk.downloader punkt
+      # - run: |
+      #     poetry run python ./cognee/tests/test_library.py
+      #   if: runner.os == 'Windows'
+      #   name: Run smoke tests with minimum deps Windows
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+      #   shell: cmd
 
 
   matrix_job_required_check:

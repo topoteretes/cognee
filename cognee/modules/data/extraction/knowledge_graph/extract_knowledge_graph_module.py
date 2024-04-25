@@ -46,7 +46,7 @@ class ExtractKnowledgeGraph(dspy.Module):
         self.lm = lm
         dspy.settings.configure(lm=self.lm)
         self.generate_graph = dspy.TypedChainOfThought(GraphFromText)
-        nltk.download('stopwords')
+        nltk.download("stopwords", quiet = True)
 
     def forward(self, context: str, question: str):
         context = remove_stop_words(context)
