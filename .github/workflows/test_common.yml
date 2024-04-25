@@ -74,7 +74,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-        run: poetry install --no-interaction --no-root
+        run: poetry install --no-interaction
 
       # - name: Build with Poetry
       #   run: poetry build
@@ -90,10 +90,6 @@ jobs:
       #     python -m nltk.downloader stopwords
       #     python -m nltk.downloader wordnet
       #     python -m nltk.downloader averaged_perceptron_tagger
-
-      - name: Install cognee package
-        run: |
-          pip install .
 
       - name: Run test script
         env:
