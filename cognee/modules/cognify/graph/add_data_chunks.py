@@ -1,3 +1,4 @@
+import logging
 from typing import TypedDict
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
@@ -13,9 +14,9 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
     identified_chunks = []
 
     for (dataset_name, chunks) in dataset_data_chunks.items():
-        print(f"Creating collection {str(dataset_name)}")
+        logging.info(f"Creating collection {str(dataset_name)}")
         try:
-            print(f"Creating collection {str(dataset_name)}")
+            logging.info(f"Creating collection {str(dataset_name)}")
             await vector_client.create_collection(dataset_name)
         except Exception:
             pass
@@ -32,17 +33,25 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
         identified_chunks.extend(dataset_chunks)
 
         if not await vector_client.collection_exists(dataset_name):
+            logging.info("Collection not found. Creating collection.")
             await vector_client.create_collection(dataset_name)
 
-        await vector_client.create_data_points(
-            dataset_name,
-            [
-                DataPoint(
-                    id = chunk["chunk_id"],
-                    payload = dict(text = chunk["text"]),
-                    embed_field = "text"
-                ) for chunk in dataset_chunks
-            ],
-        )
+        async def create_collection_retry(dataset_name, dataset_chunks):
+            await vector_client.create_data_points(
+                dataset_name,
+                [
+                    DataPoint(
+                        id = chunk["chunk_id"],
+                        payload = dict(text = chunk["text"]),
+                        embed_field = "text"
+                    ) for chunk in dataset_chunks
+                ],
+            )
+
+        try:
+            await create_collection_retry(dataset_name, dataset_chunks)
+        except Exception:
+            logging.info("Collection not found in craete data points.")
+            await create_collection_retry(dataset_name, dataset_chunks)
 
     return identified_chunks
