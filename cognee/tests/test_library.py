@@ -46,7 +46,7 @@ async def  main():
         dataset_name
     )
 
-    await cognee.cognify(["cs_explanations", "short_stories"])
+    await cognee.cognify(["short_stories"])
 
 
 if __name__ == "__main__":
