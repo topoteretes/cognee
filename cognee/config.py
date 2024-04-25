@@ -34,9 +34,9 @@ class Config:
 
     vectordb: str = os.getenv("VECTORDB", "weaviate")
 
-    qdrant_path: str = os.getenv("QDRANT_PATH")
-    qdrant_url: str = os.getenv("QDRANT_URL")
-    qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
+    qdrant_path: str = os.getenv("QDRANT_PATH", None)
+    qdrant_url: str = os.getenv("QDRANT_URL", None)
+    qdrant_api_key: str = os.getenv("QDRANT_API_KEY", None)
 
     db_path = str = os.getenv("COGNEE_DB_PATH", "databases")
     db_name: str = os.getenv("DB_NAME", "cognee.db")

@@ -94,9 +94,6 @@ class InfrastructureConfig():
                     embedding_engine = self.embedding_engine
                 )
             except (EnvironmentError, ModuleNotFoundError):
-                if config.qdrant_url is None and config.qdrant_api_key is None:
-                    raise EnvironmentError("Qdrant is not configured!")
-
                 self.vector_engine = QDrantAdapter(
                     qdrant_url = config.qdrant_url,
                     qdrant_api_key = config.qdrant_api_key,
