@@ -1,6 +1,7 @@
 
 async def  main():
     from os import path
+    import pathlib
     import cognee
 
     data_directory_path = path.abspath("../.data")
@@ -12,7 +13,8 @@ async def  main():
     await cognee.prune.prune_system()
 
     dataset_name = "explanations"
-    await cognee.add([path.abspath("../cognee/tests/test_data/Natural language processing.txt")], dataset_name)
+    explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural language processing.txt")
+    await cognee.add([explanation_file_path], dataset_name)
 
     dataset_name = "short_stories"
     # data_directory_path is defined above
