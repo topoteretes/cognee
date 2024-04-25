@@ -15,10 +15,10 @@ async def  main():
     # dataset_name = "explanations"
     # explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
     # await cognee.add([explanation_file_path], dataset_name)
-
-    dataset_name = "short_stories"
-    # data_directory_path is defined above
-    await cognee.add("data://" + data_directory_path, dataset_name)
+    #
+    # dataset_name = "short_stories"
+    # # data_directory_path is defined above
+    # await cognee.add("data://" + data_directory_path, dataset_name)
 
     text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -34,16 +34,16 @@ async def  main():
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
     #
-    # dataset_name = "explanations"
-    # await cognee.add(
-    #     [
-    #         text_1,
-    #         text_2
-    #     ],
-    #     dataset_name
-    # )
-    #
-    # await cognee.cognify(dataset_name)
+    dataset_name = "explanations"
+    await cognee.add(
+        [
+            text_1,
+            text_2
+        ],
+        dataset_name
+    )
+
+    await cognee.cognify(dataset_name)
 
 
 if __name__ == "__main__":
