@@ -6,13 +6,13 @@ async def  main():
     data_directory_path = path.abspath("../.data")
     cognee.config.data_root_directory(data_directory_path)
 
-    cognee_directory_path = path.abspath("./.cognee_system")
+    cognee_directory_path = path.abspath("../.cognee_system")
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_system()
 
     dataset_name = "explanations"
-    await cognee.add([path.abspath("./test_data/Natural language processing.txt")], dataset_name)
+    await cognee.add([path.abspath("../cognee/tests/test_data/Natural language processing.txt")], dataset_name)
 
     dataset_name = "short_stories"
     # data_directory_path is defined above

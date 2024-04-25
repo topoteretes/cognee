@@ -28,11 +28,6 @@ def fix_layer_name(layer_name):
     return sanitized_name
 
 
-
 def generate_cognitive_layer_id(layer_id: str) -> str:
-
-     layer = f"COGNITIVE_LAYER__{layer_id.upper().replace(' ', '_')}".replace("'", "").replace("/", "_")
-     layer = fix_layer_name(layer)
-     print("Fixed name:", layer)
-
-     return layer
+    layer = f"COGNITIVE_LAYER__{layer_id.upper().replace(' ', '_')}".replace("'", "").replace("/", "_")
+    return fix_layer_name(layer)
