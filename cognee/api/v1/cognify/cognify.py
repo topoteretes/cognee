@@ -44,6 +44,10 @@ async def cognify(datasets: Union[str, List[str]] = None):
     nltk.download('stopwords', quiet=True)
     stopwords.ensure_loaded()
 
+    graph_db_type = infrastructure_config.get_config()["graph_engine"]
+
+    graph_client = await get_graph_client(graph_db_type)
+
     db_engine = infrastructure_config.get_config()["database_engine"]
 
     if datasets is None or len(datasets) == 0:
@@ -68,12 +72,6 @@ async def cognify(datasets: Union[str, List[str]] = None):
     for added_dataset in added_datasets:
         if dataset_name in added_dataset:
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
-
-    awaitables = []
-
-    graph_db_type = infrastructure_config.get_config()["graph_engine"]
-
-    graph_client = await get_graph_client(graph_db_type)
 
     # await initialize_graph(USER_ID, graph_data_model, graph_client)
 

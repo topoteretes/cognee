@@ -70,10 +70,6 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
         run: poetry install --no-interaction
 
       # - name: Build with Poetry
