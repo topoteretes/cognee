@@ -14,12 +14,12 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
     identified_chunks = []
 
     for (dataset_name, chunks) in dataset_data_chunks.items():
-        # try:
-        if not await vector_client.collection_exists(dataset_name):
-            logging.error(f"Creating collection {str(dataset_name)}")
+        try:
+        # if not await vector_client.collection_exists(dataset_name):
+        #     logging.error(f"Creating collection {str(dataset_name)}")
             await vector_client.create_collection(dataset_name)
-        # except Exception:
-        #     pass
+        except Exception:
+            pass
 
         dataset_chunks = [
             dict(
@@ -32,9 +32,12 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
         identified_chunks.extend(dataset_chunks)
 
-        if not await vector_client.collection_exists(dataset_name):
+        # if not await vector_client.collection_exists(dataset_name):
+        try:
             logging.error("Collection still not found. Creating collection again.")
             await vector_client.create_collection(dataset_name)
+        except:
+            pass
 
         async def create_collection_retry(dataset_name, dataset_chunks):
             await vector_client.create_data_points(
