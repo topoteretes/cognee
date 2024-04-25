@@ -3,18 +3,17 @@ async def  main():
     from os import path
     import pathlib
     import cognee
-    import time
 
-    data_directory_path = path.join(pathlib.Path(__file__).parent.absolute(), "../../.data")
+    data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent.absolute(), "../../.data")).resolve())
+    print(data_directory_path)
     cognee.config.data_root_directory(data_directory_path)
 
-    cognee_directory_path = path.join(pathlib.Path(__file__).parent.absolute(), "../../.cognee_system")
+    cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent.absolute(), "../../.cognee_system")).resolve())
+    print(cognee_directory_path)
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_system()
 
-    time.sleep(5)
-    
     dataset_name = "cs_explanations"
     explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
     await cognee.add([explanation_file_path], dataset_name)
@@ -46,7 +45,7 @@ async def  main():
         dataset_name
     )
 
-    await cognee.cognify(["short_stories"])
+    await cognee.cognify(["short_stories", "cs_explanations"])
 
 
 if __name__ == "__main__":
