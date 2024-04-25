@@ -22,6 +22,10 @@ def send_telemetry( event_name="COGNEE_ADD"):
     if os.getenv("TELEMETRY_DISABLED"):
         return
 
+    env = os.getenv("ENV")
+    if env in ["local", "test", "dev"]:
+        return
+
     posthog = Posthog(project_api_key='phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3',
                       host='https://eu.i.posthog.com')
 
