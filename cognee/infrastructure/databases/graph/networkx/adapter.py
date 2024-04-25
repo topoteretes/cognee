@@ -133,12 +133,14 @@ class NetworkXAdapter(GraphDBInterface):
             self.graph = nx.MultiDiGraph()
             await self.save_graph_to_file(file_path)
 
-    async def delete_graph(self, path: str = None):
+    async def delete_graph(self, file_path: str = None):
         """Asynchronously delete the graph file from the filesystem."""
-        if path is None:
-            path = self.filename  # Assuming self.filename is defined elsewhere and holds the default graph file path
+        if file_path is None:
+            file_path = self.filename  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
-            await aiofiles_os.remove(path)
+            if os.path.exists(file_path):
+                await aiofiles_os.remove(file_path)
+
             self.graph = None
             logger.info("Graph deleted successfully.")
         except Exception as error:
