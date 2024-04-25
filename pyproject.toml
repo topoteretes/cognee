@@ -44,7 +44,7 @@ dlt = "^0.4.7"
 duckdb = {version = "^0.10.0", extras = ["dlt"]}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
-qdrant-client = "^1.8.0"
+qdrant-client = "^1.9.0"
 duckdb-engine = "^0.11.2"
 graphistry = "^0.33.5"
 tenacity = "^8.2.3"
