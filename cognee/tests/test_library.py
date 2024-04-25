@@ -5,10 +5,10 @@ async def  main():
     import cognee
     import time
 
-    data_directory_path = path.abspath("../.data")
+    data_directory_path = path.join(pathlib.Path(__file__).parent.absolute(), "../../.data")
     cognee.config.data_root_directory(data_directory_path)
 
-    cognee_directory_path = path.abspath("../.cognee_system")
+    cognee_directory_path = path.join(pathlib.Path(__file__).parent.absolute(), "../../.cognee_system")
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_system()
