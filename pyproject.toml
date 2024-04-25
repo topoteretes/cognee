@@ -62,6 +62,7 @@ structlog = "^24.1.0"
 tiktoken = "^0.6.0"
 dspy-ai = "2.4.3"
 posthog = "^3.5.0"
+lancedb = "^0.6.10"
 
 
 [tool.poetry.extras]
