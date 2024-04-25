@@ -11,10 +11,10 @@ async def  main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_system()
-
-    dataset_name = "explanations"
-    explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
-    await cognee.add([explanation_file_path], dataset_name)
+    #
+    # dataset_name = "explanations"
+    # explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
+    # await cognee.add([explanation_file_path], dataset_name)
 
     dataset_name = "short_stories"
     # data_directory_path is defined above
@@ -33,17 +33,17 @@ async def  main():
     Up to 2020, fine tuning was the only way a model could be adapted to be able to accomplish specific tasks. Larger sized models, such as GPT-3, however, can be prompt-engineered to achieve similar results.[6] They are thought to acquire knowledge about syntax, semantics and "ontology" inherent in human language corpora, but also inaccuracies and biases present in the corpora.
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
-
-    dataset_name = "explanations"
-    await cognee.add(
-        [
-            text_1,
-            text_2
-        ],
-        dataset_name
-    )
-
-    await cognee.cognify(dataset_name)
+    #
+    # dataset_name = "explanations"
+    # await cognee.add(
+    #     [
+    #         text_1,
+    #         text_2
+    #     ],
+    #     dataset_name
+    # )
+    #
+    # await cognee.cognify(dataset_name)
 
 
 if __name__ == "__main__":
