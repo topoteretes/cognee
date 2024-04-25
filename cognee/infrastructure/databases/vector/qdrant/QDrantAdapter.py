@@ -68,7 +68,7 @@ class QDrantAdapter(VectorDBInterface):
     ):
         client = self.get_qdrant_client()
 
-        return await client.create_collection(
+        result = await client.create_collection(
             collection_name = collection_name,
             vectors_config = {
                 "text": models.VectorParams(
@@ -77,6 +77,10 @@ class QDrantAdapter(VectorDBInterface):
                 )
             }
         )
+
+        client.close()
+
+        return result
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         client = self.get_qdrant_client()
@@ -94,13 +98,19 @@ class QDrantAdapter(VectorDBInterface):
 
         points = [convert_to_qdrant_point(point) for point in data_points]
 
-        return await client.upload_points(
+        result = await client.upload_points(
             collection_name = collection_name,
             points = points
         )
 
+        client.close()
+
+        return result
+
     async def retrieve(self, collection_name: str, data_id: str):
-        results = await self.get_qdrant_client().retrieve(collection_name, [data_id], with_payload = True)
+        client = await self.get_qdrant_client()
+        results = client.retrieve(collection_name, [data_id], with_payload = True)
+        client.close()
         return results[0] if len(results) > 0 else None
 
     async def search(
@@ -116,7 +126,7 @@ class QDrantAdapter(VectorDBInterface):
 
         client = self.get_qdrant_client()
 
-        return await client.search(
+        result = await client.search(
             collection_name = collection_name,
             query_vector = models.NamedVector(
                 name = "text",
@@ -125,6 +135,10 @@ class QDrantAdapter(VectorDBInterface):
             limit = limit,
             with_vectors = with_vector
         )
+
+        client.close()
+
+        return result
 
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int = None, with_vectors: bool = False):
@@ -163,6 +177,8 @@ class QDrantAdapter(VectorDBInterface):
             requests = requests
         )
 
+        client.close()
+
         return [filter(lambda result: result.score > 0.9, result_group) for result_group in results]
 
     async def prune(self):
@@ -172,3 +188,5 @@ class QDrantAdapter(VectorDBInterface):
 
         for collection in response.collections:
             await client.delete_collection(collection.name)
+
+        client.close()
