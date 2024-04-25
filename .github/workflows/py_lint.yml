@@ -72,7 +72,7 @@ jobs:
           poetry run python ./tools/check-lockfile.py
           poetry run mypy --config-file mypy.ini cognee
           poetry run flake8 --max-line-length=200 cognee
-          poetry run black cognee docs tests --diff --extend-exclude=".*syntax_error.py"
+          poetry run black cognee --exclude docs  --diff --extend-exclude=".*syntax_error.py"
           # poetry run isort ./ --diff
               poetry run bandit -r cognee/ -n 3 -l
 
