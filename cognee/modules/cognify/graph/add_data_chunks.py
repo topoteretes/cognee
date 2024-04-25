@@ -12,13 +12,14 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
     identified_chunks = []
 
-    for (dataset_name, chunks) in dataset_data_chunks.items():
+    for dataset_name in dataset_data_chunks.keys():
         try:
             await vector_client.create_collection(dataset_name)
         except Exception as error:
             print(error)
             pass
 
+    for (dataset_name, chunks) in dataset_data_chunks.items():
         dataset_chunks = [
             dict(
                 chunk_id = chunk["chunk_id"],
