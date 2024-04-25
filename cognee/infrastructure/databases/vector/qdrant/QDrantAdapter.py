@@ -58,6 +58,10 @@ class QDrantAdapter(VectorDBInterface):
     async def embed_data(self, data: List[str]) -> List[float]:
         return await self.embedding_engine.embed_text(data)
 
+    async def collection_exists(self, collection_name: str) -> bool:
+        client = self.get_qdrant_client()
+        return client.collection_exists(collection_name)
+
     async def create_collection(
       self,
       collection_name: str,

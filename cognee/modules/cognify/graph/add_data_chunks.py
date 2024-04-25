@@ -31,6 +31,9 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
         identified_chunks.extend(dataset_chunks)
 
+        if not await vector_client.collection_exists(dataset_name):
+            await vector_client.create_collection(dataset_name)
+
         await vector_client.create_data_points(
             dataset_name,
             [
