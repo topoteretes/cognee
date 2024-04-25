@@ -1,7 +1,3 @@
-import dotenv
-
-dotenv.load_dotenv()
-
 async def  main():
     from os import path
     import pathlib
