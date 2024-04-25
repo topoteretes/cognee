@@ -13,7 +13,7 @@ async def  main():
     await cognee.prune.prune_system()
 
     dataset_name = "explanations"
-    explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural language processing.txt")
+    explanation_file_path = path.join(pathlib.Path(__file__).parent.absolute(), "test_data/Natural_language_processing.txt")
     await cognee.add([explanation_file_path], dataset_name)
 
     dataset_name = "short_stories"
