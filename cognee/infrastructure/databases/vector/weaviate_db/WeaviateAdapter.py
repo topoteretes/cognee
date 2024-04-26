@@ -21,9 +21,6 @@ class WeaviateAdapter(VectorDBInterface):
         self.client = weaviate.connect_to_wcs(
             cluster_url=url,
             auth_credentials=weaviate.auth.AuthApiKey(api_key),
-            # headers = {
-            #     "X-OpenAI-Api-Key": openai_api_key
-            # },
             additional_config=wvc.init.AdditionalConfig(timeout=wvc.init.Timeout(init=30))
         )
 
@@ -31,20 +28,23 @@ class WeaviateAdapter(VectorDBInterface):
         return await self.embedding_engine.embed_text(data)
 
     async def collection_exists(self, collection_name: str) -> bool:
-        event_loop = asyncio.get_event_loop()
+        future = asyncio.Future()
 
-        def sync_collection_exists():
-            return self.client.collections.exists(collection_name)
+        future.set_result(self.client.collections.exists(collection_name))
 
-        return await event_loop.run_in_executor(None, sync_collection_exists)
+        return future
 
-    async def create_collection(self, collection_name: str):
+    async def create_collection(
+        self,
+        collection_name: str,
+        payload_schema = None,
+    ):
         import weaviate.classes.config as wvcc
 
-        event_loop = asyncio.get_event_loop()
+        future = asyncio.Future()
 
-        def sync_create_collection():
-            return self.client.collections.create(
+        future.set_result(
+            self.client.collections.create(
                 name=collection_name,
                 properties=[
                     wvcc.Property(
@@ -54,13 +54,9 @@ class WeaviateAdapter(VectorDBInterface):
                     )
                 ]
             )
+        )
 
-        # try:
-        result = await event_loop.run_in_executor(None, sync_create_collection)
-        # finally:
-        #     event_loop.shutdown_executor()
-
-        return result
+        return future
 
     def get_collection(self, collection_name: str):
         return self.client.collections.get(collection_name)
@@ -82,21 +78,17 @@ class WeaviateAdapter(VectorDBInterface):
 
         return self.get_collection(collection_name).data.insert_many(objects)
 
-    async def retrieve(self, collection_name: str, data_id: str):
-        def sync_retrieve():
-            return self.get_collection(collection_name).query.fetch_object_by_id(UUID(data_id))
+    async def retrieve(self, collection_name: str, data_point_id: str):
+        future = asyncio.Future()
 
-        event_loop = asyncio.get_event_loop()
-
-        # try:
-        data_point = await event_loop.run_in_executor(None, sync_retrieve)
-        # finally:
-            # event_loop.shutdown_executor()
+        data_point = self.get_collection(collection_name).query.fetch_object_by_id(UUID(data_point_id))
 
         data_point.payload = data_point.properties
         del data_point.properties
 
-        return data_point
+        future.set_result(data_point)
+
+        return future
 
     async def search(
             self,
@@ -114,7 +106,6 @@ class WeaviateAdapter(VectorDBInterface):
         if query_vector is None:
             query_vector = (await self.embed_data([query_text]))[0]
 
-        # def sync_search():
         search_result = self.get_collection(collection_name).query.hybrid(
             query = None,
             vector = query_vector,

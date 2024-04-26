@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import uuid4
+from pydantic import BaseModel
 from typing import List, Tuple, TypedDict
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
@@ -106,8 +107,16 @@ async def add_cognitive_layer_graphs(
 
         await graph_client.add_edges(graph_edges)
 
+        class References(BaseModel):
+            node_id: str
+            cognitive_layer: str
+
+        class PayloadSchema(BaseModel):
+            value: str
+            references: References
+
         try:
-            await vector_client.create_collection(layer_id)
+            await vector_client.create_collection(layer_id, payload_schema = PayloadSchema)
         except Exception:
             # It's ok if the collection already exists.
             pass

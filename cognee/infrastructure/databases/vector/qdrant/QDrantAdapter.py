@@ -68,6 +68,7 @@ class QDrantAdapter(VectorDBInterface):
     async def create_collection(
       self,
       collection_name: str,
+      payload_schema = None,
     ):
         client = self.get_qdrant_client()
 
@@ -110,9 +111,9 @@ class QDrantAdapter(VectorDBInterface):
 
         return result
 
-    async def retrieve(self, collection_name: str, data_id: str):
+    async def retrieve(self, collection_name: str, data_point_id: str):
         client = await self.get_qdrant_client()
-        results = client.retrieve(collection_name, [data_id], with_payload = True)
+        results = client.retrieve(collection_name, [data_point_id], with_payload = True)
         await client.close()
         return results[0] if len(results) > 0 else None
 

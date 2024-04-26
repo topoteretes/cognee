@@ -63,6 +63,7 @@ tiktoken = "^0.6.0"
 dspy-ai = "2.4.3"
 posthog = "^3.5.0"
 lancedb = "^0.6.10"
+tantivy = "^0.21.0"
 
 
 [tool.poetry.extras]
