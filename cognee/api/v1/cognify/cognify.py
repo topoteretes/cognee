@@ -166,3 +166,21 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     send_telemetry("cognee.cognify")
 
     print(f"Chunk ({chunk_id}) cognified.")
+
+
+if __name__ == "__main__":
+
+    async def test():
+
+        from cognee.api.v1.add import add
+
+        await add(["A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification"], "test")
+
+        graph = await cognify()
+
+        from cognee.utils import render_graph
+
+        await render_graph(graph, include_color=True, include_nodes=True, include_size=True)
+
+    import asyncio
+    asyncio.run(test())

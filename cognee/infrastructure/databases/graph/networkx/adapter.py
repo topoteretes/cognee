@@ -12,7 +12,8 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 logger = logging.getLogger("NetworkXAdapter")
 
 class NetworkXAdapter(GraphDBInterface):
-    _instance = None  # Class variable to store the singleton instance
+    _instance = None
+    graph = None # Class variable to store the singleton instance
 
     def __new__(cls, filename):
         if cls._instance is None:
@@ -23,8 +24,7 @@ class NetworkXAdapter(GraphDBInterface):
     def __init__(self, filename = "cognee_graph.pkl"):
         self.filename = filename
 
-    async def graph(self):
-        return self.graph
+
 
     async def add_node(
         self,
@@ -95,6 +95,7 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def extract_node(self, node_id: str) -> dict:
         if self.graph.has_node(node_id):
+
             return self.graph.nodes[node_id]
 
         return None
