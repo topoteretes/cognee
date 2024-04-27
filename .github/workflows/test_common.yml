@@ -92,6 +92,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_URL: ${{ secrets.QDRANT_API_URL }}
+          ENV: 'dev'
         run: poetry run python ./cognee/tests/test_library.py
 
       # - run: |
