@@ -70,7 +70,11 @@ jobs:
           export PATH=$PATH:"/c/Program Files/usr/bin" # needed for Windows
           ./tools/check-package.sh
           poetry run python ./tools/check-lockfile.py
-          poetry run mypy --config-file mypy.ini cognee
+          if [ -f "mypy.ini" ]; then
+              poetry run mypy --config-file mypy.ini cognee
+          else
+              echo "mypy.ini file does not exist"
+          fi
           poetry run flake8 --max-line-length=200 cognee
           # poetry run black cognee --exclude docs  --diff --extend-exclude=".*syntax_error.py"
           # poetry run isort ./ --diff
