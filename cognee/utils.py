@@ -18,7 +18,16 @@ config = Config()
 config.load()
 
 
-def send_telemetry(event_name: str):
+
+
+def send_telemetry(event_name: str)-> None:
+    """
+    Send telemetry data to Posthog.
+    Args:
+        event_name (str): The name of the event to be sent.
+    Returns:
+        None
+    """
     if os.getenv("TELEMETRY_DISABLED"):
         return
 
@@ -27,7 +36,7 @@ def send_telemetry(event_name: str):
         return
 
     posthog = Posthog(
-        project_api_key = "phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3",
+        project_api_key="phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3",
         host="https://eu.i.posthog.com"
     )
 
@@ -42,7 +51,7 @@ def send_telemetry(event_name: str):
     except Exception as e:
         print("ERROR sending telemetric data to Posthog. See exception: %s", e)
 
-def get_document_names(doc_input):
+def get_document_names(doc_input) -> list:
     """
     Get a list of document names.
 

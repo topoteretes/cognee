@@ -121,7 +121,7 @@ class Config:
     chunk_overlap: int = 0
     chunk_strategy: str = ChunkStrategy.PARAGRAPH
 
-    def load(self):
+    def load(self) -> None:
         """Loads the configuration from a file or environment variables."""
         config = configparser.ConfigParser()
         config.read(self.config_path)
@@ -139,7 +139,7 @@ class Config:
                     if hasattr(self, key):
                         setattr(self, key, value)
 
-    def save(self):
+    def save(self) -> None:
         """Saves the current configuration to a file."""
         config = configparser.ConfigParser()
 

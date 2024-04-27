@@ -15,12 +15,12 @@ sys.path.insert(0, parent_dir)
 environment = os.getenv("AWS_ENV", "dev")
 
 
-def fetch_secret(secret_name:str, region_name:str, env_file_path:str):
+def fetch_secret(secret_name: str, region_name: str, env_file_path: str) -> None:
     """Fetch the secret from AWS Secrets Manager and write it to the .env file."""
     print("Initializing session")
-    session = boto3.session.Session()
+    session: boto3.Session = boto3.session.Session()
     print("Session initialized")
-    client = session.client(service_name="secretsmanager", region_name=region_name)
+    client: boto3.client = session.client(service_name="secretsmanager", region_name=region_name)
     print("Client initialized")
 
     try:
