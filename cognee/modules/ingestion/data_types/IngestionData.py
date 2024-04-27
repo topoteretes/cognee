@@ -1,13 +1,16 @@
 from typing import Protocol, BinaryIO
 
+from typing import Union, Protocol, BinaryIO
+
 class IngestionData(Protocol):
-    data: str | BinaryIO = None
+    data: Union[str, BinaryIO] = None
 
-    def get_data(self):
+    def get_data(self) -> None:
         raise NotImplementedError()
 
-    def get_identifier(self):
+    def get_identifier(self) -> None:
         raise NotImplementedError()
 
-    def get_metadata(self):
+    def get_metadata(self) -> None:
         raise NotImplementedError()
+
