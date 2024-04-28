@@ -3,6 +3,7 @@ from uuid import uuid4
 from typing import List, Union
 import logging
 import instructor
+import nltk
 from openai import OpenAI
 from nltk.corpus import stopwords
 from cognee.config import Config
@@ -40,7 +41,12 @@ logger = logging.getLogger("cognify")
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
     # Has to be loaded in advance, multithreading doesn't work without it.
+    nltk.download('stopwords', quiet=True)
     stopwords.ensure_loaded()
+
+    graph_db_type = infrastructure_config.get_config()["graph_engine"]
+
+    graph_client = await get_graph_client(graph_db_type)
 
     db_engine = infrastructure_config.get_config()["database_engine"]
 
@@ -66,12 +72,6 @@ async def cognify(datasets: Union[str, List[str]] = None):
     for added_dataset in added_datasets:
         if dataset_name in added_dataset:
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
-
-    awaitables = []
-
-    graph_db_type = infrastructure_config.get_config()["graph_engine"]
-
-    graph_client = await get_graph_client(graph_db_type)
 
     # await initialize_graph(USER_ID, graph_data_model, graph_client)
 
@@ -163,6 +163,24 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
         )
 
-    send_telemetry( "COGNEE_COGNIFY")
+    send_telemetry("cognee.cognify")
 
     print(f"Chunk ({chunk_id}) cognified.")
+
+
+if __name__ == "__main__":
+
+    async def test():
+
+        from cognee.api.v1.add import add
+
+        await add(["A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification"], "test")
+
+        graph = await cognify()
+
+        from cognee.utils import render_graph
+
+        await render_graph(graph, include_color=True, include_nodes=True, include_size=True)
+
+    import asyncio
+    asyncio.run(test())

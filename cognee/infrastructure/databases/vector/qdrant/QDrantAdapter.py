@@ -43,12 +43,13 @@ class QDrantAdapter(VectorDBInterface):
     def get_qdrant_client(self) -> AsyncQdrantClient:
         if self.qdrant_path is not None:
             return AsyncQdrantClient(
-                path = self.qdrant_path,
+                path = self.qdrant_path, port=6333
             )
         elif self.qdrant_url is not None:
             return AsyncQdrantClient(
                 url = self.qdrant_url,
                 api_key = self.qdrant_api_key,
+                port = 6333
             )
 
         return AsyncQdrantClient(
@@ -58,13 +59,19 @@ class QDrantAdapter(VectorDBInterface):
     async def embed_data(self, data: List[str]) -> List[float]:
         return await self.embedding_engine.embed_text(data)
 
+    async def collection_exists(self, collection_name: str) -> bool:
+        client = self.get_qdrant_client()
+        result = await client.collection_exists(collection_name)
+        await client.close()
+        return result
+
     async def create_collection(
       self,
       collection_name: str,
     ):
         client = self.get_qdrant_client()
 
-        return await client.create_collection(
+        result = await client.create_collection(
             collection_name = collection_name,
             vectors_config = {
                 "text": models.VectorParams(
@@ -73,6 +80,10 @@ class QDrantAdapter(VectorDBInterface):
                 )
             }
         )
+
+        await client.close()
+
+        return result
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         client = self.get_qdrant_client()
@@ -90,13 +101,19 @@ class QDrantAdapter(VectorDBInterface):
 
         points = [convert_to_qdrant_point(point) for point in data_points]
 
-        return await client.upload_points(
+        result = await client.upload_points(
             collection_name = collection_name,
             points = points
         )
 
+        await client.close()
+
+        return result
+
     async def retrieve(self, collection_name: str, data_id: str):
-        results = await self.get_qdrant_client().retrieve(collection_name, [data_id], with_payload = True)
+        client = self.get_qdrant_client()
+        results = await client.retrieve(collection_name, [data_id], with_payload = True)
+        await client.close()
         return results[0] if len(results) > 0 else None
 
     async def search(
@@ -112,7 +129,7 @@ class QDrantAdapter(VectorDBInterface):
 
         client = self.get_qdrant_client()
 
-        return await client.search(
+        result = await client.search(
             collection_name = collection_name,
             query_vector = models.NamedVector(
                 name = "text",
@@ -121,6 +138,10 @@ class QDrantAdapter(VectorDBInterface):
             limit = limit,
             with_vectors = with_vector
         )
+
+        await client.close()
+
+        return result
 
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int = None, with_vectors: bool = False):
@@ -159,6 +180,8 @@ class QDrantAdapter(VectorDBInterface):
             requests = requests
         )
 
+        await client.close()
+
         return [filter(lambda result: result.score > 0.9, result_group) for result_group in results]
 
     async def prune(self):
@@ -168,3 +191,5 @@ class QDrantAdapter(VectorDBInterface):
 
         for collection in response.collections:
             await client.delete_collection(collection.name)
+
+        await client.close()

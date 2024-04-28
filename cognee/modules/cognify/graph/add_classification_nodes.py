@@ -2,8 +2,8 @@ from typing import List
 
 async def add_classification_nodes(graph_client, parent_node_id: str, categories: List) -> None:
     for category in categories:
-        data_type = category["data_type"].upper().replace(' ', '_')
-        category_name = category["category_name"].upper().replace(' ', '_').replace("'", "").replace("/", "_")
+        data_type = category["data_type"].upper().replace(" ", "_")
+        category_name = category["category_name"].upper().replace(" ", "_").replace("'", "").replace("/", "_")
 
         data_type_node_id = data_type
 

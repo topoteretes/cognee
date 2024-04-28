@@ -27,5 +27,9 @@ async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None)
             pass
             
     graph_client = NetworkXAdapter(filename = graph_file_path)
-    await graph_client.load_graph_from_file()
+
+
+    if (graph_client.graph is None):
+        await graph_client.load_graph_from_file()
+
     return graph_client

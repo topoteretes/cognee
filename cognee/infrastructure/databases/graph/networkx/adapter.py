@@ -12,7 +12,8 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 logger = logging.getLogger("NetworkXAdapter")
 
 class NetworkXAdapter(GraphDBInterface):
-    _instance = None  # Class variable to store the singleton instance
+    _instance = None
+    graph = None # Class variable to store the singleton instance
 
     def __new__(cls, filename):
         if cls._instance is None:
@@ -22,10 +23,8 @@ class NetworkXAdapter(GraphDBInterface):
 
     def __init__(self, filename = "cognee_graph.pkl"):
         self.filename = filename
-        self.graph = nx.MultiDiGraph()
 
-    async def graph(self):
-        return self.graph
+
 
     async def add_node(
         self,
@@ -96,6 +95,7 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def extract_node(self, node_id: str) -> dict:
         if self.graph.has_node(node_id):
+
             return self.graph.nodes[node_id]
 
         return None
@@ -113,6 +113,9 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""
+        if file_path == self.filename:
+            return
+
         if not file_path:
             file_path = self.filename
         try:
@@ -120,24 +123,26 @@ class NetworkXAdapter(GraphDBInterface):
                 async with aiofiles.open(file_path, "r") as file:
                     graph_data = json.loads(await file.read())
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
-                    return self.graph
             else:
                 # Log that the file does not exist and an empty graph is initialized
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
                 self.graph = nx.MultiDiGraph()  # Use MultiDiGraph to keep it consistent with __init__
-                return self.graph
+                await self.save_graph_to_file(file_path)
         except Exception as error:
             logger.error("Failed to load graph from file: %s", file_path)
             # Initialize an empty graph in case of error
             self.graph = nx.MultiDiGraph()
-            return self.graph
+            await self.save_graph_to_file(file_path)
 
-    async def delete_graph(self, path: str = None):
+    async def delete_graph(self, file_path: str = None):
         """Asynchronously delete the graph file from the filesystem."""
-        if path is None:
-            path = self.filename  # Assuming self.filename is defined elsewhere and holds the default graph file path
+        if file_path is None:
+            file_path = self.filename  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
-            await aiofiles_os.remove(path)
+            if os.path.exists(file_path):
+                await aiofiles_os.remove(file_path)
+
+            self.graph = None
             logger.info("Graph deleted successfully.")
         except Exception as error:
             logger.error("Failed to delete graph: %s", error)

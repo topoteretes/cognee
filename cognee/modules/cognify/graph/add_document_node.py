@@ -4,6 +4,10 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 async def add_document_node(graph_client: GraphDBInterface, parent_node_id, document_metadata):
     document_id = f"DOCUMENT__{document_metadata['id']}"
 
+
+
+
+
     document = await graph_client.extract_node(document_id)
 
     if not document:
