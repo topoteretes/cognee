@@ -62,6 +62,10 @@ async def add_cognitive_layer_graphs(
 
             id, type, name, description, *node_properties = node
 
+            print("Node properties: ", node_properties)
+
+            node_properties = dict(node_properties)
+
             graph_nodes.append((
                 node_id,
                 dict(
@@ -77,7 +81,7 @@ async def add_cognitive_layer_graphs(
                     # named_entities = named_entities,
                     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    *node_properties,
+                    **node_properties,
                 )
             ))
 
