@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
-from pydantic import BaseModel
 from typing import List, Tuple, TypedDict
+from pydantic import BaseModel
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
 from cognee.shared.data_models import KnowledgeGraph
@@ -122,7 +122,7 @@ async def add_cognitive_layer_graphs(
             pass
 
         data_points = [
-            DataPoint(
+            DataPoint[PayloadSchema](
                 id = str(uuid4()),
                 payload = dict(
                     value = node_data["name"],

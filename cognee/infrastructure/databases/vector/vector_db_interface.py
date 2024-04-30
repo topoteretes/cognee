@@ -13,7 +13,7 @@ class VectorDBInterface(Protocol):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema: Optional[PayloadSchema],
+        payload_schema: Optional[PayloadSchema] = None,
     ): raise NotImplementedError
 
     """ Data points """

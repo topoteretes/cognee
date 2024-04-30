@@ -25,7 +25,7 @@ async def search_similarity(query: str, graph):
                     layer_id = result.payload["references"]["cognitive_layer"],
                     node_id = result.payload["references"]["node_id"],
                     score = result.score,
-                ) for result in results if result.score > 0.5
+                ) for result in results if result.score > 0.8
             ])
 
     if len(graph_nodes) == 0:
@@ -39,7 +39,10 @@ async def search_similarity(query: str, graph):
         if "chunk_collection" not in graph_node and "chunk_id" not in graph_node:
             continue
 
-        vector_point = await vector_engine.retrieve(graph_node["chunk_collection"], graph_node["chunk_id"])
+        vector_point = await vector_engine.retrieve(
+            graph_node["chunk_collection"],
+            graph_node["chunk_id"],
+        )
 
         relevant_context.append(vector_point.payload["text"])
 

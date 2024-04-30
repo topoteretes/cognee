@@ -1,5 +1,5 @@
 from typing import TypedDict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
 
@@ -14,10 +14,11 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
     identified_chunks = []
 
     class PayloadSchema(BaseModel):
-        text: str
+        text: str = Field(...)
 
     for (dataset_name, chunks) in dataset_data_chunks.items():
         try:
+
             await vector_client.create_collection(dataset_name, payload_schema = PayloadSchema)
         except Exception as error:
             print(error)
@@ -28,7 +29,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
                 chunk_id = chunk["chunk_id"],
                 collection = dataset_name,
                 text = chunk["text"],
-                file_metadata = chunk["file_metadata"],
+                document_id = chunk["document_id"],
             ) for chunk in chunks
         ]
 
@@ -37,10 +38,10 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
         await vector_client.create_data_points(
             dataset_name,
             [
-                DataPoint(
+                DataPoint[PayloadSchema](
                     id = chunk["chunk_id"],
-                    payload = dict(text = chunk["text"]),
-                    embed_field = "text"
+                    payload = PayloadSchema.parse_obj(dict(text = chunk["text"])),
+                    embed_field = "text",
                 ) for chunk in dataset_chunks
             ],
         )

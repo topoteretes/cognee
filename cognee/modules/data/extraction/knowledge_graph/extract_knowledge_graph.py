@@ -19,6 +19,6 @@ async def extract_knowledge_graph(text: str, cognitive_layer, graph_model):
         return (await event_loop.run_in_executor(None, sync_extract_knowledge_graph)).graph
         # return compiled_extract_knowledge_graph(text, question = "").graph
     except Exception as error:
-        logger.error("Error extracting graph from content: %s", error, exc_info = True)
-        
+        # TODO: Log error to Sentry
+
         return await extract_content_graph(text, cognitive_layer, graph_model)

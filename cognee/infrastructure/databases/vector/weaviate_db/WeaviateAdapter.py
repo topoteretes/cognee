@@ -69,9 +69,9 @@ class WeaviateAdapter(VectorDBInterface):
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
             return DataObject(
-                uuid=data_point.id,
-                properties=data_point.payload,
-                vector=data_vectors[data_points.index(data_point)]
+                uuid = data_point.id,
+                properties = data_point.payload.dict(),
+                vector = data_vectors[data_points.index(data_point)]
             )
 
         objects = list(map(convert_to_weaviate_data_points, data_points))
@@ -88,7 +88,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         future.set_result(data_point)
 
-        return future
+        return await future
 
     async def search(
             self,

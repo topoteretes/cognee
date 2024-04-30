@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector import DataPoint
 
-async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keywords: List[str]) -> None:
+async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]) -> None:
     vector_client = infrastructure_config.get_config("vector_engine")
 
     keyword_nodes = []
@@ -17,7 +17,6 @@ async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keyw
             keyword_id,
             dict(
                 id = keyword_id,
-                chunk_id = chunk_id,
                 name = keyword.lower().capitalize(),
                 keyword = keyword.lower(),
                 entity_type = "Keyword",
@@ -37,9 +36,17 @@ async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keyw
         ) for (keyword_id, __) in keyword_nodes
     ])
 
+    class References(BaseModel):
+        node_id: str
+        cognitive_layer: str
+
+    class PayloadSchema(BaseModel):
+        value: str
+        references: References
+
     # Add data to vector
     keyword_data_points = [
-        DataPoint(
+        DataPoint[PayloadSchema](
             id = str(uuid4()),
             payload = dict(
                 value = keyword_data["keyword"],
@@ -53,14 +60,6 @@ async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keyw
     ]
 
     try:
-        class References(BaseModel):
-            node_id: str
-            cognitive_layer: str
-
-        class PayloadSchema(BaseModel):
-            value: str
-            references: References
-
         await vector_client.create_collection(parent_node_id, payload_schema = PayloadSchema)
     except Exception:
         # It's ok if the collection already exists.

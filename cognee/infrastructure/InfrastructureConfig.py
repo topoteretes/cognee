@@ -108,11 +108,12 @@ class InfrastructureConfig():
                         embedding_engine = self.embedding_engine
                     )
                 else:
-                    import tempfile
                     from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+                    lance_db_path = self.database_directory_path + "/cognee.lancedb"
+                    LocalStorage.ensure_directory_exists(lance_db_path)
 
                     self.vector_engine = LanceDBAdapter(
-                        uri = tempfile.mkdtemp(dir = self.database_directory_path, suffix = ".lancedb"),
+                        uri = lance_db_path,
                         api_key = None,
                         embedding_engine = self.embedding_engine,
                     )

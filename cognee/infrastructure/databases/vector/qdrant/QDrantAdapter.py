@@ -94,7 +94,7 @@ class QDrantAdapter(VectorDBInterface):
         def convert_to_qdrant_point(data_point: DataPoint):
             return models.PointStruct(
                 id = data_point.id,
-                payload = data_point.payload,
+                payload = data_point.payload.dict(),
                 vector = {
                     "text": data_vectors[data_points.index(data_point)]
                 }
