@@ -63,6 +63,9 @@ tiktoken = "^0.6.0"
 dspy-ai = "2.4.3"
 posthog = "^3.5.0"
 lancedb = "^0.6.10"
+importlib-metadata = "6.1.0"
+deepeval = "^0.21.36"
+
 
 
 [tool.poetry.extras]

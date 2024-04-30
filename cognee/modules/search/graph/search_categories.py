@@ -1,11 +1,19 @@
-from typing import Union, Dict
+from typing import Union, Dict, re
+
+from cognee.modules.search.llm.extraction.categorize_relevant_category import categorize_relevant_category
 
 """ Search categories in the graph and return their summary attributes. """
 
-from cognee.shared.data_models import GraphDBType
+from cognee.shared.data_models import GraphDBType, DefaultContentPrediction
 import networkx as nx
 
-async def search_categories(graph: Union[nx.Graph, any], query_label: str, infrastructure_config: Dict):
+def strip_exact_regex(s, substring):
+    # Escaping substring to be used in a regex pattern
+    pattern = re.escape(substring)
+    # Regex to match the exact substring at the start and end
+    return re.sub(f"^{pattern}|{pattern}$", "", s)
+
+async def search_categories(query:str, graph: Union[nx.Graph, any], query_label: str, infrastructure_config: Dict):
     """
     Filter nodes in the graph that contain the specified label and return their summary attributes.
     This function supports both NetworkX graphs and Neo4j graph databases.
@@ -22,8 +30,25 @@ async def search_categories(graph: Union[nx.Graph, any], query_label: str, infra
     """
     # Determine which client is in use based on the configuration
     if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-        # Logic for NetworkX
-        return {node: data.get('content_labels') for node, data in graph.nodes(data=True) if query_label in node and 'content_labels' in data}
+
+        categories_and_ids = [
+            {'document_id': strip_exact_regex(_, "DATA_SUMMARY__"), 'Summary': data['summary']}
+            for _, data in graph.nodes(data=True)
+            if 'summary' in data
+        ]
+        print("summaries_and_ids", categories_and_ids)
+        check_relevant_category = await categorize_relevant_category(query, categories_and_ids, response_model= infrastructure_config.get_config()["classification_model"])
+        print("check_relevant_summary", check_relevant_category)
+
+        connected_nodes = list(graph.neighbors(check_relevant_category['document_id']))
+        print("connected_nodes", connected_nodes)
+        descriptions = {node: graph.nodes[node].get('description', 'No desc available') for node in connected_nodes}
+        print("descs", descriptions)
+        return descriptions
+
+        #
+        # # Logic for NetworkX
+        # return {node: data.get('content_labels') for node, data in graph.nodes(data=True) if query_label in node and 'content_labels' in data}
 
     elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
         # Logic for Neo4j

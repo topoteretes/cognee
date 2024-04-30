@@ -72,13 +72,13 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
-      # - name: Build with Poetry
-      #   run: poetry build
-
-      # - name: Install Package
-      #   run: |
-      #     cd dist
-      #     pip install *.whl
+      #      - name: Build with Poetry
+      #        run: poetry build
+      #
+      #      - name: Install Package
+      #        run: |
+      #         cd dist
+      #         pip install *.whl
 
       # - name: Download NLTK Punkt Tokenizer Models
       #   run: |

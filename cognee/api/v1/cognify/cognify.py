@@ -126,6 +126,8 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
     print(f"Chunk ({chunk_id}) classified.")
 
+    print("document_id", document_id)
+
     content_summary = await get_content_summary(input_text)
     await add_summary_nodes(graph_client, document_id, content_summary)
 
@@ -171,16 +173,16 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 if __name__ == "__main__":
 
     async def test():
-
-        from cognee.api.v1.add import add
-
-        await add(["A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification"], "test")
-
-        graph = await cognify()
+        #
+        # from cognee.api.v1.add import add
+        #
+        # await add(["A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification"], "code")
+        #
+        # graph = await cognify()
 
         from cognee.utils import render_graph
 
-        await render_graph(graph, include_color=True, include_nodes=True, include_size=True)
+        await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
 
     import asyncio
     asyncio.run(test())

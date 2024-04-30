@@ -41,6 +41,9 @@ class NetworkXAdapter(GraphDBInterface):
     ) -> None:
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
+
+    async def get_graph(self):
+        return self.graph
     
     async def add_edge(
         self,

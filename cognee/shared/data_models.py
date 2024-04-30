@@ -244,3 +244,10 @@ class DefaultGraphModel(BaseModel):
     documents: List[Document] = []
     default_fields: Optional[Dict[str, Any]] = {}
     default_relationship: Relationship = Relationship(type = "has_properties")
+
+
+class ResponseSummaryModel(BaseModel):
+    """ Response summary model and existing document id """
+    document_id: str
+    response_summary: str
+
