@@ -32,7 +32,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         future.set_result(self.client.collections.exists(collection_name))
 
-        return future
+        return await future
 
     async def create_collection(
         self,
@@ -56,7 +56,7 @@ class WeaviateAdapter(VectorDBInterface):
             )
         )
 
-        return future
+        return await future
 
     def get_collection(self, collection_name: str):
         return self.client.collections.get(collection_name)
