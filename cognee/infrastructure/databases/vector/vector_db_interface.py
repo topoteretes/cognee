@@ -1,41 +1,20 @@
 from typing import List, Protocol, Optional
 from abc import abstractmethod
 from .models.DataPoint import DataPoint
+from .models.PayloadSchema import PayloadSchema
 
 class VectorDBInterface(Protocol):
     """ Collections """
     @abstractmethod
+    async def collection_exists(self, collection_name: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     async def create_collection(
         self,
-        collection_name: str
+        collection_name: str,
+        payload_schema: Optional[PayloadSchema] = None,
     ): raise NotImplementedError
-
-    # @abstractmethod
-    # async def update_collection(
-    #     self,
-    #     collection_name: str,
-    #     collection_config: object
-    # ): raise NotImplementedError
-
-    # @abstractmethod
-    # async def delete_collection(
-    #     self,
-    #     collection_name: str
-    # ): raise NotImplementedError
-
-    # @abstractmethod
-    # async def create_vector_index(
-    #     self,
-    #     collection_name: str,
-    #     vector_index_config: object
-    # ): raise NotImplementedError
-
-    # @abstractmethod
-    # async def create_data_index(
-    #     self,
-    #     collection_name: str,
-    #     vector_index_config: object
-    # ): raise NotImplementedError
 
     """ Data points """
     @abstractmethod
@@ -45,27 +24,12 @@ class VectorDBInterface(Protocol):
         data_points: List[DataPoint]
     ): raise NotImplementedError
 
-    # @abstractmethod
-    # async def get_data_point(
-    #     self,
-    #     collection_name: str,
-    #     data_point_id: str
-    # ): raise NotImplementedError
-
-    # @abstractmethod
-    # async def update_data_point(
-    #     self,
-    #     collection_name: str,
-    #     data_point_id: str,
-    #     payload: object
-    # ): raise NotImplementedError
-
-    # @abstractmethod
-    # async def delete_data_point(
-    #     self,
-    #     collection_name: str,
-    #     data_point_id: str
-    # ): raise NotImplementedError
+    @abstractmethod
+    async def retrieve(
+        self,
+        collection_name: str,
+        data_point_id: str
+    ): raise NotImplementedError
 
     """ Search """
     @abstractmethod

@@ -16,7 +16,6 @@ from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_lay
     graph_ready_output, connect_nodes_in_graph
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
 from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_layers
 # from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
@@ -41,7 +40,7 @@ logger = logging.getLogger("cognify")
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
     # Has to be loaded in advance, multithreading doesn't work without it.
-    nltk.download('stopwords', quiet=True)
+    nltk.download("stopwords", quiet=True)
     stopwords.ensure_loaded()
 
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
@@ -84,6 +83,12 @@ async def cognify(datasets: Union[str, List[str]] = None):
         for file_metadata in files:
             with open(file_metadata["file_path"], "rb") as file:
                 try:
+                    document_id = await add_document_node(
+                        graph_client,
+                        parent_node_id = f"DefaultGraphModel__{USER_ID}",
+                        document_metadata = file_metadata,
+                    )
+
                     file_type = guess_file_type(file)
                     text = extract_text_from_file(file, file_type)
                     subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
@@ -92,30 +97,24 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         data_chunks[dataset_name] = []
 
                     for subchunk in subchunks:
-                        data_chunks[dataset_name].append(dict(text = subchunk, chunk_id = str(uuid4()), file_metadata = file_metadata))
+                        data_chunks[dataset_name].append(dict(document_id = document_id, chunk_id = str(uuid4()), text = subchunk))
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
     added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
 
     await asyncio.gather(
-        *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in added_chunks]
+        *[process_text(chunk["document_id"], chunk["chunk_id"], chunk["collection"], chunk["text"]) for chunk in added_chunks]
     )
 
     return graph_client.graph
 
-async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict):
-    print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
+async def process_text(document_id: str, chunk_id: str, chunk_collection: str, input_text: str):
+    raw_document_id = document_id.split("__")[-1]
+
+    print(f"Processing chunk ({chunk_id}) from document ({raw_document_id}).")
 
     graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
-
-    document_id = await add_document_node(
-        graph_client,
-        parent_node_id = f"DefaultGraphModel__{USER_ID}", #make a param of defaultgraph model to make sure when user passes his stuff, it doesn't break pipeline
-        document_metadata = file_metadata,
-    )
-
-    await add_label_nodes(graph_client, document_id, chunk_id, file_metadata["keywords"].split("|"))
 
     classified_categories = await get_content_categories(input_text)
     await add_classification_nodes(
@@ -139,7 +138,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
     if infrastructure_config.get_config()["connect_documents"] is True:
         db_engine = infrastructure_config.get_config()["database_engine"]
-        relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = file_metadata["id"])
+        relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = raw_document_id)
 
         list_of_nodes = []
 

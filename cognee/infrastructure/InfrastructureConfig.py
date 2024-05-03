@@ -1,7 +1,6 @@
 from cognee.config import Config
 from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
-from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
 from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
 from .llm.openai.adapter import OpenAIAdapter
@@ -81,6 +80,12 @@ class InfrastructureConfig():
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
 
+        if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
+            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+
+        if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
+            self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
+
         if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
                 from .databases.vector.weaviate_db import WeaviateAdapter
@@ -94,17 +99,24 @@ class InfrastructureConfig():
                     embedding_engine = self.embedding_engine
                 )
             except (EnvironmentError, ModuleNotFoundError):
-                self.vector_engine = QDrantAdapter(
-                    qdrant_url = config.qdrant_url,
-                    qdrant_api_key = config.qdrant_api_key,
-                    embedding_engine = self.embedding_engine
-                )
+                if config.qdrant_url and config.qdrant_api_key:
+                    from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
 
-        if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
-            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+                    self.vector_engine = QDrantAdapter(
+                        qdrant_url = config.qdrant_url,
+                        qdrant_api_key = config.qdrant_api_key,
+                        embedding_engine = self.embedding_engine
+                    )
+                else:
+                    from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+                    lance_db_path = self.database_directory_path + "/cognee.lancedb"
+                    LocalStorage.ensure_directory_exists(lance_db_path)
 
-        if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
-            self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
+                    self.vector_engine = LanceDBAdapter(
+                        uri = lance_db_path,
+                        api_key = None,
+                        embedding_engine = self.embedding_engine,
+                    )
 
         if config_entity is not None:
             return getattr(self, config_entity)
