@@ -41,14 +41,24 @@ Join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
 ## 📦 Installation
 
-With pip:
+### With pip
 
+```bash
+pip install cognee
+```
+
+Use Weaviate vector storage:
 ```bash
 pip install "cognee[weaviate]"
 ```
 
-With poetry:
+### With poetry
 
+```bash
+poetry add cognee
+```
+
+Use Weaviate vector storage:
 ```bash
 poetry add "cognee[weaviate]"
 ```
