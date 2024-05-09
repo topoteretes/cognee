@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
 from cognee.root_dir import get_absolute_path
-from cognee.shared.data_models import ChunkStrategy
+from cognee.shared.data_models import ChunkStrategy, DefaultGraphModel
 
 base_dir = Path(__file__).resolve().parent.parent
 # Load the .env file from the base directory
@@ -74,6 +74,7 @@ class Config:
 
     # Database parameters
     graph_database_provider: str = os.getenv("GRAPH_DB_PROVIDER", "NETWORKX")
+    graph_topology:str = DefaultGraphModel
 
     if (
         os.getenv("ENV") == "prod"

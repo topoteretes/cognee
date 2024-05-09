@@ -34,6 +34,7 @@ class ChunkStrategy(Enum):
     EXACT = "exact"
     PARAGRAPH = "paragraph"
     SENTENCE = "sentence"
+    CODE    = "code"
 
 class MemorySummary(BaseModel):
     """ Memory summary. """

@@ -72,3 +72,9 @@ class config():
         infrastructure_config.set_config({
             "chunk_strategy": chunk_strategy
         })
+
+    @staticmethod
+    def set_graph_topology(graph_topology: object):
+        infrastructure_config.set_config({
+            "graph_topology": graph_topology
+        })

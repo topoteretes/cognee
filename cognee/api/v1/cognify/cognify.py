@@ -14,6 +14,7 @@ from cognee.modules.cognify.graph.add_cognitive_layer_graphs import add_cognitiv
 from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
+from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
@@ -73,7 +74,14 @@ async def cognify(datasets: Union[str, List[str]] = None):
         if dataset_name in added_dataset:
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
-    # await initialize_graph(USER_ID, graph_data_model, graph_client)
+
+
+
+    graph_topology = infrastructure_config.get_config()["graph_topology"]
+
+
+
+    await initialize_graph(USER_ID, graph_client=graph_client)
 
     data_chunks = {}
 
@@ -174,11 +182,11 @@ if __name__ == "__main__":
 
     async def test():
         #
-        # from cognee.api.v1.add import add
-        #
-        # await add(["A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification"], "code")
-        #
-        # graph = await cognify()
+        from cognee.api.v1.add import add
+
+        await add(["A large language model (LLM) is a language model notable for its ability to achieve general-purpose language generation and other natural language processing tasks such as classification"], "code")
+
+        graph = await cognify()
 
         from cognee.utils import render_graph
 

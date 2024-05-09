@@ -2,9 +2,9 @@ from datetime import datetime
 from cognee.shared.data_models import DefaultGraphModel, Relationship, UserProperties, UserLocation
 from cognee.modules.cognify.graph.create import create_semantic_graph
 
-async def initialize_graph(root_id: str, graphdatamodel, graph_client):
+async def initialize_graph(root_id: str, graphdatamodel=None, graph_client=None):
     if graphdatamodel:
-        graph = graphdatamodel(id = root_id)
+        graph = graphdatamodel(node_id= root_id)
         graph_ = await create_semantic_graph(graph, graph_client)
         return graph_
     else:

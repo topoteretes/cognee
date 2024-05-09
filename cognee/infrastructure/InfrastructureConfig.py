@@ -33,6 +33,7 @@ class InfrastructureConfig():
     database_file_path: str = None
     chunk_strategy = config.chunk_strategy
     chunk_engine = None
+    graph_topology = config.graph_topology
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
@@ -77,6 +78,9 @@ class InfrastructureConfig():
 
         if self.chunk_engine is None:
             self.chunk_engine = DefaultChunkEngine()
+
+        if self.graph_topology is None:
+            self.graph_topology = config.graph_topology
 
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
@@ -129,6 +133,7 @@ class InfrastructureConfig():
             "database_path": self.database_file_path,
             "chunk_strategy": self.chunk_strategy,
             "chunk_engine": self.chunk_engine,
+            "graph_topology": self.graph_topology
         }
 
     def set_config(self, new_config: dict):
@@ -182,5 +187,8 @@ class InfrastructureConfig():
 
         if "chunk_engine" in new_config:
             self.chunk_engine = new_config["chunk_engine"]
+
+        if "graph_topology" in new_config:
+            self.graph_topology = new_config["graph_topology"]
 
 infrastructure_config = InfrastructureConfig()

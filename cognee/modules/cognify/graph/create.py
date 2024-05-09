@@ -44,6 +44,7 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
 
             # Add an edge if a parent ID is provided and the graph engine is NETWORKX
             if parent_id and "default_relationship" in node_data and infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+                print("Node id", node_id)
                 await client.add_edge(parent_id, node_id, relationship_name = node_data["default_relationship"]["type"], edge_properties = node_data)
         except Exception as e:
             # Log the exception; consider a logging framework for production use
@@ -103,6 +104,7 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
 
 
 async def add_edge(client, parent_id: Optional[str], node_id: str, node_data: dict, created_node_ids):
+    print('NODE ID', node_data)
 
     if node_id == "Relationship_default" and parent_id:
         # Initialize source and target variables outside the loop
