@@ -75,6 +75,14 @@ async def cognify(datasets: Union[str, List[str]] = None):
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
 
+    print(dataset_files)
+
+    # topology can be inferred, loaded, or extrapolated from the data in the end of the flow
+    # for code generation, we infer the topology from the folder structure as simple step
+
+
+
+
 
 
     graph_topology = infrastructure_config.get_config()["graph_topology"]
