@@ -37,24 +37,24 @@ async def add_label_nodes(graph_client, parent_node_id: str, chunk_id: str, keyw
     ])
 
     # Add data to vector
-    keyword_data_points = [
-        DataPoint(
-            id = str(uuid4()),
-            payload = dict(
-                value = keyword_data["keyword"],
-                references = dict(
-                    node_id = keyword_node_id,
-                    cognitive_layer = parent_node_id,
-                ),
-            ),
-            embed_field = "value"
-        ) for (keyword_node_id, keyword_data) in keyword_nodes
-    ]
-
-    try:
-        await vector_client.create_collection(parent_node_id)
-    except Exception:
-        # It's ok if the collection already exists.
-        pass
-
-    await vector_client.create_data_points(parent_node_id, keyword_data_points)
+    # keyword_data_points = [
+    #     DataPoint(
+    #         id = str(uuid4()),
+    #         payload = dict(
+    #             value = keyword_data["keyword"],
+    #             references = dict(
+    #                 node_id = keyword_node_id,
+    #                 cognitive_layer = parent_node_id,
+    #             ),
+    #         ),
+    #         embed_field = "value"
+    #     ) for (keyword_node_id, keyword_data) in keyword_nodes
+    # ]
+    #
+    # try:
+    #     await vector_client.create_collection(parent_node_id)
+    # except Exception:
+    #     # It's ok if the collection already exists.
+    #     pass
+    #
+    # await vector_client.create_data_points(parent_node_id, keyword_data_points)

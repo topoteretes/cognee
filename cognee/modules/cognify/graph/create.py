@@ -40,12 +40,20 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
     if node_id != "Relationship_default":
         try:
             # Attempt to add the node to the graph database
+            # print('NODE ID', node_id)
+            # print('NODE DATA', node_data)
             result = await client.add_node(node_id, node_properties = node_data)
+            print("added node", result)
 
             # Add an edge if a parent ID is provided and the graph engine is NETWORKX
             if parent_id and "default_relationship" in node_data and infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-                print("Node id", node_id)
-                await client.add_edge(parent_id, node_id, relationship_name = node_data["default_relationship"]["type"], edge_properties = node_data)
+
+                try:
+                    await client.add_edge(parent_id, node_id, relationship_name = node_data["default_relationship"]["type"], edge_properties = node_data)
+                    print("added edge")
+                except Exception as e:
+                    print(f"Error adding edge: {e}")
+                    pass
         except Exception as e:
             # Log the exception; consider a logging framework for production use
             print(f"Error adding node or edge: {e}")
@@ -139,38 +147,66 @@ async def add_edge(client, parent_id: Optional[str], node_id: str, node_data: di
             await client.add_edge(relationship_details['source'], relationship_details['target'], relationship_name = relationship_details['type'])
 
 
-
-
 async def process_attribute(graph_client, parent_id: Optional[str], attribute: str, value: Any, created_node_ids=None):
-
     if created_node_ids is None:
         created_node_ids = []
+
     if isinstance(value, BaseModel):
         node_id = await generate_node_id(value)
         node_data = value.model_dump()
 
-        # Use the specified default relationship for the edge between the parent node and the current node
-
+        # Add node to the graph
         created_node_id = await add_node(graph_client, parent_id, node_id, node_data)
+        created_node_ids.append(node_id)
 
-        created_node_ids.append(created_node_id)
-
-        # await add_edge(graph_client, parent_id, node_id, node_data, relationship_data,created_node_ids)
+        # Add an edge if a default_relationship exists
+        if hasattr(value, 'default_relationship') and value.default_relationship:
+            await add_edge(graph_client, parent_id, node_id, value.default_relationship.dict())
 
         # Recursively process nested attributes to ensure all nodes and relationships are added to the graph
-        for sub_attr, sub_val in value.__dict__.items():  # Access attributes and their values directly
-
-            out = await process_attribute(graph_client, node_id, sub_attr, sub_val)
-
-            created_node_ids.extend(out)
+        for sub_attr, sub_val in value.dict().items():
+            if isinstance(sub_val, (BaseModel, list)):  # Check if the value is a model or list
+                await process_attribute(graph_client, node_id, sub_attr, sub_val, created_node_ids)
 
     elif isinstance(value, list) and all(isinstance(item, BaseModel) for item in value):
         # For lists of BaseModel instances, process each item in the list
         for item in value:
-            out = await process_attribute(graph_client, parent_id, attribute, item, created_node_ids)
-            created_node_ids.extend(out)
+            await process_attribute(graph_client, parent_id, attribute, item, created_node_ids)
 
     return created_node_ids
+
+# async def process_attribute(graph_client, parent_id: Optional[str], attribute: str, value: Any, created_node_ids=None):
+#
+#     if created_node_ids is None:
+#         created_node_ids = []
+#     if isinstance(value, BaseModel):
+#         node_id = await generate_node_id(value)
+#         node_data = value.model_dump()
+#
+#         # Use the specified default relationship for the edge between the parent node and the current node
+#
+#         created_node_id = await add_node(graph_client, parent_id, node_id, node_data)
+#
+#         created_node_ids.append(created_node_id)
+#
+#         # await add_edge(graph_client, parent_id, node_id, node_data, relationship_data,created_node_ids)
+#
+#         # Recursively process nested attributes to ensure all nodes and relationships are added to the graph
+#         # for sub_attr, sub_val in value.__dict__.items(): # Access attributes and their values directly
+#         #     print('SUB ATTR', sub_attr)
+#         #     print('SUB VAL', sub_val)
+#         #
+#         #     out = await process_attribute(graph_client, node_id, sub_attr, sub_val)
+#         #
+#         #     created_node_ids.extend(out)
+#
+#     elif isinstance(value, list) and all(isinstance(item, BaseModel) for item in value):
+#         # For lists of BaseModel instances, process each item in the list
+#         for item in value:
+#             out = await process_attribute(graph_client, parent_id, attribute, item, created_node_ids)
+#             created_node_ids.extend(out)
+#
+#     return created_node_ids
 
 
 async def process_attribute_edge(graph_client, parent_id: Optional[str], attribute: str, value: Any, created_node_ids=None):
@@ -212,20 +248,22 @@ async def create_dynamic(graph_model, graph_client) :
 
     created_node_ids.append(out)
 
+    print('CREATED NODE IDS', created_node_ids)
+
     for attribute_name, attribute_value in graph_model:
         ids = await process_attribute(graph_client, root_id, attribute_name, attribute_value)
-        created_node_ids.extend(ids)
-
-    flattened_and_deduplicated = list({
-        item["nodeId"]: item
-            # Use the 'nodeId' as the unique key in the dictionary comprehension
-            for sublist in created_node_ids if sublist  # Ensure sublist is not None
-            for item in sublist  # Iterate over items in the sublist
-    }.values())
-
-    for attribute_name, attribute_value in graph_model:
-        ids = await process_attribute_edge(graph_client, root_id, attribute_name, attribute_value, flattened_and_deduplicated)
-
+    #     created_node_ids.extend(ids)
+    #
+    # flattened_and_deduplicated = list({
+    #     item["nodeId"]: item
+    #         # Use the 'nodeId' as the unique key in the dictionary comprehension
+    #         for sublist in created_node_ids if sublist  # Ensure sublist is not None
+    #         for item in sublist  # Iterate over items in the sublist
+    # }.values())
+    #
+    # for attribute_name, attribute_value in graph_model:
+    #     ids = await process_attribute_edge(graph_client, root_id, attribute_name, attribute_value, flattened_and_deduplicated)
+    #
     return graph_client
 
 

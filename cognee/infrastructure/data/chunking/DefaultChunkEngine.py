@@ -52,6 +52,7 @@ class DefaultChunkEngine():
         elif chunk_strategy == ChunkStrategy.EXACT:
             chunked_data = DefaultChunkEngine.chunk_data_exact(source_data, chunk_size, chunk_overlap)
 
+
         return chunked_data
 
 

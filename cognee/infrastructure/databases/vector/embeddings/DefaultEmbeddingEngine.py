@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 
 import instructor
@@ -8,8 +9,8 @@ from openai import AsyncOpenAI
 
 from cognee.config import Config
 from cognee.root_dir import get_absolute_path
-from .EmbeddingEngine import EmbeddingEngine
-
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from litellm import aembedding
 config = Config()
 config.load()
 
@@ -27,16 +28,28 @@ class DefaultEmbeddingEngine(EmbeddingEngine):
 class OpenAIEmbeddingEngine(EmbeddingEngine):
     async def embed_text(self, text: List[str]) -> List[float]:
 
-        OPENAI_API_KEY = config.openai_key
 
-        aclient = instructor.patch(AsyncOpenAI())
-        text = text.replace("\n", " ")
-        response = await aclient.embeddings.create(input = text, model = config.openai_embedding_model)
-        embedding = response.data[0].embedding
+        response = await aembedding(config.openai_embedding_model, input=text)
+
+
+        # embedding = response.data[0].embedding
         # embeddings_list = list(map(lambda embedding: embedding.tolist(), embedding_model.embed(text)))
-        return embedding
+        return response.data[0]['embedding']
 
 
     def get_vector_size(self) -> int:
         return config.openai_embedding_dimensions
+
+
+if __name__ == "__main__":
+    async def gg():
+        openai_embedding_engine = OpenAIEmbeddingEngine()
+        # print(openai_embedding_engine.embed_text(["Hello, how are you?"]))
+        # print(openai_embedding_engine.get_vector_size())
+        # default_embedding_engine = DefaultEmbeddingEngine()
+        sds = await openai_embedding_engine.embed_text(["Hello, sadasdas are you?"])
+        print(sds)
+        # print(default_embedding_engine.get_vector_size())
+
+    asyncio.run(gg())
 

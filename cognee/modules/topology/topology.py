@@ -10,7 +10,7 @@ from datetime import datetime
 
 from cognee import config
 from cognee.infrastructure import infrastructure_config
-from infer_data_topology import infer_data_topology
+from cognee.modules.topology.infer_data_topology import infer_data_topology
 
 
 
@@ -31,66 +31,124 @@ from infer_data_topology import infer_data_topology
 #     default_relationship: Relationship = Relationship(type = "has_properties")
 #
 class Relationship(BaseModel):
-    type: str
-    source: Optional[str] = None
-    target: Optional[str] = None
-    properties: Optional[Dict[str, Any]] = None
+    type: str = Field(..., description="The type of relationship, e.g., 'belongs_to'.")
+    source: Optional[str] = Field(None, description="The identifier of the source id of in the relationship being a directory or subdirectory")
+    target: Optional[str] = Field(None, description="The identifier of the target id in the relationship being the directory, subdirectory or file")
+    properties: Optional[Dict[str, Any]] = Field(None, description="A dictionary of additional properties and values related to the relationship.")
 
 
 
 class Document(BaseModel):
-    id: str
+    node_id: str
     title: str
     description: Optional[str] = None
-    default_relationship: Relationship = Field(default_factory=lambda: Relationship(type="belongs_to"))
+    default_relationship: Relationship
 
 
 class DirectoryModel(BaseModel):
-    name: str
+    node_id: str
     path: str
     summary: str
     documents: List[Document] = []
     subdirectories: List['DirectoryModel'] = []
-    default_relationship: Relationship = Field(default_factory=lambda: Relationship(type="belongs_to"))
+    default_relationship: Relationship
 
 DirectoryModel.update_forward_refs()
 
-class RepositoryMetadata(BaseModel):
-    name: str
+class DirMetadata(BaseModel):
+    node_id: str
     summary: str
     owner: str
     description: Optional[str] = None
     directories: List[DirectoryModel] = []
     documents: List[Document] = []
-    default_relationship: Relationship = Field(default_factory=lambda: Relationship(type="belongs_to"))
+    default_relationship: Relationship
 
 class GitHubRepositoryModel(BaseModel):
-    metadata: RepositoryMetadata
+    node_id: str
+    metadata: DirMetadata
     root_directory: DirectoryModel
+
 
 class TopologyEngine:
     def __init__(self):
         self.models: Dict[str, Type[BaseModel]] = {}
 
-    async def infer(self, repository: str):
+    async def populate_model(self, directory_path, file_structure, parent_id=None):
+        directory_id = os.path.basename(directory_path) or "root"
+        directory = DirectoryModel(
+            node_id=directory_id,
+            path=directory_path,
+            summary=f"Contents of {directory_id}",
+            default_relationship=Relationship(type="contains", source=parent_id, target=directory_id)
+        )
+
+        for key, value in file_structure.items():
+            if isinstance(value, dict):
+                # Recurse into subdirectory
+                subdirectory_path = os.path.join(directory_path, key)
+                subdirectory = await self.populate_model(subdirectory_path, value, parent_id=directory_id)
+                directory.subdirectories.append(subdirectory)
+            elif isinstance(value, tuple) and value[0] == 'file':
+                # Handle file
+                document = Document(
+                    node_id=key,
+                    title=key,
+                    default_relationship=Relationship(type="contained_by", source=key, target=directory_id)
+                )
+                directory.documents.append(document)
+
+        return directory
+
+    async def infer_from_directory_structure(self, node_id:str, repository: str, model):
+        """ Infer the topology of a repository from its file structure """
 
         path = infrastructure_config.get_config()["data_root_directory"]
 
         path = path +"/"+ str(repository)
         print(path)
+
         if not os.path.exists(path):
             raise FileNotFoundError(f"No such directory: {path}")
 
-        file_structure = {}
+        root = {}
         for filename in glob.glob(f"{path}/**", recursive=True):
+            parts = os.path.relpath(filename, start=path).split(os.path.sep)
+            current = root
+            for part in parts[:-1]:  # Traverse/create to the last directory
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+            last_part = parts[-1]
             if os.path.isfile(filename):
-                key = os.path.relpath(filename, start=path).replace(os.path.sep, "__")
-                file_structure[key] = (str, ...)  # Assuming content as string for simplicity
+                current[last_part] = ("file", ...)  # Placeholder for file content or metadata
+            elif os.path.isdir(filename):
+                if last_part not in current:  # Only create a new directory entry if it doesn't exist
+                    current[last_part] = {}
 
+        root_directory = await self.populate_model('/', root)
 
-        result = await infer_data_topology(str(file_structure), GitHubRepositoryModel)
+        # repository_metadata = await infer_data_topology(str(root), DirMetadata)
 
-        return result
+        repository_metadata = DirMetadata(
+            node_id="repo1",
+            summary="Example repository",
+            owner="user1",
+            directories=[root_directory],
+            documents=[],
+            default_relationship=Relationship(type="contained_by", source="repo1", target=node_id)
+        )
+
+        active_model = GitHubRepositoryModel(
+            node_id=node_id,
+            metadata=repository_metadata,
+            root_directory=root_directory
+        )
+
+        return active_model
+
+        # print(github_repo_model)
+
 
     def load(self, model_name: str):
         return self.models.get(model_name)
