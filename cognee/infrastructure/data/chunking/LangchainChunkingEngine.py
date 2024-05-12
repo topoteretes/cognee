@@ -46,5 +46,7 @@ class LangchainChunkEngine():
         )
         code_chunks = python_splitter.create_documents([data_chunks])
 
-        return code_chunks
+        only_content = [chunk.page_content for chunk in code_chunks]
+
+        return only_content
 

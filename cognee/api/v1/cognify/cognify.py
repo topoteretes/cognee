@@ -11,7 +11,7 @@ from nltk.corpus import stopwords
 from cognee.api.v1.prune import prune
 from cognee.config import Config
 from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
-from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import OpenAIEmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import LiteLLMEmbeddingEngine
 from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
@@ -32,6 +32,7 @@ from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
 from cognee.modules.topology.topology import TopologyEngine
+from cognee.shared.GithubClassification import CodeContentPrediction
 from cognee.shared.data_models import ChunkStrategy
 from cognee.utils import send_telemetry
 
@@ -94,7 +95,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                     file_type = guess_file_type(file)
                     text = extract_text_from_file(file, file_type)
                     if text is None:
-                        text = ""
+                        text = "empty file"
                     subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
 
                     if dataset_name not in data_chunks:
@@ -104,6 +105,9 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         data_chunks[dataset_name].append(dict(text = subchunk, chunk_id = str(uuid4()), file_metadata = file_metadata))
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
+
+
+
 
     added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
 
@@ -129,12 +133,12 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     #
     await add_label_nodes(graph_client, document_id, chunk_id, file_metadata["keywords"].split("|"))
 
-    # classified_categories = await get_content_categories(input_text)
-    # await add_classification_nodes(
-    #     graph_client,
-    #     parent_node_id = document_id,
-    #     categories = classified_categories,
-    # )
+    classified_categories = await get_content_categories(input_text)
+    await add_classification_nodes(
+         graph_client,
+         parent_node_id = document_id,
+         categories = classified_categories,
+     )
 
     # print(f"Chunk ({chunk_id}) classified.")
 
@@ -145,11 +149,11 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
     print(f"Chunk ({chunk_id}) summarized.")
 
-    # cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
-    # cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
+    cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
+    cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
     #
-    # layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
-    # await add_cognitive_layer_graphs(graph_client, chunk_collection, chunk_id, layer_graphs)
+    layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
+    await add_cognitive_layer_graphs(graph_client, chunk_collection, chunk_id, layer_graphs)
     #
     # if infrastructure_config.get_config()["connect_documents"] is True:
     #     db_engine = infrastructure_config.get_config()["database_engine"]
@@ -196,7 +200,13 @@ if __name__ == "__main__":
         #
         # await add("data://" +data_directory_path, "example")
 
-        infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': OpenAIEmbeddingEngine()})
+        infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine()})
+        from cognee.shared.SourceCodeGraph import SourceCodeGraph
+        from cognee.api.v1.config import config
+
+        config.set_graph_model(SourceCodeGraph)
+
+        config.set_classification_model(CodeContentPrediction)
 
         graph = await cognify()
         #
