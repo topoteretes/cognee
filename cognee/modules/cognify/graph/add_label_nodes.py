@@ -19,7 +19,7 @@ async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]
                 id = keyword_id,
                 name = keyword.lower().capitalize(),
                 keyword = keyword.lower(),
-                type = "Keyword",
+                entity_type = "Keyword",
                 created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
@@ -45,29 +45,6 @@ async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]
         references: References
 
     # Add data to vector
-
-    keyword_data_points = [
-        DataPoint(
-            id = str(uuid4()),
-            payload = dict(
-                value = keyword_data["keyword"],
-                references = dict(
-                    node_id = keyword_node_id,
-                    cognitive_layer = parent_node_id,
-                ),
-            ),
-            embed_field = "value"
-        ) for (keyword_node_id, keyword_data) in keyword_nodes
-    ]
-
-    try:
-        await vector_client.create_collection(parent_node_id)
-    except Exception:
-        # It's ok if the collection already exists.
-        pass
-
-    await vector_client.create_data_points(parent_node_id, keyword_data_points)
-
     keyword_data_points = [
         DataPoint[PayloadSchema](
             id = str(uuid4()),
@@ -84,9 +61,8 @@ async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]
 
     try:
         await vector_client.create_collection(parent_node_id, payload_schema = PayloadSchema)
-    except Exception:
+    except Exception as e:
         # It's ok if the collection already exists.
-        pass
+        print(e)
 
     await vector_client.create_data_points(parent_node_id, keyword_data_points)
-

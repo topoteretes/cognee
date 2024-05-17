@@ -87,18 +87,14 @@ async def cognify(datasets: Union[str, List[str]] = None):
     chunk_engine = infrastructure_config.get_config()["chunk_engine"]
     chunk_strategy = infrastructure_config.get_config()["chunk_strategy"]
     async def process_batch(files_batch):
-        for dataset_name, file_metadata in files_batch:
+        for dataset_name, file_metadata, document_id in files_batch:
             with open(file_metadata["file_path"], "rb") as file:
                 try:
-                    document_id = await add_document_node(
-                        graph_client,
-                        parent_node_id = f"DefaultGraphModel__{USER_ID}",
-                        document_metadata = file_metadata,
-                    )
-
                     file_type = guess_file_type(file)
                     text = extract_text_from_file(file, file_type)
                     if text is None:
+                        text = "empty file"
+                    if text == "":
                         text = "empty file"
                     subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
 
@@ -106,7 +102,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         data_chunks[dataset_name] = []
 
                     for subchunk in subchunks:
-                        data_chunks[dataset_name].append(dict(document_id = document_id, chunk_id = str(uuid4()), text = subchunk))
+                        data_chunks[dataset_name].append(dict(document_id = document_id, chunk_id = str(uuid4()), text = subchunk, file_metadata = file_metadata))
 
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
@@ -124,8 +120,14 @@ async def cognify(datasets: Union[str, List[str]] = None):
     files_batch = []
 
     for (dataset_name, files) in dataset_files:
+
         for file_metadata in files:
-            files_batch.append((dataset_name, file_metadata))
+            document_id = await add_document_node(
+                graph_client,
+                parent_node_id=f"DefaultGraphModel__{USER_ID}",
+                document_metadata=file_metadata,
+            )
+            files_batch.append((dataset_name, file_metadata, document_id))
             file_count += 1
 
             if file_count >= batch_size:
@@ -199,11 +201,6 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     classified_categories= [{'data_type': 'text', 'category_name': 'Source code in various programming languages'}]
 
 
-    await asyncio.gather(
-        *[process_text(chunk["document_id"], chunk["chunk_id"], chunk["collection"], chunk["text"]) for chunk in added_chunks]
-    )
-
-    return graph_client.graph
 #
 # async def process_text(document_id: str, chunk_id: str, chunk_collection: str, input_text: str):
 #     raw_document_id = document_id.split("__")[-1]

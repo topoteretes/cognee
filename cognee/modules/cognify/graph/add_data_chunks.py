@@ -34,6 +34,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
                 collection = dataset_name,
                 text = chunk["text"],
                 document_id = chunk["document_id"],
+                file_metadata = chunk["file_metadata"],
             ) for chunk in chunks
         ]
 

@@ -25,6 +25,7 @@ async def add_document_node(graph_client: GraphDBInterface, parent_node_id, docu
         dict(relationship_name = "has_document"),
     )
 
-    await add_label_nodes(graph_client, document_id, document_metadata["keywords"].split("|"))
+    #
+    # await add_label_nodes(graph_client, document_id, document_metadata["keywords"].split("|"))
 
     return document_id

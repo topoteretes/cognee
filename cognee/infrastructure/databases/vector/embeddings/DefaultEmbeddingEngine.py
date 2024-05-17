@@ -27,25 +27,23 @@ class DefaultEmbeddingEngine(EmbeddingEngine):
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
+    import asyncio
+    from typing import List
 
-    async def embed_text(self, text: List[str]) -> List[float]:
+    async def embed_text(self, text: List[str]) -> List[List[float]]:
+        async def get_embedding(text_):
+            response = await aembedding(config.litellm_embedding_model, input=text_)
+            return response.data[0]['embedding']
 
-
-
-        print("text", text)
-        try:
-            text = str(text[0])
-        except:
-            text = str(text)
-
-
-        response = await aembedding(config.litellm_embedding_model, input=text)
-
+        tasks = [get_embedding(text_) for text_ in text]
+        result = await asyncio.gather(*tasks)
+        return result
 
         # embedding = response.data[0].embedding
-        # embeddings_list = list(map(lambda embedding: embedding.tolist(), embedding_model.embed(text)))
-        print("response", type(response.data[0]['embedding']))
-        return response.data[0]['embedding']
+        # # embeddings_list = list(map(lambda embedding: embedding.tolist(), embedding_model.embed(text)))
+        # print("response", type(response.data[0]['embedding']))
+        # print("response", response.data[0])
+        # return [response.data[0]['embedding']]
 
 
     def get_vector_size(self) -> int:
