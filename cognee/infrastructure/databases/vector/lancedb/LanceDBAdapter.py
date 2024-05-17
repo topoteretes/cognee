@@ -1,74 +1,145 @@
+from typing import List, Optional, get_type_hints, Generic, TypeVar
 import asyncio
+from pydantic import BaseModel, Field
 import lancedb
-from typing import List, Optional
+from lancedb.pydantic import Vector, LanceModel
+from cognee.infrastructure.files.storage import LocalStorage
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface, DataPoint
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
-import asyncio
-import lancedb
-from pathlib import Path
-import tempfile
+class LanceDBAdapter(VectorDBInterface):
+    connection: lancedb.AsyncConnection = None
 
-class LanceDBAdapter:
-    def __init__(self, uri: Optional[str] = None, api_key: Optional[str] = None):
-        if uri:
-            self.uri = uri
-        else:
-            # Create a temporary directory for the LanceDB 'in-memory' simulation
-            self.temp_dir = tempfile.mkdtemp(suffix='.lancedb')
-            self.uri = f"file://{self.temp_dir}"
+    def __init__(
+        self,
+        uri: Optional[str],
+        api_key: Optional[str],
+        embedding_engine: EmbeddingEngine,
+    ):
+        self.uri = uri
         self.api_key = api_key
-        self.db = None
+        self.embedding_engine = embedding_engine
 
-    async def connect(self):
-        # Asynchronously connect to a LanceDB database, effectively in-memory if no URI is provided
-        self.db = await lancedb.connect_async(self.uri, api_key=self.api_key)
+    async def get_connection(self):
+        if self.connection is None:
+            self.connection = await lancedb.connect_async(self.uri, api_key = self.api_key)
 
-    async def disconnect(self):
-        # Disconnect and clean up the database if it was set up as temporary
-        await self.db.close()
-        if hasattr(self, 'temp_dir'):
-            Path(self.temp_dir).unlink(missing_ok=True)  # Remove the temporary directory
+        return self.connection
 
-    async def create_table(self, table_name: str, schema=None, data=None):
-        if not await self.table_exists(table_name):
-            return await self.db.create_table(name=table_name, schema=schema, data=data)
-        else:
-            raise ValueError(f"Table {table_name} already exists")
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
+        return await self.embedding_engine.embed_text(data)
 
-    async def table_exists(self, table_name: str) -> bool:
-        table_names = await self.db.table_names()
-        return table_name in table_names
+    async def collection_exists(self, collection_name: str) -> bool:
+        connection = await self.get_connection()
+        collection_names = await connection.table_names()
+        return collection_name in collection_names
 
-    async def insert_data(self, table_name: str, data_points: List[dict]):
-        table = await self.db.open_table(table_name)
-        await table.add(data_points)
+    async def create_collection(self, collection_name: str, payload_schema: BaseModel):
+        data_point_types = get_type_hints(DataPoint)
 
-    async def query_data(self, table_name: str, query=None, limit=10):
-        # Asynchronously query data from a table
-        table = await self.db.open_table(table_name)
-        if query:
-            query_result = await table.query().where(query).limit(limit).to_pandas()
-        else:
-            query_result = await table.query().limit(limit).to_pandas()
-        return query_result
+        class LanceDataPoint(LanceModel):
+            id: data_point_types["id"] = Field(...)
+            vector: Vector(self.embedding_engine.get_vector_size())
+            payload: payload_schema
 
-    async def vector_search(self, table_name: str, query_vector: List[float], limit=10):
-        # Perform an asynchronous vector search
-        table = await self.db.open_table(table_name)
-        query_result = await table.vector_search().nearest_to(query_vector).limit(limit).to_pandas()
-        return query_result
+        if not await self.collection_exists(collection_name):
+            connection = await self.get_connection()
+            return await connection.create_table(
+                name = collection_name,
+                schema = LanceDataPoint,
+                exist_ok = True,
+            )
 
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        connection = await self.get_connection()
 
-async def main():
-    # Example without providing a URI, simulates in-memory behavior
-    adapter = LanceDBAdapter()
-    await adapter.connect()
+        if not await self.collection_exists(collection_name):
+            await self.create_collection(
+                collection_name,
+                payload_schema = type(data_points[0].payload),
+            )
 
-    try:
-        await adapter.create_table("my_table")
-        data_points = [{"id": 1, "text": "example", "vector": [0.1, 0.2, 0.3]}]
-        await adapter.insert_data("my_table", data_points)
-    finally:
-        await adapter.disconnect()
+        collection = await connection.open_table(collection_name)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        data_vectors = await self.embed_data(
+            [data_point.get_embeddable_data() for data_point in data_points]
+        )
+
+        IdType = TypeVar("IdType")
+        PayloadSchema = TypeVar("PayloadSchema")
+
+        class LanceDataPoint(LanceModel, Generic[IdType, PayloadSchema]):
+            id: IdType
+            vector: Vector(self.embedding_engine.get_vector_size())
+            payload: PayloadSchema
+
+        lance_data_points = [
+            LanceDataPoint[type(data_point.id), type(data_point.payload)](
+                id = data_point.id,
+                vector = data_vectors[data_index],
+                payload = data_point.payload,
+            ) for (data_index, data_point) in enumerate(data_points)
+        ]
+
+        await collection.add(lance_data_points)
+
+    async def retrieve(self, collection_name: str, data_point_id: str):
+        connection = await self.get_connection()
+        collection = await connection.open_table(collection_name)
+        results = await collection.query().where(f"id = '{data_point_id}'").to_pandas()
+        result = results.to_dict("index")[0]
+
+        return ScoredResult(
+            id = result["id"],
+            payload = result["payload"],
+            score = 1,
+        )
+
+    async def search(
+        self,
+        collection_name: str,
+        query_text: str = None,
+        query_vector: List[float] = None,
+        limit: int = 10,
+        with_vector: bool = False,
+    ):
+        if query_text is None and query_vector is None:
+            raise ValueError("One of query_text or query_vector must be provided!")
+
+        if query_text and not query_vector:
+            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+
+        connection = await self.get_connection()
+        collection = await connection.open_table(collection_name)
+
+        results = await collection.vector_search(query_vector).limit(limit).to_pandas()
+
+        return [ScoredResult(
+            id = str(result["id"]),
+            score = float(result["_distance"]),
+            payload = result["payload"],
+        ) for result in results.to_dict("index").values()]
+
+    async def batch_search(
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: int = None,
+        with_vector: bool = False,
+    ):
+        query_vectors = await self.embedding_engine.embed_text(query_texts)
+
+        return asyncio.gather(
+            *[self.search(
+                collection_name = collection_name,
+                query_vector = query_vector,
+                limit = limit,
+                with_vector = with_vector,
+            ) for query_vector in query_vectors]
+        )
+
+    async def prune(self):
+        # Clean up the database if it was set up as temporary
+        if self.uri.startswith("/"):
+            LocalStorage.remove_all(self.uri) # Remove the temporary directory and files inside

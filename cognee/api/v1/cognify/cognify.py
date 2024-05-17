@@ -21,7 +21,6 @@ from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_lay
     graph_ready_output, connect_nodes_in_graph
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognee.modules.cognify.graph.add_label_nodes import add_label_nodes
 from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_layers
 # from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
@@ -49,7 +48,7 @@ logger = logging.getLogger("cognify")
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
     # Has to be loaded in advance, multithreading doesn't work without it.
-    nltk.download('stopwords', quiet=True)
+    nltk.download("stopwords", quiet=True)
     stopwords.ensure_loaded()
 
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
@@ -91,6 +90,12 @@ async def cognify(datasets: Union[str, List[str]] = None):
         for dataset_name, file_metadata in files_batch:
             with open(file_metadata["file_path"], "rb") as file:
                 try:
+                    document_id = await add_document_node(
+                        graph_client,
+                        parent_node_id = f"DefaultGraphModel__{USER_ID}",
+                        document_metadata = file_metadata,
+                    )
+
                     file_type = guess_file_type(file)
                     text = extract_text_from_file(file, file_type)
                     if text is None:
@@ -101,17 +106,18 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         data_chunks[dataset_name] = []
 
                     for subchunk in subchunks:
-                        data_chunks[dataset_name].append(
-                            dict(text=subchunk, chunk_id=str(uuid4()), file_metadata=file_metadata))
+                        data_chunks[dataset_name].append(dict(document_id = document_id, chunk_id = str(uuid4()), text = subchunk))
+
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
         added_chunks = await add_data_chunks(data_chunks)
 
-        # await asyncio.gather(
-        #     *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in
-        #       added_chunks]
-        # )
+
+        await asyncio.gather(
+            *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in
+              added_chunks]
+        )
 
     batch_size = 20
     file_count = 0
@@ -193,23 +199,44 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     classified_categories= [{'data_type': 'text', 'category_name': 'Source code in various programming languages'}]
 
 
+    await asyncio.gather(
+        *[process_text(chunk["document_id"], chunk["chunk_id"], chunk["collection"], chunk["text"]) for chunk in added_chunks]
+    )
 
-    print(f"Chunk ({chunk_id}) classified.")
-
-    # print("document_id", document_id)
-    #
-    # content_summary = await get_content_summary(input_text)
-    # await add_summary_nodes(graph_client, document_id, content_summary)
-
-    print(f"Chunk ({chunk_id}) summarized.")
-    #
-    cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
-    cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
-    #
-    layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
-    await add_cognitive_layer_graphs(graph_client, chunk_collection, chunk_id, layer_graphs)
-
-    print("got here 4444")
+    return graph_client.graph
+#
+# async def process_text(document_id: str, chunk_id: str, chunk_collection: str, input_text: str):
+#     raw_document_id = document_id.split("__")[-1]
+#
+#     print(f"Processing chunk ({chunk_id}) from document ({raw_document_id}).")
+#
+#     graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
+#
+#     classified_categories = await get_content_categories(input_text)
+#     await add_classification_nodes(
+#         graph_client,
+#         parent_node_id = document_id,
+#         categories = classified_categories,
+#     )
+# >>>>>>> origin/main
+#
+#     print(f"Chunk ({chunk_id}) classified.")
+#
+#     # print("document_id", document_id)
+#     #
+#     # content_summary = await get_content_summary(input_text)
+#     # await add_summary_nodes(graph_client, document_id, content_summary)
+#
+#     print(f"Chunk ({chunk_id}) summarized.")
+#     #
+#     cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
+#     cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
+#     #
+#     layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
+#     await add_cognitive_layer_graphs(graph_client, chunk_collection, chunk_id, layer_graphs)
+#
+# <<<<<<< HEAD
+#     print("got here 4444")
     #
     # if infrastructure_config.get_config()["connect_documents"] is True:
     #     db_engine = infrastructure_config.get_config()["database_engine"]
@@ -240,6 +267,37 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     # send_telemetry("cognee.cognify")
     #
     # print(f"Chunk ({chunk_id}) cognified.")
+# =======
+#     if infrastructure_config.get_config()["connect_documents"] is True:
+#         db_engine = infrastructure_config.get_config()["database_engine"]
+#         relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = raw_document_id)
+#
+#         list_of_nodes = []
+#
+#         relevant_documents_to_connect.append({
+#             "layer_id": document_id,
+#         })
+#
+#         for document in relevant_documents_to_connect:
+#             node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
+#             list_of_nodes.extend(node_descriptions_to_match)
+#
+#         nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+#
+#         results = await resolve_cross_graph_references(nodes_by_layer)
+#
+#         relationships = graph_ready_output(results)
+#
+#         await connect_nodes_in_graph(
+#             graph_client,
+#             relationships,
+#             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
+#         )
+#
+#     send_telemetry("cognee.cognify")
+#
+#     print(f"Chunk ({chunk_id}) cognified.")
+# >>>>>>> origin/main
 
 
 if __name__ == "__main__":

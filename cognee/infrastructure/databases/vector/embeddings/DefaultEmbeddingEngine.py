@@ -4,8 +4,6 @@ from typing import List
 import instructor
 from openai import AsyncOpenAI
 from fastembed import TextEmbedding
-from fastembed import TextEmbedding
-from openai import AsyncOpenAI
 
 from cognee.config import Config
 from cognee.root_dir import get_absolute_path

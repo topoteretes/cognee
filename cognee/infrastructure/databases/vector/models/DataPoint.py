@@ -1,10 +1,13 @@
-from typing import Union
+from typing import Generic, TypeVar
 from pydantic import BaseModel
 
-class DataPoint(BaseModel):
+PayloadSchema = TypeVar("PayloadSchema", bound = BaseModel)
+
+class DataPoint(BaseModel, Generic[PayloadSchema]):
     id: str
-    payload: dict[str, Union[str, dict[str, str]]]
+    payload: PayloadSchema
     embed_field: str = "value"
 
     def get_embeddable_data(self):
-        return self.payload[self.embed_field]
+        if hasattr(self.payload, self.embed_field):
+            return getattr(self.payload, self.embed_field)
