@@ -19,12 +19,17 @@ class LocalStorage(Storage):
             mode = "w" if isinstance(data, str) else "wb",
             encoding = "utf-8" if isinstance(data, str) else None
         ) as f:
-            f.write(data if isinstance(data, str) else data.read())
+            if hasattr(data, "read"):
+                data.seek(0)
+                f.write(data.read())
+            else:
+                f.write(data)
 
     def retrieve(self, file_path: str, mode: str = "rb"):
         full_file_path = self.storage_path + "/" + file_path
 
         with open(full_file_path, mode = mode) as f:
+            f.seek(0)
             return f.read()
 
     @staticmethod

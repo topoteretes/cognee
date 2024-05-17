@@ -22,6 +22,21 @@ txt_file_type = TxtFileType()
 
 filetype.add_type(txt_file_type)
 
+class CustomPdfMatcher(filetype.Type):
+    MIME = "application/pdf"
+    EXTENSION = "pdf"
+
+    def __init__(self):
+        super(CustomPdfMatcher, self).__init__(mime = CustomPdfMatcher.MIME, extension = CustomPdfMatcher.EXTENSION)
+
+    def match(self, buf):
+        return b"PDF-" in buf
+
+custom_pdf_matcher = CustomPdfMatcher()
+
+filetype.add_type(custom_pdf_matcher)
+
+
 def guess_file_type(file: BinaryIO) -> filetype.Type:
     file_type = filetype.guess(file)
 

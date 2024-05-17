@@ -19,7 +19,7 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
     keywords = extract_keywords(file_text)
 
     file_path = file.name
-    file_name = file_path.split("/")[-1].split(".")[0]
+    file_name = file_path.split("/")[-1].split(".")[0] if file_path else None
 
     return FileMetadata(
         name = file_name,

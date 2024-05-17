@@ -21,6 +21,49 @@ class DuckDBAdapter():
         with self.get_connection() as connection:
             return connection.sql(f"SELECT id, name, file_path, extension, mime_type, keywords FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
 
+    def create_table(self, table_name: str, table_config: list[dict]):
+        fields_query_parts = []
+
+        for table_config_item in table_config:
+            fields_query_parts.append(f"{table_config_item['name']} {table_config_item['type']}")
+
+        with self.get_connection() as connection:
+            query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(fields_query_parts)});"
+            connection.execute(query)
+
+    def delete_table(self, table_name: str):
+        with self.get_connection() as connection:
+            query = f"DROP TABLE IF EXISTS {table_name};"
+            connection.execute(query)
+
+    def insert_data(self, table_name: str, data: list[dict]):
+        def get_values(data_entry: list):
+            return ", ".join([f"'{value}'" if isinstance(value, str) else value for value in data_entry])
+      
+        columns = ", ".join(data[0].keys())
+        values = ", ".join([f"({get_values(data_entry.values())})" for data_entry in data])
+
+        with self.get_connection() as connection:
+            query = f"INSERT INTO {table_name} ({columns}) VALUES {values};"
+            connection.execute(query)
+
+    def get_data(self, table_name: str, filters: dict = None):
+        with self.get_connection() as connection:
+            def get_values(values: list):
+                return ", ".join([f"'{value}'" for value in values])
+
+            def get_filters(filters: dict):
+                return " AND ".join([
+                    f"{key} IN ({get_values(value)})" if isinstance(value, list)
+                    else f"{key} = '{value}'" for (key, value) in filters.items()
+                ])
+
+            query = f"SELECT * FROM {table_name}" + (";" if filters is None else f" WHERE {get_filters(filters)};")
+            results = connection.sql(query).to_df().to_dict("records")
+
+            return {
+                result["data_id"]: result["status"] for result in results
+            }
 
     def load_cognify_data(self, data):
         with self.get_connection() as connection:
@@ -29,7 +72,7 @@ class DuckDBAdapter():
                 CREATE TABLE IF NOT EXISTS cognify (
                     document_id STRING,
                     layer_id STRING,
-                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT NULL,
                     processed BOOLEAN DEFAULT FALSE,
                     document_id_target STRING NULL

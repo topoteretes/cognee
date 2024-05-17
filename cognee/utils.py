@@ -212,6 +212,7 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
     # Visualization
     url = plotter.plot(render=False, as_files=True, memoize=False)
     print(f"Graph is visualized at: {url}")
+    return url
 
 
 def sanitize_df(df):

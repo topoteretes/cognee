@@ -1,0 +1,12 @@
+
+.iFrameViewContainer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: 30%;
+  background: var(--global-background-default);
+  border-radius: var(--border-radius);
+  border: 1px solid white;
+  z-index: 10;
+}

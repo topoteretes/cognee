@@ -2,9 +2,9 @@ import asyncio
 from uuid import uuid4
 from typing import List, Union
 import logging
-import instructor
+# import instructor
 import nltk
-from openai import OpenAI
+# from openai import OpenAI
 from nltk.corpus import stopwords
 from cognee.config import Config
 from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks
@@ -26,12 +26,13 @@ from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
 from cognee.utils import send_telemetry
+from cognee.modules.tasks import create_task_status_table, update_task_status
 
 
 config = Config()
 config.load()
 
-aclient = instructor.patch(OpenAI())
+# aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
@@ -42,6 +43,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
     # Has to be loaded in advance, multithreading doesn't work without it.
     nltk.download("stopwords", quiet=True)
     stopwords.ensure_loaded()
+    create_task_status_table()
 
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
@@ -80,6 +82,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
     chunk_strategy = infrastructure_config.get_config()["chunk_strategy"]
 
     for (dataset_name, files) in dataset_files:
+        update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
+
         for file_metadata in files:
             with open(file_metadata["file_path"], "rb") as file:
                 try:
@@ -88,6 +92,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         parent_node_id = f"DefaultGraphModel__{USER_ID}",
                         document_metadata = file_metadata,
                     )
+                    update_task_status(document_id, "DOCUMENT_PROCESSING_STARTED")
 
                     file_type = guess_file_type(file)
                     text = extract_text_from_file(file, file_type)
@@ -97,15 +102,39 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         data_chunks[dataset_name] = []
 
                     for subchunk in subchunks:
-                        data_chunks[dataset_name].append(dict(document_id = document_id, chunk_id = str(uuid4()), text = subchunk))
+                        data_chunks[dataset_name].append(dict(
+                            document_id = document_id,
+                            chunk_id = str(uuid4()),
+                            text = subchunk,
+                        ))
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
     added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
 
-    await asyncio.gather(
-        *[process_text(chunk["document_id"], chunk["chunk_id"], chunk["collection"], chunk["text"]) for chunk in added_chunks]
-    )
+    chunks_by_document = {}
+
+    for chunk in added_chunks:
+        if chunk["document_id"] not in chunks_by_document:
+            chunks_by_document[chunk["document_id"]] = []
+        chunks_by_document[chunk["document_id"]].append(chunk)
+
+    for document_id, chunks in chunks_by_document.items():
+        try:
+            await asyncio.gather(
+                *[process_text(
+                    chunk["document_id"],
+                    chunk["chunk_id"],
+                    chunk["collection"],
+                    chunk["text"],
+                ) for chunk in chunks]
+            )
+            update_task_status(document_id, "DOCUMENT_PROCESSING_FINISHED")
+        except Exception as e:
+            logger.exception(e)
+            update_task_status(document_id, "DOCUMENT_PROCESSING_FAILED")
+
+    update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
 
     return graph_client.graph
 

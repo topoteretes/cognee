@@ -1,30 +1,42 @@
 """ FastAPI server for the Cognee API. """
 import os
-from uuid import UUID
 
 import aiohttp
 import uvicorn
-import logging
 
+import logging
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
     format="%(asctime)s [%(levelname)s] %(message)s",  # Set the log message format
 )
-
 logger = logging.getLogger(__name__)
 
 from cognee.config import Config
-
 config = Config()
 config.load()
 
-from typing import Dict, Any, List, Union, BinaryIO
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from typing import Dict, Any, List, Union, Annotated
+from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 app = FastAPI(debug=True)
+
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins = origins,
+    allow_credentials = True,
+    allow_methods = ["OPTIONS", "GET", "POST", "DELETE"],
+    allow_headers = ["*"],
+)
+
 #
 # from auth.cognito.JWTBearer import JWTBearer
 # from auth.auth import jwks
@@ -52,30 +64,101 @@ class Payload(BaseModel):
     payload: Dict[str, Any]
 
 
+@app.get("/datasets", response_model=list)
+async def get_datasets():
+    from cognee import datasets
+    return datasets.list_datasets()
+
+@app.delete("/datasets/{dataset_id}", response_model=dict)
+async def delete_dataset(dataset_id: str):
+    from cognee import datasets
+
+    datasets.delete_dataset(dataset_id)
+
+    return JSONResponse(
+      status_code = 200,
+      content = "OK",
+    )
+
+@app.get("/datasets/{dataset_id}/graph", response_model=list)
+async def get_dataset_graph(dataset_id: str):
+    from cognee import utils
+
+    from cognee.infrastructure import infrastructure_config
+    from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+
+    graph_engine = infrastructure_config.get_config("graph_engine")
+    graph_client = await get_graph_client(graph_engine)
+
+    graph_url = await utils.render_graph(graph_client.graph)
+
+    return JSONResponse(
+      status_code = 200,
+      content = str(graph_url),
+    )
+
+
+@app.get("/datasets/{dataset_id}/data", response_model=list)
+async def get_dataset_data(dataset_id: str):
+    from cognee import datasets
+    dataset_data = datasets.list_data(dataset_id)
+
+    if dataset_data is None:
+        raise HTTPException(status_code = 404, detail = f"Dataset ({dataset_id}) not found.")
+
+    return [dict(
+      id = data["id"],
+      name = f"{data['name']}.{data['extension']}",
+      keywords = data["keywords"].split("|"),
+      filePath = data["file_path"],
+      mimeType = data["mime_type"],
+    ) for data in dataset_data]
+
+
+@app.get("/datasets/status", response_model=dict)
+async def get_dataset_status(datasets: Annotated[list, Query(alias = "dataset")] = None):
+    from cognee import datasets as cognee_datasets
+    datasets_statuses = cognee_datasets.get_status(datasets)
+
+    return JSONResponse(
+        status_code = 200,
+        content = datasets_statuses
+    )
+
+@app.get("/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
+async def get_raw_data(dataset_id: str, data_id: str):
+    from cognee import datasets
+    dataset_data = datasets.list_data(dataset_id)
+
+    if dataset_data is None:
+        raise HTTPException(status_code = 404, detail = f"Dataset ({dataset_id}) not found.")
+
+    data = [data for data in dataset_data if data["id"] == data_id][0]
+
+    return data["file_path"]
+
+
 class AddPayload(BaseModel):
-    data: Union[str, BinaryIO, List[Union[str, BinaryIO]]]
-    dataset_id: UUID
-    dataset_name: str
+    data: Union[str, UploadFile, List[Union[str, UploadFile]]]
+    dataset_id: str
     class Config:
         arbitrary_types_allowed = True # This is required to allow the use of Union
-class CognifyPayload(BaseModel):
-    datasets: Union[str, List[str]]
 
-class SearchPayload(BaseModel):
-    query_params:  Dict[str, Any]
 @app.post("/add", response_model=dict)
-async def add(payload: AddPayload):
+async def add(
+    datasetId: str = Form(...),
+    data: List[UploadFile] = File(...),
+):
     """ This endpoint is responsible for adding data to the graph."""
-    from v1.add.add import add
+    from cognee import add as cognee_add
 
     try:
-        data = payload.data
-        if isinstance(data, str) and data.startswith('http'):
-            if 'github' in data:
+        if isinstance(data, str) and data.startswith("http"):
+            if "github" in data:
                 # Perform git clone if the URL is from GitHub
-                repo_name = data.split('/')[-1].replace('.git', '')
-                os.system(f'git clone {data} .data/{repo_name}')
-                await add(
+                repo_name = data.split("/")[-1].replace(".git", "")
+                os.system(f"git clone {data} .data/{repo_name}")
+                await cognee_add(
                     "data://.data/",
                     f"{repo_name}",
                 )
@@ -85,16 +168,20 @@ async def add(payload: AddPayload):
                     async with session.get(data) as resp:
                         if resp.status == 200:
                             file_data = await resp.read()
-                            with open(f'.data/{data.split("/")[-1]}', 'wb') as f:
+                            with open(f".data/{data.split('/')[-1]}", "wb") as f:
                                 f.write(file_data)
-                            await add(
-                                f"data://.data/",
+                            await cognee_add(
+                                "data://.data/",
                                 f"{data.split('/')[-1]}",
                             )
         else:
-            await add(
-                payload.data,
-                payload.dataset_name,
+            await cognee_add(
+                data,
+                datasetId,
+            )
+            return JSONResponse(
+                status_code = 200,
+                content = "OK"
             )
     except Exception as error:
         return JSONResponse(
@@ -102,13 +189,21 @@ async def add(payload: AddPayload):
             content = { "error": str(error) }
         )
 
+class CognifyPayload(BaseModel):
+    datasets: list[str]
+
 @app.post("/cognify", response_model=dict)
 async def cognify(payload: CognifyPayload):
     """ This endpoint is responsible for the cognitive processing of the content."""
-    from v1.cognify.cognify import cognify
+    from cognee import cognify as cognee_cognify
 
     try:
-        await cognify(payload.datasets)
+        await cognee_cognify(payload.datasets)
+
+        return JSONResponse(
+            status_code = 200,
+            content = "OK"
+        )
     except Exception as error:
         return JSONResponse(
             status_code = 409,
@@ -116,14 +211,17 @@ async def cognify(payload: CognifyPayload):
         )
 
 
+class SearchPayload(BaseModel):
+    query_params:  Dict[str, Any]
+
 @app.post("/search", response_model=dict)
 async def search(payload: SearchPayload):
     """ This endpoint is responsible for searching for nodes in the graph."""
-    from v1.search.search import search
+    from cognee import search as cognee_search
 
     try:
-        search_type = 'SIMILARITY'
-        await search(search_type, payload.query_params)
+        search_type = "SIMILARITY"
+        await cognee_search(search_type, payload.query_params)
     except Exception as error:
         return JSONResponse(
             status_code = 409,
@@ -141,6 +239,13 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
     try:
         logger.info(f"Starting server at {host}:{port}")
+        from cognee import config
+        data_directory_path = os.path.abspath(".data_storage")
+        config.data_root_directory(data_directory_path)
+
+        cognee_directory_path = os.path.abspath(".cognee_system")
+        config.system_root_directory(cognee_directory_path)
+        
         uvicorn.run(app, host=host, port=port)
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")

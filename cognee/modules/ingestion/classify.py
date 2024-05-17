@@ -1,13 +1,16 @@
 from io import BufferedReader
 from typing import Union, BinaryIO
 from .exceptions import IngestionException
-from .data_types import create_text_data, create_binary_data
+from .data_types import TextData, BinaryData
 
-def classify(data: Union[str, BinaryIO]):
+def classify(data: Union[str, BinaryIO], filename: str = None):
     if isinstance(data, str):
-        return create_text_data(data)
+        return TextData(data)
 
     if isinstance(data, BufferedReader):
-        return create_binary_data(data)
+        return BinaryData(data)
 
-    raise IngestionException(f"Type of data sent to cognee.add(data_path: string | List[string]) not supported: {type(data)}")
+    if hasattr(data, "file"):
+        return BinaryData(data.file, filename)
+
+    raise IngestionException(f"Type of data sent to classify(data: Union[str, BinaryIO) not supported: {type(data)}")
