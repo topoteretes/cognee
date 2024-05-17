@@ -37,11 +37,24 @@ services:
     depends_on:
       - postgres
       - neo4j
+      - frontend
     deploy:
       resources:
         limits:
           cpus: "4.0"
           memory: 8GB
+  frontend:
+    container_name: frontend
+    build:
+      context: ./cognee-frontend
+      dockerfile: Dockerfile
+    volumes:
+      - "./cognee-frontend:/app"
+    ports:
+      - "3000:3000"
+    networks:
+      - cognee_backend
+
 
   postgres:
      image: postgres

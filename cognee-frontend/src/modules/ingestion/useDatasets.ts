@@ -14,7 +14,7 @@ function useDatasets() {
   const statusTimeout = useRef<any>(null);
 
   const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
-    fetch(`http://localhost:8000/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`)
+    fetch(`http://0.0.0.0:8000/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`)
       .then((response) => response.json())
       .then((statuses) => setDatasets(
         (datasets) => (
@@ -65,7 +65,7 @@ function useDatasets() {
   }, []);
 
   const fetchDatasets = useCallback(() => {
-    fetch('http://localhost:8000/datasets')
+    fetch('http://0.0.0.0:8000/datasets')
       .then((response) => response.json())
       .then((datasets) => datasets.map((dataset: string) => ({ id: dataset, name: dataset })))
       .then((datasets) => {

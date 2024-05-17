@@ -37,7 +37,7 @@ export default function Home() {
   }, [refreshDatasets]);
 
   const openDatasetData = (dataset: { id: string }) => {
-    fetch(`http://localhost:8000/datasets/${dataset.id}/data`)
+    fetch(`http://0.0.0.0:8000/datasets/${dataset.id}/data`)
       .then((response) => response.json())
       .then(setDatasetData)
       .then(() => setSelectedDataset(dataset.id));
@@ -56,7 +56,7 @@ export default function Home() {
     const file = files[0];
     formData.append('data', file, file.name);
 
-    return fetch('http://localhost:8000/add', {
+    return fetch('http://0.0.0.0:8000/add', {
       method: 'POST',
       body: formData,
     })
@@ -88,7 +88,7 @@ export default function Home() {
   const cognifyDataset = useCallback((dataset: { id: string }) => {
     showNotification(`Cognification started for dataset "${dataset.id}".`, 5000);
 
-    return fetch('http://localhost:8000/cognify', {
+    return fetch('http://0.0.0.0:8000/cognify', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -120,7 +120,7 @@ export default function Home() {
   }, [cognifyDataset, disableCognifyRun, enableCognifyRun]);
 
   const deleteDataset = useCallback((dataset: { id: string }) => {
-    fetch(`http://localhost:8000/datasets/${dataset.id}`, {
+    fetch(`http://0.0.0.0:8000/datasets/${dataset.id}`, {
       method: 'DELETE',
     })
      .then(() => {
@@ -146,7 +146,7 @@ export default function Home() {
   }, [showExplorationWindow]);
   
   const exploreDataset = useCallback((dataset: { id: string }) => {
-    fetch(`http://localhost:8000/datasets/${dataset.id}/graph`)
+    fetch(`http://0.0.0.0:8000/datasets/${dataset.id}/graph`)
       .then((response) => response.text())
       .then((text) => text.replace('"', ''))
       .then((graphUrl: string) => {
