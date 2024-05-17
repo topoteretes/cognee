@@ -87,9 +87,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     chunk_engine = infrastructure_config.get_config()["chunk_engine"]
     chunk_strategy = infrastructure_config.get_config()["chunk_strategy"]
-
-    for (dataset_name, files) in dataset_files:
-        for file_metadata in files:
+    async def process_batch(files_batch):
+        for dataset_name, file_metadata in files_batch:
             with open(file_metadata["file_path"], "rb") as file:
                 try:
                     file_type = guess_file_type(file)
@@ -102,20 +101,67 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         data_chunks[dataset_name] = []
 
                     for subchunk in subchunks:
-                        data_chunks[dataset_name].append(dict(text = subchunk, chunk_id = str(uuid4()), file_metadata = file_metadata))
+                        data_chunks[dataset_name].append(
+                            dict(text=subchunk, chunk_id=str(uuid4()), file_metadata=file_metadata))
                 except FileTypeException:
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
+        added_chunks = await add_data_chunks(data_chunks)
 
+        # await asyncio.gather(
+        #     *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in
+        #       added_chunks]
+        # )
 
+    batch_size = 20
+    file_count = 0
+    files_batch = []
 
-    added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
+    for (dataset_name, files) in dataset_files:
+        for file_metadata in files:
+            files_batch.append((dataset_name, file_metadata))
+            file_count += 1
 
-    await asyncio.gather(
-        *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in added_chunks]
-    )
+            if file_count >= batch_size:
+                await process_batch(files_batch)
+                files_batch = []
+                file_count = 0
+
+    # Process any remaining files in the last batch
+    if files_batch:
+        await process_batch(files_batch)
 
     return graph_client.graph
+
+    #
+    # for (dataset_name, files) in dataset_files:
+    #     for file_metadata in files:
+    #         with open(file_metadata["file_path"], "rb") as file:
+    #             try:
+    #                 file_type = guess_file_type(file)
+    #                 text = extract_text_from_file(file, file_type)
+    #                 if text is None:
+    #                     text = "empty file"
+    #                 subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
+    #
+    #                 if dataset_name not in data_chunks:
+    #                     data_chunks[dataset_name] = []
+    #
+    #                 for subchunk in subchunks:
+    #                     data_chunks[dataset_name].append(dict(text = subchunk, chunk_id = str(uuid4()), file_metadata = file_metadata))
+    #             except FileTypeException:
+    #                 logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
+    #
+    #
+    #
+    #
+    # added_chunks: list[tuple[str, str, dict]] = await add_data_chunks(data_chunks)
+    #
+    # await asyncio.gather(
+    #     *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"]) for chunk in added_chunks]
+    # )
+    #
+    # return graph_client.graph
 
 async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict):
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
@@ -124,36 +170,46 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
     graph_topology = infrastructure_config.get_config()["graph_topology"]
 
+    print("got here")
+
 
     document_id = await add_document_node(
         graph_client,
         parent_node_id = f"{file_metadata['name']}.{file_metadata['extension']}", #make a param of defaultgraph model to make sure when user passes his stuff, it doesn't break pipeline
         document_metadata = file_metadata,
     )
+    # print("got here2")
+    # await add_label_nodes(graph_client, document_id, chunk_id, file_metadata["keywords"].split("|"))
+
+    # classified_categories = await get_content_categories(input_text)
     #
-    await add_label_nodes(graph_client, document_id, chunk_id, file_metadata["keywords"].split("|"))
+    # print("classified_categories", classified_categories)
+    # await add_classification_nodes(
+    #      graph_client,
+    #      parent_node_id = document_id,
+    #      categories = classified_categories,
+    #  )
 
-    classified_categories = await get_content_categories(input_text)
-    await add_classification_nodes(
-         graph_client,
-         parent_node_id = document_id,
-         categories = classified_categories,
-     )
+    classified_categories= [{'data_type': 'text', 'category_name': 'Source code in various programming languages'}]
 
-    # print(f"Chunk ({chunk_id}) classified.")
 
-    print("document_id", document_id)
 
-    content_summary = await get_content_summary(input_text)
-    await add_summary_nodes(graph_client, document_id, content_summary)
+    print(f"Chunk ({chunk_id}) classified.")
+
+    # print("document_id", document_id)
+    #
+    # content_summary = await get_content_summary(input_text)
+    # await add_summary_nodes(graph_client, document_id, content_summary)
 
     print(f"Chunk ({chunk_id}) summarized.")
-
+    #
     cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
     cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
     #
     layer_graphs = await get_layer_graphs(input_text, cognitive_layers)
     await add_cognitive_layer_graphs(graph_client, chunk_collection, chunk_id, layer_graphs)
+
+    print("got here 4444")
     #
     # if infrastructure_config.get_config()["connect_documents"] is True:
     #     db_engine = infrastructure_config.get_config()["database_engine"]
@@ -200,7 +256,7 @@ if __name__ == "__main__":
         #
         # await add("data://" +data_directory_path, "example")
 
-        infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine()})
+        infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine() })
         from cognee.shared.SourceCodeGraph import SourceCodeGraph
         from cognee.api.v1.config import config
 
