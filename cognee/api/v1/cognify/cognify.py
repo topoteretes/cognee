@@ -32,7 +32,7 @@ from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
 from cognee.modules.topology.topology import TopologyEngine
 from cognee.shared.GithubClassification import CodeContentPrediction
-from cognee.shared.data_models import ChunkStrategy
+from cognee.shared.data_models import ChunkStrategy, DefaultGraphModel
 from cognee.utils import send_telemetry
 
 
@@ -178,8 +178,10 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
     graph_topology = infrastructure_config.get_config()["graph_topology"]
 
-    print("got here")
-
+    if graph_topology == "default":
+        parent_node_id = f"{file_metadata['name']}.{file_metadata['extension']}"
+    elif graph_topology == DefaultGraphModel:
+        parent_node_id = f"DefaultGraphModel__{USER_ID}"
 
     document_id = await add_document_node(
         graph_client,
