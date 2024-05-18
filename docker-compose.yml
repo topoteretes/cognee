@@ -64,7 +64,7 @@ services:
        - POSTGRES_USER=bla
        - POSTGRES_PASSWORD=bla
        - POSTGRES_DB=bubu
-       - ENVIRONMENT=local
+
      networks:
        - cognee_backend
      ports:
