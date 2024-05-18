@@ -192,35 +192,35 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
 
 
-#     if infrastructure_config.get_config()["connect_documents"] is True:
-#         db_engine = infrastructure_config.get_config()["database_engine"]
-#         relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = raw_document_id)
-#
-#         list_of_nodes = []
-#
-#         relevant_documents_to_connect.append({
-#             "layer_id": document_id,
-#         })
-#
-#         for document in relevant_documents_to_connect:
-#             node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
-#             list_of_nodes.extend(node_descriptions_to_match)
-#
-#         nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
-#
-#         results = await resolve_cross_graph_references(nodes_by_layer)
-#
-#         relationships = graph_ready_output(results)
-#
-#         await connect_nodes_in_graph(
-#             graph_client,
-#             relationships,
-#             score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
-#         )
-#
-#     send_telemetry("cognee.cognify")
-#
-#     print(f"Chunk ({chunk_id}) cognified.")
+    # if infrastructure_config.get_config()["connect_documents"] is True:
+    #     db_engine = infrastructure_config.get_config()["database_engine"]
+    #     relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = raw_document_id)
+    #
+    #     list_of_nodes = []
+    #
+    #     relevant_documents_to_connect.append({
+    #         "layer_id": document_id,
+    #     })
+    #
+    #     for document in relevant_documents_to_connect:
+    #         node_descriptions_to_match = await graph_client.extract_node_description(document["layer_id"])
+    #         list_of_nodes.extend(node_descriptions_to_match)
+    #
+    #     nodes_by_layer = await group_nodes_by_layer(list_of_nodes)
+    #
+    #     results = await resolve_cross_graph_references(nodes_by_layer)
+    #
+    #     relationships = graph_ready_output(results)
+    #
+    #     await connect_nodes_in_graph(
+    #         graph_client,
+    #         relationships,
+    #         score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
+    #     )
+    #
+    # send_telemetry("cognee.cognify")
+    #
+    # print(f"Chunk ({chunk_id}) cognified.")
 
 
 
@@ -238,14 +238,27 @@ if __name__ == "__main__":
         #
         # await add("data://" +data_directory_path, "example")
 
+        text = """import subprocess
+                def show_all_processes():
+                    process = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE)
+                    output, error = process.communicate()
+                
+                    if error:
+                        print(f"Error: {error}")
+                    else:
+                        print(output.decode())
+                
+                show_all_processes()"""
+
+        from cognee.api.v1.add import add
+
+        await add([text], "example_dataset")
+
         infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine() })
         from cognee.shared.SourceCodeGraph import SourceCodeGraph
         from cognee.api.v1.config import config
 
         config.set_graph_model(SourceCodeGraph)
-
-
-
         config.set_classification_model(CodeContentPrediction)
 
         graph = await cognify()

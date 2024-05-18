@@ -77,7 +77,7 @@ if __name__ == "__main__":
         #
         # await add("data://" +data_directory_path, "example")
 
-        graph = await add_topology()
+        # graph = await add_topology()
 
         graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
