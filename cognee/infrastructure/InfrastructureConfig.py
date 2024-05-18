@@ -33,6 +33,7 @@ class InfrastructureConfig():
     chunk_strategy = config.chunk_strategy
     chunk_engine = None
     graph_topology = config.graph_topology
+    monitoring_tool = config.monitoring_tool
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:

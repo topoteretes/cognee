@@ -2,11 +2,21 @@ import asyncio
 from typing import List, Type
 import openai
 import instructor
-from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt
+
+from cognee.config import Config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.shared.data_models import MonitoringTool
+
+config = Config()
+config.load()
+
+if config.monitoring_tool == MonitoringTool.LANGFUSE:
+    from langfuse.openai import AsyncOpenAI, OpenAI
+else:
+    from openai import AsyncOpenAI, OpenAI
 
 class OpenAIAdapter(LLMInterface):
     """Adapter for OpenAI's GPT-3, GPT=4 API"""

@@ -79,6 +79,11 @@ class Config:
     graph_topology:str = DefaultGraphModel
     cognitive_layers_limit: int = 2
 
+    from cognee.shared.data_models import MonitoringTool
+
+    # Monitoring tool
+    monitoring_tool: str = os.getenv("MONITORING_TOOL", MonitoringTool.LANGFUSE)
+
     if (
         os.getenv("ENV") == "prod"
         or os.getenv("ENV") == "dev"

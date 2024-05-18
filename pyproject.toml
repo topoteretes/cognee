@@ -66,6 +66,7 @@ deepeval = "^0.21.36"
 litellm = "^1.37.3"
 groq = "^0.5.0"
 tantivy = "^0.21.0"
+langfuse = "^2.32.0"
 
 
 [tool.poetry.extras]
