@@ -77,6 +77,7 @@ class Config:
     # Database parameters
     graph_database_provider: str = os.getenv("GRAPH_DB_PROVIDER", "NETWORKX")
     graph_topology:str = DefaultGraphModel
+    cognitive_layers_limit: int = 2
 
     if (
         os.getenv("ENV") == "prod"

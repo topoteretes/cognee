@@ -17,6 +17,7 @@ async def add_document_node(graph_client: GraphDBInterface, parent_node_id, docu
     document["type"] = "Document"
 
     await graph_client.add_node(document_id, document)
+    print(f"Added document node: {document_id}")
 
     await graph_client.add_edge(
         parent_node_id,
