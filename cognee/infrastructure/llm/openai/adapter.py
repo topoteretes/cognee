@@ -15,6 +15,10 @@ config.load()
 
 if config.monitoring_tool == MonitoringTool.LANGFUSE:
     from langfuse.openai import AsyncOpenAI, OpenAI
+elif config.monitoring_tool == MonitoringTool.LANGSMITH:
+    from langsmith import wrap_openai
+    from openai import AsyncOpenAI
+    AsyncOpenAI = wrap_openai(AsyncOpenAI())
 else:
     from openai import AsyncOpenAI, OpenAI
 

@@ -7,9 +7,23 @@ from tenacity import retry, stop_after_attempt
 from openai import AsyncOpenAI
 import openai
 
+from cognee.config import Config
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.shared.data_models import MonitoringTool
+
+config = Config()
+config.load()
+
+if config.monitoring_tool == MonitoringTool.LANGFUSE:
+    from langfuse.openai import AsyncOpenAI, OpenAI
+elif config.monitoring_tool == MonitoringTool.LANGSMITH:
+    from langsmith import wrap_openai
+    from openai import AsyncOpenAI
+    AsyncOpenAI = wrap_openai(AsyncOpenAI())
+else:
+    from openai import AsyncOpenAI, OpenAI
 
 class GenericAPIAdapter(LLMInterface):
     """Adapter for Generic API LLM provider API """
