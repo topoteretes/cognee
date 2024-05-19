@@ -12,7 +12,7 @@ from cognee.api.v1.prune import prune
 from cognee.config import Config
 from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
 from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import LiteLLMEmbeddingEngine
-from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks
+from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks, add_data_chunks_basic_rag
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
 from cognee.modules.cognify.graph.add_cognitive_layer_graphs import add_cognitive_layer_graphs
@@ -80,7 +80,6 @@ async def cognify(datasets: Union[str, List[str]] = None):
         if dataset_name in added_dataset:
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
-    # print("dataset_files", dataset_files)
 
 
     data_chunks = {}
@@ -109,13 +108,14 @@ async def cognify(datasets: Union[str, List[str]] = None):
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
         added_chunks = await add_data_chunks(data_chunks)
+        added__basic_rag_chunks = await add_data_chunks_basic_rag(data_chunks)
 
 
-        await asyncio.gather(
-            *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"],chunk['document_id']) for chunk in
-              added_chunks]
-        )
-
+    #     await asyncio.gather(
+    #         *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"],chunk['document_id']) for chunk in
+    #           added_chunks]
+    #     )
+    #
     batch_size = 20
     file_count = 0
     files_batch = []
@@ -260,12 +260,16 @@ if __name__ == "__main__":
 
         config.set_graph_model(SourceCodeGraph)
         config.set_classification_model(CodeContentPrediction)
-
         graph = await cognify()
-        #
-        from cognee.utils import render_graph
+        vector_client = infrastructure_config.get_config("vector_engine")
 
-        await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
+        out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)
+
+        print("results", out)
+        #
+        # from cognee.utils import render_graph
+        #
+        # await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
 
     import asyncio
     asyncio.run(test())
