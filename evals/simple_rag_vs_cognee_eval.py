@@ -67,12 +67,34 @@ def get_answer(content: str,context, model: Type[BaseModel]= AnswerModel):
         logger.error("Error extracting cognitive layers from content: %s", error, exc_info = True)
         raise error
 
-def run_cognify_base_rag_and_search():
+async def run_cognify_base_rag():
+    from cognee.api.v1.add import add
+    from cognee.api.v1.prune import prune
+    from cognee.api.v1.cognify.cognify import cognify
+
+    await prune.prune_system()
+
+    await add("data://test_datasets", "initial_test")
+
+    graph = await cognify("initial_test")
+
+
+
     pass
 
 
-def run_cognify_and_search():
-    pass
+async def cognify_search_base_rag(content:str, context:str):
+    vector_client = infrastructure_config.get_config("vector_engine")
+
+    return_ = await vector_client.search(collection_name="basic_rag", query_text="show_all_processes", limit=10)
+
+    print("results", return_)
+    return return_
+
+async def cognify_search_graph(content:str, context:str):
+    from cognee.api.v1.search.search import search
+    return_ = await search(content)
+    return return_
 
 
 
@@ -90,12 +112,29 @@ def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase]) -> List[LLM
         test_cases.append(test_case)
     return test_cases
 
-# Data preprocessing before setting the dataset test cases
-dataset.test_cases = convert_goldens_to_test_cases(dataset.test_cases)
+# # Data preprocessing before setting the dataset test cases
+# dataset.test_cases = convert_goldens_to_test_cases(dataset.test_cases)
+#
+#
+# from deepeval.metrics import HallucinationMetric
+#
+#
+# metric = HallucinationMetric()
+# dataset.evaluate([metric])
 
 
-from deepeval.metrics import HallucinationMetric
+if __name__ == "__main__":
 
+    import asyncio
 
-metric = HallucinationMetric()
-dataset.evaluate([metric])
+    async def main():
+        await run_cognify_base_rag_and_search()
+
+    asyncio.run(main())
+    # run_cognify_base_rag_and_search()
+    # # Data preprocessing before setting the dataset test cases
+    # dataset.test_cases = convert_goldens_to_test_cases(dataset.test_cases)
+    # from deepeval.metrics import HallucinationMetric
+    # metric = HallucinationMetric()
+    # dataset.evaluate([metric])
+    pass

@@ -71,6 +71,7 @@ protobuf = "<5.0.0"
 langchain-community = "0.0.38"
 langchain ="0.1.10"
 deepeval = "^0.21.42"
+falkordb = "^1.0.4"
 
 
 [tool.poetry.extras]
