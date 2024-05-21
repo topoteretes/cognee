@@ -111,11 +111,11 @@ async def cognify(datasets: Union[str, List[str]] = None):
         added__basic_rag_chunks = await add_data_chunks_basic_rag(data_chunks)
 
 
-    #     await asyncio.gather(
-    #         *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"],chunk['document_id']) for chunk in
-    #           added_chunks]
-    #     )
-    #
+        await asyncio.gather(
+            *[process_text(chunk["collection"], chunk["chunk_id"], chunk["text"], chunk["file_metadata"],chunk['document_id']) for chunk in
+              added_chunks]
+        )
+
     batch_size = 20
     file_count = 0
     files_batch = []

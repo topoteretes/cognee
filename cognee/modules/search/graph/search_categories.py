@@ -1,6 +1,7 @@
 from typing import Union, Dict
 import re
 
+from pydantic import BaseModel
 
 from cognee.modules.search.llm.extraction.categorize_relevant_category import categorize_relevant_category
 
@@ -14,6 +15,10 @@ def strip_exact_regex(s, substring):
     pattern = re.escape(substring)
     # Regex to match the exact substring at the start and end
     return re.sub(f"^{pattern}|{pattern}$", "", s)
+
+
+class DefaultResponseModel(BaseModel):
+    document_id: str
 
 async def search_categories(query:str, graph: Union[nx.Graph, any], query_label: str=None, infrastructure_config: Dict=None):
     """
@@ -39,19 +44,14 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
             for _, data in graph.nodes(data=True)
             if 'summary' in data
         ]
-        print("summaries_and_ids", categories_and_ids)
-        check_relevant_category = await categorize_relevant_category(query, categories_and_ids, response_model= infrastructure_config.get_config()["classification_model"])
-        print("check_relevant_summary", check_relevant_category)
-
+        connected_nodes = []
+        for id in categories_and_ids:
+            print("id", id)
+            connected_nodes.append(list(graph.neighbors(id['document_id'])))
+        check_relevant_category = await categorize_relevant_category(query, categories_and_ids, response_model=DefaultResponseModel )
         connected_nodes = list(graph.neighbors(check_relevant_category['document_id']))
-        print("connected_nodes", connected_nodes)
         descriptions = {node: graph.nodes[node].get('description', 'No desc available') for node in connected_nodes}
-        print("descs", descriptions)
         return descriptions
-
-        #
-        # # Logic for NetworkX
-        # return {node: data.get('content_labels') for node, data in graph.nodes(data=True) if query_label in node and 'content_labels' in data}
 
     elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
         # Logic for Neo4j

@@ -8,7 +8,6 @@ async def categorize_relevant_category(query: str, summary, response_model: Type
 
     enriched_query= render_prompt("categorize_categories.txt", {"query": query, "categories": summary})
 
-    print("enriched_query", enriched_query)
 
     system_prompt = " Choose the relevant categories and return appropriate output based on the model"
 
