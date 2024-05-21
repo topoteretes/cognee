@@ -1,4 +1,6 @@
-from typing import Union, Dict, re
+from typing import Union, Dict
+import re
+
 
 from cognee.modules.search.llm.extraction.categorize_relevant_category import categorize_relevant_category
 
@@ -13,7 +15,7 @@ def strip_exact_regex(s, substring):
     # Regex to match the exact substring at the start and end
     return re.sub(f"^{pattern}|{pattern}$", "", s)
 
-async def search_categories(query:str, graph: Union[nx.Graph, any], query_label: str, infrastructure_config: Dict):
+async def search_categories(query:str, graph: Union[nx.Graph, any], query_label: str=None, infrastructure_config: Dict=None):
     """
     Filter nodes in the graph that contain the specified label and return their summary attributes.
     This function supports both NetworkX graphs and Neo4j graph databases.
@@ -29,6 +31,7 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
       each representing a node with 'nodeId' and 'summary'.
     """
     # Determine which client is in use based on the configuration
+    from cognee.infrastructure import infrastructure_config
     if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
 
         categories_and_ids = [

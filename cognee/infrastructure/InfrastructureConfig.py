@@ -84,8 +84,10 @@ class InfrastructureConfig():
 
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
             self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
-
         if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
+            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+
+        if self.database_directory_path is None:
             self.database_directory_path = self.system_root_directory + "/" + config.db_path
 
         if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
@@ -114,6 +116,9 @@ class InfrastructureConfig():
                     )
                 else:
                     from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+                    print("Using LanceDB as vector engine", self.database_directory_path)
+                    print("Setting system root directory to", self.system_root_directory)
+
                     lance_db_path = self.database_directory_path + "/cognee.lancedb"
                     LocalStorage.ensure_directory_exists(lance_db_path)
 

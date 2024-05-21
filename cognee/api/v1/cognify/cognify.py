@@ -258,9 +258,9 @@ if __name__ == "__main__":
         from cognee.shared.SourceCodeGraph import SourceCodeGraph
         from cognee.api.v1.config import config
 
-        config.set_graph_model(SourceCodeGraph)
-        config.set_classification_model(CodeContentPrediction)
-        graph = await cognify()
+        # config.set_graph_model(SourceCodeGraph)
+        # config.set_classification_model(CodeContentPrediction)
+        # graph = await cognify()
         vector_client = infrastructure_config.get_config("vector_engine")
 
         out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)

@@ -84,17 +84,22 @@ async def run_cognify_base_rag():
 
 
 async def cognify_search_base_rag(content:str, context:str):
+    infrastructure_config.set_config({"database_directory_path": "/Users/vasa/Projects/cognee/cognee/.cognee_system/databases/cognee.lancedb"})
+
     vector_client = infrastructure_config.get_config("vector_engine")
 
-    return_ = await vector_client.search(collection_name="basic_rag", query_text="show_all_processes", limit=10)
+    return_ = await vector_client.search(collection_name="basic_rag", query_text=content, limit=10)
 
     print("results", return_)
     return return_
 
 async def cognify_search_graph(content:str, context:str):
     from cognee.api.v1.search.search import search
-    return_ = await search(content)
-    return return_
+    search_type = 'CATEGORIES'
+    params = {'query': 'Ministarstvo'}
+
+    results = await search(search_type, params)
+    return results
 
 
 
@@ -128,8 +133,9 @@ if __name__ == "__main__":
     import asyncio
 
     async def main():
-        await run_cognify_base_rag_and_search()
-
+        # await run_cognify_base_rag()
+        # await cognify_search_base_rag("show_all_processes", "context")
+        await cognify_search_graph("show_all_processes", "context")
     asyncio.run(main())
     # run_cognify_base_rag_and_search()
     # # Data preprocessing before setting the dataset test cases

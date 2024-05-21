@@ -6,7 +6,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 async def categorize_relevant_category(query: str, summary, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
 
-    enriched_query= render_prompt("categorize_category.txt", {"query": query, "categories": summary})
+    enriched_query= render_prompt("categorize_categories.txt", {"query": query, "categories": summary})
 
     print("enriched_query", enriched_query)
 
