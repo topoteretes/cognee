@@ -70,7 +70,10 @@ function useDatasets() {
       .then((datasets) => datasets.map((dataset: string) => ({ id: dataset, name: dataset })))
       .then((datasets) => {
         setDatasets(datasets);
-        checkDatasetStatuses(datasets);
+
+        if (datasets.length > 0) {
+          checkDatasetStatuses(datasets);
+        }
       });
   }, [checkDatasetStatuses]);
 

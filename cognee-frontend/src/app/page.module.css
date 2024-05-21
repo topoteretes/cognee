@@ -1,12 +1,18 @@
 .main {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   padding: 32px;
   min-height: 100vh;
-  gap: 32px;
 }
 .main.noData {
   flex-direction: column;
+}
+
+.data {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  gap: 32px;
 }
 
 .datasetsView {
@@ -32,20 +38,4 @@
   100% {
     width: 70%;
   }
-}
-
-.noDataWizardContainer {
-  width: 100%;
-  margin-top: 96px;
-}
-
-.wizardDataset {
-  border: 2px solid white;
-  border-radius: var(--border-radius);
-  padding: 24px;
-  min-width: 350px;
-}
-
-.fileSize {
-  display: block;
 }

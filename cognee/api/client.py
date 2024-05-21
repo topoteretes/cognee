@@ -16,7 +16,7 @@ from cognee.config import Config
 config = Config()
 config.load()
 
-from typing import Dict, Any, List, Union, Annotated
+from typing import Dict, Any, List, Union, Annotated, Literal
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -229,6 +229,38 @@ async def search(payload: SearchPayload):
         )
 
 
+@app.get("/settings", response_model=dict)
+async def get_settings():
+    from cognee.modules.settings import get_settings
+    return get_settings()
+
+
+class LLMConfig(BaseModel):
+    openAIApiKey: str
+
+class VectorDBConfig(BaseModel):
+    choice: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
+    url: str
+    apiKey: str
+
+class SettingsPayload(BaseModel):
+    llm: LLMConfig | None = None
+    vectorDB: VectorDBConfig | None = None
+
+@app.post("/settings", response_model=dict)
+async def save_config(new_settings: SettingsPayload):
+    from cognee.modules.settings import save_llm_config, save_vector_db_config
+
+    if hasattr(new_settings, "llm"):
+        await save_llm_config(new_settings.llm)
+
+    if hasattr(new_settings, "vectorDB"):
+        await save_vector_db_config(new_settings.vectorDB)
+
+    return JSONResponse(
+      status_code = 200,
+      content = "OK",
+    )
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """

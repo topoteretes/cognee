@@ -18,6 +18,7 @@ class InfrastructureConfig():
     llm_provider: str = config.llm_provider
     database_engine: DatabaseEngine = None
     vector_engine: VectorDBInterface = None
+    vector_engine_choice: str = None
     graph_engine: GraphDBType = None
     llm_engine: LLMInterface = None
     classification_model = None
@@ -89,6 +90,7 @@ class InfrastructureConfig():
         if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
                 from .databases.vector.weaviate_db import WeaviateAdapter
+                config.load()
 
                 if config.weaviate_url is None and config.weaviate_api_key is None:
                     raise EnvironmentError("Weaviate is not configured!")
@@ -98,7 +100,10 @@ class InfrastructureConfig():
                     config.weaviate_api_key,
                     embedding_engine = self.embedding_engine
                 )
+                self.vector_engine_choice = "weaviate"
             except (EnvironmentError, ModuleNotFoundError):
+                config.load()
+
                 if config.qdrant_url and config.qdrant_api_key:
                     from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
 
@@ -107,8 +112,10 @@ class InfrastructureConfig():
                         qdrant_api_key = config.qdrant_api_key,
                         embedding_engine = self.embedding_engine
                     )
+                    self.vector_engine_choice = "qdrant"
                 else:
                     from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+                    config.load()
                     lance_db_path = self.database_directory_path + "/cognee.lancedb"
                     LocalStorage.ensure_directory_exists(lance_db_path)
 
@@ -117,6 +124,8 @@ class InfrastructureConfig():
                         api_key = None,
                         embedding_engine = self.embedding_engine,
                     )
+                    self.lance_db_path = lance_db_path
+                    self.vector_engine_choice = "lancedb"
 
         if config_entity is not None:
             return getattr(self, config_entity)
@@ -124,6 +133,7 @@ class InfrastructureConfig():
         return {
             "llm_engine": self.llm_engine,
             "vector_engine": self.vector_engine,
+            "vector_engine_choice": self.vector_engine_choice,
             "database_engine": self.database_engine,
             "system_root_directory": self.system_root_directory,
             "data_root_directory": self.data_root_directory,
