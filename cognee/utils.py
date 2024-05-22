@@ -1,5 +1,5 @@
 """ This module contains utility functions for the cognee. """
-
+import logging
 import os
 import uuid
 import datetime
@@ -20,6 +20,8 @@ config.load()
 
 def send_telemetry(event_name: str):
     if os.getenv("TELEMETRY_DISABLED"):
+        print("Telemetry is disabled.")
+        logging.info("Telemetry is disabled.")
         return
 
     env = os.getenv("ENV")

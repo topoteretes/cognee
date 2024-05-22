@@ -1,25 +1,51 @@
 import asyncio
+import os
 from typing import List, Type
 from pydantic import BaseModel
 import instructor
 from tenacity import retry, stop_after_attempt
 from openai import AsyncOpenAI
 import openai
+
+from cognee.config import Config
+from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.shared.data_models import MonitoringTool
 
+config = Config()
+config.load()
+
+if config.monitoring_tool == MonitoringTool.LANGFUSE:
+    from langfuse.openai import AsyncOpenAI, OpenAI
+elif config.monitoring_tool == MonitoringTool.LANGSMITH:
+    from langsmith import wrap_openai
+    from openai import AsyncOpenAI
+    AsyncOpenAI = wrap_openai(AsyncOpenAI())
+else:
+    from openai import AsyncOpenAI, OpenAI
 
 class GenericAPIAdapter(LLMInterface):
-    """Adapter for Ollama's API"""
+    """Adapter for Generic API LLM provider API """
 
     def __init__(self, api_endpoint, api_key: str, model: str):
-        self.aclient =  instructor.patch(
-            AsyncOpenAI(
-                base_url = api_endpoint,
-                api_key = api_key,  # required, but unused
-            ),
-            mode = instructor.Mode.JSON,
-        )
+
+
+        if infrastructure_config.get_config()["llm_provider"] == 'groq':
+            from groq import groq
+            self.aclient = instructor.from_openai(client = groq.Groq(
+                api_key=api_key,
+            ), mode=instructor.Mode.MD_JSON)
+        else:
+            self.aclient = instructor.patch(
+                AsyncOpenAI(
+                    base_url = api_endpoint,
+                    api_key = api_key,  # required, but unused
+                ),
+                mode = instructor.Mode.JSON,
+            )
+
+
         self.model = model
 
     @retry(stop = stop_after_attempt(5))
@@ -75,20 +101,21 @@ class GenericAPIAdapter(LLMInterface):
 
         return embeddings
 
-    @retry(stop=stop_after_attempt(5))
-    async def acreate_structured_output(self, text_input: str, system_prompt: str,
-                                        response_model: Type[BaseModel]) -> BaseModel:
+    @retry(stop = stop_after_attempt(5))
+    async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
+
         return await self.aclient.chat.completions.create(
-            model=self.model,
-            messages=[
+            model = self.model,
+            messages = [
                 {
                     "role": "user",
                     "content": f"""Use the given format to
-                    extract information from the following input: {text_input}. {system_prompt} """,
-                }
+                    extract information from the following input: {text_input}. """,
+                },
+                {"role": "system", "content": system_prompt},
             ],
-            response_model=response_model,
+            response_model = response_model,
         )
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:

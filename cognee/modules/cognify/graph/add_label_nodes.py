@@ -61,8 +61,8 @@ async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]
 
     try:
         await vector_client.create_collection(parent_node_id, payload_schema = PayloadSchema)
-    except Exception:
+    except Exception as e:
         # It's ok if the collection already exists.
-        pass
+        print(e)
 
     await vector_client.create_data_points(parent_node_id, keyword_data_points)

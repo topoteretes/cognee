@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
 from cognee.root_dir import get_absolute_path
-from cognee.shared.data_models import ChunkStrategy
+from cognee.shared.data_models import ChunkStrategy, DefaultGraphModel
 
 base_dir = Path(__file__).resolve().parent.parent
 # Load the .env file from the base directory
@@ -51,18 +51,20 @@ class Config:
 
     # Model parameters
     llm_provider: str = os.getenv("LLM_PROVIDER","openai") #openai, or custom or ollama
-    custom_model: str = os.getenv("CUSTOM_LLM_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1") #"mistralai/Mixtral-8x7B-Instruct-v0.1"
+    custom_model: str = os.getenv("CUSTOM_LLM_MODEL", "llama3-70b-8192") #"mistralai/Mixtral-8x7B-Instruct-v0.1"
     custom_endpoint: str = os.getenv("CUSTOM_ENDPOINT", "https://api.endpoints.anyscale.com/v1") #"https://api.endpoints.anyscale.com/v1" # pass claude endpoint
     custom_key: Optional[str] = os.getenv("CUSTOM_LLM_API_KEY")
     ollama_endpoint: str = os.getenv("CUSTOM_OLLAMA_ENDPOINT", "http://localhost:11434/v1") #"http://localhost:11434/v1"
     ollama_key: Optional[str] = "ollama"
     ollama_model: str = os.getenv("CUSTOM_OLLAMA_MODEL", "mistral:instruct") #"mistral:instruct"
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4-1106-preview" ) #"gpt-4-1106-preview"
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o" ) #"gpt-4o"
     model_endpoint: str = "openai"
     openai_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
     openai_embedding_model = "text-embedding-3-large"
     openai_embedding_dimensions = 3072
+    litellm_embedding_model = "text-embedding-3-large"
+    litellm_embedding_dimensions = 3072
 
     graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
@@ -74,6 +76,13 @@ class Config:
 
     # Database parameters
     graph_database_provider: str = os.getenv("GRAPH_DB_PROVIDER", "NETWORKX")
+    graph_topology:str = DefaultGraphModel
+    cognitive_layers_limit: int = 2
+
+    from cognee.shared.data_models import MonitoringTool
+
+    # Monitoring tool
+    monitoring_tool: str = os.getenv("MONITORING_TOOL", MonitoringTool.LANGFUSE)
 
     if (
         os.getenv("ENV") == "prod"

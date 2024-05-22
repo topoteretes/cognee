@@ -29,5 +29,7 @@ def fix_layer_name(layer_name):
 
 
 def generate_cognitive_layer_id(layer_id: str) -> str:
+
     layer = f"COGNITIVE_LAYER__{layer_id.upper().replace(' ', '_')}".replace("'", "").replace("/", "_")
     return fix_layer_name(layer)
+

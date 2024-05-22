@@ -22,7 +22,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, infrastructur
 
     if node_id is None:
         return {}
-
+    from cognee.infrastructure import infrastructure_config
     if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
         if node_id not in graph:
             return {}

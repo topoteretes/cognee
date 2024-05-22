@@ -7,9 +7,9 @@ from pydantic import BaseModel, Field
 class Node(BaseModel):
     """Node in a knowledge graph."""
     id: str
-    entity_name: str
-    entity_type: str
-    entity_description: str
+    name: str
+    type: str
+    description: str
 
 class Edge(BaseModel):
     """Edge in a knowledge graph."""
@@ -26,8 +26,6 @@ class GraphQLQuery(BaseModel):
     """GraphQL query."""
     query: str
 
-
-
 class Answer(BaseModel):
     """Answer."""
     answer: str
@@ -36,12 +34,12 @@ class ChunkStrategy(Enum):
     EXACT = "exact"
     PARAGRAPH = "paragraph"
     SENTENCE = "sentence"
+    CODE    = "code"
 
 class MemorySummary(BaseModel):
     """ Memory summary. """
     nodes: List[Node] = Field(..., default_factory=list)
     edges: List[Edge] = Field(..., default_factory=list)
-
 
 class TextSubclass(str, Enum):
     ARTICLES = "Articles, essays, and reports"
@@ -106,7 +104,6 @@ class ImageSubclass(str, Enum):
     ARTWORK = "Artwork and paintings"
     SCREENSHOTS = "Screenshots and graphical user interfaces"
     OTHER_IMAGES = "Other types of images"
-
 
 class VideoSubclass(str, Enum):
     MOVIES = "Movies and short films"
@@ -183,7 +180,6 @@ class DefaultContentPrediction(BaseModel):
         ProceduralContent,
     ]
 
-
 class SummarizedContent(BaseModel):
     """Class for a single class label summary and description."""
     summary: str
@@ -192,7 +188,6 @@ class SummarizedContent(BaseModel):
 class LabeledContent(BaseModel):
     """Class for a single class label summary."""
     content_labels: str
-
 
 
 class CognitiveLayerSubgroup(BaseModel):
@@ -250,3 +245,17 @@ class DefaultGraphModel(BaseModel):
     documents: List[Document] = []
     default_fields: Optional[Dict[str, Any]] = {}
     default_relationship: Relationship = Relationship(type = "has_properties")
+
+
+class ResponseSummaryModel(BaseModel):
+    """ Response summary model and existing document id """
+    document_id: str
+    response_summary: str
+
+
+class MonitoringTool(str, Enum):
+    """ Monitoring tools """
+    LANGFUSE = "langfuse"
+    LLMLITE = "llmlite"
+    LANGSMITH = "langsmith"
+

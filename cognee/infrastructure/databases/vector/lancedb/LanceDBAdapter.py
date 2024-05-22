@@ -37,10 +37,11 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
         data_point_types = get_type_hints(DataPoint)
+        vector_size = self.embedding_engine.get_vector_size()
 
         class LanceDataPoint(LanceModel):
             id: data_point_types["id"] = Field(...)
-            vector: Vector(self.embedding_engine.get_vector_size())
+            vector: Vector(vector_size)
             payload: payload_schema
 
         if not await self.collection_exists(collection_name):
@@ -68,10 +69,11 @@ class LanceDBAdapter(VectorDBInterface):
 
         IdType = TypeVar("IdType")
         PayloadSchema = TypeVar("PayloadSchema")
+        vector_size = self.embedding_engine.get_vector_size()
 
         class LanceDataPoint(LanceModel, Generic[IdType, PayloadSchema]):
             id: IdType
-            vector: Vector(self.embedding_engine.get_vector_size())
+            vector: Vector(vector_size)
             payload: PayloadSchema
 
         lance_data_points = [

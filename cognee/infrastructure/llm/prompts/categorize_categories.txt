@@ -1,0 +1,2 @@
+Chose the summary that is the most relevant to the query`{{ query }}`
+Here are the categories:`{{ categories }}`
