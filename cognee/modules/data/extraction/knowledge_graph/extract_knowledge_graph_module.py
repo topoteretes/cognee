@@ -29,8 +29,8 @@ class GraphFromText(dspy.Signature):
 
 
 def are_all_nodes_and_edges_valid(graph: KnowledgeGraph) -> bool:
-    return all([getattr(node, "entity_type", "").strip() != "" for node in graph.nodes]) and \
-        all([getattr(node, "entity_name", "").strip() != "" for node in graph.nodes]) and \
+    return all([getattr(node, "type", "").strip() != "" for node in graph.nodes]) and \
+        all([getattr(node, "name", "").strip() != "" for node in graph.nodes]) and \
         all([getattr(edge, "relationship_name", "").strip() != "" for edge in graph.edges])
 
 def is_node_connected(node: Node, edges: List[Edge]) -> bool:
@@ -41,7 +41,7 @@ def are_all_nodes_connected(graph: KnowledgeGraph) -> bool:
 
 
 class ExtractKnowledgeGraph(dspy.Module):
-    def __init__(self, lm = dspy.OpenAI(model = config.openai_model, api_key = config.openai_key, model_type = "chat", max_tokens = 4096)):
+    def __init__(self, lm = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)):
         super().__init__()
         self.lm = lm
         dspy.settings.configure(lm=self.lm)
@@ -50,13 +50,13 @@ class ExtractKnowledgeGraph(dspy.Module):
 
     def forward(self, context: str, question: str):
         context = remove_stop_words(context)
-        context = trim_text_to_max_tokens(context, 1500, config.openai_model)
+        context = trim_text_to_max_tokens(context, 1500, config.llm_model)
       
         with dspy.context(lm = self.lm):
             graph = self.generate_graph(text = context).graph
 
             not_valid_nodes_or_edges_message = """
-                All nodes must contain "entity_name".
+                All nodes must contain "name".
                 All edges must contain "relationship_name".
                 Please add mandatory fields to nodes and edges."""
 
@@ -79,7 +79,7 @@ def remove_stop_words(text):
 
 #
 # if __name__ == "__main__":
-#     gpt_4_turbo = dspy.OpenAI(model="gpt-4", max_tokens=4000, api_key=config.openai_key, model_type="chat")
+#     gpt_4_turbo = dspy.OpenAI(model="gpt-4", max_tokens=4000, api_key=config.llm_api_key, model_type="chat")
 #     dspy.settings.configure(lm=gpt_4_turbo)
 
 

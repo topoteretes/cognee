@@ -26,29 +26,29 @@ def create_quantization_config(quantization_config: Dict):
     return None
 
 class QDrantAdapter(VectorDBInterface):
-    qdrant_url: str = None
+    name = "Qdrant"
+    url: str = None
+    api_key: str = None
     qdrant_path: str = None
-    qdrant_api_key: str = None
 
-    def __init__(self, qdrant_url, qdrant_api_key, embedding_engine: EmbeddingEngine, qdrant_path = None):
+    def __init__(self, url, api_key, embedding_engine: EmbeddingEngine, qdrant_path = None):
         self.embedding_engine = embedding_engine
 
         if qdrant_path is not None:
             self.qdrant_path = qdrant_path
         else:
-            self.qdrant_url = qdrant_url
-
-        self.qdrant_api_key = qdrant_api_key
+            self.url = url
+            self.api_key = api_key
 
     def get_qdrant_client(self) -> AsyncQdrantClient:
         if self.qdrant_path is not None:
             return AsyncQdrantClient(
                 path = self.qdrant_path, port=6333
             )
-        elif self.qdrant_url is not None:
+        elif self.url is not None:
             return AsyncQdrantClient(
-                url = self.qdrant_url,
-                api_key = self.qdrant_api_key,
+                url = self.url,
+                api_key = self.api_key,
                 port = 6333
             )
 

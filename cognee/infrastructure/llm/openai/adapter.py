@@ -2,19 +2,37 @@ import asyncio
 from typing import List, Type
 import openai
 import instructor
-from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt
+
+from cognee.config import Config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.shared.data_models import MonitoringTool
+
+config = Config()
+config.load()
+
+if config.monitoring_tool == MonitoringTool.LANGFUSE:
+    from langfuse.openai import AsyncOpenAI, OpenAI
+elif config.monitoring_tool == MonitoringTool.LANGSMITH:
+    from langsmith import wrap_openai
+    from openai import AsyncOpenAI
+    AsyncOpenAI = wrap_openai(AsyncOpenAI())
+else:
+    from openai import AsyncOpenAI, OpenAI
 
 class OpenAIAdapter(LLMInterface):
+    name = "OpenAI"
+    model: str
+    api_key: str
+  
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
     def __init__(self, api_key: str, model:str):
-        openai.api_key = api_key
-        self.aclient = instructor.from_openai(AsyncOpenAI())
-        self.client = instructor.from_openai(OpenAI())
+        self.aclient = instructor.from_openai(AsyncOpenAI(api_key = api_key))
+        self.client = instructor.from_openai(OpenAI(api_key = api_key))
         self.model = model
+        self.api_key = api_key
 
     @retry(stop = stop_after_attempt(5))
     def completions_with_backoff(self, **kwargs):

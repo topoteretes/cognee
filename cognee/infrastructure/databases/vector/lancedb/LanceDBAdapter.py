@@ -1,6 +1,5 @@
 from typing import List, Optional, get_type_hints, Generic, TypeVar
 import asyncio
-from pydantic import BaseModel, Field
 import lancedb
 from lancedb.pydantic import Vector, LanceModel
 from cognee.infrastructure.files.storage import LocalStorage
@@ -9,21 +8,25 @@ from ..vector_db_interface import VectorDBInterface, DataPoint
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
 class LanceDBAdapter(VectorDBInterface):
+    name = "LanceDB"
+    url: str
+    api_key: str
     connection: lancedb.AsyncConnection = None
+
 
     def __init__(
         self,
-        uri: Optional[str],
+        url: Optional[str],
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
-        self.uri = uri
+        self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
 
     async def get_connection(self):
         if self.connection is None:
-            self.connection = await lancedb.connect_async(self.uri, api_key = self.api_key)
+            self.connection = await lancedb.connect_async(self.url, api_key = self.api_key)
 
         return self.connection
 
@@ -35,12 +38,13 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
-    async def create_collection(self, collection_name: str, payload_schema: BaseModel):
+    async def create_collection(self, collection_name: str, payload_schema = None):
         data_point_types = get_type_hints(DataPoint)
+        vector_size = self.embedding_engine.get_vector_size()
 
         class LanceDataPoint(LanceModel):
-            id: data_point_types["id"] = Field(...)
-            vector: Vector(self.embedding_engine.get_vector_size())
+            id: data_point_types["id"]
+            vector: Vector(vector_size)
             payload: payload_schema
 
         if not await self.collection_exists(collection_name):
@@ -68,10 +72,11 @@ class LanceDBAdapter(VectorDBInterface):
 
         IdType = TypeVar("IdType")
         PayloadSchema = TypeVar("PayloadSchema")
+        vector_size = self.embedding_engine.get_vector_size()
 
         class LanceDataPoint(LanceModel, Generic[IdType, PayloadSchema]):
             id: IdType
-            vector: Vector(self.embedding_engine.get_vector_size())
+            vector: Vector(vector_size)
             payload: PayloadSchema
 
         lance_data_points = [
@@ -126,7 +131,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection_name: str,
         query_texts: List[str],
         limit: int = None,
-        with_vector: bool = False,
+        with_vectors: bool = False,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -135,11 +140,11 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name = collection_name,
                 query_vector = query_vector,
                 limit = limit,
-                with_vector = with_vector,
+                with_vector = with_vectors,
             ) for query_vector in query_vectors]
         )
 
     async def prune(self):
         # Clean up the database if it was set up as temporary
-        if self.uri.startswith("/"):
-            LocalStorage.remove_all(self.uri) # Remove the temporary directory and files inside
+        if self.url.startswith("/"):
+            LocalStorage.remove_all(self.url) # Remove the temporary directory and files inside

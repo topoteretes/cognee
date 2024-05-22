@@ -3,6 +3,8 @@ import asyncio
 from enum import Enum
 from typing import Dict, Any, Callable, List
 from pydantic import BaseModel, field_validator
+
+from cognee.modules.search.graph import search_cypher
 from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
@@ -18,6 +20,10 @@ class SearchType(Enum):
     CATEGORIES = 'CATEGORIES'
     NEIGHBOR = 'NEIGHBOR'
     SUMMARY = 'SUMMARY'
+    SUMMARY_CLASSIFICATION = 'SUMMARY_CLASSIFICATION'
+    NODE_CLASSIFICATION = 'NODE_CLASSIFICATION'
+    DOCUMENT_CLASSIFICATION = 'DOCUMENT_CLASSIFICATION',
+    CYPHER = 'CYPHER'
 
     @staticmethod
     def from_str(name: str):
@@ -51,7 +57,9 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
         SearchType.SIMILARITY: search_similarity,
         SearchType.CATEGORIES: search_categories,
         SearchType.NEIGHBOR: search_neighbour,
-        SearchType.SUMMARY: search_summary
+        SearchType.SUMMARY: search_summary,
+        SearchType.CYPHER: search_cypher
+
     }
 
     results = []

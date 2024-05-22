@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 
 import instructor
@@ -6,8 +7,11 @@ from fastembed import TextEmbedding
 
 from cognee.config import Config
 from cognee.root_dir import get_absolute_path
-from .EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from litellm import aembedding
+import litellm
 
+litellm.set_verbose = True
 config = Config()
 config.load()
 
@@ -22,19 +26,39 @@ class DefaultEmbeddingEngine(EmbeddingEngine):
         return config.embedding_dimensions
 
 
-class OpenAIEmbeddingEngine(EmbeddingEngine):
-    async def embed_text(self, text: List[str]) -> List[float]:
+class LiteLLMEmbeddingEngine(EmbeddingEngine):
+    import asyncio
+    from typing import List
 
-        OPENAI_API_KEY = config.openai_key
+    async def embed_text(self, text: List[str]) -> List[List[float]]:
+        async def get_embedding(text_):
+            response = await aembedding(config.litellm_embedding_model, input=text_)
+            return response.data[0]['embedding']
 
-        aclient = instructor.patch(AsyncOpenAI())
-        text = text.replace("\n", " ")
-        response = await aclient.embeddings.create(input = text, model = config.openai_embedding_model)
-        embedding = response.data[0].embedding
-        # embeddings_list = list(map(lambda embedding: embedding.tolist(), embedding_model.embed(text)))
-        return embedding
+        tasks = [get_embedding(text_) for text_ in text]
+        result = await asyncio.gather(*tasks)
+        return result
+
+        # embedding = response.data[0].embedding
+        # # embeddings_list = list(map(lambda embedding: embedding.tolist(), embedding_model.embed(text)))
+        # print("response", type(response.data[0]['embedding']))
+        # print("response", response.data[0])
+        # return [response.data[0]['embedding']]
 
 
     def get_vector_size(self) -> int:
-        return config.openai_embedding_dimensions
+        return config.litellm_embedding_dimensions
+
+
+if __name__ == "__main__":
+    async def gg():
+        openai_embedding_engine = LiteLLMEmbeddingEngine()
+        # print(openai_embedding_engine.embed_text(["Hello, how are you?"]))
+        # print(openai_embedding_engine.get_vector_size())
+        # default_embedding_engine = DefaultEmbeddingEngine()
+        sds = await openai_embedding_engine.embed_text(["Hello, sadasdas are you?"])
+        print(sds)
+        # print(default_embedding_engine.get_vector_size())
+
+    asyncio.run(gg())
 

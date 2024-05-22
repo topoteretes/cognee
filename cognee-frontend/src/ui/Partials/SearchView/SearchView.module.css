@@ -1,0 +1,41 @@
+
+.searchViewContainer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: 30%;
+  background: var(--global-background-default);
+  border-radius: var(--border-radius);
+  border: 1px solid white;
+  z-index: 10;
+}
+
+.searchContainer {
+  flex: 1;
+  padding: 16px;
+  border-top: 2px solid white;
+  overflow: hidden;
+}
+
+.messagesContainer {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.messages {
+  flex: 1;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  overflow-y: auto;
+}
+
+.message {
+  padding: 16px;
+  border-radius: var(--border-radius);
+}
+
+.userMessage {
+  align-self: flex-end;
+  background-color: #5858ff;
+}

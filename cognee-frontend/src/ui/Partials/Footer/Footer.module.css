@@ -1,0 +1,16 @@
+.footer {
+  padding: 24px 0;
+}
+
+.leftSide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rightSide {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 24px;
+}

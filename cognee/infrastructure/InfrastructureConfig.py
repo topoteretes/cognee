@@ -3,7 +3,7 @@ from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
 from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
-from .llm.openai.adapter import OpenAIAdapter
+from .llm.get_llm_client import get_llm_client
 from .files.storage import LocalStorage
 from .data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
@@ -18,6 +18,7 @@ class InfrastructureConfig():
     llm_provider: str = config.llm_provider
     database_engine: DatabaseEngine = None
     vector_engine: VectorDBInterface = None
+    vector_engine_choice: str = None
     graph_engine: GraphDBType = None
     llm_engine: LLMInterface = None
     classification_model = None
@@ -32,6 +33,12 @@ class InfrastructureConfig():
     database_file_path: str = None
     chunk_strategy = config.chunk_strategy
     chunk_engine = None
+    graph_topology = config.graph_topology
+    monitoring_tool = config.monitoring_tool
+    llm_provider: str = None
+    llm_model: str = None
+    llm_endpoint: str = None
+    llm_api_key: str = None
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
@@ -77,10 +84,16 @@ class InfrastructureConfig():
         if self.chunk_engine is None:
             self.chunk_engine = DefaultChunkEngine()
 
+        if self.graph_topology is None:
+            self.graph_topology = config.graph_topology
+
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
-            self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
+            self.llm_engine = get_llm_client()
 
         if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
+            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+
+        if self.database_directory_path is None:
             self.database_directory_path = self.system_root_directory + "/" + config.db_path
 
         if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
@@ -89,6 +102,7 @@ class InfrastructureConfig():
         if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
                 from .databases.vector.weaviate_db import WeaviateAdapter
+                config.load()
 
                 if config.weaviate_url is None and config.weaviate_api_key is None:
                     raise EnvironmentError("Weaviate is not configured!")
@@ -98,25 +112,31 @@ class InfrastructureConfig():
                     config.weaviate_api_key,
                     embedding_engine = self.embedding_engine
                 )
+                self.vector_engine_choice = "weaviate"
             except (EnvironmentError, ModuleNotFoundError):
+                config.load()
+
                 if config.qdrant_url and config.qdrant_api_key:
                     from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
 
                     self.vector_engine = QDrantAdapter(
-                        qdrant_url = config.qdrant_url,
-                        qdrant_api_key = config.qdrant_api_key,
+                        url = config.qdrant_url,
+                        api_key = config.qdrant_api_key,
                         embedding_engine = self.embedding_engine
                     )
+                    self.vector_engine_choice = "qdrant"
                 else:
                     from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+                    config.load()
                     lance_db_path = self.database_directory_path + "/cognee.lancedb"
                     LocalStorage.ensure_directory_exists(lance_db_path)
 
                     self.vector_engine = LanceDBAdapter(
-                        uri = lance_db_path,
+                        url = lance_db_path,
                         api_key = None,
                         embedding_engine = self.embedding_engine,
                     )
+                    self.vector_engine_choice = "lancedb"
 
         if config_entity is not None:
             return getattr(self, config_entity)
@@ -124,6 +144,7 @@ class InfrastructureConfig():
         return {
             "llm_engine": self.llm_engine,
             "vector_engine": self.vector_engine,
+            "vector_engine_choice": self.vector_engine_choice,
             "database_engine": self.database_engine,
             "system_root_directory": self.system_root_directory,
             "data_root_directory": self.data_root_directory,
@@ -141,6 +162,7 @@ class InfrastructureConfig():
             "database_path": self.database_file_path,
             "chunk_strategy": self.chunk_strategy,
             "chunk_engine": self.chunk_engine,
+            "graph_topology": self.graph_topology
         }
 
     def set_config(self, new_config: dict):
@@ -194,5 +216,8 @@ class InfrastructureConfig():
 
         if "chunk_engine" in new_config:
             self.chunk_engine = new_config["chunk_engine"]
+
+        if "graph_topology" in new_config:
+            self.graph_topology = new_config["graph_topology"]
 
 infrastructure_config = InfrastructureConfig()

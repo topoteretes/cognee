@@ -1,11 +1,13 @@
 """ Fetches the context of a given node in the graph"""
 from typing import Union, Dict
 
+from neo4j import AsyncSession
+
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 import networkx as nx
 from cognee.shared.data_models import GraphDBType
 
-async def search_neighbour(graph: Union[nx.Graph, any], id: str, infrastructure_config: Dict,
+async def search_neighbour(graph: Union[nx.Graph, any], query: str,
                            other_param: dict = None):
     """
     Search for nodes that share the same 'layer_uuid' as the specified node and return their descriptions.
@@ -20,26 +22,22 @@ async def search_neighbour(graph: Union[nx.Graph, any], id: str, infrastructure_
     Returns:
     - List[str]: A list of 'description' attributes of nodes that share the same 'layer_uuid' with the specified node.
     """
-    node_id = other_param.get('node_id') if other_param else None
+    from cognee.infrastructure import infrastructure_config
+    node_id = other_param.get('node_id') if other_param else query
 
     if node_id is None:
         return []
 
     if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
-        if isinstance(graph, nx.Graph):
-            if node_id not in graph:
-                return []
+        relevant_context = []
+        target_layer_uuid = graph.nodes[node_id].get('layer_uuid')
 
-            relevant_context = []
-            target_layer_uuid = graph.nodes[node_id].get('layer_uuid')
+        for n, attr in graph.nodes(data=True):
+            if attr.get('layer_uuid') == target_layer_uuid and 'description' in attr:
+                relevant_context.append(attr['description'])
 
-            for n, attr in graph.nodes(data=True):
-                if attr.get('layer_uuid') == target_layer_uuid and 'description' in attr:
-                    relevant_context.append(attr['description'])
+        return relevant_context
 
-            return relevant_context
-        else:
-            raise ValueError("Graph object does not match the specified graph engine type in the configuration.")
 
     elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
         if isinstance(graph, AsyncSession):

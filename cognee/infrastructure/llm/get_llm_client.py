@@ -1,9 +1,8 @@
 """Get the LLM client."""
 from enum import Enum
-from cognee.config import Config
-from .anthropic.adapter import AnthropicAdapter
-from .openai.adapter import OpenAIAdapter
-from .generic_llm_api.adapter import GenericAPIAdapter
+import json
+import logging
+from cognee.infrastructure.llm import llm_config
 
 # Define an Enum for LLM Providers
 class LLMProvider(Enum):
@@ -12,20 +11,22 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
 
-config = Config()
-config.load()
-
 def get_llm_client():
     """Get the LLM client based on the configuration using Enums."""
-    provider = LLMProvider(config.llm_provider)
+    logging.error(json.dumps(llm_config.to_dict()))
+    provider = LLMProvider(llm_config.llm_provider)
 
     if provider == LLMProvider.OPENAI:
-        return OpenAIAdapter(config.openai_key, config.openai_model)
+        from .openai.adapter import OpenAIAdapter
+        return OpenAIAdapter(llm_config.llm_api_key, llm_config.llm_model)
     elif provider == LLMProvider.OLLAMA:
-        return GenericAPIAdapter(config.ollama_endpoint, config.ollama_key, config.ollama_model)
+        from .generic_llm_api.adapter import GenericAPIAdapter
+        return GenericAPIAdapter(llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Ollama")
     elif provider == LLMProvider.ANTHROPIC:
-        return AnthropicAdapter(config.custom_model)
+        from .anthropic.adapter import AnthropicAdapter
+        return AnthropicAdapter(llm_config.llm_model)
     elif provider == LLMProvider.CUSTOM:
-        return GenericAPIAdapter(config.custom_endpoint, config.custom_key, config.custom_model)
+        from .generic_llm_api.adapter import GenericAPIAdapter
+        return GenericAPIAdapter(llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Custom")
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")

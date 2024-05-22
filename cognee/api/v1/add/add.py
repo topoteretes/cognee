@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Union, BinaryIO
 from os import path
 import asyncio
 import dlt
@@ -10,39 +10,40 @@ from cognee.modules.discovery import discover_directory_datasets
 from cognee.utils import send_telemetry
 
 
-async def add(data_path: Union[str, List[str]], dataset_name: str = None):
-    if isinstance(data_path, str):
-        # data_path is a data directory path
-        if "data://" in data_path:
-            return await add_data_directory(data_path.replace("data://", ""), dataset_name)
-        # data_path is a file path
-        if "file://" in data_path:
-            return await add([data_path], dataset_name)
-        # data_path is a text
+async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = None):
+    if isinstance(data, str):
+        # data is a data directory path
+        if "data://" in data:
+            return await add_data_directory(data.replace("data://", ""), dataset_name)
+        # data is a file path
+        if "file://" in data:
+            return await add([data], dataset_name)
+        # data is a text
         else:
-            file_path = save_text_to_file(data_path, dataset_name)
+            file_path = save_data_to_file(data, dataset_name)
             return await add([file_path], dataset_name)
 
-    # data_path is a list of file paths or texts
+    if hasattr(data, "file"):
+        file_path = save_data_to_file(data.file, dataset_name, filename = data.filename)
+        return await add([file_path], dataset_name)
+
+    # data is a list of file paths or texts
     file_paths = []
-    texts = []
 
-    for file_path in data_path:
-        if file_path.startswith("/") or file_path.startswith("file://"):
-            file_paths.append(file_path)
-        else:
-            texts.append(file_path)
-
-    awaitables = []
-
-    if len(texts) > 0:
-        for text in texts:
-            file_paths.append(save_text_to_file(text, dataset_name))
+    for data_item in data:
+        if hasattr(data_item, "file"):
+            file_paths.append(save_data_to_file(data_item, dataset_name, filename = data_item.filename))
+        elif isinstance(data_item, str) and (
+            data_item.startswith("/") or data_item.startswith("file://")
+        ):
+            file_paths.append(data_item)
+        elif isinstance(data_item, str):
+            file_paths.append(save_data_to_file(data_item, dataset_name))
 
     if len(file_paths) > 0:
-        awaitables.append(add_files(file_paths, dataset_name))
+        return await add_files(file_paths, dataset_name)
 
-    return await asyncio.gather(*awaitables)
+    return []
 
 async def add_files(file_paths: List[str], dataset_name: str):
     infra_config = infrastructure_config.get_config()
@@ -118,16 +119,17 @@ async def add_data_directory(data_path: str, dataset_name: str = None):
 
     return await asyncio.gather(*results)
 
-def save_text_to_file(text: str, dataset_name: str):
+def save_data_to_file(data: Union[str, BinaryIO], dataset_name: str, filename: str = None):
     data_directory_path = infrastructure_config.get_config()["data_root_directory"]
 
-    classified_data = ingestion.classify(text)
-    data_id = ingestion.identify(classified_data)
+    classified_data = ingestion.classify(data, filename)
+    # data_id = ingestion.identify(classified_data)
 
     storage_path = data_directory_path + "/" + dataset_name.replace(".", "/")
     LocalStorage.ensure_directory_exists(storage_path)
 
-    text_file_name = data_id + ".txt"
-    LocalStorage(storage_path).store(text_file_name, classified_data.get_data())
+    file_metadata = classified_data.get_metadata()
+    file_name = file_metadata["name"]
+    LocalStorage(storage_path).store(file_name, classified_data.get_data())
 
-    return "file://" + storage_path + "/" + text_file_name
+    return "file://" + storage_path + "/" + file_name

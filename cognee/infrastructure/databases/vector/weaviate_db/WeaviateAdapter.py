@@ -1,7 +1,6 @@
 import asyncio
 from uuid import UUID
 from typing import List, Optional
-from multiprocessing import Pool
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
 from ..models.ScoredResult import ScoredResult
@@ -9,19 +8,24 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
 
 class WeaviateAdapter(VectorDBInterface):
-    async_pool: Pool = None
+    name = "Weaviate"
+    url: str
+    api_key: str
     embedding_engine: EmbeddingEngine = None
 
     def __init__(self, url: str, api_key: str, embedding_engine: EmbeddingEngine):
         import weaviate
         import weaviate.classes as wvc
-      
+
+        self.url = url
+        self.api_key = api_key
+
         self.embedding_engine = embedding_engine
 
         self.client = weaviate.connect_to_wcs(
-            cluster_url=url,
-            auth_credentials=weaviate.auth.AuthApiKey(api_key),
-            additional_config=wvc.init.AdditionalConfig(timeout=wvc.init.Timeout(init=30))
+            cluster_url = url,
+            auth_credentials = weaviate.auth.AuthApiKey(api_key),
+            additional_config = wvc.init.AdditionalConfig(timeout = wvc.init.Timeout(init=30))
         )
 
     async def embed_data(self, data: List[str]) -> List[float]:

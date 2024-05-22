@@ -1,3 +1,4 @@
+from duckdb import CatalogException
 from cognee.modules.discovery import discover_directory_datasets
 from cognee.infrastructure import infrastructure_config
 
@@ -12,6 +13,27 @@ class datasets():
         return list(discover_directory_datasets(directory_path).keys())
 
     @staticmethod
-    def query_data(dataset_name: str):
+    def list_data(dataset_name: str):
         db = infrastructure_config.get_config("database_engine")
-        return db.get_files_metadata(dataset_name)
+        try:
+            return db.get_files_metadata(dataset_name)
+        except CatalogException:
+            return None
+
+    @staticmethod
+    def get_status(dataset_ids: list[str]) -> dict:
+        db = infrastructure_config.get_config("database_engine")
+        try:
+            return db.get_data("cognee_task_status", {
+              "data_id": dataset_ids
+            })
+        except CatalogException:
+            return {}
+
+    @staticmethod
+    def delete_dataset(dataset_id: str):
+        db = infrastructure_config.get_config("database_engine")
+        try:
+            return db.delete_table(dataset_id)
+        except CatalogException:
+            return {}

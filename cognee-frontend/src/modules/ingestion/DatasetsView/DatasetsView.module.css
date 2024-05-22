@@ -1,0 +1,6 @@
+
+.datasetMenu {
+  background-color: var(--global-background-default);
+  border-radius: var(--border-radius);
+  padding: 4px;
+}
