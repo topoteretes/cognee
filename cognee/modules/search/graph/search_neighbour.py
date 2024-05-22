@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.graph.get_graph_client import get_graph_cli
 import networkx as nx
 from cognee.shared.data_models import GraphDBType
 
-async def search_neighbour(graph: Union[nx.Graph, any], node_id: str,
+async def search_neighbour(graph: Union[nx.Graph, any], query: str,
                            other_param: dict = None):
     """
     Search for nodes that share the same 'layer_uuid' as the specified node and return their descriptions.
@@ -23,8 +23,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], node_id: str,
     - List[str]: A list of 'description' attributes of nodes that share the same 'layer_uuid' with the specified node.
     """
     from cognee.infrastructure import infrastructure_config
-    if node_id is None:
-        node_id = other_param.get('node_id') if other_param else None
+    node_id = other_param.get('node_id') if other_param else query
 
     if node_id is None:
         return []

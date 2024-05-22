@@ -8,7 +8,9 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 
 
 class AnthropicAdapter(LLMInterface):
-    """Adapter for Ollama's API"""
+    """Adapter for Anthropic API"""
+    name = "Anthropic"
+    model: str
 
     def __init__(self, model: str = None):
         self.aclient = instructor.patch(

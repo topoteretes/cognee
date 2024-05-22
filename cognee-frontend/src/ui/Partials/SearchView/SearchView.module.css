@@ -15,18 +15,24 @@
   flex: 1;
   padding: 16px;
   border-top: 2px solid white;
+  overflow: hidden;
+}
+
+.messagesContainer {
+  flex: 1;
+  overflow-y: auto;
 }
 
 .messages {
   flex: 1;
   padding-top: 24px;
   padding-bottom: 24px;
+  overflow-y: auto;
 }
 
 .message {
   padding: 16px;
   border-radius: var(--border-radius);
-  width: max-content;
 }
 
 .userMessage {

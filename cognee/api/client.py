@@ -3,6 +3,7 @@ import os
 
 import aiohttp
 import uvicorn
+import json
 
 import logging
 # Set up logging
@@ -16,7 +17,7 @@ from cognee.config import Config
 config = Config()
 config.load()
 
-from typing import Dict, Any, List, Union, Annotated, Literal
+from typing import Dict, Any, List, Union, Annotated, Literal, Optional
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +26,7 @@ from pydantic import BaseModel
 app = FastAPI(debug=True)
 
 origins = [
+    "http://frontend:3000",
     "http://localhost:3000",
     "http://localhost:3001",
 ]
@@ -220,8 +222,16 @@ async def search(payload: SearchPayload):
     from cognee import search as cognee_search
 
     try:
-        search_type = "SIMILARITY"
-        await cognee_search(search_type, payload.query_params)
+        search_type = payload.query_params["searchType"]
+        params = {
+          "query": payload.query_params["query"],
+        }
+        results = await cognee_search(search_type, params)
+
+        return JSONResponse(
+            status_code = 200,
+            content = json.dumps(results)
+        )
     except Exception as error:
         return JSONResponse(
             status_code = 409,
@@ -236,25 +246,26 @@ async def get_settings():
 
 
 class LLMConfig(BaseModel):
-    openAIApiKey: str
+    provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"]]
+    model: str
+    apiKey: str
 
 class VectorDBConfig(BaseModel):
-    choice: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
+    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
     url: str
     apiKey: str
 
 class SettingsPayload(BaseModel):
-    llm: LLMConfig | None = None
-    vectorDB: VectorDBConfig | None = None
+    llm: Optional[LLMConfig] = None
+    vectorDB: Optional[VectorDBConfig] = None
 
 @app.post("/settings", response_model=dict)
 async def save_config(new_settings: SettingsPayload):
     from cognee.modules.settings import save_llm_config, save_vector_db_config
-
-    if hasattr(new_settings, "llm"):
+    if new_settings.llm is not None:
         await save_llm_config(new_settings.llm)
 
-    if hasattr(new_settings, "vectorDB"):
+    if new_settings.vectorDB is not None:
         await save_vector_db_config(new_settings.vectorDB)
 
     return JSONResponse(

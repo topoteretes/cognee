@@ -1,4 +1,4 @@
-import { CTAButton, CloseIcon, GhostButton, Input, Spacer, Stack, Text } from 'ohmy-ui';
+import { CTAButton, CloseIcon, GhostButton, Input, Spacer, Stack, Text, DropdownSelect } from 'ohmy-ui';
 import styles from './SearchView.module.css';
 import { useCallback, useState } from 'react';
 import { v4 } from 'uuid';
@@ -22,9 +22,26 @@ export default function SearchView({ onClose }: SearchViewProps) {
     setInputValue(event.target.value);
   }, []);
 
+  const searchOptions = [{
+    value: 'SIMILARITY',
+    label: 'Similarity',
+  }, {
+    value: 'NEIGHBOR',
+    label: 'Neighbor',
+  }, {
+    value: 'SUMMARY',
+    label: 'Summary',
+  }, {
+    value: 'ADJACENT',
+    label: 'Adjacent',
+  }, {
+    value: 'CATEGORIES',
+    label: 'Categories',
+  }];
+  const [searchType, setSearchType] = useState(searchOptions[0]);
+
   const handleSearchSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
 
     setMessages((currentMessages) => [
       ...currentMessages,
@@ -43,6 +60,7 @@ export default function SearchView({ onClose }: SearchViewProps) {
       body: JSON.stringify({
         query_params: {
           query: inputValue,
+          searchType: searchType.value,
         },
       }),
     })
@@ -58,8 +76,8 @@ export default function SearchView({ onClose }: SearchViewProps) {
         ]);
         setInputValue('');
       })
-  }, [inputValue]);
-  
+  }, [inputValue, searchType]);
+
   return (
     <Stack className={styles.searchViewContainer}>
       <Stack gap="between" align="center/" orientation="horizontal">
@@ -71,20 +89,27 @@ export default function SearchView({ onClose }: SearchViewProps) {
         </GhostButton>
       </Stack>
       <Stack className={styles.searchContainer}>
-        <Stack gap="2" className={styles.messages} align="end">
-          {messages.map((message) => (
-            <Text
-              key={message.id}
-              className={classNames(styles.message, {
-                [styles.userMessage]: message.user === "user",
-              })}
-            >
-              {message.text}
-            </Text>
-          ))}
-        </Stack>
+        <div className={styles.messagesContainer}>
+          <Stack gap="2" className={styles.messages} align="end">
+            {messages.map((message) => (
+              <Text
+                key={message.id}
+                className={classNames(styles.message, {
+                  [styles.userMessage]: message.user === "user",
+                })}
+              >
+                {message.text}
+              </Text>
+            ))}
+          </Stack>
+        </div>
         <form onSubmit={handleSearchSubmit}>
           <Stack orientation="horizontal" gap="2">
+            <DropdownSelect
+              value={searchType}
+              options={searchOptions}
+              onChange={setSearchType}
+            />
             <Input value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
             <CTAButton type="submit">Search</CTAButton>
           </Stack>

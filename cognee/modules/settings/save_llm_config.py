@@ -1,15 +1,20 @@
-import os
+import json
+import logging
 from pydantic import BaseModel
-from cognee.config import Config
-
-config = Config()
+from cognee.infrastructure.llm import llm_config
+from cognee.infrastructure import infrastructure_config
 
 class LLMConfig(BaseModel):
-    openAIApiKey: str
+    apiKey: str
+    model: str
+    provider: str
 
-async def save_llm_config(llm_config: LLMConfig):
-    if "*" in llm_config.openAIApiKey:
-        return
+async def save_llm_config(new_llm_config: LLMConfig):
+    llm_config.llm_provider = new_llm_config.provider
+    llm_config.llm_model = new_llm_config.model
 
-    os.environ["OPENAI_API_KEY"] = llm_config.openAIApiKey
-    config.load()
+    if "*****" not in new_llm_config.apiKey and len(new_llm_config.apiKey.strip()) > 0:
+        llm_config.llm_api_key = new_llm_config.apiKey
+
+    logging.error(json.dumps(llm_config.to_dict()))
+    infrastructure_config.llm_engine = None

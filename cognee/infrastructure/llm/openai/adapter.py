@@ -23,12 +23,16 @@ else:
     from openai import AsyncOpenAI, OpenAI
 
 class OpenAIAdapter(LLMInterface):
+    name = "OpenAI"
+    model: str
+    api_key: str
+  
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
     def __init__(self, api_key: str, model:str):
-        openai.api_key = api_key
-        self.aclient = instructor.from_openai(AsyncOpenAI())
-        self.client = instructor.from_openai(OpenAI())
+        self.aclient = instructor.from_openai(AsyncOpenAI(api_key = api_key))
+        self.client = instructor.from_openai(OpenAI(api_key = api_key))
         self.model = model
+        self.api_key = api_key
 
     @retry(stop = stop_after_attempt(5))
     def completions_with_backoff(self, **kwargs):

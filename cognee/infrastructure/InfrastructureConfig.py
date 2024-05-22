@@ -3,7 +3,7 @@ from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
 from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
-from .llm.openai.adapter import OpenAIAdapter
+from .llm.get_llm_client import get_llm_client
 from .files.storage import LocalStorage
 from .data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
@@ -35,6 +35,10 @@ class InfrastructureConfig():
     chunk_engine = None
     graph_topology = config.graph_topology
     monitoring_tool = config.monitoring_tool
+    llm_provider: str = None
+    llm_model: str = None
+    llm_endpoint: str = None
+    llm_api_key: str = None
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
@@ -84,7 +88,8 @@ class InfrastructureConfig():
             self.graph_topology = config.graph_topology
 
         if (config_entity is None or config_entity == "llm_engine") and self.llm_engine is None:
-            self.llm_engine = OpenAIAdapter(config.openai_key, config.openai_model)
+            self.llm_engine = get_llm_client()
+
         if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
             self.database_directory_path = self.system_root_directory + "/" + config.db_path
 
@@ -115,8 +120,8 @@ class InfrastructureConfig():
                     from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
 
                     self.vector_engine = QDrantAdapter(
-                        qdrant_url = config.qdrant_url,
-                        qdrant_api_key = config.qdrant_api_key,
+                        url = config.qdrant_url,
+                        api_key = config.qdrant_api_key,
                         embedding_engine = self.embedding_engine
                     )
                     self.vector_engine_choice = "qdrant"
@@ -127,11 +132,10 @@ class InfrastructureConfig():
                     LocalStorage.ensure_directory_exists(lance_db_path)
 
                     self.vector_engine = LanceDBAdapter(
-                        uri = lance_db_path,
+                        url = lance_db_path,
                         api_key = None,
                         embedding_engine = self.embedding_engine,
                     )
-                    self.lance_db_path = lance_db_path
                     self.vector_engine_choice = "lancedb"
 
         if config_entity is not None:

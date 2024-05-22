@@ -73,6 +73,8 @@ function useDatasets() {
 
         if (datasets.length > 0) {
           checkDatasetStatuses(datasets);
+        } else {
+          window.location.href = '/wizard';
         }
       });
   }, [checkDatasetStatuses]);

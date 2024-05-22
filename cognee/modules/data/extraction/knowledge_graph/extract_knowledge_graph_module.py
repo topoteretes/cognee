@@ -41,7 +41,7 @@ def are_all_nodes_connected(graph: KnowledgeGraph) -> bool:
 
 
 class ExtractKnowledgeGraph(dspy.Module):
-    def __init__(self, lm = dspy.OpenAI(model = config.openai_model, api_key = config.openai_key, model_type = "chat", max_tokens = 4096)):
+    def __init__(self, lm = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)):
         super().__init__()
         self.lm = lm
         dspy.settings.configure(lm=self.lm)
@@ -50,7 +50,7 @@ class ExtractKnowledgeGraph(dspy.Module):
 
     def forward(self, context: str, question: str):
         context = remove_stop_words(context)
-        context = trim_text_to_max_tokens(context, 1500, config.openai_model)
+        context = trim_text_to_max_tokens(context, 1500, config.llm_model)
       
         with dspy.context(lm = self.lm):
             graph = self.generate_graph(text = context).graph
@@ -79,7 +79,7 @@ def remove_stop_words(text):
 
 #
 # if __name__ == "__main__":
-#     gpt_4_turbo = dspy.OpenAI(model="gpt-4", max_tokens=4000, api_key=config.openai_key, model_type="chat")
+#     gpt_4_turbo = dspy.OpenAI(model="gpt-4", max_tokens=4000, api_key=config.llm_api_key, model_type="chat")
 #     dspy.settings.configure(lm=gpt_4_turbo)
 
 

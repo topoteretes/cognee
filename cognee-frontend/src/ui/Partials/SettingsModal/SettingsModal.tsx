@@ -7,12 +7,22 @@ interface SelectOption {
 }
 
 export default function SettingsModal({ isOpen = false, onClose = () => {} }) {
-  const [llmConfig, setLLMConfig] = useState<{ openAIApiKey: string }>();
+  const [llmConfig, setLLMConfig] = useState<{
+    apiKey: string;
+    model: SelectOption;
+    models: {
+      openai: SelectOption[];
+      ollama: SelectOption[];
+      anthropic: SelectOption[];
+    };
+    provider: SelectOption;
+    providers: SelectOption[];
+  }>();
   const [vectorDBConfig, setVectorDBConfig] = useState<{
-    choice: SelectOption;
-    options: SelectOption[];
     url: string;
     apiKey: string;
+    provider: SelectOption;
+    options: SelectOption[];
   }>();
 
   const {
@@ -23,10 +33,18 @@ export default function SettingsModal({ isOpen = false, onClose = () => {} }) {
 
   const saveConfig = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const newOpenAIApiKey = event.target.openAIApiKey.value;
-    const newVectorDBChoice = vectorDBConfig?.choice.value;
-    const newVectorDBUrl = event.target.vectorDBUrl.value;
-    const newVectorDBApiKey = event.target.vectorDBApiKey.value;
+
+    const newVectorConfig = {
+      provider: vectorDBConfig?.provider.value,
+      url: event.target.vectorDBUrl.value,
+      apiKey: event.target.vectorDBApiKey.value,
+    };
+
+    const newLLMConfig = {
+      provider: llmConfig?.provider.value,
+      model: llmConfig?.model.value,
+      apiKey: event.target.llmApiKey.value,
+    };
 
     startSaving();
 
@@ -36,14 +54,8 @@ export default function SettingsModal({ isOpen = false, onClose = () => {} }) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        llm: {
-          openAIApiKey: newOpenAIApiKey,
-        },
-        vectorDB: {
-          choice: newVectorDBChoice,
-          url: newVectorDBUrl,
-          apiKey: newVectorDBApiKey,
-        },
+        llm: newLLMConfig,
+        vectorDB: newVectorConfig,
       }),
     })
       .then(() => {
@@ -52,14 +64,40 @@ export default function SettingsModal({ isOpen = false, onClose = () => {} }) {
       .finally(() => stopSaving());
   };
 
-  const handleVectorDBChange = useCallback((newChoice: SelectOption) => {
+  const handleVectorDBChange = useCallback((newVectorDBProvider: SelectOption) => {
     setVectorDBConfig((config) => {
-      if (config?.choice !== newChoice) {
+      if (config?.provider !== newVectorDBProvider) {
         return {
          ...config,
-          choice: newChoice,
+          provider: newVectorDBProvider,
           url: '',
           apiKey: '',
+        };
+      }
+      return config;
+    });
+  }, []);
+
+  const handleLLMProviderChange = useCallback((newLLMProvider: SelectOption) => {
+    setLLMConfig((config) => {
+      if (config?.provider !== newLLMProvider) {
+        return {
+         ...config,
+          provider: newLLMProvider,
+          model: config?.models[newLLMProvider.value][0],
+          apiKey: '',
+        };
+      }
+      return config;
+    });
+  }, []);
+
+  const handleLLMModelChange = useCallback((newLLMModel: SelectOption) => {
+    setLLMConfig((config) => {
+      if (config?.model !== newLLMModel) {
+        return {
+         ...config,
+          model: newLLMModel,
         };
       }
       return config;
@@ -71,6 +109,9 @@ export default function SettingsModal({ isOpen = false, onClose = () => {} }) {
       const response = await fetch('http://0.0.0.0:8000/settings');
       const settings = await response.json();
 
+      if (!settings.llm.model) {
+        settings.llm.model = settings.llm.models[settings.llm.provider.value][0];
+      }
       setLLMConfig(settings.llm);
       setVectorDBConfig(settings.vectorDB);
     };
@@ -79,40 +120,54 @@ export default function SettingsModal({ isOpen = false, onClose = () => {} }) {
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}>
-      <Stack gap="4" orientation="vertical" align="center/">
+      <Stack gap="8" orientation="vertical" align="center/">
         <H2>Settings</H2>
         <form onSubmit={saveConfig} style={{ width: '100%' }}>
-          <Stack gap="2" orientation="vertical">
-            <H3>LLM Config</H3>
-            <FormGroup orientation="vertical" align="center/" gap="1">
-              <FormLabel>OpenAI API Key</FormLabel>
+          <Stack gap="4" orientation="vertical">
+            <Stack gap="2" orientation="vertical">
+              <H3>LLM Config</H3>
+              <FormGroup orientation="horizontal" align="center/" gap="4">
+                <FormLabel>LLM provider:</FormLabel>
+                <DropdownSelect
+                  value={llmConfig?.provider}
+                  options={llmConfig?.providers}
+                  onChange={handleLLMProviderChange}
+                />
+              </FormGroup>
+              <FormGroup orientation="horizontal" align="center/" gap="4">
+                <FormLabel>LLM model:</FormLabel>
+                <DropdownSelect
+                  value={llmConfig?.model}
+                  options={llmConfig?.provider ? llmConfig?.models[llmConfig?.provider.value] : []}
+                  onChange={handleLLMModelChange}
+                />
+              </FormGroup>
               <FormInput>
-                <Input defaultValue={llmConfig?.openAIApiKey} name="openAIApiKey" placeholder="OpenAI API Key" />
+                <Input defaultValue={llmConfig?.apiKey} name="llmApiKey" placeholder="LLM API key" />
               </FormInput>
-            </FormGroup>
+            </Stack>
 
-            <H3>Vector Database Config</H3>
-            <DropdownSelect
-              value={vectorDBConfig?.choice}
-              options={vectorDBConfig?.options}
-              onChange={handleVectorDBChange}
-            />
-            <FormGroup orientation="vertical" align="center/" gap="1">
-              <FormLabel>Vector DB url</FormLabel>
+            <Stack gap="2" orientation="vertical">
+              <H3>Vector Database Config</H3>
+              <FormGroup orientation="horizontal" align="center/" gap="4">
+                <FormLabel>Vector DB provider:</FormLabel>
+                <DropdownSelect
+                  value={vectorDBConfig?.provider}
+                  options={vectorDBConfig?.options}
+                  onChange={handleVectorDBChange}
+                />
+              </FormGroup>
               <FormInput>
-                <Input defaultValue={vectorDBConfig?.url} name="vectorDBUrl" placeholder="Vector DB API url" />
+                <Input defaultValue={vectorDBConfig?.url} name="vectorDBUrl" placeholder="Vector DB instance url" />
               </FormInput>
-            </FormGroup>
-            <FormGroup orientation="vertical" align="center/" gap="1">
-              <FormLabel>Vector DB API key</FormLabel>
               <FormInput>
                 <Input defaultValue={vectorDBConfig?.apiKey} name="vectorDBApiKey" placeholder="Vector DB API key" />
               </FormInput>
-            </FormGroup>
-            <Stack align="/end">
-              <Spacer top="2">
-                <CTAButton type="submit">Save</CTAButton>
-              </Spacer>
+              <Stack align="/end">
+                <Spacer top="2">
+                  <CTAButton type="submit">Save</CTAButton>
+                </Spacer>
+              </Stack>
             </Stack>
           </Stack>
         </form>

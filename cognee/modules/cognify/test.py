@@ -7,7 +7,7 @@ config = Config()
 config.load()
 
 def run():
-    gpt4 = dspy.OpenAI(model = config.openai_model, api_key = config.openai_key, model_type = "chat", max_tokens = 4096)
+    gpt4 = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)
     compiled_extract_knowledge_graph = ExtractKnowledgeGraph(lm = gpt4)
     compiled_extract_knowledge_graph.load(get_absolute_path("./programs/extract_knowledge_graph/extract_knowledge_graph.json"))
 

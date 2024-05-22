@@ -1,10 +1,8 @@
 import asyncio
-import os
 from typing import List, Type
 from pydantic import BaseModel
 import instructor
 from tenacity import retry, stop_after_attempt
-from openai import AsyncOpenAI
 import openai
 
 from cognee.config import Config
@@ -19,23 +17,31 @@ config.load()
 if config.monitoring_tool == MonitoringTool.LANGFUSE:
     from langfuse.openai import AsyncOpenAI, OpenAI
 elif config.monitoring_tool == MonitoringTool.LANGSMITH:
-    from langsmith import wrap_openai
+    from langsmith import wrappers
     from openai import AsyncOpenAI
-    AsyncOpenAI = wrap_openai(AsyncOpenAI())
+    AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
 else:
     from openai import AsyncOpenAI, OpenAI
 
 class GenericAPIAdapter(LLMInterface):
     """Adapter for Generic API LLM provider API """
+    name: str
+    model: str
+    api_key: str
 
-    def __init__(self, api_endpoint, api_key: str, model: str):
+    def __init__(self, api_endpoint, api_key: str, model: str, name: str):
+        self.name = name
+        self.model = model
+        self.api_key = api_key
 
-
-        if infrastructure_config.get_config()["llm_provider"] == 'groq':
+        if infrastructure_config.get_config()["llm_provider"] == "groq":
             from groq import groq
-            self.aclient = instructor.from_openai(client = groq.Groq(
-                api_key=api_key,
-            ), mode=instructor.Mode.MD_JSON)
+            self.aclient = instructor.from_openai(
+                client = groq.Groq(
+                  api_key = api_key,
+                ),
+                mode = instructor.Mode.MD_JSON
+            )
         else:
             self.aclient = instructor.patch(
                 AsyncOpenAI(
@@ -44,9 +50,6 @@ class GenericAPIAdapter(LLMInterface):
                 ),
                 mode = instructor.Mode.JSON,
             )
-
-
-        self.model = model
 
     @retry(stop = stop_after_attempt(5))
     def completions_with_backoff(self, **kwargs):
