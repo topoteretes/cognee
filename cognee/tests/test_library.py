@@ -3,23 +3,23 @@ async def  main():
     import pathlib
     import cognee
 
-    print("Working dir: ", str(pathlib.Path(__file__).parent))
-    data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
-    print("Data dir: ", data_directory_path)
-    cognee.config.data_root_directory(data_directory_path)
-
-    cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.cognee_system")).resolve())
-    print("System dir: ", cognee_directory_path)
-    cognee.config.system_root_directory(cognee_directory_path)
+    # print("Working dir: ", str(pathlib.Path(__file__).parent))
+    # data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
+    # print("Data dir: ", data_directory_path)
+    # cognee.config.data_root_directory(data_directory_path)
+    #
+    # cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.cognee_system")).resolve())
+    # print("System dir: ", cognee_directory_path)
+    # cognee.config.system_root_directory(cognee_directory_path)
 
 
     dataset_name = "cs_explanations"
-    explanation_file_path = path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+    explanation_file_path = path.join("/Users/runner/work/cognee/cognee/tests/", "test_data/Natural_language_processing.txt")
     await cognee.add([explanation_file_path], dataset_name)
     
     dataset_name = "short_stories"
     # data_directory_path is defined above
-    await cognee.add("data://" + data_directory_path, dataset_name)
+    await cognee.add("data://" + "/Users/runner/work/cognee/cognee/tests/", dataset_name)
 
     text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
