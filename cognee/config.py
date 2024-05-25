@@ -53,7 +53,7 @@ class Config:
 
     # Model parameters
     llm_provider: str = os.getenv("LLM_PROVIDER", "openai") #openai, or custom or ollama
-    llm_model: str = os.getenv("LLM_MODEL", None)
+    llm_model: str = os.getenv("LLM_MODEL", "gpt-4")
     llm_api_key: str = os.getenv("LLM_API_KEY", None)
     llm_endpoint: str = os.getenv("LLM_ENDPOINT", None)
 
