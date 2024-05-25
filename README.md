@@ -54,10 +54,6 @@ pip install cognee
 poetry add cognee
 ```
 
-Use Weaviate vector storage:
-```bash
-poetry add "cognee"
-```
 
 ## 💻 Usage
 
@@ -111,6 +107,18 @@ cognee.add("data://{absolute_path_to_directory}", dataset_name)
 ```
 
 Read more [here](docs/index.md#run).
+
+## Vector retrieval, Graphs and LLMs
+
+Cognee supports a variety of tools and services for different operations:
+
+- **Local Setup**: By default, LanceDB runs locally with NetworkX and OpenAI.
+
+- **Vector Stores**: Cognee supports Qdrant and Weaviate for vector storage.
+
+- **Language Models (LLMs)**: You can use either Anyscale or Ollama as your LLM provider.
+
+- **Graph Stores**: In addition to LanceDB, Neo4j is also supported for graph storage.
 
 ## Demo
 
