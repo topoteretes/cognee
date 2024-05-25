@@ -72,6 +72,10 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
+
+      - name: Run tests
+        run: poetry run pytest tests/
+
       #      - name: Build with Poetry
       #        run: poetry build
       #
