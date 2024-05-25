@@ -24,9 +24,9 @@ async def  main():
 
     dataset_name = "cs_explanations"
 
-    # explanation_file_path = "test_data/Natural_language_processing.txt"
+    explanation_file_path = os.path.join(os.getcwd(), "test_data/Natural_language_processing.txt")
     #
-    # await cognee.add([explanation_file_path], dataset_name)
+    await cognee.add([explanation_file_path], dataset_name)
     
     # dataset_name = "short_stories"
     # # data_directory_path is defined above
@@ -46,15 +46,15 @@ async def  main():
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
 
-
-    dataset_name = "cs_explanations"
-    await cognee.add(
-        [
-            text_1,
-            text_2
-        ],
-        dataset_name
-    )
+    #
+    # dataset_name = "cs_explanations"
+    # await cognee.add(
+    #     [
+    #         text_1,
+    #         text_2
+    #     ],
+    #     dataset_name
+    # )
 
     await cognee.cognify([ "cs_explanations"])
 

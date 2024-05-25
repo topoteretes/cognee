@@ -2,6 +2,7 @@ import logging
 import os
 
 from cognee.config import Config
+from .data.chunking.config import get_chunk_config
 from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
 from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
@@ -18,6 +19,7 @@ config.load()
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
 relational = get_relationaldb_config()
+chunk_config = get_chunk_config()
 class InfrastructureConfig():
 
     system_root_directory: str = config.system_root_directory
@@ -38,7 +40,7 @@ class InfrastructureConfig():
     connect_documents = config.connect_documents
     database_directory_path: str = None
     database_file_path: str = None
-    chunk_strategy = config.chunk_strategy
+    chunk_strategy = chunk_config.chunk_strategy
     chunk_engine = None
     graph_topology = config.graph_topology
     monitoring_tool = config.monitoring_tool
@@ -86,10 +88,10 @@ class InfrastructureConfig():
             self.connect_documents = config.connect_documents
 
         if self.chunk_strategy is None:
-            self.chunk_strategy = config.chunk_strategy
+            self.chunk_strategy = chunk_config.chunk_strategy
 
         if self.chunk_engine is None:
-            self.chunk_engine = DefaultChunkEngine()
+            self.chunk_engine = chunk_config.chunk_engine
 
         if self.graph_topology is None:
             self.graph_topology = config.graph_topology
