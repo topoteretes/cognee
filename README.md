@@ -47,10 +47,6 @@ Join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 pip install cognee
 ```
 
-Use Weaviate vector storage:
-```bash
-pip install "cognee[weaviate]"
-```
 
 ### With poetry
 
@@ -60,7 +56,7 @@ poetry add cognee
 
 Use Weaviate vector storage:
 ```bash
-poetry add "cognee[weaviate]"
+poetry add "cognee"
 ```
 
 ## 💻 Usage
@@ -71,9 +67,6 @@ poetry add "cognee[weaviate]"
 import os
 
 os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
-os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
-
-os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
 
 ```
 You can also use Ollama or Anyscale as your LLM provider. For more info on local models check our [docs](https://topoteretes.github.io/cognee)
