@@ -1,4 +1,5 @@
 def is_text_content(content):
+    """Check if the content is text."""
     # Check for null bytes
     if b'\0' in content:
         return False
