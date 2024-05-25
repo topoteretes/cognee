@@ -12,10 +12,12 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
 
+config = Config()
+config.load()
 def get_llm_client():
     """Get the LLM client based on the configuration using Enums."""
     # logging.error(json.dumps(llm_config.to_dict()))
-    provider = LLMProvider(Config.llm_provider)
+    provider = LLMProvider(config.llm_provider)
 
     if provider == LLMProvider.OPENAI:
         from .openai.adapter import OpenAIAdapter
