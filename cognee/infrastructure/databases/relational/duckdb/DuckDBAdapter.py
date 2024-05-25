@@ -1,13 +1,9 @@
 import duckdb
-
+import os
 class DuckDBAdapter():
     def __init__(self, db_path: str, db_name: str):
-        if db_path is None:
-            db_path = "/Users/runner/work/cognee/cognee/.cognee_system"
-        if db_name is None:
-            db_name = "cognee.db"
 
-        db_location = db_path + "/" + db_name
+        db_location = os.path.abspath(os.path.join(db_path, db_name))
 
         self.get_connection = lambda: duckdb.connect(db_location)
 
