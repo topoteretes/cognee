@@ -64,10 +64,10 @@ class Config:
     # model_endpoint: str = "openai"
     # llm_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
-    openai_embedding_model = "text-embedding-3-large"
-    openai_embedding_dimensions = 3072
-    litellm_embedding_model = "text-embedding-3-large"
-    litellm_embedding_dimensions = 3072
+    # openai_embedding_model = "text-embedding-3-large"
+    # openai_embedding_dimensions = 3072
+    # litellm_embedding_model = "text-embedding-3-large"
+    # litellm_embedding_dimensions = 3072
 
     graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
