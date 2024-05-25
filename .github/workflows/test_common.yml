@@ -72,6 +72,11 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
+      - name: Create .cognee_system directory and print path
+        run: |
+          mkdir .cognee_system
+          echo $(pwd)/.cognee_system
+
 
       - name: Run tests
         run: poetry run pytest tests/
