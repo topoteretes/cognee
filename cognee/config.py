@@ -35,6 +35,7 @@ class Config:
 
 
     system_root_directory = get_absolute_path(".cognee_system")
+    logging.info("system_root_directory: %s", system_root_directory)
     data_root_directory = os.getenv("DATA_PATH", get_absolute_path(".data"))
 
     vectordb: str = os.getenv("VECTORDB", "weaviate")
