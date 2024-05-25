@@ -7,6 +7,7 @@ async def  main():
     from os import path
     import pathlib
     import cognee
+    logging.basicConfig(level=logging.DEBUG)
 
     # print("Working dir: ", str(pathlib.Path(__file__).parent))
     # data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
@@ -23,9 +24,9 @@ async def  main():
 
     dataset_name = "cs_explanations"
 
-    explanation_file_path = "test_data/Natural_language_processing.txt"
-
-    await cognee.add([explanation_file_path], dataset_name)
+    # explanation_file_path = "test_data/Natural_language_processing.txt"
+    #
+    # await cognee.add([explanation_file_path], dataset_name)
     
     # dataset_name = "short_stories"
     # # data_directory_path is defined above
@@ -46,14 +47,14 @@ async def  main():
     """
 
 
-    # dataset_name = "cs_explanations"
-    # await cognee.add(
-    #     [
-    #         text_1,
-    #         text_2
-    #     ],
-    #     dataset_name
-    # )
+    dataset_name = "cs_explanations"
+    await cognee.add(
+        [
+            text_1,
+            text_2
+        ],
+        dataset_name
+    )
 
     await cognee.cognify([ "cs_explanations"])
 
