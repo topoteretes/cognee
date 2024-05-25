@@ -44,12 +44,6 @@ class Config:
     qdrant_url: str = os.getenv("QDRANT_URL", None)
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY", None)
 
-    db_path = str = os.getenv("COGNEE_DB_PATH", "databases")
-    db_name: str = os.getenv("DB_NAME", "cognee.db")
-    db_host: str = os.getenv("DB_HOST", "localhost")
-    db_port: str = os.getenv("DB_PORT", "5432")
-    db_user: str = os.getenv("DB_USER", "cognee")
-    db_password: str = os.getenv("DB_PASSWORD", "cognee")
 
     sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
 

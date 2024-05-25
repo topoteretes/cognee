@@ -36,14 +36,14 @@ async def  main():
     """
 
 
-    dataset_name = "cs_explanations"
-    await cognee.add(
-        [
-            text_1,
-            text_2
-        ],
-        dataset_name
-    )
+    # dataset_name = "cs_explanations"
+    # await cognee.add(
+    #     [
+    #         text_1,
+    #         text_2
+    #     ],
+    #     dataset_name
+    # )
 
     await cognee.cognify([ "cs_explanations"])
 
