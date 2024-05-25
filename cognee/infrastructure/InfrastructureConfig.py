@@ -50,9 +50,9 @@ class InfrastructureConfig():
     def get_config(self, config_entity: str = None) -> dict:
 
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
-            logging.debug("cf sdsds:")
 
-            db_path = os.path.join(self.system_root_directory,config.db_path)
+
+            db_path = os.path.join(self.system_root_directory,relational.db_path)
 
             LocalStorage.ensure_directory_exists(db_path)
 
@@ -99,9 +99,6 @@ class InfrastructureConfig():
 
         if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
             self.database_directory_path = self.system_root_directory + "/" + relational.db_path
-
-
-
         if self.database_directory_path is None:
             self.database_directory_path = self.system_root_directory + "/" + relational.db_path
 

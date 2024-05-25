@@ -1,9 +1,13 @@
+from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class LLMConfig():
-    llm_provider: str = None
-    llm_model: str = None
-    llm_endpoint: str = None
-    llm_api_key: str = None
+class LLMConfig(BaseSettings):
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-4o"
+    llm_endpoint: str = ""
+    llm_api_key: str = ""
+
+    model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
     def to_dict(self) -> dict:
         return {
@@ -13,4 +17,6 @@ class LLMConfig():
             "apiKey": self.llm_api_key,
         }
 
-llm_config = LLMConfig()
+@lru_cache
+def get_llm_config():
+    return LLMConfig()

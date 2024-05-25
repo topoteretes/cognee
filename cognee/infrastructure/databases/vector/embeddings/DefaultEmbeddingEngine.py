@@ -12,8 +12,8 @@ from litellm import aembedding
 import litellm
 
 litellm.set_verbose = True
-config = Config()
-config.load()
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import get_embedding_config
+config = get_embedding_config()
 
 class DefaultEmbeddingEngine(EmbeddingEngine):
     async def embed_text(self, text: List[str]) -> List[float]:

@@ -45,7 +45,6 @@ class Config:
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY", None)
 
 
-    sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
 
     graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
