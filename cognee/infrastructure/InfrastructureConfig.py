@@ -11,10 +11,12 @@ from .data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
     LabeledContent, DefaultCognitiveLayer
 
-config = Config()
-config.load()
+
 
 class InfrastructureConfig():
+    config = Config()
+    config.load()
+    logging.info("cf path: %s", config.db_path)
     system_root_directory: str = config.system_root_directory
     data_root_directory: str = config.data_root_directory
     llm_provider: str = config.llm_provider
@@ -43,6 +45,9 @@ class InfrastructureConfig():
     llm_api_key: str = None
 
     def get_config(self, config_entity: str = None) -> dict:
+        config = Config()
+        config.load()
+        logging.info("cf path: %s", config.db_path)
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
 
 
