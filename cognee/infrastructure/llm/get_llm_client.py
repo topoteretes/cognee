@@ -2,8 +2,9 @@
 from enum import Enum
 import json
 import logging
-from cognee.infrastructure.llm import llm_config
+# from cognee.infrastructure.llm import llm_config
 
+from cognee.config import Config
 # Define an Enum for LLM Providers
 class LLMProvider(Enum):
     OPENAI = "openai"
@@ -13,8 +14,8 @@ class LLMProvider(Enum):
 
 def get_llm_client():
     """Get the LLM client based on the configuration using Enums."""
-    logging.error(json.dumps(llm_config.to_dict()))
-    provider = LLMProvider(llm_config.llm_provider)
+    # logging.error(json.dumps(llm_config.to_dict()))
+    provider = LLMProvider(Config.llm_provider)
 
     if provider == LLMProvider.OPENAI:
         from .openai.adapter import OpenAIAdapter
