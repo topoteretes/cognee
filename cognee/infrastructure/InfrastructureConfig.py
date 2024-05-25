@@ -44,12 +44,13 @@ class InfrastructureConfig():
 
     def get_config(self, config_entity: str = None) -> dict:
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
+
+            if self.system_root_directory is None:
+                self.system_root_directory ='/Users/runner/work/cognee/cognee/.cognee_system'
+            if config.db_path is None:
+                config.db_path = "databases"
             db_path = self.system_root_directory + "/" + config.db_path
 
-            print("root_dir: ", self.system_root_directory)
-            print("config.db_path: ", config.db_path)
-            logging.info("db_path: %s", db_path)
-            logging.info("db_name: %s", self.system_root_directory)
 
             LocalStorage.ensure_directory_exists(db_path)
 
