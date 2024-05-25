@@ -26,5 +26,5 @@ class BaseConfig(BaseSettings):
         }
 
 @lru_cache
-def get_llm_config():
+def get_base_config():
     return BaseConfig()

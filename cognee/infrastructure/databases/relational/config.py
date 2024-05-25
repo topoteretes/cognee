@@ -1,10 +1,12 @@
+import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.infrastructure.databases.relational import DuckDBAdapter
-
+from cognee.base_config import get_base_config
+config = get_base_config()
 
 class RelationalConfig(BaseSettings):
-    db_path: str =  "databases"
+    db_path: str =  os.path.join(config.system_root_directory,"databases")
     db_name: str =  "cognee.db"
     db_host: str =  "localhost"
     db_port: str =  "5432"
