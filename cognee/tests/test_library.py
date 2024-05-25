@@ -1,3 +1,8 @@
+
+import logging
+import os
+
+logging.basicConfig(level=logging.DEBUG)
 async def  main():
     from os import path
     import pathlib
@@ -12,6 +17,8 @@ async def  main():
     # print("System dir: ", cognee_directory_path)
     # cognee.config.system_root_directory(cognee_directory_path)
 
+    logging.debug("CURRENCT CWD: %s", pathlib.Path(__file__).parent)
+    logging.debug("CURRENCT CWD: %s", os.getcwd())
 
 
     dataset_name = "cs_explanations"
