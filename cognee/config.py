@@ -9,7 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from cognee.root_dir import get_absolute_path
 from cognee.shared.data_models import ChunkStrategy, DefaultGraphModel
-
+logging.basicConfig(level=logging.DEBUG)
 def load_dontenv():
     base_dir = Path(__file__).resolve().parent.parent
     # Load the .env file from the base directory

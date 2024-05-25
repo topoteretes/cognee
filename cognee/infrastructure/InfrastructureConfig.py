@@ -1,4 +1,5 @@
 import logging
+import os
 
 from cognee.config import Config
 from .databases.relational import DuckDBAdapter, DatabaseEngine
@@ -11,7 +12,7 @@ from .data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
     LabeledContent, DefaultCognitiveLayer
 
-
+logging.basicConfig(level=logging.DEBUG)
 
 class InfrastructureConfig():
     config = Config()
@@ -47,11 +48,11 @@ class InfrastructureConfig():
     def get_config(self, config_entity: str = None) -> dict:
         config = Config()
         config.load()
-        logging.info("cf path: %s", config.db_path)
+        logging.debug("cf path: %s", config.db_path)
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
 
 
-            db_path = self.system_root_directory + "/" + config.db_path
+            db_path = os.path.join(self.system_root_directory,config.db_path)
 
 
             LocalStorage.ensure_directory_exists(db_path)
