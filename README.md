@@ -66,7 +66,7 @@ poetry add "cognee"
 ```
 import os
 
-os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
+os.environ["OPENAI_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
 You can also use Ollama or Anyscale as your LLM provider. For more info on local models check our [docs](https://topoteretes.github.io/cognee)
