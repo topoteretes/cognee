@@ -106,7 +106,10 @@ class InfrastructureConfig():
             self.database_directory_path = self.system_root_directory + "/" + config.db_path
 
         if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
-            self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
+            try:
+                self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
+            except:
+                self.database_file_path = self.system_root_directory + "/" + "databases" + "/" + "cognee.db"
 
         if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
