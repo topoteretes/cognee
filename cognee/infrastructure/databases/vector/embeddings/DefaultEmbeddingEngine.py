@@ -12,7 +12,7 @@ from litellm import aembedding
 import litellm
 
 litellm.set_verbose = True
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import get_embedding_config
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 config = get_embedding_config()
 
 class DefaultEmbeddingEngine(EmbeddingEngine):

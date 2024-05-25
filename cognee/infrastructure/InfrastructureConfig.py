@@ -15,7 +15,7 @@ from ..shared.data_models import GraphDBType, DefaultContentPrediction, Knowledg
 logging.basicConfig(level=logging.DEBUG)
 config = Config()
 config.load()
-from cognee.infrastructure.databases.relational.RelationalConfig import get_relationaldb_config
+from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
 relational = get_relationaldb_config()
 class InfrastructureConfig():
