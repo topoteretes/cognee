@@ -53,6 +53,7 @@ class InfrastructureConfig():
 
 
             db_path = os.path.join(self.system_root_directory,config.db_path)
+            logging.debug("db_path cfg: %s", db_path)
 
 
             LocalStorage.ensure_directory_exists(db_path)
