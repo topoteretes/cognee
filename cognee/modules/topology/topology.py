@@ -1,11 +1,7 @@
-
 import os
 import glob
-from pydantic import BaseModel, create_model
-from typing import Dict, Type, Any
-
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Type, Any
 from datetime import datetime
 
 from cognee import config
@@ -13,29 +9,11 @@ from cognee.infrastructure import infrastructure_config
 from cognee.modules.topology.infer_data_topology import infer_data_topology
 
 
-
-# class UserLocation(BaseModel):
-#     location_id: str
-#     description: str
-#     default_relationship: Relationship = Relationship(type = "located_in")
-#
-# class UserProperties(BaseModel):
-#     custom_properties: Optional[Dict[str, Any]] = None
-#     location: Optional[UserLocation] = None
-#
-# class DefaultGraphModel(BaseModel):
-#     node_id: str
-#     user_properties: UserProperties = UserProperties()
-#     documents: List[Document] = []
-#     default_fields: Optional[Dict[str, Any]] = {}
-#     default_relationship: Relationship = Relationship(type = "has_properties")
-#
 class Relationship(BaseModel):
     type: str = Field(..., description="The type of relationship, e.g., 'belongs_to'.")
     source: Optional[str] = Field(None, description="The identifier of the source id of in the relationship being a directory or subdirectory")
     target: Optional[str] = Field(None, description="The identifier of the target id in the relationship being the directory, subdirectory or file")
     properties: Optional[Dict[str, Any]] = Field(None, description="A dictionary of additional properties and values related to the relationship.")
-
 
 
 class Document(BaseModel):
@@ -53,7 +31,9 @@ class DirectoryModel(BaseModel):
     subdirectories: List['DirectoryModel'] = []
     default_relationship: Relationship
 
+
 DirectoryModel.update_forward_refs()
+
 
 class DirMetadata(BaseModel):
     node_id: str
@@ -64,6 +44,7 @@ class DirMetadata(BaseModel):
     documents: List[Document] = []
     default_relationship: Relationship
 
+
 class GitHubRepositoryModel(BaseModel):
     node_id: str
     metadata: DirMetadata
@@ -71,10 +52,10 @@ class GitHubRepositoryModel(BaseModel):
 
 
 class TopologyEngine:
-    def __init__(self):
+    def __init__(self) -> None:
         self.models: Dict[str, Type[BaseModel]] = {}
 
-    async def populate_model(self, directory_path, file_structure, parent_id=None):
+    async def populate_model(self, directory_path: str, file_structure: Dict[str, Union[Dict, Tuple[str, ...]]], parent_id: Optional[str] = None) -> DirectoryModel:
         directory_id = os.path.basename(directory_path) or "root"
         directory = DirectoryModel(
             node_id=directory_id,
@@ -100,18 +81,17 @@ class TopologyEngine:
 
         return directory
 
-    async def infer_from_directory_structure(self, node_id:str, repository: str, model):
+    async def infer_from_directory_structure(self, node_id: str, repository: str, model: Type[BaseModel]) -> GitHubRepositoryModel:
         """ Infer the topology of a repository from its file structure """
 
         path = infrastructure_config.get_config()["data_root_directory"]
-
-        path = path +"/"+ str(repository)
+        path = path + "/" + str(repository)
         print(path)
 
         if not os.path.exists(path):
             raise FileNotFoundError(f"No such directory: {path}")
 
-        root = {}
+        root: Dict[str, Union[Dict, Tuple[str, ...]]] = {}
         for filename in glob.glob(f"{path}/**", recursive=True):
             parts = os.path.relpath(filename, start=path).split(os.path.sep)
             current = root
@@ -127,8 +107,6 @@ class TopologyEngine:
                     current[last_part] = {}
 
         root_directory = await self.populate_model('/', root)
-
-        # repository_metadata = await infer_data_topology(str(root), DirMetadata)
 
         repository_metadata = DirMetadata(
             node_id="repo1",
@@ -147,13 +125,10 @@ class TopologyEngine:
 
         return active_model
 
-        # print(github_repo_model)
-
-
-    def load(self, model_name: str):
+    def load(self, model_name: str) -> Optional[Type[BaseModel]]:
         return self.models.get(model_name)
 
-    def extrapolate(self, model_name: str):
+    def extrapolate(self, model_name: str) -> None:
         # This method would be implementation-specific depending on what "extrapolate" means
         pass
 
@@ -164,12 +139,13 @@ if __name__ == "__main__":
     config.data_root_directory(data_directory_path)
     cognee_directory_path = os.path.abspath("../.cognee_system")
     config.system_root_directory(cognee_directory_path)
-    async def main():
+
+    async def main() -> None:
         engine = TopologyEngine()
         # model = engine.load("GitHubRepositoryModel")
         # if model is None:
         #     raise ValueError("Model not found")
-        result = await engine.infer("example")
+        result = await engine.infer_from_directory_structure("example_node_id", "example_repo", GitHubRepositoryModel)
         print(result)
 
     import asyncio
