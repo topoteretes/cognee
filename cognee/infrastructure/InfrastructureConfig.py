@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.DEBUG)
 class InfrastructureConfig():
     config = Config()
     config.load()
-    logging.info("cf path: %s", config.db_path)
     system_root_directory: str = config.system_root_directory
     data_root_directory: str = config.data_root_directory
     llm_provider: str = config.llm_provider
@@ -54,6 +53,7 @@ class InfrastructureConfig():
 
             db_path = os.path.join(self.system_root_directory,config.db_path)
             logging.debug("db_path cfg: %s", db_path)
+            logging.debug("db_name cfg: %s", config.db_name)
 
 
             LocalStorage.ensure_directory_exists(db_path)
