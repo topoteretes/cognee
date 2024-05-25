@@ -135,4 +135,5 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 
 ## Star History
 
+
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
