@@ -54,7 +54,7 @@ class Config:
     # Model parameters
     llm_provider: str = os.getenv("LLM_PROVIDER", "openai") #openai, or custom or ollama
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4")
-    llm_api_key: str = os.getenv("LLM_API_KEY", None)
+    llm_api_key: str = os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY"))
     llm_endpoint: str = os.getenv("LLM_ENDPOINT", None)
 
     # custom_model: str = os.getenv("CUSTOM_LLM_MODEL", "llama3-70b-8192") #"mistralai/Mixtral-8x7B-Instruct-v0.1"
