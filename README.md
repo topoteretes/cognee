@@ -133,9 +133,6 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 ![Image](assets/architecture.png)
 
 
-## 🚀 It's alive
+## Star History
 
-<p>
-Try it yourself on Whatsapp with one of our <a href="https://keepi.ai" target="_blank">partners</a> by typing `/save {content you want to save}` followed by `/query {knowledge you saved previously}`
-For more info here are the <a href="https://topoteretes.github.io/cognee">docs</a>
-</p>
+[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
