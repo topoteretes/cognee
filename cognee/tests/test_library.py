@@ -14,7 +14,10 @@ async def  main():
 
 
     dataset_name = "cs_explanations"
-    explanation_file_path = path.join("/Users/runner/work/cognee/cognee/./cognee/tests", "test_data/Natural_language_processing.txt")
+
+    explanation_file_path = path.abspath(
+        "/Users/stef/Documents/dev/cognee/cognee/tests/test_data/Natural_language_processing.txt"
+    )
     await cognee.add([explanation_file_path], dataset_name)
     
     # dataset_name = "short_stories"
