@@ -21,15 +21,15 @@ def get_llm_client():
 
     if provider == LLMProvider.OPENAI:
         from .openai.adapter import OpenAIAdapter
-        return OpenAIAdapter(llm_config.llm_api_key, llm_config.llm_model)
+        return OpenAIAdapter(config.llm_api_key, config.llm_model)
     elif provider == LLMProvider.OLLAMA:
         from .generic_llm_api.adapter import GenericAPIAdapter
-        return GenericAPIAdapter(llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Ollama")
+        return GenericAPIAdapter(config.llm_endpoint, config.llm_api_key, config.llm_model, "Ollama")
     elif provider == LLMProvider.ANTHROPIC:
         from .anthropic.adapter import AnthropicAdapter
-        return AnthropicAdapter(llm_config.llm_model)
+        return AnthropicAdapter(config.llm_model)
     elif provider == LLMProvider.CUSTOM:
         from .generic_llm_api.adapter import GenericAPIAdapter
-        return GenericAPIAdapter(llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Custom")
+        return GenericAPIAdapter(config.llm_endpoint, config.llm_api_key, config.llm_model, "Custom")
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")

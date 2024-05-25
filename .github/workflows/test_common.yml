@@ -81,13 +81,7 @@ jobs:
       - name: Run tests
         run: poetry run pytest tests/
 
-      #      - name: Build with Poetry
-      #        run: poetry build
-      #
-      #      - name: Install Package
-      #        run: |
-      #         cd dist
-      #         pip install *.whl
+
 
       # - name: Download NLTK Punkt Tokenizer Models
       #   run: |
@@ -101,6 +95,14 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENV: 'dev'
         run: poetry run python ./cognee/tests/test_library.py
+
+      - name: Build with Poetry
+        run: poetry build
+
+      - name: Install Package
+        run: |
+         cd dist
+         pip install *.whl
 
       # - run: |
       #     poetry run
