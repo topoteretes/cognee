@@ -16,7 +16,10 @@ def load_dontenv():
     dotenv_path = base_dir / ".env"
     load_dotenv(dotenv_path=dotenv_path, override = True)
 
-load_dontenv()
+try:
+    load_dontenv()
+except:
+    pass
 
 @dataclass
 class Config:
@@ -138,7 +141,10 @@ class Config:
 
     def load(self):
         """Loads the configuration from a file or environment variables."""
-        load_dontenv()
+        try:
+            load_dontenv()
+        except:
+            pass
         config = configparser.ConfigParser()
         config.read(self.config_path)
 
