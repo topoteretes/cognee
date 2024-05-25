@@ -13,10 +13,13 @@ from ..shared.data_models import GraphDBType, DefaultContentPrediction, Knowledg
     LabeledContent, DefaultCognitiveLayer
 
 logging.basicConfig(level=logging.DEBUG)
+config = Config()
+config.load()
+from cognee.infrastructure.databases.relational.RelationalConfig import get_relationaldb_config
 
+relational = get_relationaldb_config()
 class InfrastructureConfig():
-    config = Config()
-    config.load()
+
     system_root_directory: str = config.system_root_directory
     data_root_directory: str = config.data_root_directory
     llm_provider: str = config.llm_provider
@@ -45,8 +48,6 @@ class InfrastructureConfig():
     llm_api_key: str = None
 
     def get_config(self, config_entity: str = None) -> dict:
-        config = Config()
-        config.load()
 
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
             logging.debug("cf sdsds:")
@@ -55,10 +56,7 @@ class InfrastructureConfig():
 
             LocalStorage.ensure_directory_exists(db_path)
 
-            self.database_engine = DuckDBAdapter(
-                db_name = "cognee.db",
-                db_path = db_path
-            )
+            self.database_engine = relational.db_engine
 
         if self.graph_engine is None:
             self.graph_engine = GraphDBType.NETWORKX
@@ -100,20 +98,16 @@ class InfrastructureConfig():
             self.llm_engine = get_llm_client()
 
         if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
-            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+            self.database_directory_path = self.system_root_directory + "/" + relational.db_path
 
-        if self.system_root_directory is None:
-            self.system_root_directory = "/Users/runner/work/cognee/cognee/.cognee_system"
 
 
         if self.database_directory_path is None:
-            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+            self.database_directory_path = self.system_root_directory + "/" + relational.db_path
 
         if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
-            try:
-                self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
-            except:
-                self.database_file_path = self.system_root_directory + "/" + "databases" + "/" + "cognee.db"
+
+            self.database_file_path = self.system_root_directory + "/" + relational.db_path + "/" + relational.db_name
 
         if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
