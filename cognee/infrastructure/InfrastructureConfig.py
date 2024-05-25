@@ -47,19 +47,16 @@ class InfrastructureConfig():
     def get_config(self, config_entity: str = None) -> dict:
         config = Config()
         config.load()
-        logging.debug("cf path: %s", config.db_path)
-        if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
 
+        if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
+            logging.debug("cf sdsds:")
 
             db_path = os.path.join(self.system_root_directory,config.db_path)
-            logging.debug("db_path cfg: %s", db_path)
-            logging.debug("db_name cfg: %s", config.db_name)
-
 
             LocalStorage.ensure_directory_exists(db_path)
 
             self.database_engine = DuckDBAdapter(
-                db_name = config.db_name,
+                db_name = "cognee.db",
                 db_path = db_path
             )
 
