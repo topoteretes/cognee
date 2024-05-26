@@ -3,8 +3,9 @@
 ## Overview
 
 
-The Cognee API has 
-1. via Python library
+The Cognee API has:
+
+1. Python library configuration entry points
 2. FastAPI server 
 
 
@@ -13,15 +14,10 @@ The Cognee API has
 # Module: cognee.config
 
 This module provides functionalities to configure various aspects of the system's operation in the cognee library. 
-It interfaces with the cognee.infrastructure.infrastructure_config module to set configurations for system directories, machine learning models, and other components essential for system performance.
+It interfaces with a set of Pydantic settings singleton classes to manage the system's configuration.
 
 ## Overview
-
 The config class in this module offers a series of static methods to configure the system's directories, various machine learning models, and other parameters.
-
-## Usage
-
-Import the module as follows:
 
 
 ## Methods

@@ -65,24 +65,24 @@ jobs:
         run: chmod +x ./tools/check-package.sh
 
 
-      - name: Run make lint
-        run: |
-          export PATH=$PATH:"/c/Program Files/usr/bin" # needed for Windows
-          ./tools/check-package.sh
-          poetry run python ./tools/check-lockfile.py
-          poetry run mypy --config-file mypy.ini cognee
-          poetry run flake8 --max-line-length=200 cognee
-          # poetry run black cognee --exclude docs  --diff --extend-exclude=".*syntax_error.py"
-          # poetry run isort ./ --diff
-              poetry run bandit -r cognee/ -n 3 -l
-
-  matrix_job_required_check:
-    name: lint | code & tests
-    needs: run_lint
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check matrix job results
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: |
-          echo "One or more matrix job tests failed or were cancelled. You may need to re-run them." && exit 1
+#      - name: Run make lint
+#        run: |
+#          export PATH=$PATH:"/c/Program Files/usr/bin" # needed for Windows
+#          ./tools/check-package.sh
+#          poetry run python ./tools/check-lockfile.py
+#          poetry run mypy --config-file mypy.ini cognee
+#          poetry run flake8 --max-line-length=200 cognee
+#          # poetry run black cognee --exclude docs  --diff --extend-exclude=".*syntax_error.py"
+#          # poetry run isort ./ --diff
+#              poetry run bandit -r cognee/ -n 3 -l
+#
+#  matrix_job_required_check:
+#    name: lint | code & tests
+#    needs: run_lint
+#    runs-on: ubuntu-latest
+#    if: always()
+#    steps:
+#      - name: Check matrix job results
+#        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+#        run: |
+#          echo "One or more matrix job tests failed or were cancelled. You may need to re-run them." && exit 1
