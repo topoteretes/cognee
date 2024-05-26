@@ -4,8 +4,6 @@ import os
 from cognee.config import Config
 from .data.chunking.config import get_chunk_config
 from .databases.relational import DatabaseEngine
-from .databases.vector.vector_db_interface import VectorDBInterface
-# from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
 from .llm.get_llm_client import get_llm_client
 from .files.storage import LocalStorage
@@ -26,8 +24,6 @@ class InfrastructureConfig():
     data_root_directory: str = config.data_root_directory
     llm_provider: str = config.llm_provider
     database_engine: DatabaseEngine = None
-    vector_engine: VectorDBInterface = None
-    vector_engine_choice: str = None
     graph_engine: GraphDBType = None
     llm_engine: LLMInterface = None
     classification_model = None
@@ -81,9 +77,6 @@ class InfrastructureConfig():
         if self.intra_layer_score_treshold is None:
             self.intra_layer_score_treshold = config.intra_layer_score_treshold
 
-        # if self.embedding_engine is None:
-        #     self.embedding_engine = DefaultEmbeddingEngine()
-
         if self.connect_documents is None:
             self.connect_documents = config.connect_documents
 
@@ -105,46 +98,13 @@ class InfrastructureConfig():
             self.database_directory_path = self.system_root_directory + "/" + relational.db_path
 
         if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
-
             self.database_file_path = self.system_root_directory + "/" + relational.db_path + "/" + relational.db_name
-
-        if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
-            try:
-                from .databases.vector.weaviate_db import WeaviateAdapter
-                config.load()
-
-                if config.weaviate_url is None and config.weaviate_api_key is None:
-                    raise EnvironmentError("Weaviate is not configured!")
-
-                self.vector_engine = WeaviateAdapter(
-                    config.weaviate_url,
-                    config.weaviate_api_key,
-                    embedding_engine = self.embedding_engine
-                )
-                self.vector_engine_choice = "weaviate"
-            except (EnvironmentError, ModuleNotFoundError):
-                config.load()
-
-                if config.qdrant_url and config.qdrant_api_key:
-                    from .databases.vector.qdrant.QDrantAdapter import QDrantAdapter
-
-                    self.vector_engine = QDrantAdapter(
-                        url = config.qdrant_url,
-                        api_key = config.qdrant_api_key,
-                        embedding_engine = self.embedding_engine
-                    )
-                    self.vector_engine_choice = "qdrant"
-                else:
-                    self.vector_engine = vector_db_config.vector_engine
-                    self.vector_engine_choice = vector_db_config.vector_engine_choice
 
         if config_entity is not None:
             return getattr(self, config_entity)
 
         return {
             "llm_engine": self.llm_engine,
-            "vector_engine": self.vector_engine,
-            "vector_engine_choice": self.vector_engine_choice,
             "database_engine": self.database_engine,
             "system_root_directory": self.system_root_directory,
             "data_root_directory": self.data_root_directory,
@@ -174,9 +134,6 @@ class InfrastructureConfig():
 
         if "database_engine" in new_config:
             self.database_engine = new_config["database_engine"]
-
-        if "vector_engine" in new_config:
-            self.vector_engine = new_config["vector_engine"]
 
         if "llm_engine" in new_config:
             self.llm_engine = new_config["llm_engine"]
