@@ -1,12 +1,8 @@
-import { CTAButton, CloseIcon, GhostButton, Input, Spacer, Stack, Text, DropdownSelect } from 'ohmy-ui';
-import styles from './SearchView.module.css';
-import { useCallback, useState } from 'react';
 import { v4 } from 'uuid';
 import classNames from 'classnames';
-
-interface SearchViewProps {
-  onClose: () => void;
-}
+import { useCallback, useState } from 'react';
+import { CTAButton, Stack, Text, DropdownSelect, TextArea, useBoolean } from 'ohmy-ui';
+import styles from './SearchView.module.css';
 
 interface Message {
   id: string;
@@ -14,29 +10,31 @@ interface Message {
   text: string;
 }
 
-export default function SearchView({ onClose }: SearchViewProps) {
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+export default function SearchView() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState<string>("");
 
-  const handleInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(event.target.value);
   }, []);
 
   const searchOptions = [{
     value: 'SIMILARITY',
-    label: 'Similarity',
-  }, {
-    value: 'NEIGHBOR',
-    label: 'Neighbor',
+    label: 'Look for similar graph nodes',
   }, {
     value: 'SUMMARY',
-    label: 'Summary',
+    label: 'Get a summary related to query',
   }, {
     value: 'ADJACENT',
-    label: 'Adjacent',
+    label: 'Look for graph node\'s neighbors',
   }, {
     value: 'CATEGORIES',
-    label: 'Categories',
+    label: 'Search by categories (Comma separated categories)',
   }];
   const [searchType, setSearchType] = useState(searchOptions[0]);
 
@@ -78,43 +76,39 @@ export default function SearchView({ onClose }: SearchViewProps) {
       })
   }, [inputValue, searchType]);
 
+  const {
+    value: isInputExpanded,
+    setTrue: expandInput,
+    setFalse: contractInput,
+  } = useBoolean(false);
+
   return (
     <Stack className={styles.searchViewContainer}>
-      <Stack gap="between" align="center/" orientation="horizontal">
-        <Spacer horizontal="2">
-          <Text>Search</Text>
-        </Spacer>
-        <GhostButton onClick={onClose}>
-          <CloseIcon />
-        </GhostButton>
-      </Stack>
-      <Stack className={styles.searchContainer}>
-        <div className={styles.messagesContainer}>
-          <Stack gap="2" className={styles.messages} align="end">
-            {messages.map((message) => (
-              <Text
-                key={message.id}
-                className={classNames(styles.message, {
-                  [styles.userMessage]: message.user === "user",
-                })}
-              >
-                {message.text}
-              </Text>
-            ))}
-          </Stack>
-        </div>
-        <form onSubmit={handleSearchSubmit}>
-          <Stack orientation="horizontal" gap="2">
-            <DropdownSelect
-              value={searchType}
-              options={searchOptions}
-              onChange={setSearchType}
-            />
-            <Input value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
-            <CTAButton type="submit">Search</CTAButton>
-          </Stack>
-        </form>
-      </Stack>
+      <DropdownSelect<SelectOption>
+        value={searchType}
+        options={searchOptions}
+        onChange={setSearchType}
+      />
+      <div className={styles.messagesContainer}>
+        <Stack gap="2" className={styles.messages} align="end">
+          {messages.map((message) => (
+            <Text
+              key={message.id}
+              className={classNames(styles.message, {
+                [styles.userMessage]: message.user === "user",
+              })}
+            >
+              {message.text}
+            </Text>
+          ))}
+        </Stack>
+      </div>
+      <form onSubmit={handleSearchSubmit}>
+        <Stack orientation="horizontal" align="end/" gap="2">
+          <TextArea style={{ height: isInputExpanded ? '128px' : '38px' }} onFocus={expandInput} onBlur={contractInput} value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
+          <CTAButton hugContent type="submit">Search</CTAButton>
+        </Stack>
+      </form>
     </Stack>
   );
 }

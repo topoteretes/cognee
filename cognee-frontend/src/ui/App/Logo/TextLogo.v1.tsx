@@ -10,6 +10,5 @@ export default function TextLogo({ width = 160, height = 42, color = 'currentCol
         </linearGradient>
       </defs>
     </svg>
-
   );
 }

@@ -71,6 +71,7 @@ protobuf = "<5.0.0"
 langchain-community = "0.0.38"
 deepeval = "^0.21.42"
 falkordb = "^1.0.4"
+pydantic-settings = "^2.2.1"
 
 
 [tool.poetry.extras]

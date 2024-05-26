@@ -1,198 +1,83 @@
-import { useCallback, useState } from 'react';
-import { IFrameView } from '@/ui';
+import { useState } from 'react';
+import { CloseIcon, GhostButton, Spacer, Stack, useBoolean } from 'ohmy-ui';
+import { TextLogo } from '@/ui/App';
 import { SettingsIcon } from '@/ui/Icons';
-import { LoadingIndicator, TextLogo } from '@/modules/app';
-import { CTAButton, GhostButton, H1, Stack, Text, UploadInput, useBoolean } from 'ohmy-ui';
 import { Footer, SettingsModal } from '@/ui/Partials';
+import ConfigStep from './ConfigStep';
+import AddStep from './AddStep';
+import CognifyStep from './CognifyStep';
+import ExploreStep from './ExploreStep';
+import { WizardContent } from '@/ui/Partials/Wizard';
 
 import styles from './WizardPage.module.css';
-
-interface ExplorationWindowConfig {
-  url: string;
-  title: string;
-}
+import { Divider } from '@/ui/Layout';
+import { useSearchParams } from 'next/navigation';
 
 interface WizardPageProps {
-  onDataAdd: (dataset: { id: string }, files: File[]) => Promise<void>;
-  onDataCognify: (dataset: { id: string }) => Promise<void>;
-  onDataExplore: (dataset: { id: string }) => Promise<ExplorationWindowConfig>;
   onFinish: () => void;
 }
 
 export default function WizardPage({
-  onDataAdd,
-  onDataCognify,
-  onDataExplore,
   onFinish,
 }: WizardPageProps) {
-  const [wizardStep, setWizardStep] = useState<'add' | 'upload' | 'cognify' | 'explore'>('add');
-  const [wizardData, setWizardData] = useState<File[] | null>(null);
-  
-  const addWizardData = useCallback((files: File[]) => {
-    setWizardData(files);
-    setWizardStep('upload');
-  }, []);
-
-  const {
-    value: isUploadRunning,
-    setTrue: disableUploadRun,
-    setFalse: enableUploadRun,
-  } = useBoolean(false);
-  const uploadWizardData = useCallback(() => {
-    disableUploadRun()
-    onDataAdd({ id: 'main' }, wizardData!)
-      .then(() => {
-        setWizardStep('cognify')
-      })
-      .finally(() => enableUploadRun());
-  }, [disableUploadRun, enableUploadRun, onDataAdd, wizardData]);
-
-  const {
-    value: isCognifyRunning,
-    setTrue: disableCognifyRun,
-    setFalse: enableCognifyRun,
-  } = useBoolean(false);
-  const cognifyWizardData = useCallback(() => {
-    disableCognifyRun();
-    onDataCognify({ id: 'main' })
-      .then(() => {
-        setWizardStep('explore');
-      })
-      .finally(() => enableCognifyRun());
-  }, [onDataCognify, disableCognifyRun, enableCognifyRun]);
-
-  const {
-    value: isExploreLoading,
-    setTrue: startLoadingExplore,
-    setFalse: finishLoadingExplore,
-  } = useBoolean(false);
-
-  const [explorationWindowProps, setExplorationWindowProps] = useState<ExplorationWindowConfig | null>(null);
-
-  const {
-    value: isExplorationWindowShown,
-    setTrue: showExplorationWindow,
-  } = useBoolean(false);
-
-  const openExplorationWindow = useCallback((explorationWindowProps: ExplorationWindowConfig) => {
-    setExplorationWindowProps(explorationWindowProps);
-    showExplorationWindow();
-  }, [showExplorationWindow]);
-
-  const exploreWizardData = useCallback(() => {
-    startLoadingExplore();
-    onDataExplore({ id: 'main' })
-      .then((exploreWindowConfig) => {
-        openExplorationWindow(exploreWindowConfig);
-      })
-      .finally(() => {
-        finishLoadingExplore();
-      });
-  }, [finishLoadingExplore, onDataExplore, openExplorationWindow, startLoadingExplore]);
-  
+  const searchParams = useSearchParams()
+  const presetWizardStep = searchParams.get('step') as 'config';
+  const [wizardStep, setWizardStep] = useState<'config' | 'add' | 'cognify' | 'explore'>(presetWizardStep || 'config');
   const {
     value: isSettingsModalOpen,
     setTrue: openSettingsModal,
     setFalse: closeSettingsModal,
   } = useBoolean(false);
 
+  const dataset = { id: 'main' };
+
   return (
     <main className={styles.main}>
-      <Stack orientation="horizontal" gap="between" align="center">
-        <TextLogo />
-        <GhostButton onClick={openSettingsModal}>
-          <SettingsIcon />
-        </GhostButton>
-      </Stack>
-      <SettingsModal isOpen={isSettingsModalOpen} onClose={closeSettingsModal} />
-      <Stack gap="4" orientation="vertical" align="center/center" className={styles.wizardContainer}>
-        {wizardStep === 'explore'
-          ? (<H1>Explore the Knowledge</H1>)
-          : (<H1>Add Knowledge</H1>)}
-        <Stack gap="4" orientation="vertical" align="center/center">
-          {wizardStep === 'upload' && wizardData && (
-            <Stack gap="4" className={styles.wizardDataset}>
-              {wizardData.map((file, index) => (
-                <div key={index}>
-                  <Text bold>{file.name}</Text>
-                  <Text className={styles.fileSize} size="small">
-                    {getBiggestUnitSize(file.size)}
-                  </Text>
-                </div>
-              ))}
-            </Stack>
-          )}
-          {(wizardStep === 'add' || wizardStep === 'upload') && (
-            <Text>No data in the system. Let&apos;s add your data.</Text>
-          )}
-          {wizardStep === 'cognify' && (
-            <Text>Process data and make it explorable.</Text>
+      <Spacer inset vertical="1" horizontal="2">
+        <Stack orientation="horizontal" gap="between" align="center">
+          <TextLogo width={225} height={64} />
+          {wizardStep === 'explore' && (
+            <GhostButton hugContent onClick={onFinish}>
+              <CloseIcon />
+            </GhostButton>
           )}
           {wizardStep === 'add' && (
-            <UploadInput onChange={addWizardData}>
-              <Text>Add data</Text>
-            </UploadInput>
-          )}
-          {wizardStep === 'upload' && (
-            <CTAButton disabled={isUploadRunning} onClick={uploadWizardData}>
-              <Stack gap="2" orientation="horizontal" align="center/center">
-                <Text>Upload</Text>
-                {isUploadRunning && (
-                  <LoadingIndicator />
-                )}
-              </Stack>
-            </CTAButton>
-          )}
-          {wizardStep === 'cognify' && (
-            <>
-              {isCognifyRunning && (
-                <Text>Processing may take a minute, depending on data size.</Text>
-              )}
-              <CTAButton disabled={isCognifyRunning} onClick={cognifyWizardData}>
-                <Stack gap="2" orientation="horizontal" align="center/center">
-                  <Text>Cognify</Text>
-                  {isCognifyRunning && (
-                    <LoadingIndicator />
-                  )}
-                </Stack>
-              </CTAButton>
-            </>
-          )}
-          {wizardStep === 'explore' && (
-            <>
-              {!isExplorationWindowShown && (
-                <CTAButton onClick={exploreWizardData}>
-                  <Stack gap="2" orientation="horizontal" align="center/center">
-                    <Text>Start exploring</Text>
-                    {isExploreLoading && (
-                      <LoadingIndicator />
-                    )}
-                  </Stack>
-                </CTAButton>
-              )}
-              {isExplorationWindowShown && (
-                <IFrameView
-                  src={explorationWindowProps!.url}
-                  title={explorationWindowProps!.title}
-                  onClose={onFinish}
-                />
-              )}
-            </>
+            <GhostButton hugContent onClick={openSettingsModal}>
+              <SettingsIcon />
+            </GhostButton>
           )}
         </Stack>
-      </Stack>
-      <Footer />
+      </Spacer>
+      <Divider />
+      <SettingsModal isOpen={isSettingsModalOpen} onClose={closeSettingsModal} />
+      <div className={styles.wizardContainer}>
+        {wizardStep === 'config' && (
+          <WizardContent>
+            <ConfigStep onNext={() => setWizardStep('add')} />
+          </WizardContent>
+        )}
+
+        {wizardStep === 'add' && (
+          <WizardContent>
+            <AddStep onNext={() => setWizardStep('cognify')} />
+          </WizardContent>
+        )}
+
+        {wizardStep === 'cognify' && (
+          <WizardContent>
+            <CognifyStep dataset={dataset} onNext={() => setWizardStep('explore')} />
+          </WizardContent>
+        )}
+
+        {wizardStep === 'explore' && (
+          <Spacer inset top="4" bottom="1" horizontal="4">
+            <ExploreStep dataset={dataset} onClose={onFinish} />
+          </Spacer>
+        )}
+      </div>
+      <Spacer inset horizontal="3" wrap>
+        <Footer />
+      </Spacer>
     </main>
   )
-}
-
-function getBiggestUnitSize(sizeInBytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB'];
-
-  let i = 0;
-  while (sizeInBytes >= 1024 && i < units.length - 1) {
-    sizeInBytes /= 1024;
-    i++;
-  }
-  return `${sizeInBytes.toFixed(2)} ${units[i]}`;
 }

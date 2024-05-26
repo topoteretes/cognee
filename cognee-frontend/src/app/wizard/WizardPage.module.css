@@ -2,23 +2,12 @@
   display: flex;
   flex-direction: row;
   flex-direction: column;
-  padding: 32px;
+  padding: 0;
   min-height: 100vh;
-  gap: 32px;
 }
 
 .wizardContainer {
   flex: 1;
-  width: 100%;
-}
-
-.wizardDataset {
-  border: 2px solid white;
-  border-radius: var(--border-radius);
-  padding: 24px;
-  min-width: 350px;
-}
-
-.fileSize {
-  display: block;
+  display: flex;
+  padding: 24px 0;
 }

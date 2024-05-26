@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Stack } from 'ohmy-ui';
 import { DiscordIcon, GithubIcon } from '@/ui/Icons';
-import { TextLogo } from '@/modules/app';
+// import { TextLogo } from '@/ui/App';
 import styles from './Footer.module.css';
 
 export default function Footer() {
@@ -9,7 +9,7 @@ export default function Footer() {
     <footer className={styles.footer}>
       <Stack orientation="horizontal" gap="between">
         <div className={styles.leftSide}>
-          <TextLogo width={92} height={24} />
+          {/* <TextLogo width={92} height={24} /> */}
         </div>
         <div className={styles.rightSide}>
           <Link target="_blank" href="https://github.com/topoteretes/cognee">

@@ -1,6 +1,6 @@
 from cognee.config import Config
 from cognee.infrastructure import infrastructure_config
-from cognee.infrastructure.llm import llm_config
+from cognee.infrastructure.llm import get_llm_config
 
 def get_settings():
     config = Config()
@@ -29,6 +29,8 @@ def get_settings():
         "value": "anthropic",
         "label": "Anthropic",
     }]
+
+    llm_config = get_llm_config()
 
     return dict(
         llm = {

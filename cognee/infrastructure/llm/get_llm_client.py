@@ -2,7 +2,7 @@
 from enum import Enum
 import json
 import logging
-from cognee.infrastructure.llm import llm_config
+from cognee.infrastructure.llm import get_llm_config
 
 # Define an Enum for LLM Providers
 class LLMProvider(Enum):
@@ -13,6 +13,8 @@ class LLMProvider(Enum):
 
 def get_llm_client():
     """Get the LLM client based on the configuration using Enums."""
+    llm_config = get_llm_config()
+
     logging.error(json.dumps(llm_config.to_dict()))
     provider = LLMProvider(llm_config.llm_provider)
 

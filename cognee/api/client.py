@@ -124,7 +124,7 @@ async def get_dataset_status(datasets: Annotated[list, Query(alias = "dataset")]
 
     return JSONResponse(
         status_code = 200,
-        content = datasets_statuses
+        content = { dataset["data_id"]: dataset["status"] for dataset in datasets_statuses },
     )
 
 @app.get("/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)

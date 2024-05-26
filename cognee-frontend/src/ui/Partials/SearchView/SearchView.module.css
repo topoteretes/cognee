@@ -1,21 +1,10 @@
-
 .searchViewContainer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  left: 30%;
-  background: var(--global-background-default);
-  border-radius: var(--border-radius);
-  border: 1px solid white;
-  z-index: 10;
-}
-
-.searchContainer {
   flex: 1;
   padding: 16px;
-  border-top: 2px solid white;
   overflow: hidden;
+  border: 1px solid white;
+  background: var(--global-background-default);
+  border-radius: var(--border-radius);
 }
 
 .messagesContainer {
