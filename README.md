@@ -66,6 +66,11 @@ import os
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
+or 
+```
+cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
+```
+
 You can also use Ollama or Anyscale as your LLM provider. For more info on local models check our [docs](https://topoteretes.github.io/cognee)
 
 ### Run
