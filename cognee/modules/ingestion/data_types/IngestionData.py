@@ -1,7 +1,8 @@
-from typing import Protocol, BinaryIO
+from typing import Protocol, BinaryIO, Union
+
 
 class IngestionData(Protocol):
-    data: str | BinaryIO = None
+    data: Union[str, BinaryIO] = None
 
     def get_data(self):
         raise NotImplementedError()

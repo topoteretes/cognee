@@ -9,14 +9,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 from cognee.root_dir import get_absolute_path
 from cognee.shared.data_models import ChunkStrategy, DefaultGraphModel
-
+logging.basicConfig(level=logging.DEBUG)
 def load_dontenv():
     base_dir = Path(__file__).resolve().parent.parent
     # Load the .env file from the base directory
     dotenv_path = base_dir / ".env"
     load_dotenv(dotenv_path=dotenv_path, override = True)
 
-load_dontenv()
+try:
+    load_dontenv()
+except:
+    pass
 
 @dataclass
 class Config:
@@ -32,6 +35,7 @@ class Config:
 
 
     system_root_directory = get_absolute_path(".cognee_system")
+    logging.info("system_root_directory: %s", system_root_directory)
     data_root_directory = os.getenv("DATA_PATH", get_absolute_path(".data"))
 
     vectordb: str = os.getenv("VECTORDB", "weaviate")
@@ -40,21 +44,14 @@ class Config:
     qdrant_url: str = os.getenv("QDRANT_URL", None)
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY", None)
 
-    db_path = str = os.getenv("COGNEE_DB_PATH", "databases")
-    db_name: str = os.getenv("DB_NAME", "cognee.db")
-    db_host: str = os.getenv("DB_HOST", "localhost")
-    db_port: str = os.getenv("DB_PORT", "5432")
-    db_user: str = os.getenv("DB_USER", "cognee")
-    db_password: str = os.getenv("DB_PASSWORD", "cognee")
 
-    sqlalchemy_logging: bool = os.getenv("SQLALCHEMY_LOGGING", True)
 
     graph_filename = os.getenv("GRAPH_NAME", "cognee_graph.pkl")
 
     # Model parameters
     llm_provider: str = os.getenv("LLM_PROVIDER", "openai") #openai, or custom or ollama
-    llm_model: str = os.getenv("LLM_MODEL", None)
-    llm_api_key: str = os.getenv("LLM_API_KEY", None)
+    llm_model: str = os.getenv("LLM_MODEL", "gpt-4")
+    llm_api_key: str = os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY"))
     llm_endpoint: str = os.getenv("LLM_ENDPOINT", None)
 
     # custom_model: str = os.getenv("CUSTOM_LLM_MODEL", "llama3-70b-8192") #"mistralai/Mixtral-8x7B-Instruct-v0.1"
@@ -67,10 +64,10 @@ class Config:
     # model_endpoint: str = "openai"
     # llm_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", 0.0))
-    openai_embedding_model = "text-embedding-3-large"
-    openai_embedding_dimensions = 3072
-    litellm_embedding_model = "text-embedding-3-large"
-    litellm_embedding_dimensions = 3072
+    # openai_embedding_model = "text-embedding-3-large"
+    # openai_embedding_dimensions = 3072
+    # litellm_embedding_model = "text-embedding-3-large"
+    # litellm_embedding_dimensions = 3072
 
     graphistry_username = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password = os.getenv("GRAPHISTRY_PASSWORD")
@@ -90,39 +87,8 @@ class Config:
     # Monitoring tool
     monitoring_tool: str = os.getenv("MONITORING_TOOL", MonitoringTool.LANGFUSE)
 
-    if (
-        os.getenv("ENV") == "prod"
-        or os.getenv("ENV") == "dev"
-        or os.getenv("AWS_ENV") == "dev"
-        or os.getenv("AWS_ENV") == "prd"
-    ):
-        load_dotenv()
-        logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL_PROD"))
-        graph_database_url: str = os.getenv("GRAPH_DB_URL_PROD")
-        graph_database_username: str = os.getenv("GRAPH_DB_USER")
-        graph_database_password: str = os.getenv("GRAPH_DB_PW")
-    else:
-        logging.info("graph_db_url: %s", os.getenv("GRAPH_DB_URL"))
-        graph_database_url: str = os.getenv("GRAPH_DB_URL")
-        graph_database_username: str = os.getenv("GRAPH_DB_USER")
-        graph_database_password: str = os.getenv("GRAPH_DB_PW")
-
     weaviate_url: str = os.getenv("WEAVIATE_URL")
     weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY")
-
-    if (
-        os.getenv("ENV") == "prod"
-        or os.getenv("ENV") == "dev"
-        or os.getenv("AWS_ENV") == "dev"
-        or os.getenv("AWS_ENV") == "prd"
-    ):
-        load_dotenv()
-
-        db_host: str = os.getenv("POSTGRES_HOST")
-        logging.info("db_host: %s", db_host)
-        db_user: str = os.getenv("POSTGRES_USER")
-        db_password: str = os.getenv("POSTGRES_PASSWORD")
-        db_name: str = os.getenv("POSTGRES_DB")
 
     # Model parameters and configuration for interlayer scoring
     intra_layer_score_treshold: float = 0.98
@@ -132,13 +98,16 @@ class Config:
     anon_clientid: Optional[str] = field(default_factory=lambda: uuid.uuid4().hex)
 
     #Chunking parameters
-    chunk_size: int = 1500
-    chunk_overlap: int = 0
-    chunk_strategy: str = ChunkStrategy.PARAGRAPH
+    # chunk_size: int = 1500
+    # chunk_overlap: int = 0
+    # chunk_strategy: str = ChunkStrategy.PARAGRAPH
 
     def load(self):
         """Loads the configuration from a file or environment variables."""
-        load_dontenv()
+        try:
+            load_dontenv()
+        except:
+            pass
         config = configparser.ConfigParser()
         config.read(self.config_path)
 

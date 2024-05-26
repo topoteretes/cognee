@@ -9,6 +9,7 @@ class FileTypeException(Exception):
         self.message = message
 
 class TxtFileType(filetype.Type):
+    """Text file type"""
     MIME = "text/plain"
     EXTENSION = "txt"
 

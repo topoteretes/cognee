@@ -6,6 +6,7 @@ import nltk
 from nltk.corpus import stopwords
 from cognee.config import Config
 from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import LiteLLMEmbeddingEngine
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
@@ -29,9 +30,24 @@ from cognee.shared.data_models import ChunkStrategy, KnowledgeGraph
 from cognee.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
+from cognee.base_config import get_base_config
+from cognee.infrastructure.data.chunking.config import get_chunk_config
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
+graph_config = get_graph_config()
 config = Config()
 config.load()
+
+
+relational_config = get_relationaldb_config()
+
+
+cognify_config = get_cognify_config()
+chunk_config = get_chunk_config()
+base_config = get_base_config()
+embedding_config = get_embedding_config()
 
 # aclient = instructor.patch(OpenAI())
 
@@ -46,11 +62,11 @@ async def cognify(datasets: Union[str, List[str]] = None):
     stopwords.ensure_loaded()
     create_task_status_table()
 
-    graph_db_type = infrastructure_config.get_config()["graph_engine"]
+    graph_db_type = graph_config.graph_engine
 
     graph_client = await get_graph_client(graph_db_type)
 
-    db_engine = infrastructure_config.get_config()["database_engine"]
+    db_engine = relational_config.database_engine
 
     if datasets is None or len(datasets) == 0:
         datasets = db_engine.get_datasets()
@@ -76,8 +92,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
 
-    chunk_engine = infrastructure_config.get_config()["chunk_engine"]
-    chunk_strategy = infrastructure_config.get_config()["chunk_strategy"]
+    chunk_engine = chunk_config.chunk_engine
+    chunk_strategy = chunk_config.chunk_strategy
 
     async def process_batch(files_batch):
         data_chunks = {}
@@ -91,7 +107,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         text = "empty file"
                     if text == "":
                         text = "empty file"
-                    subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
+                    subchunks = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size, chunk_config.chunk_overlap)
 
                     if dataset_name not in data_chunks:
                         data_chunks[dataset_name] = []
@@ -128,7 +144,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     for (dataset_name, files) in dataset_files:
         for file_metadata in files:
-            graph_topology = infrastructure_config.get_config()["graph_model"]
+            graph_topology = graph_config.graph_model
 
             if graph_topology == SourceCodeGraph:
                 parent_node_id = f"{file_metadata['name']}.{file_metadata['extension']}"
@@ -161,9 +177,10 @@ async def cognify(datasets: Union[str, List[str]] = None):
 async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict, document_id: str):
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
-    graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
+    graph_client = await get_graph_client(graph_config.graph_engine)
+    print("graph_client", graph_client)
 
-    graph_topology = infrastructure_config.get_config()["graph_model"]
+    graph_topology = cognify_config.graph_model
     if graph_topology == SourceCodeGraph:
         classified_categories = [{"data_type": "text", "category_name": "Code and functions"}]
     elif graph_topology == KnowledgeGraph:
@@ -185,7 +202,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     print(f"Chunk ({chunk_id}) summarized.")
 
     cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
-    cognitive_layers = cognitive_layers[:config.cognitive_layers_limit]
+    cognitive_layers = cognitive_layers[:cognify_config.cognitive_layers_limit]
 
     try:
         cognitive_layers = (await add_cognitive_layers(graph_client, document_id, cognitive_layers))[:2]
@@ -196,8 +213,8 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
         pass
 
 
-    if infrastructure_config.get_config()["connect_documents"] is True:
-        db_engine = infrastructure_config.get_config()["database_engine"]
+    if cognify_config.connect_documents is True:
+        db_engine = relational_config.database_engine
         relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = document_id)
 
         list_of_nodes = []
@@ -219,7 +236,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
         await connect_nodes_in_graph(
             graph_client,
             relationships,
-            score_threshold = infrastructure_config.get_config()["intra_layer_score_treshold"]
+            score_threshold = cognify_config.intra_layer_score_treshold
         )
 
     send_telemetry("cognee.cognify")

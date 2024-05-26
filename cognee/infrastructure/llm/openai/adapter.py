@@ -5,20 +5,24 @@ import instructor
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt
 
+from cognee.base_config import get_base_config
 from cognee.config import Config
+from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import MonitoringTool
 
 config = Config()
 config.load()
+llm_config = get_llm_config()
+base_config = get_base_config()
 
-if config.monitoring_tool == MonitoringTool.LANGFUSE:
+if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
     from langfuse.openai import AsyncOpenAI, OpenAI
-elif config.monitoring_tool == MonitoringTool.LANGSMITH:
-    from langsmith import wrap_openai
+elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
+    from langsmith import wrappers
     from openai import AsyncOpenAI
-    AsyncOpenAI = wrap_openai(AsyncOpenAI())
+    AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
 else:
     from openai import AsyncOpenAI, OpenAI
 

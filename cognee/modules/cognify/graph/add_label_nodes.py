@@ -2,11 +2,14 @@ from uuid import uuid4
 from typing import List
 from datetime import datetime
 from pydantic import BaseModel
-from cognee.infrastructure import infrastructure_config
-from cognee.infrastructure.databases.vector import DataPoint
 
+from cognee.infrastructure.databases.vector import DataPoint
+from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+graph_config = get_graph_config()
+vectordb_config = get_vectordb_config()
 async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]) -> None:
-    vector_client = infrastructure_config.get_config("vector_engine")
+    vector_client = vectordb_config.vector_engine
 
     keyword_nodes = []
 

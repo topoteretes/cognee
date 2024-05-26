@@ -56,12 +56,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         if "name" not in serialized_properties:
             serialized_properties["name"] = node_id
-
-        # serialized_properties["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # serialized_properties["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # properties = ", ".join(f"{property_name}: ${property_name}" for property_name in serialized_properties.keys())
-
         query = f"""MERGE (node:`{node_id}` {{id: $node_id}})
                 ON CREATE SET node += $properties
                 RETURN ID(node) AS internal_id, node.id AS nodeId"""
@@ -84,30 +78,6 @@ class Neo4jAdapter(GraphDBInterface):
                 node_id = node_id,
                 node_properties = node_properties,
             )
-
-
-        #     serialized_properties = self.serialize_properties(node_properties)
-
-        #     if "name" not in serialized_properties:
-        #         serialized_properties["name"] = node_id
-
-        #     nodes_data.append({
-        #         "node_id": node_id,
-        #         "properties": serialized_properties,
-        #     })
-
-        # query = """UNWIND $nodes_data AS node_data
-        #         MERGE (node:{id: node_data.node_id})
-        #         ON CREATE SET node += node_data.properties
-        #         RETURN ID(node) AS internal_id, node.id AS id"""
-
-        # params = {"nodes_data": nodes_data}
-
-        # result = await self.query(query, params)
-
-        # await self.close()
-
-        # return result
 
     async def extract_node_description(self, node_id: str):
         query = """MATCH (n)-[r]->(m)
@@ -138,7 +108,7 @@ class Neo4jAdapter(GraphDBInterface):
         query = """MATCH (node) WHERE node.layer_id IS NOT NULL
         RETURN node"""
 
-        return [result['node'] for result in (await self.query(query))]
+        return [result["node"] for result in (await self.query(query))]
 
     async def extract_node(self, node_id: str):
         query= """
@@ -146,7 +116,7 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN node
         """
 
-        results = [node['node'] for node in (await self.query(query, dict(node_id = node_id)))]
+        results = [node["node"] for node in (await self.query(query, dict(node_id = node_id)))]
 
         return results[0] if len(results) > 0 else None
 
@@ -163,10 +133,12 @@ class Neo4jAdapter(GraphDBInterface):
         from_node = from_node.replace(":", "_")
         to_node = to_node.replace(":", "_")
 
-        query = f"""MATCH (from_node:`{from_node}` {{id: $from_node}}), (to_node:`{to_node}` {{id: $to_node}})
-                MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
-                SET r += $properties
-                RETURN r"""
+        query = f"""MATCH (from_node:`{from_node}`
+         {{id: $from_node}}), 
+         (to_node:`{to_node}` {{id: $to_node}})
+         MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
+         SET r += $properties
+         RETURN r"""
 
         params = {
             "from_node": from_node,
@@ -191,30 +163,6 @@ class Neo4jAdapter(GraphDBInterface):
                 relationship_name = relationship_name,
                 edge_properties = edge_properties
             )
-
-            # Filter out None values and do not serialize; Neo4j can handle complex types like arrays directly
-        #     serialized_properties = self.serialize_properties(edge_properties)
-
-        #     edges_data.append({
-        #         "from_node": from_node,
-        #         "to_node": to_node,
-        #         "relationship_name": relationship_name,
-        #         "properties": serialized_properties
-        #     })
-
-        # query = """UNWIND $edges_data AS edge_data
-        #         MATCH (from_node:{id: edge_data.from_node}), (to_node:{id: edge_data.to_node})
-        #         MERGE (from_node)-[r:{edge_data.relationship_name}]->(to_node)
-        #         ON CREATE SET r += edge_data.properties
-        #         RETURN r"""
-
-        # params = {"edges_data": edges_data}
-
-        # result = await self.query(query, params)
-
-        # await self.close()
-
-        # return result
 
 
     async def filter_nodes(self, search_criteria):

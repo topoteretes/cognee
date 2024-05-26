@@ -6,7 +6,10 @@ from neo4j import AsyncSession
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 import networkx as nx
 from cognee.shared.data_models import GraphDBType
-
+from cognee.infrastructure.databases.graph.config import get_graph_config
+graph_config = get_graph_config()
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+vector_config = get_vectordb_config()
 async def search_neighbour(graph: Union[nx.Graph, any], query: str,
                            other_param: dict = None):
     """
@@ -28,7 +31,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
     if node_id is None:
         return []
 
-    if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+    if graph_config.graph_engine == GraphDBType.NETWORKX:
         relevant_context = []
         target_layer_uuid = graph.nodes[node_id].get('layer_uuid')
 
@@ -39,7 +42,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
         return relevant_context
 
 
-    elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
+    elif graph_config.graph_engine  == GraphDBType.NEO4J:
         if isinstance(graph, AsyncSession):
             cypher_query = """
             MATCH (target {id: $node_id})

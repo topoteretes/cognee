@@ -1,7 +1,11 @@
+import logging
+import os
+
 from cognee.config import Config
+from .data.chunking.config import get_chunk_config
 from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
-from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
+# from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
 from .llm.get_llm_client import get_llm_client
 from .files.storage import LocalStorage
@@ -9,10 +13,16 @@ from .data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from ..shared.data_models import GraphDBType, DefaultContentPrediction, KnowledgeGraph, SummarizedContent, \
     LabeledContent, DefaultCognitiveLayer
 
+logging.basicConfig(level=logging.DEBUG)
 config = Config()
 config.load()
-
+from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+vector_db_config = get_vectordb_config()
+relational = get_relationaldb_config()
+chunk_config = get_chunk_config()
 class InfrastructureConfig():
+
     system_root_directory: str = config.system_root_directory
     data_root_directory: str = config.data_root_directory
     llm_provider: str = config.llm_provider
@@ -31,7 +41,7 @@ class InfrastructureConfig():
     connect_documents = config.connect_documents
     database_directory_path: str = None
     database_file_path: str = None
-    chunk_strategy = config.chunk_strategy
+    chunk_strategy = chunk_config.chunk_strategy
     chunk_engine = None
     graph_topology = config.graph_topology
     monitoring_tool = config.monitoring_tool
@@ -41,15 +51,15 @@ class InfrastructureConfig():
     llm_api_key: str = None
 
     def get_config(self, config_entity: str = None) -> dict:
+
         if (config_entity is None or config_entity == "database_engine") and self.database_engine is None:
-            db_path = self.system_root_directory + "/" + config.db_path
+
+
+            db_path = os.path.join(self.system_root_directory,relational.db_path)
 
             LocalStorage.ensure_directory_exists(db_path)
 
-            self.database_engine = DuckDBAdapter(
-                db_name = config.db_name,
-                db_path = db_path
-            )
+            self.database_engine = relational.db_engine
 
         if self.graph_engine is None:
             self.graph_engine = GraphDBType.NETWORKX
@@ -72,17 +82,17 @@ class InfrastructureConfig():
         if self.intra_layer_score_treshold is None:
             self.intra_layer_score_treshold = config.intra_layer_score_treshold
 
-        if self.embedding_engine is None:
-            self.embedding_engine = DefaultEmbeddingEngine()
+        # if self.embedding_engine is None:
+        #     self.embedding_engine = DefaultEmbeddingEngine()
 
         if self.connect_documents is None:
             self.connect_documents = config.connect_documents
 
         if self.chunk_strategy is None:
-            self.chunk_strategy = config.chunk_strategy
+            self.chunk_strategy = chunk_config.chunk_strategy
 
         if self.chunk_engine is None:
-            self.chunk_engine = DefaultChunkEngine()
+            self.chunk_engine = chunk_config.chunk_engine
 
         if self.graph_topology is None:
             self.graph_topology = config.graph_topology
@@ -91,13 +101,13 @@ class InfrastructureConfig():
             self.llm_engine = get_llm_client()
 
         if (config_entity is None or config_entity == "database_directory_path") and self.database_directory_path is None:
-            self.database_directory_path = self.system_root_directory + "/" + config.db_path
-
+            self.database_directory_path = self.system_root_directory + "/" + relational.db_path
         if self.database_directory_path is None:
-            self.database_directory_path = self.system_root_directory + "/" + config.db_path
+            self.database_directory_path = self.system_root_directory + "/" + relational.db_path
 
         if (config_entity is None or config_entity == "database_file_path") and self.database_file_path is None:
-            self.database_file_path = self.system_root_directory + "/" + config.db_path + "/" + config.db_name
+
+            self.database_file_path = self.system_root_directory + "/" + relational.db_path + "/" + relational.db_name
 
         if (config_entity is None or config_entity == "vector_engine") and self.vector_engine is None:
             try:
@@ -126,17 +136,8 @@ class InfrastructureConfig():
                     )
                     self.vector_engine_choice = "qdrant"
                 else:
-                    from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
-                    config.load()
-                    lance_db_path = self.database_directory_path + "/cognee.lancedb"
-                    LocalStorage.ensure_directory_exists(lance_db_path)
-
-                    self.vector_engine = LanceDBAdapter(
-                        url = lance_db_path,
-                        api_key = None,
-                        embedding_engine = self.embedding_engine,
-                    )
-                    self.vector_engine_choice = "lancedb"
+                    self.vector_engine = vector_db_config.vector_engine
+                    self.vector_engine_choice = vector_db_config.vector_engine_choice
 
         if config_entity is not None:
             return getattr(self, config_entity)
