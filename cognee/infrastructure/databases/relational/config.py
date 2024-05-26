@@ -16,7 +16,7 @@ class RelationalConfig(BaseSettings):
         db_name=db_name,
         db_path=db_path
     )
-    db_file_path = os.path.join(db_path, db_name)
+    db_file_path:str = os.path.join(db_path, db_name)
     database_path: str = os.path.join(config.system_root_directory, "databases")
     database_directory_path: str = db_path
 
