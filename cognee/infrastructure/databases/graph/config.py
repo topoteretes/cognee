@@ -11,11 +11,10 @@ base_config = get_base_config()
 class GraphConfig(BaseSettings):
     graph_filename: str = "cognee_graph.pkl"
     graph_database_provider: str = "NETWORKX"
-    graph_topology: str = DefaultGraphModel
     graph_database_url: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
-    graph_database_port: int = ""
+    graph_database_port: int = 123
     graph_file_path: str = os.path.join(relational_config.database_directory_path,graph_filename)
     graph_engine: object =  GraphDBType.NETWORKX
     graph_model: object = DefaultGraphModel
