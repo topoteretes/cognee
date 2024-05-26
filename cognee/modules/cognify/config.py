@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.root_dir import get_absolute_path
 
 from cognee.shared.data_models import MonitoringTool, DefaultContentPrediction, LabeledContent, SummarizedContent, \
-    DefaultCognitiveLayer, DefaultGraphModel
+    DefaultCognitiveLayer, DefaultGraphModel, KnowledgeGraph
 
 
 # Monitoring tool
@@ -20,6 +20,7 @@ class CognifyConfig(BaseSettings):
     connect_documents: bool = False
     graph_topology: object = DefaultGraphModel
     cognitive_layers_limit: int = 2
+    graph_model:object = KnowledgeGraph
 
 
 
