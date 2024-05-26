@@ -5,7 +5,7 @@ from cognee.config import Config
 from .data.chunking.config import get_chunk_config
 from .databases.relational import DuckDBAdapter, DatabaseEngine
 from .databases.vector.vector_db_interface import VectorDBInterface
-from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
+# from .databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
 from .llm.llm_interface import LLMInterface
 from .llm.get_llm_client import get_llm_client
 from .files.storage import LocalStorage
@@ -81,8 +81,8 @@ class InfrastructureConfig():
         if self.intra_layer_score_treshold is None:
             self.intra_layer_score_treshold = config.intra_layer_score_treshold
 
-        if self.embedding_engine is None:
-            self.embedding_engine = DefaultEmbeddingEngine()
+        # if self.embedding_engine is None:
+        #     self.embedding_engine = DefaultEmbeddingEngine()
 
         if self.connect_documents is None:
             self.connect_documents = config.connect_documents
