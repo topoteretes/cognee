@@ -178,6 +178,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
     graph_client = await get_graph_client(graph_config.graph_engine)
+    print("graph_client", graph_client)
 
     graph_topology = cognify_config.graph_model
     if graph_topology == SourceCodeGraph:
