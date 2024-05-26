@@ -1,11 +1,15 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import DefaultEmbeddingEngine
+
+
 class EmbeddingConfig(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-large"
     openai_embedding_dimensions: int = 3072
     litellm_embedding_model: str = "text-embedding-3-large"
     litellm_embedding_dimensions: int = 3072
+    embedding_engine:object = DefaultEmbeddingEngine()
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 

@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.base_config import get_base_config
-from cognee.shared.data_models import DefaultGraphModel
+from cognee.shared.data_models import DefaultGraphModel, GraphDBType
 
 base_config = get_base_config()
 
@@ -15,7 +15,9 @@ class GraphConfig(BaseSettings):
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = ""
-    graph_file_path = os.path.join(base_config.database_directory_path,graph_filename)
+    graph_file_path: str = os.path.join(base_config.database_directory_path,graph_filename)
+    graph_engine: object =  GraphDBType.NETWORKX
+    graph_model: object = DefaultGraphModel
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
@@ -29,6 +31,7 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
+            "graph_engine": self.graph_engine
 
         }
 
