@@ -30,16 +30,16 @@ from cognee.shared.data_models import ChunkStrategy, KnowledgeGraph
 from cognee.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
-graph_config = get_graph_config()
-config = Config()
-config.load()
-
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+
+graph_config = get_graph_config()
+config = Config()
+config.load()
+
 
 relational_config = get_relationaldb_config()
 
