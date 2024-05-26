@@ -19,10 +19,6 @@ It interfaces with the cognee.infrastructure.infrastructure_config module to set
 
 The config class in this module offers a series of static methods to configure the system's directories, various machine learning models, and other parameters.
 
-## Usage
-
-Import the module as follows:
-
 
 ## Methods
 
