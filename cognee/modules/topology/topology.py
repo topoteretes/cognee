@@ -1,13 +1,16 @@
 import os
 import glob
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Union, Type, Any
+from typing import Dict, List, Optional, Union, Type, Any, Tuple
 from datetime import datetime
 
 from cognee import config
+from cognee.base_config import get_base_config
 from cognee.infrastructure import infrastructure_config
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.topology.infer_data_topology import infer_data_topology
-
+cognify_config = get_cognify_config()
+base_config = get_base_config()
 
 class Relationship(BaseModel):
     type: str = Field(..., description="The type of relationship, e.g., 'belongs_to'.")
@@ -84,7 +87,7 @@ class TopologyEngine:
     async def infer_from_directory_structure(self, node_id: str, repository: str, model: Type[BaseModel]) -> GitHubRepositoryModel:
         """ Infer the topology of a repository from its file structure """
 
-        path = infrastructure_config.get_config()["data_root_directory"]
+        path = base_config.data_root_directory
         path = path + "/" + str(repository)
         print(path)
 

@@ -13,6 +13,8 @@ from cognee.modules.search.graph.search_summary import search_summary
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.infrastructure import infrastructure_config
 from cognee.utils import send_telemetry
+from cognee.infrastructure.databases.graph.config import get_graph_config
+graph_config = get_graph_config()
 
 class SearchType(Enum):
     ADJACENT = 'ADJACENT'
@@ -49,7 +51,7 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
-    graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
+    graph_client = await get_graph_client(graph_config.graph_engine)
     graph = graph_client.graph
 
     search_functions: Dict[SearchType, Callable] = {

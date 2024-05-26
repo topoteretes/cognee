@@ -1,9 +1,12 @@
 import uuid
 
-from cognee.infrastructure import infrastructure_config
+# from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
-
+from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+graph_config = get_graph_config()
+vectordb_config = get_vectordb_config()
 
 
 async def group_nodes_by_layer(node_descriptions):
@@ -41,7 +44,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
             if relationship['score'] > score_threshold:
 
                 # For NetworkX
-                if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+                if graph_config.graph_engine == GraphDBType.NETWORKX:
                     searched_node_id_found = await get_node_by_unique_id(graph.graph, relationship['searched_node_id'])
                     original_id_for_search_found = await get_node_by_unique_id(graph.graph, relationship['original_id_for_search'])
                     if searched_node_id_found and original_id_for_search_found:
@@ -54,7 +57,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                         )
 
                 # For Neo4j
-                elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
+                elif graph_config.graph_engine == GraphDBType.NEO4J:
                     # Neo4j specific logic to add an edge
                     # This is just a placeholder, replace it with actual Neo4j logic
                     print("query is ", f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}' CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")

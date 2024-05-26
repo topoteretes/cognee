@@ -7,6 +7,7 @@ from cognee.modules.topology.topology import TopologyEngine, GitHubRepositoryMod
 import pandas as pd
 from pydantic import BaseModel
 
+
 USER_ID = "default_user"
 
 async def add_topology(directory: str = "example", model: BaseModel = GitHubRepositoryModel) -> Any:

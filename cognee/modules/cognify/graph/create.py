@@ -2,10 +2,13 @@
 from typing import  Optional, Any
 from pydantic import BaseModel
 
-from cognee.infrastructure import infrastructure_config
+# from cognee.infrastructure import infrastructure_config
 from cognee.shared.data_models import GraphDBType
 
-
+from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+graph_config = get_graph_config()
+vectordb_config = get_vectordb_config()
 async def generate_node_id(instance: BaseModel) -> str:
     for field in ["id", "doc_id", "location_id", "type_id", "node_id"]:
         if hasattr(instance, field):
@@ -30,7 +33,7 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
     - Exception: If there is an error during the node or edge addition process, it logs the error and continues without interrupting the execution flow.
 
     Note:
-    - The function currently supports adding edges only if the graph database engine is NETWORKX, as specified in the global `infrastructure_config`.
+    - The function currently supports adding edges only if the graph database engine is NETWORKX, as specified in the graph configuration.
     """
 
     # Initialize result to None to ensure a clear return path
@@ -46,7 +49,7 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
             print("added node", result)
 
             # Add an edge if a parent ID is provided and the graph engine is NETWORKX
-            if parent_id and "default_relationship" in node_data and infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+            if parent_id and "default_relationship" in node_data and graph_config.graph_engine == GraphDBType.NETWORKX:
 
                 try:
                     await client.add_edge(parent_id, node_id, relationship_name = node_data["default_relationship"]["type"], edge_properties = node_data)

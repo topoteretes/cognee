@@ -2,7 +2,9 @@ import logging
 import asyncio
 from cognee.infrastructure import infrastructure_config
 from .extraction.knowledge_graph.extract_knowledge_graph import extract_knowledge_graph
-
+from.extraction.extract_summary import extract_summary
+from cognee.modules.cognify.config import get_cognify_config
+config = get_cognify_config()
 logger = logging.getLogger(__name__)
 
 async def get_layer_graphs(content: str, cognitive_layers: list[tuple[str, dict]]):
@@ -11,7 +13,7 @@ async def get_layer_graphs(content: str, cognitive_layers: list[tuple[str, dict]
             extract_knowledge_graph(
                 content,
                 cognitive_layer_data["name"],
-                infrastructure_config.get_config()["graph_model"]
+                config.graph_model
             ) for (_, cognitive_layer_data) in cognitive_layers
         ]
 

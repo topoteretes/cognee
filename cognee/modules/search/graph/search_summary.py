@@ -7,7 +7,10 @@ from cognee.infrastructure import infrastructure_config
 
 from cognee.modules.search.llm.extraction.categorize_relevant_summary import categorize_relevant_summary
 from cognee.shared.data_models import GraphDBType, ResponseSummaryModel
-
+from cognee.infrastructure.databases.graph.config import get_graph_config
+graph_config = get_graph_config()
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+vector_config = get_vectordb_config()
 import re
 
 def strip_exact_regex(s, substring):
@@ -30,7 +33,7 @@ async def search_summary( query: str,  graph: Union[nx.Graph, any]) -> Dict[str,
     - Dict[str, str]: A dictionary where keys are node identifiers containing the query string, and values are their 'summary' attributes.
     """
 
-    if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+    if graph_config.graph_engine == GraphDBType.NETWORKX:
         print("graph", graph)
         summaries_and_ids = [
             {'document_id': strip_exact_regex(_, "DATA_SUMMARY__"), 'Summary': data['summary']}
@@ -48,7 +51,7 @@ async def search_summary( query: str,  graph: Union[nx.Graph, any]) -> Dict[str,
         return descriptions
 
 
-    elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
+    elif graph_config.graph_engine == GraphDBType.NEO4J:
         cypher_query = f"""
         MATCH (n)
         WHERE n.id CONTAINS $query AND EXISTS(n.summary)

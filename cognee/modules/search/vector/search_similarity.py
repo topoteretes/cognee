@@ -1,10 +1,13 @@
 from dsp.utils import deduplicate
 from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-
+from cognee.infrastructure.databases.graph.config import get_graph_config
+graph_config = get_graph_config()
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+vector_config = get_vectordb_config()
 
 async def search_similarity(query: str, graph):
-    graph_db_type = infrastructure_config.get_config()["graph_engine"]
+    graph_db_type = graph_config.graph_engine
 
     graph_client = await get_graph_client(graph_db_type)
 
@@ -17,7 +20,7 @@ async def search_similarity(query: str, graph):
     graph_nodes = []
 
     for layer_id in unique_layer_uuids:
-        vector_engine = infrastructure_config.get_config()["vector_engine"]
+        vector_engine = vector_config.vector_engine
 
         results = await vector_engine.search(layer_id, query_text = query, limit = 10)
         print("results", results)

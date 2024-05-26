@@ -3,11 +3,13 @@ from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.data import Dataset, Data
 from cognee.infrastructure.files import remove_file_from_storage
 from cognee.infrastructure.databases.relational import DatabaseEngine
+from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+config = get_relationaldb_config()
 
 logger = logging.getLogger(__name__)
 
 async def add_data_to_dataset(dataset: Dataset, data: Data):
-    db_engine: DatabaseEngine = infrastructure_config.get_config()["database_engine"]
+    db_engine: DatabaseEngine = config.database_engine
 
     existing_dataset = (await db_engine.query_entity(dataset)).scalar()
     existing_data = (await db_engine.query_entity(data)).scalar()

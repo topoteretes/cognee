@@ -10,6 +10,11 @@ from cognee.modules.search.llm.extraction.categorize_relevant_category import ca
 from cognee.shared.data_models import GraphDBType, DefaultContentPrediction
 import networkx as nx
 
+from cognee.infrastructure.databases.graph.config import get_graph_config
+graph_config = get_graph_config()
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+vector_config = get_vectordb_config()
+
 def strip_exact_regex(s, substring):
     # Escaping substring to be used in a regex pattern
     pattern = re.escape(substring)
@@ -37,7 +42,7 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
     """
     # Determine which client is in use based on the configuration
     from cognee.infrastructure import infrastructure_config
-    if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+    if graph_config.graph_engine == GraphDBType.NETWORKX:
 
         categories_and_ids = [
             {'document_id': strip_exact_regex(_, "DATA_SUMMARY__"), 'Summary': data['summary']}
@@ -53,7 +58,7 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
         descriptions = {node: graph.nodes[node].get('description', 'No desc available') for node in connected_nodes}
         return descriptions
 
-    elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
+    elif graph_config.graph_engine == GraphDBType.NEO4J:
         # Logic for Neo4j
         cypher_query = """
         MATCH (n)

@@ -6,6 +6,7 @@ from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
 
+
 cognify_config = get_cognify_config()
 chunk_config = get_chunk_config()
 graph_config = get_graph_config()
@@ -23,9 +24,6 @@ class config():
     @staticmethod
     def monitoring_tool(monitoring_tool: object):
         base_config.monitoring_tool = monitoring_tool
-
-
-
 
     @staticmethod
     def set_classification_model(classification_model: object):
@@ -57,9 +55,7 @@ class config():
 
     @staticmethod
     def llm_provider(llm_provider: str):
-        infrastructure_config.set_config({
-            "llm_provider": llm_provider
-        })
+        graph_config.llm_provider = llm_provider
 
     @staticmethod
     def intra_layer_score_treshold(intra_layer_score_treshold: str):
@@ -77,6 +73,5 @@ class config():
 
     @staticmethod
     def set_graph_topology(graph_topology: object):
-        infrastructure_config.set_config({
-            "graph_topology": graph_topology
-        })
+        get_cognify_config.graph_topology =graph_topology
+
