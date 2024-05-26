@@ -1,18 +1,14 @@
 """Factory function to get the appropriate graph client based on the graph type."""
 
-from cognee.config import Config
 from cognee.shared.data_models import GraphDBType
-from cognee.infrastructure import infrastructure_config
+from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
 from .networkx.adapter import NetworkXAdapter
-
-config = Config()
-config.load()
+config = get_graph_config()
 
 
 async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None) -> GraphDBInterface :
     """Factory function to get the appropriate graph client based on the graph type."""
-    graph_file_path = f"{infrastructure_config.get_config('database_directory_path')}/{graph_file_name if graph_file_name else config.graph_filename}"
 
     if graph_type == GraphDBType.NEO4J:
         try:
@@ -25,10 +21,20 @@ async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None)
             )
         except:
             pass
-            
-    graph_client = NetworkXAdapter(filename = graph_file_path)
 
+    elif graph_type == GraphDBType.FALKORDB:
+        try:
+            from .falkordb.adapter import FalcorDBAdapter
 
+            return FalcorDBAdapter(
+                graph_database_url = config.graph_database_url,
+                graph_database_username = config.graph_database_username,
+                graph_database_password = config.graph_database_password,
+                graph_database_port = config.graph_database_port
+            )
+        except:
+            pass
+    graph_client = NetworkXAdapter(filename = config.graph_file_path)
     if (graph_client.graph is None):
         await graph_client.load_graph_from_file()
 

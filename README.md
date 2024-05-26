@@ -31,9 +31,10 @@ Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrie
 
 ![Cognee Demo](assets/cognee_demo.gif)
 
-Try it in a Google collab  <a href="https://colab.research.google.com/drive/11k0GtbrKRVGTxhcgad4Wl8YvCnWJVWPl?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
-Join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
+Try it in a Google collab  <a href="https://colab.research.google.com/drive/184Kpe9XGjrt8nVss0WDiPsPRrPk5lZ6o?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
+
+If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
 
 
@@ -62,9 +63,15 @@ poetry add cognee
 ```
 import os
 
-os.environ["OPENAI_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
+or 
+```
+import cognee
+cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
+```
+
 You can also use Ollama or Anyscale as your LLM provider. For more info on local models check our [docs](https://topoteretes.github.io/cognee)
 
 ### Run

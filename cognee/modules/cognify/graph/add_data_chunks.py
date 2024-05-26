@@ -1,8 +1,11 @@
 
 from typing import TypedDict
 from pydantic import BaseModel, Field
-from cognee.infrastructure import infrastructure_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
 from cognee.infrastructure.databases.vector import DataPoint
+
+config = get_vectordb_config()
 
 class TextChunk(TypedDict):
     text: str
@@ -10,7 +13,7 @@ class TextChunk(TypedDict):
     file_metadata: dict
 
 async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
-    vector_client = infrastructure_config.get_config("vector_engine")
+    vector_client = config.vector_engine
 
     identified_chunks = []
 
@@ -52,7 +55,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
 
 async def add_data_chunks_basic_rag(dataset_data_chunks: dict[str, list[TextChunk]]):
-    vector_client = infrastructure_config.get_config("vector_engine")
+    vector_client = config.vector_engine
 
     identified_chunks = []
 

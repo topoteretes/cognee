@@ -7,8 +7,10 @@ from cognee.modules.topology.topology import TopologyEngine, GitHubRepositoryMod
 import pandas as pd
 from pydantic import BaseModel
 
+
 USER_ID = "default_user"
-async def add_topology(directory="example", model=GitHubRepositoryModel):
+
+async def add_topology(directory: str = "example", model: BaseModel = GitHubRepositoryModel) -> Any:
     graph_db_type = infrastructure_config.get_config()["graph_engine"]
 
     graph_client = await get_graph_client(graph_db_type)
@@ -16,7 +18,7 @@ async def add_topology(directory="example", model=GitHubRepositoryModel):
     graph_topology = infrastructure_config.get_config()["graph_topology"]
 
     engine = TopologyEngine()
-    topology = await engine.infer_from_directory_structure(node_id =USER_ID , repository = directory, model=model)
+    topology = await engine.infer_from_directory_structure(node_id=USER_ID, repository=directory, model=model)
 
     def flatten_model(model: BaseModel, parent_id: Optional[str] = None) -> Dict[str, Any]:
         """Flatten a single Pydantic model to a dictionary handling nested structures."""
@@ -42,16 +44,15 @@ async def add_topology(directory="example", model=GitHubRepositoryModel):
         else:
             return []
 
-    def flatten_repository(repo_model):
+    def flatten_repository(repo_model: BaseModel) -> List[Dict[str, Any]]:
         """ Flatten the entire repository model, starting with the top-level model """
         return recursive_flatten(repo_model)
 
     flt_topology = flatten_repository(topology)
 
-    df =pd.DataFrame(flt_topology)
+    df = pd.DataFrame(flt_topology)
 
     print(df.head(10))
-
 
     for _, row in df.iterrows():
         node_data = row.to_dict()
@@ -65,9 +66,10 @@ async def add_topology(directory="example", model=GitHubRepositoryModel):
     return graph_client.graph
 
 if __name__ == "__main__":
-    async def test():
+    async def test() -> None:
+        # Uncomment and modify the following lines as needed
         # await prune.prune_system()
-        # #
+        #
         # from cognee.api.v1.add import add
         # data_directory_path = os.path.abspath("../../../.data")
         # # print(data_directory_path)
@@ -75,7 +77,7 @@ if __name__ == "__main__":
         # # cognee_directory_path = os.path.abspath("../.cognee_system")
         # # config.system_root_directory(cognee_directory_path)
         #
-        # await add("data://" +data_directory_path, "example")
+        # await add("data://" + data_directory_path, "example")
 
         # graph = await add_topology()
 

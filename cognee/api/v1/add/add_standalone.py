@@ -3,7 +3,9 @@ from uuid import UUID, uuid4
 from typing import Union, BinaryIO, List
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure import infrastructure_config
+from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
+relational_config = get_relationaldb_config()
 class DatasetException(Exception):
     message: str
 
@@ -16,7 +18,7 @@ async def add_standalone(
     dataset_id: UUID = uuid4(),
     dataset_name: str = None
 ):
-    db_engine = infrastructure_config.get_config()["database_engine"]
+    db_engine = relational_config.database_engine
     if db_engine.is_db_done is not True:
         await db_engine.ensure_tables()
 

@@ -18,8 +18,7 @@ _Open-source framework for loading and structuring LLM context to create accurat
 
 ### Let's learn about cogneeHub!
 
-cogneeHub is a free and open-sourced learning platform for those interested in creating deterministic LLM outputs.
-We help people with using graphs, LLMs and adding vector retrieval to their ML stack. 
+cogneeHub is a free, open-source learning platform for those interested in creating deterministic LLM outputs. We help developers by using graphs, LLMs, and adding vector retrieval to their Machine Learning stack.
 
 - **Get started** — [Get started with cognee quickly and try it out for yourself.](quickstart.md)
 - **Conceptual Overview** — Learn about the [core concepts](conceptual_overview.md) of cognee and how it fits into your projects.

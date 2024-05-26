@@ -1,8 +1,9 @@
 import duckdb
-
+import os
 class DuckDBAdapter():
     def __init__(self, db_path: str, db_name: str):
-        db_location = db_path + "/" + db_name
+
+        db_location = os.path.abspath(os.path.join(db_path, db_name))
 
         self.get_connection = lambda: duckdb.connect(db_location)
 

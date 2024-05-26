@@ -13,10 +13,12 @@ You can also use Ollama or Anyscale as your LLM provider. For more info on local
 ```
 import os
 
-os.environ["WEAVIATE_URL"] = "YOUR_WEAVIATE_URL"
-os.environ["WEAVIATE_API_KEY"] = "YOUR_WEAVIATE_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
+```
+or 
+```
+cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 
-os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
 ## Run
 

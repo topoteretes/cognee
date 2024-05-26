@@ -2,6 +2,7 @@ from typing import BinaryIO
 from pypdf import PdfReader
 
 def extract_text_from_file(file: BinaryIO, file_type) -> str:
+    """Extract text from a file"""
     if file_type.extension == "pdf":
         reader = PdfReader(stream = file)
         pages = list(reader.pages[:3])

@@ -4,6 +4,8 @@
 from typing import Union, Dict
 import networkx as nx
 from cognee.shared.data_models import GraphDBType
+from cognee.infrastructure.databases.graph.config import get_graph_config
+graph_config = get_graph_config()
 async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: dict = None) -> Dict[str, str]:
     """
     Find the neighbours of a given node in the graph and return their descriptions.
@@ -22,7 +24,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
     if node_id is None:
         return {}
     from cognee.infrastructure import infrastructure_config
-    if infrastructure_config.get_config()["graph_engine"] == GraphDBType.NETWORKX:
+    if graph_config.graph_engine == GraphDBType.NETWORKX:
         if node_id not in graph:
             return {}
 
@@ -30,7 +32,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
         neighbor_descriptions = {neighbor: graph.nodes[neighbor].get('description') for neighbor in neighbors}
         return neighbor_descriptions
 
-    elif infrastructure_config.get_config()["graph_engine"] == GraphDBType.NEO4J:
+    elif graph_config.graph_engine  == GraphDBType.NEO4J:
         cypher_query = """
         MATCH (node {id: $node_id})-[:CONNECTED_TO]->(neighbor)
         RETURN neighbor.id AS neighbor_id, neighbor.description AS description

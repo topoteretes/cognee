@@ -11,6 +11,7 @@ class FileMetadata(TypedDict):
     keywords: list[str]
 
 def get_file_metadata(file: BinaryIO) -> FileMetadata:
+    """Get metadata from a file"""
     file.seek(0)
     file_type = guess_file_type(file)
 

@@ -1,26 +1,35 @@
+
+import logging
+import os
+
+logging.basicConfig(level=logging.DEBUG)
 async def  main():
     from os import path
     import pathlib
     import cognee
+    logging.basicConfig(level=logging.DEBUG)
 
-    print("Working dir: ", str(pathlib.Path(__file__).parent))
-    data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
-    print("Data dir: ", data_directory_path)
-    cognee.config.data_root_directory(data_directory_path)
+    # print("Working dir: ", str(pathlib.Path(__file__).parent))
+    # data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
+    # print("Data dir: ", data_directory_path)
+    # cognee.config.data_root_directory(data_directory_path)
+    #
+    # cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.cognee_system")).resolve())
+    # print("System dir: ", cognee_directory_path)
+    # cognee.config.system_root_directory(cognee_directory_path)
 
-    cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.cognee_system")).resolve())
-    print("System dir: ", cognee_directory_path)
-    cognee.config.system_root_directory(cognee_directory_path)
+    logging.debug("CURRENCT CWD: %s", pathlib.Path(__file__).parent)
+    logging.debug("CURRENCT CWD: %s", os.getcwd())
 
-    await cognee.prune.prune_system()
 
     dataset_name = "cs_explanations"
-    explanation_file_path = path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+
+    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
     await cognee.add([explanation_file_path], dataset_name)
     
-    dataset_name = "short_stories"
-    # data_directory_path is defined above
-    await cognee.add("data://" + data_directory_path, dataset_name)
+    # dataset_name = "short_stories"
+    # # data_directory_path is defined above
+    # await cognee.add("data://" + "/Users/runner/work/cognee/cognee/./cognee/tests", dataset_name)
 
     text_1 = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -36,17 +45,17 @@ async def  main():
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
 
+    #
+    # dataset_name = "cs_explanations"
+    # await cognee.add(
+    #     [
+    #         text_1,
+    #         text_2
+    #     ],
+    #     dataset_name
+    # )
 
-    dataset_name = "cs_explanations"
-    await cognee.add(
-        [
-            text_1,
-            text_2
-        ],
-        dataset_name
-    )
-
-    await cognee.cognify(["short_stories", "cs_explanations"])
+    await cognee.cognify([ "cs_explanations"])
 
 
 if __name__ == "__main__":
