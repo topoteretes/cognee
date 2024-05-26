@@ -17,7 +17,7 @@ class RelationalConfig(BaseSettings):
         db_path=db_path
     )
     database_path: str = os.path.join(config.system_root_directory, "databases")
-    database_directory_path: str = os.path.join(config.db_path, "cognee.db")
+    database_directory_path: str = os.path.join(db_path, "cognee.db")
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
