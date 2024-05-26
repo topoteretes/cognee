@@ -206,6 +206,7 @@ class DefaultCognitiveLayer(BaseModel):
 class GraphDBType(Enum):
     NETWORKX = auto()
     NEO4J = auto()
+    FALKORDB = auto()
 
 
 # Models for representing different entities
