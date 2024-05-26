@@ -58,6 +58,14 @@ class config():
         graph_config.llm_provider = llm_provider
 
     @staticmethod
+    def llm_endpoint(llm_endpoint: str):
+        graph_config.llm_endpoint = llm_endpoint
+
+    @staticmethod
+    def llm_model(llm_model: str):
+        graph_config.llm_model = llm_model
+
+    @staticmethod
     def intra_layer_score_treshold(intra_layer_score_treshold: str):
         cognify_config.intra_layer_score_treshold =intra_layer_score_treshold
 

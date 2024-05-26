@@ -23,9 +23,6 @@ The config class in this module offers a series of static methods to configure t
 
 Import the module as follows:
 
-```python
-from cognee.config import config
-```
 
 ## Methods
 
@@ -35,7 +32,7 @@ Sets the root directory of the system where essential system files and operation
 system_root_directory (str): The path to set as the system's root directory.
 Example:
 ```python
-config.system_root_directory('/path/to/system/root')
+cognee.config.system_root_directory('/path/to/system/root')
 ```
 
 ### data_root_directory(data_root_directory: str)
@@ -45,8 +42,8 @@ data_root_directory (str): The path to set as the data root directory.
 
 Example:
 ```python
-
-config.data_root_directory('/path/to/data/root')
+import cognee
+cognee.config.data_root_directory('/path/to/data/root')
 ```
 
 ### set_classification_model(classification_model: object)
@@ -56,7 +53,8 @@ classification_model (object): The Pydantic model to use for classification.
 Check cognee.shared.data_models for existing models.
 Example:
 ```python
-config.set_classification_model(model)
+import cognee
+cognee.config.set_classification_model(model)
 ```
 
 set_summarization_model(summarization_model: object)
@@ -66,7 +64,8 @@ summarization_model (object): The model to use for summarization.
 Check cognee.shared.data_models for existing models.
 Example:
 ```python
-config.set_summarization_model(my_summarization_model)
+import cognee
+cognee.config.set_summarization_model(my_summarization_model)
 ```
 
 ### set_llm_model(llm_model: object)
@@ -74,7 +73,8 @@ Determines the model to handle LLMs.  Parameters:
 llm_model (object): The model to use for LLMs.
 Example:
 ```python
-config.set_llm_model("OpenAI")
+import cognee
+cognee.config.set_llm_model("openai")
 ```
 
 ### set_graph_engine(graph_engine: object)
@@ -85,7 +85,7 @@ Example:
 ```python
 from cognee.shared.data_models import GraphDBType
 
-config.set_graph_engine(GraphDBType.NEO4J)
+cognee.config.set_graph_engine(GraphDBType.NEO4J)
 ```
 
 
@@ -122,62 +122,5 @@ For each API endpoint, provide the following details:
   "status": "OK"
 }
 ```
-### Endpoint 2: Add
-- URL: /Add
-- Method: POST 
-- Auth Required: Yes | No
-- Description: This endpoint is responsible for adding data to the graph.
 
-#### Parameters
-| Name | Type                                             | Required | Description |
-| --- |--------------------------------------------------| --- | --- |
-| data | Union[str, BinaryIO, List[Union[str, BinaryIO]]] | Yes | The data to be added|
-| dataset_id | UUID                                             | Yes | The ID of the dataset. |
-| dataset_name | String                                           | Yes | The name of the dataset.|
-
-
-
-#### Response
-```json
-{
-  "response": "data"
-}
-```
-
-### Endpoint 3: Cognify
-- URL: /cognify
-- Method: POST 
-- Auth Required: Yes | No
-- Description: This endpoint is responsible for the cognitive processing of the content.
-
-#### Parameters
-| Name | Type                                             | Required | Description |
-| --- |--------------------------------------------------| --- | --- |
-| datasets | Union[str, List[str]] | Yes | The data to be added|
-
-
-#### Response
-```json
-{
-  "response": "data"
-}
-```
-
-
-### Endpoint 4: search
-- URL: /search
-- Method: POST 
-- Auth Required: No
-- Description: This endpoint is responsible for searching for nodes in the graph.
-#### Parameters
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| query_params | Dict[str, Any] | Yes | Description of the parameter. |
-
-
-#### Response
-```json
-{
-  "response": "data"
-}
-```
+More endpoints are available in the FastAPI server. Documentation is in progress

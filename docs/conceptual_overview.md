@@ -3,33 +3,41 @@
 ## Introduction
 
 !!! info "What is cognee?"
-    cognee is a framework for data processing that enables LLMs to produce for deterministic and traceable outputs.
+    cognee is a data processing framework that enables LLMs to produce deterministic and traceable outputs.
 
 
-cognee focuses on creating tools that assist developers in introducing greater predictability and management into their Retrieval-Augmented Generation (RAG) workflows through the use of graph architectures, vector stores and auto-optimizing pipelines.
+cognee assists developers in introducing greater predictability and management into their Retrieval-Augmented Generation (RAG) workflows through the use of graph architectures, vector stores, and auto-optimizing pipelines.
 
-
-Displaying this information as a graph is the clearest method to grasp the content of your documents. Crucially, using a graph allows for the systematic navigation and extraction of data from documents based on your grasp of a document's organization, an idea often termed 'document hierarchies'.
+Displaying information as a graph is the clearest way to grasp the content of your documents. Crucially, graphs allow systematic navigation and extraction of data from documents based on their hierarchy.
 ## Core Concepts
 
 
 ### Concept 1: Data Pipelines
-Most of the data we provide to a system can be understood as unstructured, semi-structured or structured. Rows from a database would belong to structured data, jsons to semi-structured data and logs could be unstructured. 
-To organize and process this data, we need to make sure to have custom loaders for all data types and also to unify and organize the data well together. 
+Most of the data we provide to a system can be categorized as unstructured, semi-structured, or structured. Rows from a database would belong to structured data, jsons to semi-structured data, and logs that we input into the system could be considered unstructured.
+To organize and process this data, we need to ensure we have custom loaders for all data types, which can help us unify and organize it properly.
 <figure markdown>
 ![Data Pipelines](img/pipelines.png)
 <figcaption>Data Pipeline Example</figcaption>
 </figure>
 
-In the example above, we have a data pipeline that imports the data from various sources, normalizes it, and stores it in a database. It also creates relevant identifiers and relationships between the data.
+In the example above, we have a pipeline in which data has been imported from various sources, normalized, and stored in a database. Relevant identifiers and relationships between the data are also created in this process.
+To create an effective data pipeline for processing various types of data—structured, semi-structured, and unstructured—it’s crucial to understand each type's specific handling and processing needs. Let's expand on the concepts involved in setting up such a data pipeline.
+
+Data Types and Their Handling
+- Structured Data: This includes data that adheres to a fixed schema, such as rows in a relational database or data in CSV files. The processing of structured data typically involves SQL queries for extraction, transformations through simple functions or procedures, and loading into destination tables or databases.
+
+- Semi-structured Data: JSON files, XML, or even some APIs' data fit this category. These data types don't have a rigid schema but have some organizational properties that can be exploited. Semi-structured data often requires parsers that can navigate its structure (like trees for XML or key-value pairs for JSON) to extract necessary information. Libraries such as json in Python or lxml for XML handling can be very useful here.
+
+- Unstructured Data: This category includes text files, logs, or even images and videos. 
+
+
 ### Concept 2: Data Enrichment with LLMs
-LLMs are adept at processing unstructured data. We can easily extract summaries, keywords, and other useful information from documents.
+LLMs are adept at processing unstructured data. They can easily extract summaries, keywords, and other useful information from documents. We use function calling with Pydantic models to extract the data and dspy to train our functions.
 <figure markdown>
 ![Data Enrichment](img/enrichment.png)
 <figcaption>Data Enrichment Example</figcaption>
 </figure>
-We decompose content into graphs, allowing us to more precisely map out the relationships between entities and concepts. 
-
+We decompose the loaded content into graphs, allowing us to more precisely map out the relationships between entities and concepts.
 ### Concept 3: Linguistic Analysis
 LLMs are probabilistic models, meaning they can make mistakes. 
 To mitigate this, we can use a combination of NLP and LLMs to determine how to analyze the data and score each part of the text. 
@@ -61,7 +69,7 @@ This involves bombarding the RAG system with hundreds of synthetic questions, en
 This method paves the way for developing self-improving memory engines that can adapt to new data and user feedback.
 
 ## Architecture Overview
-A high-level diagram of the cognee's architecture, illustrating the main components and their interactions. 
+A high-level diagram of cognee's architecture, illustrating the main components and their interactions.
 
 <figure markdown>
 ![Architecture](img/architecture.png)
@@ -80,11 +88,7 @@ Main components:
 ## How It Fits Into Your Projects
 
 !!! info "How cognee fits into your projects"
-    cognee is a self-contained library that simplifies the process of loading and structuring LLM context. It can be integrated into your data pipelines to enhance your AI applications.
+    cognee is a self-contained library that simplifies the process of loading and structuring data in LLMs.
 
-By integrating cognee into your data pipelines, you can leverage the power of LLMs, knowledge graphs, and vector retrieval to enhance your AI applications. 
-
+By integrating cognee into your data pipelines, you can leverage the power of LLMs, knowledge graphs, and vector retrieval to create accurate and explainable AI solutions.
 cognee provides a self-contained library that simplifies the process of loading and structuring LLM context, enabling you to create accurate and explainable AI solutions.
-
-Check out some [case studies](case_studies.md) to see how cognee has been used in real-world applications.
-
