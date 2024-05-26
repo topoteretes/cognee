@@ -107,7 +107,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         text = "empty file"
                     if text == "":
                         text = "empty file"
-                    subchunks = chunk_engine.chunk_data(chunk_strategy, text, config.chunk_size, config.chunk_overlap)
+                    subchunks = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size, chunk_config.chunk_overlap)
 
                     if dataset_name not in data_chunks:
                         data_chunks[dataset_name] = []
