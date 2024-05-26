@@ -68,6 +68,7 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 or 
 ```
+import cognee
 cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 ```
 
