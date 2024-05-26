@@ -5,7 +5,7 @@
 
 The Cognee API has:
 
-1. via Python library
+1. Python library configuration entry points
 2. FastAPI server 
 
 
