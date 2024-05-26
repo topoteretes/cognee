@@ -9,7 +9,7 @@ class EmbeddingConfig(BaseSettings):
     openai_embedding_dimensions: int = 3072
     litellm_embedding_model: str = "text-embedding-3-large"
     litellm_embedding_dimensions: int = 3072
-    embedding_engine:object = DefaultEmbeddingEngine()
+    embedding_engine:object = DefaultEmbeddingEngine(embedding_model=openai_embedding_model, embedding_dimensions=openai_embedding_dimensions)
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
