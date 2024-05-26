@@ -16,6 +16,7 @@ class RelationalConfig(BaseSettings):
         db_name=db_name,
         db_path=db_path
     )
+    database_path: str = os.path.join(config.system_root_directory, "databases")
     database_directory_path: str = os.path.join(config.system_root_directory,"databases")
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
@@ -28,7 +29,8 @@ class RelationalConfig(BaseSettings):
             "db_port": self.db_port,
             "db_user": self.db_user,
             "db_password": self.db_password,
-            "db_engine": self.db_engine
+            "db_engine": self.db_engine,
+            "database_path": self.database_path,
         }
 
 @lru_cache
