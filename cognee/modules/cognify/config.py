@@ -16,7 +16,7 @@ class CognifyConfig(BaseSettings):
     summarization_model: object = SummarizedContent
     labeling_model: object = LabeledContent
     cognitive_layer_model: object = DefaultCognitiveLayer
-    intra_layer_score_treshold: int = 0.98
+    intra_layer_score_treshold: float = 0.98
     connect_documents: bool = False
 
 
