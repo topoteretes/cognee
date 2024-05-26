@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+from cognee.infrastructure.files.storage import LocalStorage
+
 embeddings_config = get_embedding_config()
 base_config = get_base_config()
 
@@ -17,6 +19,8 @@ class VectorConfig(BaseSettings):
                         embedding_engine = embeddings_config.embedding_engine,
                     )
     vector_engine_choice:str = "lancedb"
+
+    LocalStorage.ensure_directory_exists(vector_db_path)
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
