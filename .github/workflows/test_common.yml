@@ -95,6 +95,7 @@ jobs:
       - name: Run test script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENV: 'dev'
         run: poetry run python ./cognee/tests/test_library.py
 
