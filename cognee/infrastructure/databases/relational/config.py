@@ -16,6 +16,7 @@ class RelationalConfig(BaseSettings):
         db_name=db_name,
         db_path=db_path
     )
+    database_directory_path: str = os.path.join(config.system_root_directory,"databases")
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 

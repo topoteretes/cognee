@@ -6,6 +6,7 @@ import nltk
 from nltk.corpus import stopwords
 from cognee.config import Config
 from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import LiteLLMEmbeddingEngine
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
@@ -29,7 +30,7 @@ from cognee.shared.data_models import ChunkStrategy, KnowledgeGraph
 from cognee.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
-
+graph_config = get_graph_config()
 config = Config()
 config.load()
 
@@ -161,7 +162,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
 async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict, document_id: str):
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
-    graph_client = await get_graph_client(infrastructure_config.get_config()["graph_engine"])
+    graph_client = await get_graph_client(graph_config.graph_engine)
 
     graph_topology = infrastructure_config.get_config()["graph_model"]
     if graph_topology == SourceCodeGraph:

@@ -17,7 +17,8 @@ logging.basicConfig(level=logging.DEBUG)
 config = Config()
 config.load()
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
-
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+vector_db_config = get_vectordb_config()
 relational = get_relationaldb_config()
 chunk_config = get_chunk_config()
 class InfrastructureConfig():
@@ -135,17 +136,8 @@ class InfrastructureConfig():
                     )
                     self.vector_engine_choice = "qdrant"
                 else:
-                    from .databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
-                    config.load()
-                    lance_db_path = self.database_directory_path + "/cognee.lancedb"
-                    LocalStorage.ensure_directory_exists(lance_db_path)
-
-                    self.vector_engine = LanceDBAdapter(
-                        url = lance_db_path,
-                        api_key = None,
-                        embedding_engine = self.embedding_engine,
-                    )
-                    self.vector_engine_choice = "lancedb"
+                    self.vector_engine = vector_db_config.vector_engine
+                    self.vector_engine_choice = vector_db_config.vector_engine_choice
 
         if config_entity is not None:
             return getattr(self, config_entity)
