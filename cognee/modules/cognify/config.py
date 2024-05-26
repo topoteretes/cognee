@@ -35,7 +35,8 @@ class CognifyConfig(BaseSettings):
             "intra_layer_score_treshold": self.intra_layer_score_treshold,
             "connect_documents": self.connect_documents,
             "graph_topology": self.graph_topology,
-            "cognitive_layers_limit": self.cognitive_layers_limit
+            "cognitive_layers_limit": self.cognitive_layers_limit,
+            "graph_model": self.graph_model
         }
 
 @lru_cache
