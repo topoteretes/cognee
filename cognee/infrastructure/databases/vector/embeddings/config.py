@@ -7,9 +7,9 @@ from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine im
 class EmbeddingConfig(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-large"
     openai_embedding_dimensions: int = 3072
-    litellm_embedding_model: str = "text-embedding-3-large"
-    litellm_embedding_dimensions: int = 3072
-    embedding_engine:object = DefaultEmbeddingEngine(embedding_model=openai_embedding_model, embedding_dimensions=openai_embedding_dimensions)
+    litellm_embedding_model: str = "BAAI/bge-large-en-v1.5"
+    litellm_embedding_dimensions: int = 1024
+    embedding_engine:object = DefaultEmbeddingEngine(embedding_model=litellm_embedding_model, embedding_dimensions=litellm_embedding_dimensions)
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
