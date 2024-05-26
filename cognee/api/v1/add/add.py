@@ -73,7 +73,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
         else:
             processed_file_paths.append(file_path)
 
-    db = duckdb.connect(relational_config.database_directory_path)
+    db = duckdb.connect(relational_config.db_file_path)
 
     destination = dlt.destinations.duckdb(
         credentials = db,
