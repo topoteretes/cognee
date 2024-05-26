@@ -15,7 +15,7 @@ base_config = get_base_config()
 class config():
     @staticmethod
     def system_root_directory(system_root_directory: str):
-        base_config.base_config = system_root_directory
+        base_config.system_root_directory = system_root_directory
 
     @staticmethod
     def data_root_directory(data_root_directory: str):
