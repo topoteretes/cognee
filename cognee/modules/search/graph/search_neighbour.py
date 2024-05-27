@@ -1,7 +1,7 @@
 """ Fetches the context of a given node in the graph"""
 from typing import Union, Dict
 
-from neo4j import AsyncSession
+
 
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 import networkx as nx
@@ -43,6 +43,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
 
 
     elif graph_config.graph_engine  == GraphDBType.NEO4J:
+        from neo4j import AsyncSession
         if isinstance(graph, AsyncSession):
             cypher_query = """
             MATCH (target {id: $node_id})
