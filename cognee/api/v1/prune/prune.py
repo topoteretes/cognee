@@ -16,8 +16,6 @@ class prune():
 
     @staticmethod
     async def prune_system(graph = True, vector = True):
-        infra_config = infrastructure_config.get_config()
-
         if graph:
             graph_client = await get_graph_client(graph_config.graph_engine)
             await graph_client.delete_graph()

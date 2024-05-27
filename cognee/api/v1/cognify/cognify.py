@@ -85,7 +85,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
                 logger.error(f"Dataset {dataset_name} is already being processed.")
                 return
 
-        update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
+            update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
+
         await cognify(dataset_name)
         update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
 
