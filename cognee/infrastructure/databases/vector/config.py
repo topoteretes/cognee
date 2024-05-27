@@ -5,33 +5,28 @@ from cognee.infrastructure.databases.relational.config import get_relationaldb_c
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from .create_vector_engine import create_vector_engine
 
-embeddings_config = get_embedding_config()
-relational_config = get_relationaldb_config()
-
-lancedb_path = os.path.join(relational_config.database_directory_path, "cognee.lancedb")
-
 class VectorConfig(BaseSettings):
-    vector_db_url: str = lancedb_path
+    vector_db_url: str = os.path.join(get_relationaldb_config().db_path, "cognee.lancedb")
     vector_db_key: str = ""
     vector_engine_provider: str = "lancedb"
     vector_engine: object = create_vector_engine(
         {
             "vector_db_key": None,
-            "vector_db_url": lancedb_path,
+            "vector_db_url": vector_db_url,
             "vector_db_provider": "lancedb",
         },
-        embeddings_config.embedding_engine,
+        get_embedding_config().embedding_engine,
     )
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
     def create_engine(self):
         if self.vector_engine_provider == "lancedb":
-            self.vector_db_url = lancedb_path
+            self.vector_db_url = os.path.join(get_relationaldb_config().db_path, "cognee.lancedb")
 
         self.vector_engine = create_vector_engine(
             get_vectordb_config().to_dict(),
-            embeddings_config.embedding_engine,
+            get_embedding_config().embedding_engine,
         )
 
     def to_dict(self) -> dict:

@@ -4,11 +4,10 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.vector import DataPoint
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
-graph_config = get_graph_config()
-vectordb_config = get_vectordb_config()
+
 async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]) -> None:
+    vectordb_config = get_vectordb_config()
     vector_client = vectordb_config.vector_engine
 
     keyword_nodes = []

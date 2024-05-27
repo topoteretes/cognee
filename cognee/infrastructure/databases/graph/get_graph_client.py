@@ -4,11 +4,11 @@ from cognee.shared.data_models import GraphDBType
 from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
 from .networkx.adapter import NetworkXAdapter
-config = get_graph_config()
 
 
 async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None) -> GraphDBInterface :
     """Factory function to get the appropriate graph client based on the graph type."""
+    config = get_graph_config()
 
     if graph_type == GraphDBType.NEO4J:
         try:

@@ -1,15 +1,10 @@
 """ Fetches the context of a given node in the graph"""
-from typing import Union, Dict
-
-from neo4j import AsyncSession
-
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 import networkx as nx
+from typing import Union
+from neo4j import AsyncSession
 from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.graph.config import get_graph_config
-graph_config = get_graph_config()
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-vector_config = get_vectordb_config()
+
 async def search_neighbour(graph: Union[nx.Graph, any], query: str,
                            other_param: dict = None):
     """
@@ -25,19 +20,20 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
     Returns:
     - List[str]: A list of 'description' attributes of nodes that share the same 'layer_uuid' with the specified node.
     """
-    from cognee.infrastructure import infrastructure_config
     node_id = other_param.get('node_id') if other_param else query
 
     if node_id is None:
         return []
 
+    graph_config = get_graph_config()
+
     if graph_config.graph_engine == GraphDBType.NETWORKX:
         relevant_context = []
-        target_layer_uuid = graph.nodes[node_id].get('layer_uuid')
+        target_layer_uuid = graph.nodes[node_id].get("layer_uuid")
 
         for n, attr in graph.nodes(data=True):
-            if attr.get('layer_uuid') == target_layer_uuid and 'description' in attr:
-                relevant_context.append(attr['description'])
+            if attr.get("layer_uuid") == target_layer_uuid and "description" in attr:
+                relevant_context.append(attr["description"])
 
         return relevant_context
 

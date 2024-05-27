@@ -1,19 +1,11 @@
-from typing import Union, Dict
-import re
-
-from pydantic import BaseModel
-
-from cognee.modules.search.llm.extraction.categorize_relevant_category import categorize_relevant_category
-
 """ Search categories in the graph and return their summary attributes. """
-
-from cognee.shared.data_models import GraphDBType, DefaultContentPrediction
+from typing import Union
+import re
 import networkx as nx
-
+from pydantic import BaseModel
+from cognee.shared.data_models import GraphDBType
+from cognee.modules.search.llm.extraction.categorize_relevant_category import categorize_relevant_category
 from cognee.infrastructure.databases.graph.config import get_graph_config
-graph_config = get_graph_config()
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-vector_config = get_vectordb_config()
 
 def strip_exact_regex(s, substring):
     # Escaping substring to be used in a regex pattern
@@ -25,7 +17,7 @@ def strip_exact_regex(s, substring):
 class DefaultResponseModel(BaseModel):
     document_id: str
 
-async def search_categories(query:str, graph: Union[nx.Graph, any], query_label: str=None, infrastructure_config: Dict=None):
+async def search_categories(query:str, graph: Union[nx.Graph, any], query_label: str=None):
     """
     Filter nodes in the graph that contain the specified label and return their summary attributes.
     This function supports both NetworkX graphs and Neo4j graph databases.
@@ -33,7 +25,6 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
     Parameters:
     - graph (Union[nx.Graph, AsyncSession]): The graph object or Neo4j session.
     - query_label (str): The label to filter nodes by.
-    - infrastructure_config (Dict): Configuration that includes the graph engine type.
 
     Returns:
     - Union[Dict, List[Dict]]: For NetworkX, returns a dictionary where keys are node identifiers,
@@ -41,21 +32,22 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
       each representing a node with 'nodeId' and 'summary'.
     """
     # Determine which client is in use based on the configuration
-    from cognee.infrastructure import infrastructure_config
+    graph_config = get_graph_config()
+
     if graph_config.graph_engine == GraphDBType.NETWORKX:
 
         categories_and_ids = [
-            {'document_id': strip_exact_regex(_, "DATA_SUMMARY__"), 'Summary': data['summary']}
+            {"document_id": strip_exact_regex(_, "DATA_SUMMARY__"), "Summary": data["summary"]}
             for _, data in graph.nodes(data=True)
-            if 'summary' in data
+            if "summary" in data
         ]
         connected_nodes = []
         for id in categories_and_ids:
             print("id", id)
-            connected_nodes.append(list(graph.neighbors(id['document_id'])))
+            connected_nodes.append(list(graph.neighbors(id["document_id"])))
         check_relevant_category = await categorize_relevant_category(query, categories_and_ids, response_model=DefaultResponseModel )
-        connected_nodes = list(graph.neighbors(check_relevant_category['document_id']))
-        descriptions = {node: graph.nodes[node].get('description', 'No desc available') for node in connected_nodes}
+        connected_nodes = list(graph.neighbors(check_relevant_category["document_id"]))
+        descriptions = {node: graph.nodes[node].get("description", "No desc available") for node in connected_nodes}
         return descriptions
 
     elif graph_config.graph_engine == GraphDBType.NEO4J:

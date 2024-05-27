@@ -1,4 +1,4 @@
-export default function TextLogo({ width = 285, height = 81, color = 'currentColor' }) {
+export default function TextLogo({ width = 285, height = 81, color = 'white' }) {
   return (
     <svg width={width} height={height} viewBox="0 0 285 81" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M42.0964 46.4597C39.6678 49.6212 36.2632 51.8922 32.4114 52.92C28.5596 53.9479 24.4762 53.6749 20.7954 52.1436C17.1147 50.6123 14.0426 47.9083 12.0565 44.4517C10.0704 40.9951 9.2813 36.9793 9.81189 33.0282C10.3425 29.0771 12.163 25.4118 14.9907 22.6016C17.8184 19.7914 21.4949 17.9937 25.4493 17.4877C29.4036 16.9816 33.4144 17.7956 36.8586 19.8032" stroke={color} strokeWidth="6.03175" strokeLinecap="round"/>

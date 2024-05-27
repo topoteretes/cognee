@@ -5,9 +5,7 @@ import logging
 import nltk
 from nltk.corpus import stopwords
 from cognee.config import Config
-from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.vector.embeddings.DefaultEmbeddingEngine import LiteLLMEmbeddingEngine
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
 from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks, add_data_chunks_basic_rag
@@ -21,37 +19,22 @@ from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_laye
 # from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
-from cognee.infrastructure import infrastructure_config
 from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
-from cognee.shared.data_models import ChunkStrategy, KnowledgeGraph
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
 from asyncio import Lock
 from cognee.modules.tasks import get_task_status
-from cognee.base_config import get_base_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
-graph_config = get_graph_config()
 config = Config()
 config.load()
-
-
-relational_config = get_relationaldb_config()
-
-
-cognify_config = get_cognify_config()
-chunk_config = get_chunk_config()
-base_config = get_base_config()
-embedding_config = get_embedding_config()
-
-# aclient = instructor.patch(OpenAI())
 
 USER_ID = "default_user"
 
@@ -66,10 +49,11 @@ async def cognify(datasets: Union[str, List[str]] = None):
     stopwords.ensure_loaded()
     create_task_status_table()
 
+    graph_config = get_graph_config()
     graph_db_type = graph_config.graph_engine
-
     graph_client = await get_graph_client(graph_db_type)
 
+    relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine
 
     if datasets is None or len(datasets) == 0:
@@ -108,7 +92,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
         if dataset_name in added_dataset:
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
-
+    chunk_config = get_chunk_config()
     chunk_engine = chunk_config.chunk_engine
     chunk_strategy = chunk_config.chunk_strategy
 
@@ -190,10 +174,11 @@ async def cognify(datasets: Union[str, List[str]] = None):
 async def process_text(chunk_collection: str, chunk_id: str, input_text: str, file_metadata: dict, document_id: str):
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
+    graph_config = get_graph_config()
     graph_client = await get_graph_client(graph_config.graph_engine)
-    print("graph_client", graph_client)
-
+    cognify_config = get_cognify_config()
     graph_topology = cognify_config.graph_model
+
     if graph_topology == SourceCodeGraph:
         classified_categories = [{"data_type": "text", "category_name": "Code and functions"}]
     elif graph_topology == KnowledgeGraph:
@@ -227,7 +212,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
 
     if cognify_config.connect_documents is True:
-        db_engine = relational_config.database_engine
+        db_engine = get_relationaldb_config().database_engine
         relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = document_id)
 
         list_of_nodes = []
@@ -258,52 +243,52 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    async def test():
-        # await prune.prune_system()
-        # #
-        # from cognee.api.v1.add import add
-        # data_directory_path = os.path.abspath("../../../.data")
-        # # print(data_directory_path)
-        # # config.data_root_directory(data_directory_path)
-        # # cognee_directory_path = os.path.abspath("../.cognee_system")
-        # # config.system_root_directory(cognee_directory_path)
-        #
-        # await add("data://" +data_directory_path, "example")
+#     async def test():
+#         # await prune.prune_system()
+#         # #
+#         # from cognee.api.v1.add import add
+#         # data_directory_path = os.path.abspath("../../../.data")
+#         # # print(data_directory_path)
+#         # # config.data_root_directory(data_directory_path)
+#         # # cognee_directory_path = os.path.abspath("../.cognee_system")
+#         # # config.system_root_directory(cognee_directory_path)
+#         #
+#         # await add("data://" +data_directory_path, "example")
 
-        text = """import subprocess
-                def show_all_processes():
-                    process = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE)
-                    output, error = process.communicate()
+#         text = """import subprocess
+#                 def show_all_processes():
+#                     process = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE)
+#                     output, error = process.communicate()
                 
-                    if error:
-                        print(f"Error: {error}")
-                    else:
-                        print(output.decode())
+#                     if error:
+#                         print(f"Error: {error}")
+#                     else:
+#                         print(output.decode())
                 
-                show_all_processes()"""
+#                 show_all_processes()"""
 
-        from cognee.api.v1.add import add
+#         from cognee.api.v1.add import add
 
-        await add([text], "example_dataset")
+#         await add([text], "example_dataset")
 
-        infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine() })
-        from cognee.shared.SourceCodeGraph import SourceCodeGraph
-        from cognee.api.v1.config import config
+#         infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine() })
+#         from cognee.shared.SourceCodeGraph import SourceCodeGraph
+#         from cognee.api.v1.config import config
 
-        # config.set_graph_model(SourceCodeGraph)
-        # config.set_classification_model(CodeContentPrediction)
-        # graph = await cognify()
-        vector_client = infrastructure_config.get_config("vector_engine")
+#         # config.set_graph_model(SourceCodeGraph)
+#         # config.set_classification_model(CodeContentPrediction)
+#         # graph = await cognify()
+#         vector_client = infrastructure_config.get_config("vector_engine")
 
-        out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)
+#         out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)
 
-        print("results", out)
-        #
-        # from cognee.utils import render_graph
-        #
-        # await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
+#         print("results", out)
+#         #
+#         # from cognee.utils import render_graph
+#         #
+#         # await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
 
-    import asyncio
-    asyncio.run(test())
+#     import asyncio
+#     asyncio.run(test())

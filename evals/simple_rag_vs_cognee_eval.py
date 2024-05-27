@@ -2,9 +2,8 @@ from deepeval.dataset import EvaluationDataset
 from pydantic import BaseModel
 
 
-from typing import List, Type
+from typing import List, Type, Dict
 from deepeval.test_case import LLMTestCase
-from deepeval.dataset import Golden
 import dotenv
 dotenv.load_dotenv()
 
@@ -42,7 +41,6 @@ print(dataset)
 
 
 import logging
-from typing import List, Dict
 from cognee.infrastructure import infrastructure_config
 
 logger = logging.getLogger(__name__)

@@ -4,9 +4,6 @@ import uuid
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-graph_config = get_graph_config()
-vectordb_config = get_vectordb_config()
 
 
 async def group_nodes_by_layer(node_descriptions):
@@ -42,6 +39,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
         for relationship in relationships:
 
             if relationship['score'] > score_threshold:
+                graph_config = get_graph_config()
 
                 # For NetworkX
                 if graph_config.graph_engine == GraphDBType.NETWORKX:

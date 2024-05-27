@@ -1,11 +1,11 @@
 from cognee.modules.data.deletion import prune_system
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage import LocalStorage
-base_config = get_base_config()
 
 class prune():
     @staticmethod
     async def prune_data():
+        base_config = get_base_config()
         data_root_directory = base_config.data_root_directory
         LocalStorage.remove_all(data_root_directory)
 

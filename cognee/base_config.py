@@ -1,6 +1,5 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from cognee.root_dir import get_absolute_path
 from cognee.shared.data_models import MonitoringTool
 

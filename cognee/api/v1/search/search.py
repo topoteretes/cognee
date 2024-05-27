@@ -11,21 +11,19 @@ from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.modules.search.graph.search_summary import search_summary
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognee.infrastructure import infrastructure_config
 from cognee.utils import send_telemetry
 from cognee.infrastructure.databases.graph.config import get_graph_config
-graph_config = get_graph_config()
 
 class SearchType(Enum):
-    ADJACENT = 'ADJACENT'
-    SIMILARITY = 'SIMILARITY'
-    CATEGORIES = 'CATEGORIES'
-    NEIGHBOR = 'NEIGHBOR'
-    SUMMARY = 'SUMMARY'
-    SUMMARY_CLASSIFICATION = 'SUMMARY_CLASSIFICATION'
-    NODE_CLASSIFICATION = 'NODE_CLASSIFICATION'
-    DOCUMENT_CLASSIFICATION = 'DOCUMENT_CLASSIFICATION',
-    CYPHER = 'CYPHER'
+    ADJACENT = "ADJACENT"
+    SIMILARITY = "SIMILARITY"
+    CATEGORIES = "CATEGORIES"
+    NEIGHBOR = "NEIGHBOR"
+    SUMMARY = "SUMMARY"
+    SUMMARY_CLASSIFICATION = "SUMMARY_CLASSIFICATION"
+    NODE_CLASSIFICATION = "NODE_CLASSIFICATION"
+    DOCUMENT_CLASSIFICATION = "DOCUMENT_CLASSIFICATION",
+    CYPHER = "CYPHER"
 
     @staticmethod
     def from_str(name: str):
@@ -38,7 +36,7 @@ class SearchParameters(BaseModel):
     search_type: SearchType
     params: Dict[str, Any]
 
-    @field_validator('search_type', mode='before')
+    @field_validator("search_type", mode="before")
     def convert_string_to_enum(cls, value):
         if isinstance(value, str):
             return SearchType.from_str(value)
@@ -51,6 +49,7 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
+    graph_config = get_graph_config()
     graph_client = await get_graph_client(graph_config.graph_engine)
     graph = graph_client.graph
 

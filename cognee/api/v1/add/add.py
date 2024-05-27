@@ -4,16 +4,12 @@ import asyncio
 import dlt
 import duckdb
 import cognee.modules.ingestion as ingestion
-from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.discovery import discover_directory_datasets
 from cognee.utils import send_telemetry
 from cognee.base_config import get_base_config
 base_config = get_base_config()
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
-
-relational_config = get_relationaldb_config()
-
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = None):
     if isinstance(data, str):
@@ -54,8 +50,6 @@ async def add_files(file_paths: List[str], dataset_name: str):
     # infra_config = infrastructure_config.get_config()
     data_directory_path = base_config.data_root_directory
 
-    LocalStorage.ensure_directory_exists(relational_config.database_directory_path)
-
     processed_file_paths = []
 
     for file_path in file_paths:
@@ -73,6 +67,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
         else:
             processed_file_paths.append(file_path)
 
+    relational_config = get_relationaldb_config()
     db = duckdb.connect(relational_config.db_file_path)
 
     destination = dlt.destinations.duckdb(

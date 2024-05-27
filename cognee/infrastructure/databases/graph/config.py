@@ -2,11 +2,8 @@
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 from cognee.shared.data_models import DefaultGraphModel, GraphDBType
-relational_config = get_relationaldb_config()
-base_config = get_base_config()
 
 class GraphConfig(BaseSettings):
     graph_filename: str = "cognee_graph.pkl"
@@ -15,7 +12,7 @@ class GraphConfig(BaseSettings):
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = 123
-    graph_file_path: str = os.path.join(relational_config.database_directory_path,graph_filename)
+    graph_file_path: str = os.path.join(get_relationaldb_config().db_path, graph_filename)
     graph_engine: object =  GraphDBType.NETWORKX
     graph_model: object = DefaultGraphModel
 

@@ -1,9 +1,6 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from cognee.root_dir import get_absolute_path
-
-from cognee.shared.data_models import MonitoringTool, DefaultContentPrediction, LabeledContent, SummarizedContent, \
+from cognee.shared.data_models import DefaultContentPrediction, LabeledContent, SummarizedContent, \
     DefaultCognitiveLayer, DefaultGraphModel, KnowledgeGraph
 
 
@@ -21,7 +18,6 @@ class CognifyConfig(BaseSettings):
     graph_topology: object = DefaultGraphModel
     cognitive_layers_limit: int = 2
     graph_model:object = KnowledgeGraph
-
 
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")

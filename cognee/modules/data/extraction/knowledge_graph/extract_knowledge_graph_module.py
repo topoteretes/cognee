@@ -3,12 +3,9 @@ import dspy
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-from cognee.config import Config
+from cognee.infrastructure.llm import get_llm_config
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge
-from cognee.utils import num_tokens_from_string, trim_text_to_max_tokens
-
-config = Config()
-config.load()
+from cognee.utils import trim_text_to_max_tokens
 
 # """Instructions:
 # You are a top-tier algorithm designed for extracting information from text in structured formats to build a knowledge graph.
@@ -41,7 +38,9 @@ def are_all_nodes_connected(graph: KnowledgeGraph) -> bool:
 
 
 class ExtractKnowledgeGraph(dspy.Module):
-    def __init__(self, lm = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)):
+    llm_config = get_llm_config()
+
+    def __init__(self, lm = dspy.OpenAI(model = llm_config.llm_model, api_key = llm_config.llm_api_key, model_type = "chat", max_tokens = 4096)):
         super().__init__()
         self.lm = lm
         dspy.settings.configure(lm=self.lm)
@@ -50,7 +49,7 @@ class ExtractKnowledgeGraph(dspy.Module):
 
     def forward(self, context: str, question: str):
         context = remove_stop_words(context)
-        context = trim_text_to_max_tokens(context, 1500, config.llm_model)
+        context = trim_text_to_max_tokens(context, 1500, self.llm_config.llm_model)
       
         with dspy.context(lm = self.lm):
             graph = self.generate_graph(text = context).graph

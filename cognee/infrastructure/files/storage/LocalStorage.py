@@ -35,7 +35,7 @@ class LocalStorage(Storage):
     @staticmethod
     def ensure_directory_exists(file_path: str):
         if not os.path.exists(file_path):
-            os.makedirs(file_path)
+            os.makedirs(file_path, exist_ok = True)
 
     def remove(self, file_path: str):
         os.remove(self.storage_path + "/" + file_path)

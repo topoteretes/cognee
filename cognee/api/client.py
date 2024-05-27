@@ -19,12 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from cognee.config import Config
-
-config = Config()
-config.load()
-
-app = FastAPI(debug=True)
+app = FastAPI(debug = True)
 
 origins = [
     "http://frontend:3000",
@@ -59,12 +54,12 @@ class Payload(BaseModel):
 
 @app.get("/datasets", response_model=list)
 async def get_datasets():
-    from cognee import datasets
+    from cognee.api.v1.datasets.datasets import datasets
     return datasets.list_datasets()
 
 @app.delete("/datasets/{dataset_id}", response_model=dict)
 async def delete_dataset(dataset_id: str):
-    from cognee import datasets
+    from cognee.api.v1.datasets.datasets import datasets
     datasets.delete_dataset(dataset_id)
     return JSONResponse(
         status_code=200,
@@ -73,22 +68,23 @@ async def delete_dataset(dataset_id: str):
 
 @app.get("/datasets/{dataset_id}/graph", response_model=list)
 async def get_dataset_graph(dataset_id: str):
-    from cognee import utils
-    from cognee.infrastructure import infrastructure_config
+    from cognee.utils import render_graph
+    from cognee.infrastructure.databases.graph import get_graph_config
     from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
-    graph_engine = infrastructure_config.get_config()["graph_engine"]
+    graph_config = get_graph_config()
+    graph_engine = graph_config.graph_engine
     graph_client = await get_graph_client(graph_engine)
-    graph_url = await utils.render_graph(graph_client.graph)
+    graph_url = await render_graph(graph_client.graph)
 
     return JSONResponse(
-        status_code=200,
-        content=str(graph_url),
+        status_code = 200,
+        content = str(graph_url),
     )
 
 @app.get("/datasets/{dataset_id}/data", response_model=list)
 async def get_dataset_data(dataset_id: str):
-    from cognee import datasets
+    from cognee.api.v1.datasets.datasets import datasets
     dataset_data = datasets.list_data(dataset_id)
     if dataset_data is None:
         raise HTTPException(status_code=404, detail=f"Dataset ({dataset_id}) not found.")
@@ -105,7 +101,7 @@ async def get_dataset_data(dataset_id: str):
 
 @app.get("/datasets/status", response_model=dict)
 async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset")] = None):
-    from cognee import datasets as cognee_datasets
+    from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
     datasets_statuses = cognee_datasets.get_status(datasets)
 
     return JSONResponse(
@@ -115,7 +111,7 @@ async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset
 
 @app.get("/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
 async def get_raw_data(dataset_id: str, data_id: str):
-    from cognee import datasets
+    from cognee.api.v1.datasets.datasets import datasets
     dataset_data = datasets.list_data(dataset_id)
     if dataset_data is None:
         raise HTTPException(status_code=404, detail=f"Dataset ({dataset_id}) not found.")
@@ -134,7 +130,7 @@ async def add(
     data: List[UploadFile] = File(...),
 ):
     """ This endpoint is responsible for adding data to the graph."""
-    from cognee import add as cognee_add
+    from cognee.api.v1.add import add as cognee_add
     try:
         if isinstance(data, str) and data.startswith("http"):
             if "github" in data:
@@ -178,7 +174,7 @@ class CognifyPayload(BaseModel):
 @app.post("/cognify", response_model=dict)
 async def cognify(payload: CognifyPayload):
     """ This endpoint is responsible for the cognitive processing of the content."""
-    from cognee import cognify as cognee_cognify
+    from cognee.api.v1.cognify.cognify import cognify as cognee_cognify
     try:
         await cognee_cognify(payload.datasets)
         return JSONResponse(
@@ -197,7 +193,7 @@ class SearchPayload(BaseModel):
 @app.post("/search", response_model=dict)
 async def search(payload: SearchPayload):
     """ This endpoint is responsible for searching for nodes in the graph."""
-    from cognee import search as cognee_search
+    from cognee.api.v1.search import search as cognee_search
     try:
         search_type = payload.query_params["searchType"]
         params = {
@@ -254,17 +250,21 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     port (int): The port for the server.
     """
     try:
-        logger.info(f"Starting server at {host}:{port}")
-        from cognee import config, prune
+        logger.info("Starting server at %s:%s", host, port)
+
+        from cognee.base_config import get_base_config
+
+        base_config = get_base_config()
         data_directory_path = os.path.abspath(".data_storage")
-        config.data_root_directory(data_directory_path)
+        base_config.data_root_directory = data_directory_path
 
         cognee_directory_path = os.path.abspath(".cognee_system")
-        config.system_root_directory(cognee_directory_path)
+        base_config.system_root_directory = cognee_directory_path
 
-        asyncio.run(prune.prune_system())
+        from cognee.modules.data.deletion import prune_system
+        asyncio.run(prune_system())
 
-        uvicorn.run(app, host=host, port=port)
+        uvicorn.run(app, host = host, port = port)
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")
         # Here you could add any cleanup code or error recovery code.

@@ -5,7 +5,7 @@ from typing import Union, Dict
 import networkx as nx
 from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.graph.config import get_graph_config
-graph_config = get_graph_config()
+
 async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: dict = None) -> Dict[str, str]:
     """
     Find the neighbours of a given node in the graph and return their descriptions.
@@ -23,7 +23,9 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
 
     if node_id is None:
         return {}
-    from cognee.infrastructure import infrastructure_config
+
+    graph_config = get_graph_config()
+
     if graph_config.graph_engine == GraphDBType.NETWORKX:
         if node_id not in graph:
             return {}

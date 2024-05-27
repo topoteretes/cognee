@@ -1,14 +1,9 @@
 """ This module is responsible for creating a semantic graph """
 from typing import  Optional, Any
 from pydantic import BaseModel
-
-# from cognee.infrastructure import infrastructure_config
 from cognee.shared.data_models import GraphDBType
-
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-graph_config = get_graph_config()
-vectordb_config = get_vectordb_config()
+
 async def generate_node_id(instance: BaseModel) -> str:
     for field in ["id", "doc_id", "location_id", "type_id", "node_id"]:
         if hasattr(instance, field):
@@ -46,7 +41,8 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
             # print('NODE ID', node_id)
             # print('NODE DATA', node_data)
             result = await client.add_node(node_id, node_properties = node_data)
-            print("added node", result)
+
+            graph_config = get_graph_config()
 
             # Add an edge if a parent ID is provided and the graph engine is NETWORKX
             if parent_id and "default_relationship" in node_data and graph_config.graph_engine == GraphDBType.NETWORKX:

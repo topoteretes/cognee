@@ -6,8 +6,7 @@ from cognee.infrastructure.databases.vector import DataPoint
 # from cognee.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
-graph_config = get_graph_config()
-vectordb_config = get_vectordb_config()
+
 class GraphLike(TypedDict):
     nodes: List
     edges: List
@@ -19,7 +18,10 @@ async def add_cognitive_layer_graphs(
     chunk_id: str,
     layer_graphs: List[Tuple[str, GraphLike]],
 ):
+    vectordb_config = get_vectordb_config()
     vector_client = vectordb_config.vector_engine
+
+    graph_config = get_graph_config()
     graph_model = graph_config.graph_model
 
     for (layer_id, layer_graph) in layer_graphs:
