@@ -2,6 +2,7 @@
 import os
 import aiohttp
 import uvicorn
+import asyncio
 import json
 import logging
 from typing import Dict, Any, List, Union, Optional, Literal
@@ -254,13 +255,15 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
     try:
         logger.info(f"Starting server at {host}:{port}")
-        from cognee import config
+        from cognee import config, prune
         data_directory_path = os.path.abspath(".data_storage")
         config.data_root_directory(data_directory_path)
 
         cognee_directory_path = os.path.abspath(".cognee_system")
         config.system_root_directory(cognee_directory_path)
-        
+
+        asyncio.run(prune.prune_system())
+
         uvicorn.run(app, host=host, port=port)
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")

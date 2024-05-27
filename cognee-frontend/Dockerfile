@@ -16,5 +16,5 @@ COPY . .
 # Make port 3000 available to the world outside this container
 EXPOSE 3000
 
-# Run npm install and then npm run dev
-CMD ["sh", "-c", "npm install && npm run dev"]
+# Build the app and run it
+CMD ["sh", "-c", "npm run build && npm start"]

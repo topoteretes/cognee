@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { Suspense, useCallback } from 'react';
 import WizardPage from './WizardPage';
 
 export default function Page() {
@@ -9,8 +9,10 @@ export default function Page() {
   }, []);
   
   return (
-    <WizardPage
-      onFinish={finishWizard}
-    />
+    <Suspense>
+      <WizardPage
+        onFinish={finishWizard}
+      />
+    </Suspense>
   );
 }

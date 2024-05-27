@@ -1,12 +1,7 @@
+from cognee.modules.data.deletion import prune_system
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage import LocalStorage
-from cognee.infrastructure import infrastructure_config
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-base_config =get_base_config()
-from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-graph_config = get_graph_config()
-vector_config = get_vectordb_config()
+base_config = get_base_config()
 
 class prune():
     @staticmethod
@@ -16,14 +11,7 @@ class prune():
 
     @staticmethod
     async def prune_system(graph = True, vector = True):
-        if graph:
-            graph_client = await get_graph_client(graph_config.graph_engine)
-            await graph_client.delete_graph()
-
-        if vector:
-            vector_client = vector_config.vector_engine
-            await vector_client.prune()
-
+        await prune_system(graph, vector)
 
 if __name__ == "__main__":
     import asyncio

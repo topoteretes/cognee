@@ -18,14 +18,28 @@ interface SelectOption {
   value: string;
 }
 
+interface SettingsForm extends HTMLFormElement {
+  vectorDBUrl: HTMLInputElement;
+  vectorDBApiKey: HTMLInputElement;
+  llmApiKey: HTMLInputElement;
+}
+
+const defaultProvider = {
+  label: 'OpenAI',
+  value: 'openai',
+};
+
+const defaultModel = {
+  label: 'gpt-4o',
+  value: 'gpt-4o',
+};
+
 export default function Settings({ onDone = () => {}, submitButtonText = 'Save' }) {
   const [llmConfig, setLLMConfig] = useState<{
     apiKey: string;
     model: SelectOption;
     models: {
-      openai: SelectOption[];
-      ollama: SelectOption[];
-      anthropic: SelectOption[];
+      [key: string]: SelectOption[];
     };
     provider: SelectOption;
     providers: SelectOption[];
@@ -43,19 +57,20 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
     setFalse: stopSaving,
   } = useBoolean(false);
 
-  const saveConfig = (event: React.FormEvent<HTMLFormElement>) => {
+  const saveConfig = (event: React.FormEvent<SettingsForm>) => {
     event.preventDefault();
+    const formElements = event.currentTarget;
 
     const newVectorConfig = {
       provider: vectorDBConfig?.provider.value,
-      url: event.target.vectorDBUrl.value,
-      apiKey: event.target.vectorDBApiKey.value,
+      url: formElements.vectorDBUrl.value,
+      apiKey: formElements.vectorDBApiKey.value,
     };
 
     const newLLMConfig = {
       provider: llmConfig?.provider.value,
       model: llmConfig?.model.value,
-      apiKey: event.target.llmApiKey.value,
+      apiKey: formElements.llmApiKey.value,
     };
 
     startSaving();
@@ -81,6 +96,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
       if (config?.provider !== newVectorDBProvider) {
         return {
          ...config,
+          options: config?.options || [],
           provider: newVectorDBProvider,
           url: '',
           apiKey: '',
@@ -94,10 +110,11 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
     setLLMConfig((config) => {
       if (config?.provider !== newLLMProvider) {
         return {
-         ...config,
           provider: newLLMProvider,
-          model: config?.models[newLLMProvider.value][0],
-          apiKey: '',
+          providers: config?.providers || [],
+          model: config?.models?.[newLLMProvider.value]?.[0] || defaultModel,
+          models: config?.models || {},
+          apiKey: config?.apiKey || '',
         };
       }
       return config;
@@ -108,8 +125,11 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
     setLLMConfig((config) => {
       if (config?.model !== newLLMModel) {
         return {
-         ...config,
+          provider: config?.provider || defaultProvider,
+          providers: config?.providers || [],
           model: newLLMModel,
+          models: config?.models || {},
+          apiKey: config?.apiKey || '',
         };
       }
       return config;

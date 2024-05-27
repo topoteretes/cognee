@@ -71,7 +71,7 @@ export default function WizardPage({
 
         {wizardStep === 'explore' && (
           <Spacer inset top="4" bottom="1" horizontal="4">
-            <ExploreStep dataset={dataset} onClose={onFinish} />
+            <ExploreStep dataset={dataset} />
           </Spacer>
         )}
       </div>
