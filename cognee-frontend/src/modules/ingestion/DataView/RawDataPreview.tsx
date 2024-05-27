@@ -1,4 +1,6 @@
-import { IFrameView } from '@/ui';
+import { IFrameView } from '@/ui/Partials';
+import { CloseIcon, GhostButton, Modal, Spacer, Stack, Text } from 'ohmy-ui';
+import styles from './RawDataPreview.module.css';
 
 interface RawDataPreviewProps {
   fileName: string;
@@ -12,11 +14,12 @@ export default function RawDataPreview({ fileName, rawData, onClose }: RawDataPr
   const src = `data:application/pdf;base64,${arrayBufferToBase64(rawData)}`.replace(';', file_header + encodeURIComponent(fileName) + ';');
   
   return (
-    <IFrameView
-      src={src}
-      title={fileName}
-      onClose={onClose}
-    />
+    <Modal isOpen onClose={onClose} className={styles.dataPreviewModal}>
+      <Spacer horizontal="2" vertical="3" wrap>
+        <Text>{fileName}</Text>
+      </Spacer> 
+      <IFrameView src={src} />
+    </Modal>
   );
 }
 

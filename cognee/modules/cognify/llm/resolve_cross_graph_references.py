@@ -1,6 +1,4 @@
 from typing import Dict, List
-from cognee.infrastructure import infrastructure_config
-
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 graph_config = get_graph_config()

@@ -1,5 +1,3 @@
-from dsp.utils import deduplicate
-from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.infrastructure.databases.graph.config import get_graph_config
 graph_config = get_graph_config()

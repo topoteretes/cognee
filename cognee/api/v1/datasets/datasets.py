@@ -1,6 +1,6 @@
 from duckdb import CatalogException
 from cognee.modules.discovery import discover_directory_datasets
-from cognee.infrastructure import infrastructure_config
+from cognee.modules.tasks import get_task_status
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
 relational_config = get_relationaldb_config()
@@ -25,11 +25,8 @@ class datasets():
 
     @staticmethod
     def get_status(dataset_ids: list[str]) -> dict:
-        db = relational_config.db_engine
         try:
-            return db.get_data("cognee_task_status", {
-              "data_id": dataset_ids
-            })
+            return get_task_status(dataset_ids)
         except CatalogException:
             return {}
 

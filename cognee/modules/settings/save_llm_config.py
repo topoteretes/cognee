@@ -1,7 +1,7 @@
 import json
 import logging
 from pydantic import BaseModel
-from cognee.infrastructure.llm import llm_config
+from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure import infrastructure_config
 
 class LLMConfig(BaseModel):
@@ -10,6 +10,8 @@ class LLMConfig(BaseModel):
     provider: str
 
 async def save_llm_config(new_llm_config: LLMConfig):
+    llm_config = get_llm_config()
+
     llm_config.llm_provider = new_llm_config.provider
     llm_config.llm_model = new_llm_config.model
 

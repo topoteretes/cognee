@@ -1,0 +1,20 @@
+
+.explorer {
+  flex: 1;
+  min-height: 100%;
+}
+
+.explorerContent {
+  flex: 1;
+}
+
+.graphExplorer {
+  width: 65%;
+  overflow: hidden;
+  border-radius: var(--border-radius);
+}
+
+.chat {
+  width: 35%;
+  display: flex;
+}

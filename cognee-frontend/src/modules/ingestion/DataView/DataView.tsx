@@ -30,7 +30,7 @@ interface DataViewProps {
 }
 
 export default function DataView({ datasetId, data, onClose, onDataAdd }: DataViewProps) {
-  const handleDataDelete = () => {};
+  // const handleDataDelete = () => {};
   const [rawData, setRawData] = useState<ArrayBuffer | null>(null);
   const [selectedData, setSelectedData] = useState<Data | null>(null);
 
@@ -40,6 +40,8 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
     fetch(`http://0.0.0.0:8000/datasets/${datasetId}/data/${dataItem.id}/raw`)
       .then((response) => response.arrayBuffer())
       .then(setRawData);
+
+    document.body.click(); // Close the dropdown menu.
   }, [datasetId]);
 
   const resetDataPreview = useCallback(() => {
@@ -54,10 +56,12 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
   return (
     <Stack orientation="vertical" gap="4">
       <Stack gap="2" orientation="horizontal" align="/end">
-        <UploadInput onChange={handleDataAdd}>
-          <Text>Add data</Text>
-        </UploadInput>
-        <GhostButton onClick={onClose}>
+        <div>
+          <UploadInput onChange={handleDataAdd}>
+            <Text>Add data</Text>
+          </UploadInput>
+        </div>
+        <GhostButton hugContent onClick={onClose}>
           <CloseIcon />
         </GhostButton>
       </Stack>

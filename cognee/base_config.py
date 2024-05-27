@@ -2,19 +2,12 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.root_dir import get_absolute_path
-
 from cognee.shared.data_models import MonitoringTool
-
-# Monitoring tool
-
-
 
 class BaseConfig(BaseSettings):
     system_root_directory: str = get_absolute_path(".cognee_system")
     data_root_directory: str = get_absolute_path(".data")
     monitoring_tool: object = MonitoringTool.LANGFUSE
-
-
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 

@@ -30,6 +30,8 @@ from cognee.shared.data_models import ChunkStrategy, KnowledgeGraph
 from cognee.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
+from asyncio import Lock
+from cognee.modules.tasks import get_task_status
 from cognee.base_config import get_base_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
@@ -55,6 +57,8 @@ USER_ID = "default_user"
 
 logger = logging.getLogger("cognify")
 
+update_status_lock = Lock()
+
 async def cognify(datasets: Union[str, List[str]] = None):
     """This function is responsible for the cognitive processing of the content."""
     # Has to be loaded in advance, multithreading doesn't work without it.
@@ -73,10 +77,22 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     awaitables = []
 
+    async def handle_cognify_task(dataset_name: str):
+        async with update_status_lock:
+            task_status = get_task_status([dataset_name])
+
+            if task_status == "DATASET_PROCESSING_STARTED":
+                logger.error(f"Dataset {dataset_name} is already being processed.")
+                return
+
+        update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
+        await cognify(dataset_name)
+        update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
+
     # datasets is a list of dataset names
     if isinstance(datasets, list):
-        for dataset in datasets:
-            awaitables.append(cognify(dataset))
+        for dataset_name in datasets:
+            awaitables.append(handle_cognify_task(dataset_name))
 
         graphs = await asyncio.gather(*awaitables)
         return graphs[0]
@@ -140,8 +156,6 @@ async def cognify(datasets: Union[str, List[str]] = None):
     file_count = 0
     files_batch = []
 
-    update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
-
     for (dataset_name, files) in dataset_files:
         for file_metadata in files:
             graph_topology = graph_config.graph_model
@@ -168,8 +182,6 @@ async def cognify(datasets: Union[str, List[str]] = None):
     # Process any remaining files in the last batch
     if len(files_batch) > 0:
         await process_batch(files_batch)
-
-    update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
 
     return graph_client.graph
 

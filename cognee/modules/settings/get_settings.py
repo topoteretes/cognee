@@ -1,6 +1,6 @@
 from cognee.config import Config
-from cognee.infrastructure import infrastructure_config
-from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.llm import get_llm_config
 
 def get_settings():
     config = Config()
@@ -18,7 +18,7 @@ def get_settings():
         "label": "LanceDB",
     }]
 
-    vector_engine = infrastructure_config.get_config("vector_engine")
+    vector_config = get_vectordb_config()
 
     llm_providers = [{
         "value": "openai",
@@ -30,6 +30,8 @@ def get_settings():
         "value": "anthropic",
         "label": "Anthropic",
     }]
+
+    llm_config = get_llm_config()
 
     return dict(
         llm = {
@@ -75,11 +77,11 @@ def get_settings():
         },
         vectorDB = {
             "provider": {
-                "label": vector_engine.name,
-                "value": vector_engine.name.lower(),
+                "label": vector_config.vector_engine_provider,
+                "value": vector_config.vector_engine_provider.lower(),
             },
-            "url": vector_engine.url,
-            "apiKey": vector_engine.api_key,
+            "url": vector_config.vector_db_url,
+            "apiKey": vector_config.vector_db_key,
             "options": vector_dbs,
         },
     )

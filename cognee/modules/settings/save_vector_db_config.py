@@ -1,10 +1,6 @@
-import os
 from typing import Union, Literal
 from pydantic import BaseModel
-from cognee.config import Config
-from cognee.infrastructure import infrastructure_config
-
-config = Config()
+from cognee.infrastructure.databases.vector import get_vectordb_config
 
 class VectorDBConfig(BaseModel):
     url: str
@@ -12,33 +8,9 @@ class VectorDBConfig(BaseModel):
     provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
 
 async def save_vector_db_config(vector_db_config: VectorDBConfig):
-    if vector_db_config.provider == "weaviate":
-        os.environ["WEAVIATE_URL"] = vector_db_config.url
-        os.environ["WEAVIATE_API_KEY"] = vector_db_config.apiKey
+    vector_config = get_vectordb_config()
 
-        remove_qdrant_config()
-
-    if vector_db_config.provider == "qdrant":
-        os.environ["QDRANT_URL"] = vector_db_config.url
-        os.environ["QDRANT_API_KEY"] = vector_db_config.apiKey
-
-        remove_weaviate_config()
-
-    if vector_db_config.provider == "lancedb":
-        remove_qdrant_config()
-        remove_weaviate_config()
-
-    config.load()
-    infrastructure_config.vector_engine = None
-
-def remove_weaviate_config():
-    if "WEAVIATE_URL" in os.environ:
-        del os.environ["WEAVIATE_URL"]
-    if "WEAVIATE_API_KEY" in os.environ:
-        del os.environ["WEAVIATE_API_KEY"]
-
-def remove_qdrant_config():
-    if "QDRANT_URL" in os.environ:
-        del os.environ["QDRANT_URL"]
-    if "QDRANT_API_KEY" in os.environ:
-        del os.environ["QDRANT_API_KEY"]
+    vector_config.vector_db_url = vector_db_config.url
+    vector_config.vector_db_key = vector_db_config.apiKey
+    vector_config.vector_engine_provider = vector_db_config.provider
+    vector_config.create_engine()

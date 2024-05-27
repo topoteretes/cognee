@@ -66,6 +66,10 @@ class DuckDBAdapter():
                 result["data_id"]: result["status"] for result in results
             }
 
+    def execute_query(self, query):
+        with self.get_connection() as connection:
+            return connection.sql(query).to_df().to_dict("records")
+
     def load_cognify_data(self, data):
         with self.get_connection() as connection:
             # Ensure the "cognify" table exists

@@ -1,7 +1,6 @@
 
 from typing import TypedDict
 from pydantic import BaseModel, Field
-from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
 from cognee.infrastructure.databases.vector import DataPoint

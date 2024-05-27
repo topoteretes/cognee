@@ -4,7 +4,7 @@ import aiohttp
 import uvicorn
 import json
 import logging
-from typing import Dict, Any, List, Union, Optional
+from typing import Dict, Any, List, Union, Optional, Literal
 from typing_extensions import Annotated
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
 from fastapi.responses import JSONResponse, FileResponse
@@ -106,9 +106,10 @@ async def get_dataset_data(dataset_id: str):
 async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset")] = None):
     from cognee import datasets as cognee_datasets
     datasets_statuses = cognee_datasets.get_status(datasets)
+
     return JSONResponse(
-        status_code=200,
-        content=datasets_statuses
+        status_code = 200,
+        content = { dataset["data_id"]: dataset["status"] for dataset in datasets_statuses },
     )
 
 @app.get("/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)

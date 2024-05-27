@@ -1,6 +1,4 @@
 """ This module is used to set the configuration of the system."""
-from cognee.infrastructure import infrastructure_config
-
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config

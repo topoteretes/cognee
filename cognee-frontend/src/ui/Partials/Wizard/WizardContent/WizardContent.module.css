@@ -1,0 +1,23 @@
+.wizardContent {
+  width: 100%;
+  max-width: 400px;
+  background: linear-gradient(90deg, #D82EB5 0.52%, #9245FD 103.83%);
+  padding: 24px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.wizardContent::before {
+  content: '';
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  max-width: 394px;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  background-color: #351A4B;
+}
+
+.wizardContent > * {
+  position: relative;
+}
