@@ -32,8 +32,10 @@ Deterministic LLMs Outputs for AI Engineers using graphs, LLMs and vector retrie
 ![Cognee Demo](assets/cognee_demo.gif)
 
 
-Try it in a Google collab  <a href="https://colab.research.google.com/drive/184Kpe9XGjrt8nVss0WDiPsPRrPk5lZ6o?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
+Try it in a Google collab  <a href="https://colab.research.google.com/drive/1_9o66rYOWQWc2rZA_3HekdOphzystSxx?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
+
+https://colab.research.google.com/drive/184Kpe9XGjrt8nVss0WDiPsPRrPk5lZ6o?usp=sharing
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
 
@@ -71,6 +73,12 @@ or
 import cognee
 cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 ```
+
+To run the UI, run:
+```
+docker-compose up cognee
+```
+Then navigate to localhost:3000/wizard
 
 You can also use Ollama or Anyscale as your LLM provider. For more info on local models check our [docs](https://topoteretes.github.io/cognee)
 
