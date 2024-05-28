@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 3000
 
 # Build the app and run it
-CMD ["sh", "-c", "npm run build && npm start"]
+CMD ["sh", "-c", "npm run dev"]
