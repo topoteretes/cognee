@@ -67,7 +67,7 @@ git push origin feature/your-feature-name
 You're on the verge of completion! It's time to showcase your hard work. 🌐
 
 1. Go to [**cognee**](https://github.com/topoteretes/cognee) on GitHub.
-2. Hit the `"New Pull Request"` button.
+2. Hit the `"Compare & Pull Request"` button.
 3. Select the base branch `(main)` and the compare branch (the one with your features).
 4. Craft a `compelling title` and provide a `detailed description` of your contributions. 🎩
 
