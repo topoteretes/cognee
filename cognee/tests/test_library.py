@@ -57,6 +57,20 @@ async def  main():
 
     await cognee.cognify([ "cs_explanations"])
 
+    search_results = cognee.search("SIMILARITY", "computer science")
+    if len(search_results) == 0:
+        print("The similarity search results list is empty.")
+        raise Exception("The search results list is empty.")
+    else:
+        print("The search results list is not empty.")
+
+    # search_results = cognee.search("SIMILARITY", "computer science")
+    # if len(search_results) == 0:
+    #     print("The similarity search results list is empty.")
+    #     raise Exception("The search results list is empty.")
+    # else:
+    #     print("The search results list is not empty.")
+
 
 if __name__ == "__main__":
     import asyncio
