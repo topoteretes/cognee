@@ -45,6 +45,31 @@ async def  main():
     Some notable LLMs are OpenAI's GPT series of models (e.g., GPT-3.5 and GPT-4, used in ChatGPT and Microsoft Copilot), Google's PaLM and Gemini (the latter of which is currently used in the chatbot of the same name), xAI's Grok, Meta's LLaMA family of open-source models, Anthropic's Claude models, Mistral AI's open source models, and Databricks' open source DBRX.
     """
 
+
+    await cognee.cognify([ "cs_explanations"])
+
+    search_results = await cognee.search("SIMILARITY", { "query": "computer science" })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
+
+    search_results = await cognee.search("CATEGORIES", { "query": "DefaultGraphModel__default_user" })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
+
+
+    search_results = await cognee.search("NEIGHBOR", { "query": "DefaultGraphModel__default_user" })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
+
+
+    search_results = await cognee.search("SUMMARY", { "query": "Work and computers" })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
+
+    search_results = await cognee.search("ADJACENT", { "query": "DefaultGraphModel__default_user" })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
+
     #
     # dataset_name = "cs_explanations"
     # await cognee.add(
@@ -55,7 +80,12 @@ async def  main():
     #     dataset_name
     # )
 
-    await cognee.cognify([ "cs_explanations"])
+    # search_results = cognee.search("SIMILARITY", "computer science")
+    # if len(search_results) == 0:
+    #     print("The similarity search results list is empty.")
+    #     raise Exception("The search results list is empty.")
+    # else:
+    #     print("The search results list is not empty.")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.modules.search.graph.search_summary import search_summary
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognee.utils import send_telemetry
+from cognee.shared.utils import send_telemetry
 from cognee.infrastructure.databases.graph.config import get_graph_config
 
 class SearchType(Enum):

@@ -2,7 +2,7 @@ from deepeval.dataset import EvaluationDataset
 from pydantic import BaseModel
 
 
-from typing import List, Type, Dict
+from typing import List, Type
 from deepeval.test_case import LLMTestCase
 import dotenv
 dotenv.load_dotenv()
@@ -41,7 +41,6 @@ print(dataset)
 
 
 import logging
-from cognee.infrastructure import infrastructure_config
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +80,18 @@ async def run_cognify_base_rag():
     pass
 
 
-async def cognify_search_base_rag(content:str, context:str):
-    infrastructure_config.set_config({"database_directory_path": "/Users/vasa/Projects/cognee/cognee/.cognee_system/databases/cognee.lancedb"})
+import os
+from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.vector import get_vectordb_config
 
-    vector_client = infrastructure_config.get_config("vector_engine")
+async def cognify_search_base_rag(content:str, context:str):
+    base_config = get_base_config()
+  
+    cognee_directory_path = os.path.abspath(".cognee_system")
+    base_config.system_root_directory = cognee_directory_path
+
+    vector_config = get_vectordb_config()
+    vector_client = vector_config.vector_engine
 
     return_ = await vector_client.search(collection_name="basic_rag", query_text=content, limit=10)
 

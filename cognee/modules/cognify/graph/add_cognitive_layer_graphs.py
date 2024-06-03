@@ -4,7 +4,7 @@ from typing import List, Tuple, TypedDict
 from pydantic import BaseModel
 from cognee.infrastructure.databases.vector import DataPoint
 
-# from cognee.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
+# from cognee.shared.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
@@ -68,8 +68,6 @@ async def add_cognitive_layer_graphs(
             # sentiment = extract_sentiment_vader(node.description)
 
             id, type, name, description, *node_properties = node
-
-            print("Node properties: ", node_properties)
 
             node_properties = dict(node_properties)
 

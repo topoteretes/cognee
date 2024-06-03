@@ -4,13 +4,10 @@ from dspy.evaluate.evaluate import Evaluate
 from dspy.primitives.example import Example
 from cognee.modules.data.extraction.knowledge_graph.extract_knowledge_graph_module import ExtractKnowledgeGraph
 from cognee.root_dir import get_absolute_path
-from cognee.config import Config
 from cognee.shared.data_models import Answer
+from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.cognify.dataset import HotPotQA
-
-config = Config()
-config.load()
 
 def evaluate():
     dataset = HotPotQA(
@@ -36,7 +33,8 @@ def evaluate():
 
     evaluate_on_hotpotqa = Evaluate(devset = devset, num_threads = 1, display_progress = True, display_table = 5, max_tokens = 4096)
 
-    gpt4 = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)
+    llm_config = get_llm_config()
+    gpt4 = dspy.OpenAI(model = llm_config.llm_model, api_key = llm_config.llm_api_key, model_type = "chat", max_tokens = 4096)
     compiled_extract_knowledge_graph = ExtractKnowledgeGraph(lm = gpt4)
     compiled_extract_knowledge_graph.load(get_absolute_path("./programs/extract_knowledge_graph/extract_knowledge_graph.json"))
 
@@ -58,7 +56,7 @@ def evaluate():
         return dsp.answer_match(example.answer, [answer_prediction.answer], frac = 0.8) or \
             dsp.passage_match([example.answer], [answer_prediction.answer])
 
-    gpt4 = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)
+    gpt4 = dspy.OpenAI(model = llm_config.llm_model, api_key = llm_config.llm_api_key, model_type = "chat", max_tokens = 4096)
     dspy.settings.configure(lm = gpt4)
 
     evaluate_on_hotpotqa(compiled_extract_knowledge_graph, metric = evaluate_answer)

@@ -11,12 +11,7 @@ import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 from posthog import Posthog
-
-from cognee.config import Config
-
-config = Config()
-config.load()
-
+from cognee.base_config import get_base_config
 
 def send_telemetry(event_name: str):
     if os.getenv("TELEMETRY_DISABLED"):
@@ -153,6 +148,7 @@ def generate_color_palette(unique_layers):
 
 
 async def register_graphistry():
+    config = get_base_config()
     graphistry.register(api = 3, username = config.graphistry_username, password = config.graphistry_password)
 
 

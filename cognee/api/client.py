@@ -68,7 +68,7 @@ async def delete_dataset(dataset_id: str):
 
 @app.get("/datasets/{dataset_id}/graph", response_model=list)
 async def get_dataset_graph(dataset_id: str):
-    from cognee.utils import render_graph
+    from cognee.shared.utils import render_graph
     from cognee.infrastructure.databases.graph import get_graph_config
     from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
@@ -253,13 +253,23 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
         logger.info("Starting server at %s:%s", host, port)
 
         from cognee.base_config import get_base_config
+        from cognee.infrastructure.databases.relational import get_relationaldb_config
+        from cognee.infrastructure.databases.vector import get_vectordb_config
+
+        cognee_directory_path = os.path.abspath(".cognee_system")
+        databases_directory_path = os.path.join(cognee_directory_path, "databases")
+
+        relational_config = get_relationaldb_config()
+        relational_config.db_path = databases_directory_path
+        relational_config.create_engine()
+
+        vector_config = get_vectordb_config()
+        vector_config.vector_db_path = databases_directory_path
+        vector_config.create_engine()
 
         base_config = get_base_config()
         data_directory_path = os.path.abspath(".data_storage")
         base_config.data_root_directory = data_directory_path
-
-        cognee_directory_path = os.path.abspath(".cognee_system")
-        base_config.system_root_directory = cognee_directory_path
 
         from cognee.modules.data.deletion import prune_system
         asyncio.run(prune_system())

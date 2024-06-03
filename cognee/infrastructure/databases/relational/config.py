@@ -1,11 +1,11 @@
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from cognee.base_config import get_base_config
+from cognee.root_dir import get_absolute_path
 from .create_relational_engine import create_relational_engine
 
 class RelationalConfig(BaseSettings):
-    db_path: str =  os.path.join(get_base_config().system_root_directory, "databases")
+    db_path: str =  os.path.join(get_absolute_path(".cognee_system"), "databases")
     db_name: str =  "cognee.db"
     db_host: str =  "localhost"
     db_port: str =  "5432"
@@ -17,7 +17,8 @@ class RelationalConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
     def create_engine(self):
-        return create_relational_engine(self.db_path, self.db_name)
+        self.db_file_path = os.path.join(self.db_path, self.db_name)
+        self.database_engine = create_relational_engine(self.db_path, self.db_name)
 
     def to_dict(self) -> dict:
         return {

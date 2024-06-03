@@ -5,26 +5,12 @@ from pydantic import BaseModel
 import instructor
 from tenacity import retry, stop_after_attempt
 import openai
-
-
-from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import MonitoringTool
 from cognee.base_config import get_base_config
 from cognee.infrastructure.llm.config import get_llm_config
 
-llm_config = get_llm_config()
-base_config = get_base_config()
-
-if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
-    from langfuse.openai import AsyncOpenAI, OpenAI
-elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
-    from langsmith import wrappers
-    from openai import AsyncOpenAI
-    AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
-else:
-    from openai import AsyncOpenAI, OpenAI
 
 class GenericAPIAdapter(LLMInterface):
     """Adapter for Generic API LLM provider API """
@@ -37,6 +23,8 @@ class GenericAPIAdapter(LLMInterface):
         self.model = model
         self.api_key = api_key
 
+        llm_config = get_llm_config()
+
         if llm_config.llm_provider == "groq":
             from groq import groq
             self.aclient = instructor.from_openai(
@@ -46,6 +34,17 @@ class GenericAPIAdapter(LLMInterface):
                 mode = instructor.Mode.MD_JSON
             )
         else:
+            base_config = get_base_config()
+
+            if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
+                from langfuse.openai import AsyncOpenAI
+            elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
+                from langsmith import wrappers
+                from openai import AsyncOpenAI
+                AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
+            else:
+                from openai import AsyncOpenAI
+
             self.aclient = instructor.patch(
                 AsyncOpenAI(
                     base_url = api_endpoint,

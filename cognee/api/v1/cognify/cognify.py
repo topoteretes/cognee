@@ -3,8 +3,8 @@ from uuid import uuid4
 from typing import List, Union
 import logging
 import nltk
+from asyncio import Lock
 from nltk.corpus import stopwords
-from cognee.config import Config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
@@ -24,17 +24,13 @@ from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.utils import send_telemetry
+from cognee.shared.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
-from asyncio import Lock
 from cognee.modules.tasks import get_task_status
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
-
-config = Config()
-config.load()
 
 USER_ID = "default_user"
 
@@ -66,7 +62,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
             task_status = get_task_status([dataset_name])
 
             if task_status == "DATASET_PROCESSING_STARTED":
-                logger.error(f"Dataset {dataset_name} is already being processed.")
+                logger.info(f"Dataset {dataset_name} is being processed.")
                 return
 
             update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
@@ -176,8 +172,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
     graph_config = get_graph_config()
     graph_client = await get_graph_client(graph_config.graph_engine)
-    cognify_config = get_cognify_config()
-    graph_topology = cognify_config.graph_model
+    graph_topology = graph_config.graph_model
 
     if graph_topology == SourceCodeGraph:
         classified_categories = [{"data_type": "text", "category_name": "Code and functions"}]
@@ -198,6 +193,8 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     content_summary = await get_content_summary(input_text)
     await add_summary_nodes(graph_client, document_id, content_summary)
     print(f"Chunk ({chunk_id}) summarized.")
+
+    cognify_config = get_cognify_config()
 
     cognitive_layers = await get_cognitive_layers(input_text, classified_categories)
     cognitive_layers = cognitive_layers[:cognify_config.cognitive_layers_limit]
@@ -286,7 +283,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
 #         print("results", out)
 #         #
-#         # from cognee.utils import render_graph
+#         # from cognee.shared.utils import render_graph
 #         #
 #         # await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
 

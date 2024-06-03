@@ -4,7 +4,7 @@ import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
-from cognee.shared.data_models import DefaultGraphModel, GraphDBType, KnowledgeGraph
+from cognee.shared.data_models import GraphDBType, KnowledgeGraph
 
 
 class GraphConfig(BaseSettings):
@@ -26,7 +26,6 @@ class GraphConfig(BaseSettings):
         return {
             "graph_filename": self.graph_filename,
             "graph_database_provider": self.graph_database_provider,
-            "graph_topology": self.graph_topology,
             "graph_file_path": self.graph_file_path,
             "graph_database_url": self.graph_database_url,
             "graph_database_username": self.graph_database_username,

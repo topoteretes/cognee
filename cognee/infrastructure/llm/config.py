@@ -7,6 +7,7 @@ class LLMConfig(BaseSettings):
     llm_endpoint: str = ""
     llm_api_key: str = ""
     llm_temperature: float = 0.0
+    llm_streaming: bool = False
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 

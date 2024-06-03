@@ -1,5 +1,5 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
-from cognee.utils import extract_pos_tags
+from cognee.shared.utils import extract_pos_tags
 
 def extract_keywords(text: str) -> list[str]:
     if len(text) == 0:

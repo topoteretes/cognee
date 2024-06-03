@@ -1,10 +1,10 @@
-from typing import Type, List
+from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 
-async def extract_categories(content: str, response_model: Type[BaseModel]):
+async def extract_topology(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
 
     system_prompt = read_query_prompt("extract_topology.txt")
