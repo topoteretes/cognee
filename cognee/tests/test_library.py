@@ -48,25 +48,25 @@ async def  main():
 
     await cognee.cognify([ "cs_explanations"])
 
-    search_results = cognee.search("SIMILARITY", "computer science")
+    search_results = await cognee.search("SIMILARITY", "computer science")
     assert len(search_results) != 0, "The search results list is empty."
     print("The search results list is not empty.")
 
-    search_results = cognee.search("CATEGORIES", "DefaultGraphModel__default_user")
-    assert len(search_results) != 0, "The search results list is empty."
-    print("The search results list is not empty.")
-
-
-    search_results = cognee.search("NEIGHBOR", "DefaultGraphModel__default_user")
+    search_results = await cognee.search("CATEGORIES", "DefaultGraphModel__default_user")
     assert len(search_results) != 0, "The search results list is empty."
     print("The search results list is not empty.")
 
 
-    search_results = cognee.search("SUMMARY", "Work and computers")
+    search_results = await cognee.search("NEIGHBOR", "DefaultGraphModel__default_user")
     assert len(search_results) != 0, "The search results list is empty."
     print("The search results list is not empty.")
 
-    search_results = cognee.search("ADJACENT", "DefaultGraphModel__default_user")
+
+    search_results = await cognee.search("SUMMARY", "Work and computers")
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
+
+    search_results = await cognee.search("ADJACENT", "DefaultGraphModel__default_user")
     assert len(search_results) != 0, "The search results list is empty."
     print("The search results list is not empty.")
 
