@@ -1,5 +1,9 @@
-
+.data
 .env
+.local.env
+.prod.env
+cognee/.data/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
