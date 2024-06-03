@@ -1,5 +1,6 @@
-
+.data
 .env
+
 .data
 .local.env
 .prod.env
@@ -8,6 +9,12 @@ evals/.deepeval-cache.json
 evals/synthetic_data
 full_run.ipynb
 notebooks/
+
+.local.env
+.prod.env
+cognee/.data/
+
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

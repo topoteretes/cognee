@@ -1,7 +1,6 @@
 import logging
-from cognee.infrastructure import infrastructure_config
-from.extraction.extract_summary import extract_summary
 from cognee.modules.cognify.config import get_cognify_config
+from .extraction.extract_summary import extract_summary
 
 config = get_cognify_config()
 logger = logging.getLogger(__name__)

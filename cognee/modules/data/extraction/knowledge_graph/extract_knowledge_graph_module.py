@@ -5,7 +5,7 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from cognee.infrastructure.llm import get_llm_config
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge
-from cognee.utils import trim_text_to_max_tokens
+from cognee.shared.utils import trim_text_to_max_tokens
 
 # """Instructions:
 # You are a top-tier algorithm designed for extracting information from text in structured formats to build a knowledge graph.

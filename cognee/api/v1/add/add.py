@@ -5,21 +5,23 @@ import dlt
 import duckdb
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.files.storage import LocalStorage
-from cognee.modules.discovery import discover_directory_datasets
-from cognee.utils import send_telemetry
+from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
+from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
-base_config = get_base_config()
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = None):
     if isinstance(data, str):
-        # data is a data directory path
         if "data://" in data:
-            return await add_data_directory(data.replace("data://", ""), dataset_name)
-        # data is a file path
+            # data is a data directory path
+            datasets = get_matched_datasets(data.replace("data://", ""), dataset_name)
+            return await asyncio.gather(*[add(file_paths, dataset_name) for [dataset_name, file_paths] in datasets])
+
         if "file://" in data:
+            # data is a file path
             return await add([data], dataset_name)
-        # data is a text
+
+        # data is text
         else:
             file_path = save_data_to_file(data, dataset_name)
             return await add([file_path], dataset_name)
@@ -47,7 +49,7 @@ async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_nam
     return []
 
 async def add_files(file_paths: List[str], dataset_name: str):
-    # infra_config = infrastructure_config.get_config()
+    base_config = get_base_config()
     data_directory_path = base_config.data_root_directory
 
     processed_file_paths = []
@@ -57,7 +59,7 @@ async def add_files(file_paths: List[str], dataset_name: str):
 
         if data_directory_path not in file_path:
             file_name = file_path.split("/")[-1]
-            file_directory_path = data_directory_path + "/" + (dataset_name.replace(".", "/") + "/" if dataset_name != "root" else "")
+            file_directory_path = data_directory_path + "/" + (dataset_name.replace(".", "/") + "/" if dataset_name != "main_dataset" else "")
             dataset_file_path = path.join(file_directory_path, file_name)
 
             LocalStorage.ensure_directory_exists(file_directory_path)
@@ -107,29 +109,3 @@ async def add_files(file_paths: List[str], dataset_name: str):
     send_telemetry("cognee.add")
 
     return run_info
-
-async def add_data_directory(data_path: str, dataset_name: str = None):
-    datasets = discover_directory_datasets(data_path)
-
-    results = []
-
-    for key in datasets.keys():
-        if dataset_name is None or key.startswith(dataset_name):
-            results.append(add(datasets[key], dataset_name = key))
-
-    return await asyncio.gather(*results)
-
-def save_data_to_file(data: Union[str, BinaryIO], dataset_name: str, filename: str = None):
-    data_directory_path = base_config.data_root_directory
-
-    classified_data = ingestion.classify(data, filename)
-    # data_id = ingestion.identify(classified_data)
-
-    storage_path = data_directory_path + "/" + dataset_name.replace(".", "/")
-    LocalStorage.ensure_directory_exists(storage_path)
-
-    file_metadata = classified_data.get_metadata()
-    file_name = file_metadata["name"]
-    LocalStorage(storage_path).store(file_name, classified_data.get_data())
-
-    return "file://" + storage_path + "/" + file_name

@@ -2,16 +2,13 @@ import dsp
 import dspy
 from dspy.teleprompt import BootstrapFewShot
 from dspy.primitives.example import Example
-from cognee.config import Config
 from cognee.modules.data.extraction.knowledge_graph.extract_knowledge_graph import ExtractKnowledgeGraph
 from cognee.root_dir import get_absolute_path
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.shared.data_models import Answer
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.cognify.dataset import HotPotQA
-
-config = Config()
-config.load()
+from cognee.infrastructure.llm import get_llm_config
 
 def train():
     colbertv2_wiki17_abstracts = dspy.ColBERTv2(url = "http://20.102.90.50:2017/wiki17_abstracts")
@@ -59,7 +56,8 @@ def train():
 
     trainset = [example.with_inputs("context", "question") for example in train_examples]
 
-    gpt4 = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)
+    llm_config = get_llm_config()
+    gpt4 = dspy.OpenAI(model = llm_config.llm_model, api_key = llm_config.llm_api_key, model_type = "chat", max_tokens = 4096)
 
     compiled_extract_knowledge_graph = optimizer.compile(ExtractKnowledgeGraph(lm = gpt4), trainset = trainset)
 
