@@ -10,10 +10,10 @@ def get_task_status(data_ids: [str]):
       f"""SELECT data_id, status
       FROM (
           SELECT data_id, status, ROW_NUMBER() OVER (PARTITION BY data_id ORDER BY created_at DESC) as rn
-          FROM cognee_task_status
+          FROM cognee.cognee.cognee_task_status
           WHERE data_id IN ({formatted_data_ids})
       ) t
       WHERE rn = 1;"""
     )
 
-    return results
+    return results[0] if len(results) > 0 else None

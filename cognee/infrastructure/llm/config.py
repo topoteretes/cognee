@@ -1,3 +1,4 @@
+from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -5,7 +6,7 @@ class LLMConfig(BaseSettings):
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o"
     llm_endpoint: str = ""
-    llm_api_key: str = ""
+    llm_api_key: Optional[str] = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
 

@@ -13,7 +13,7 @@ class DuckDBAdapter():
 
         return list(
             filter(
-                lambda table_name: table_name.endswith("staging") is False,
+                lambda schema_name: not schema_name.endswith("staging") and schema_name != "cognee",
                 tables["schema_name"]
             )
         )
@@ -22,14 +22,18 @@ class DuckDBAdapter():
         with self.get_connection() as connection:
             return connection.sql(f"SELECT id, name, file_path, extension, mime_type, keywords FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
 
-    def create_table(self, table_name: str, table_config: list[dict]):
+    def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
         fields_query_parts = []
 
         for table_config_item in table_config:
             fields_query_parts.append(f"{table_config_item['name']} {table_config_item['type']}")
 
         with self.get_connection() as connection:
-            query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(fields_query_parts)});"
+            query = f"CREATE SCHEMA IF NOT EXISTS {schema_name};"
+            connection.execute(query)
+
+        with self.get_connection() as connection:
+            query = f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"
             connection.execute(query)
 
     def delete_table(self, table_name: str):
@@ -37,7 +41,7 @@ class DuckDBAdapter():
             query = f"DROP TABLE IF EXISTS {table_name};"
             connection.execute(query)
 
-    def insert_data(self, table_name: str, data: list[dict]):
+    def insert_data(self, schema_name: str, table_name: str, data: list[dict]):
         def get_values(data_entry: list):
             return ", ".join([f"'{value}'" if isinstance(value, str) else value for value in data_entry])
       
@@ -45,7 +49,7 @@ class DuckDBAdapter():
         values = ", ".join([f"({get_values(data_entry.values())})" for data_entry in data])
 
         with self.get_connection() as connection:
-            query = f"INSERT INTO {table_name} ({columns}) VALUES {values};"
+            query = f"INSERT INTO {schema_name}.{table_name} ({columns}) VALUES {values};"
             connection.execute(query)
 
     def get_data(self, table_name: str, filters: dict = None):
