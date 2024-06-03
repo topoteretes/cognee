@@ -1,6 +1,5 @@
 import uuid
 
-# from cognee.infrastructure import infrastructure_config
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -105,7 +104,7 @@ if __name__ == "__main__":
         #
         # connect_nodes_in_graph(graph, relationships)
 
-        from cognee.utils import render_graph
+        from cognee.shared.utils import render_graph
 
         graph_url = await render_graph(graph)
 

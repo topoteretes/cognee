@@ -1,8 +1,7 @@
 import logging
 from typing import List, Dict
-from cognee.infrastructure import infrastructure_config
-from.extraction.extract_cognitive_layers import extract_cognitive_layers
 from cognee.modules.cognify.config import get_cognify_config
+from .extraction.extract_cognitive_layers import extract_cognitive_layers
 
 config = get_cognify_config()
 

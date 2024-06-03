@@ -1,5 +1,5 @@
 from duckdb import CatalogException
-from cognee.modules.discovery import discover_directory_datasets
+from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.tasks import get_task_status
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 

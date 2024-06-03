@@ -1,10 +1,7 @@
-from cognee.config import Config
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.llm import get_llm_config
 
 def get_settings():
-    config = Config()
-    config.load()
     llm_config = get_llm_config()
 
     vector_dbs = [{

@@ -6,25 +6,9 @@ from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt
 
 from cognee.base_config import get_base_config
-from cognee.config import Config
-from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import MonitoringTool
-
-config = Config()
-config.load()
-llm_config = get_llm_config()
-base_config = get_base_config()
-
-if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
-    from langfuse.openai import AsyncOpenAI, OpenAI
-elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
-    from langsmith import wrappers
-    from openai import AsyncOpenAI
-    AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
-else:
-    from openai import AsyncOpenAI, OpenAI
 
 class OpenAIAdapter(LLMInterface):
     name = "OpenAI"
@@ -33,6 +17,17 @@ class OpenAIAdapter(LLMInterface):
   
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
     def __init__(self, api_key: str, model:str):
+        base_config = get_base_config()
+
+        if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
+            from langfuse.openai import AsyncOpenAI, OpenAI
+        elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
+            from langsmith import wrappers
+            from openai import AsyncOpenAI
+            AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
+        else:
+            from openai import AsyncOpenAI, OpenAI
+
         self.aclient = instructor.from_openai(AsyncOpenAI(api_key = api_key))
         self.client = instructor.from_openai(OpenAI(api_key = api_key))
         self.model = model

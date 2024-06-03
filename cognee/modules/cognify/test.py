@@ -1,13 +1,11 @@
 import dspy
 from cognee.modules.data.extraction.knowledge_graph.extract_knowledge_graph_module import ExtractKnowledgeGraph
 from cognee.root_dir import get_absolute_path
-from cognee.config import Config
-
-config = Config()
-config.load()
+from cognee.infrastructure.llm import get_llm_config
 
 def run():
-    gpt4 = dspy.OpenAI(model = config.llm_model, api_key = config.llm_api_key, model_type = "chat", max_tokens = 4096)
+    llm_config = get_llm_config()
+    gpt4 = dspy.OpenAI(model = llm_config.llm_model, api_key = llm_config.llm_api_key, model_type = "chat", max_tokens = 4096)
     compiled_extract_knowledge_graph = ExtractKnowledgeGraph(lm = gpt4)
     compiled_extract_knowledge_graph.load(get_absolute_path("./programs/extract_knowledge_graph/extract_knowledge_graph.json"))
 

@@ -19,7 +19,6 @@ async def search_summary( query: str,  graph: Union[nx.Graph, any]) -> Dict[str,
     Parameters:
     - graph (Union[nx.Graph, AsyncSession]): The graph object or Neo4j session.
     - query (str): The query string to filter nodes by, e.g., 'SUMMARY'.
-    - infrastructure_config (Dict): Configuration that includes the graph engine type.
     - other_param (str, optional): An additional parameter, unused in this implementation but could be for future enhancements.
 
     Returns:

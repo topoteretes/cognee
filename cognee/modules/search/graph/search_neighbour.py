@@ -14,7 +14,6 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
     Parameters:
     - graph (Union[nx.Graph, AsyncSession]): The graph object or Neo4j session.
     - id (str): The identifier of the node to match against.
-    - infrastructure_config (Dict): Configuration that includes the graph engine type.
     - other_param (dict, optional): A dictionary that may contain 'node_id' to specify the node.
 
     Returns:

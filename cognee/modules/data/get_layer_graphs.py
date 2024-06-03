@@ -1,13 +1,13 @@
 import logging
 import asyncio
-from cognee.infrastructure import infrastructure_config
+from cognee.infrastructure.databases.graph import get_graph_config
 from .extraction.knowledge_graph.extract_knowledge_graph import extract_knowledge_graph
-from.extraction.extract_summary import extract_summary
-from cognee.modules.cognify.config import get_cognify_config
-config = get_cognify_config()
+
 logger = logging.getLogger(__name__)
 
 async def get_layer_graphs(content: str, cognitive_layers: list[tuple[str, dict]]):
+    config = get_graph_config()
+
     try:
         graph_awaitables = [
             extract_knowledge_graph(

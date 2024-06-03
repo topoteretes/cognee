@@ -9,7 +9,6 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
 
-llm_config = get_llm_config()
 def get_llm_client():
     """Get the LLM client based on the configuration using Enums."""
     llm_config = get_llm_config()
