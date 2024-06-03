@@ -16,7 +16,7 @@ class OpenAIAdapter(LLMInterface):
     api_key: str
   
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
-    def __init__(self, api_key: str, model:str):
+    def __init__(self, api_key: str, model: str, streaming: bool = False):
         base_config = get_base_config()
 
         if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
@@ -32,7 +32,7 @@ class OpenAIAdapter(LLMInterface):
         self.client = instructor.from_openai(OpenAI(api_key = api_key))
         self.model = model
         self.api_key = api_key
-
+        self.streaming = streaming
     @retry(stop = stop_after_attempt(5))
     def completions_with_backoff(self, **kwargs):
         """Wrapper around ChatCompletion.create w/ backoff"""
