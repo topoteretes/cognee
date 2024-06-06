@@ -2,11 +2,9 @@ from datetime import datetime
 from uuid import uuid4
 from typing import List, Tuple, TypedDict
 from pydantic import BaseModel
-from cognee.infrastructure.databases.vector import DataPoint
-
-# from cognee.shared.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
+from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
+# from cognee.shared.utils import extract_pos_tags, extract_named_entities, extract_sentiment_vader
 
 
 class GraphLike(TypedDict):
@@ -20,8 +18,7 @@ async def add_cognitive_layer_graphs(
     chunk_id: str,
     layer_graphs: List[Tuple[str, GraphLike]],
 ):
-    vectordb_config = get_vectordb_config()
-    vector_client = vectordb_config.vector_engine
+    vector_engine = get_vector_engine()
 
     graph_config = get_graph_config()
     graph_model = graph_config.graph_model
@@ -127,7 +124,7 @@ async def add_cognitive_layer_graphs(
             references: References
 
         try:
-            await vector_client.create_collection(layer_id, payload_schema = PayloadSchema)
+            await vector_engine.create_collection(layer_id, payload_schema = PayloadSchema)
         except Exception:
             # It's ok if the collection already exists.
             pass
@@ -146,8 +143,8 @@ async def add_cognitive_layer_graphs(
             ) for (node_id, node_data) in graph_nodes
         ]
 
-        await vector_client.create_data_points(layer_id, data_points)
+        await vector_engine.create_data_points(layer_id, data_points)
 
 
 def generate_node_id(node_id: str) -> str:
-    return node_id.upper().replace(' ', '_').replace("'", "")
+    return node_id.upper().replace(" ", "_").replace("'", "")

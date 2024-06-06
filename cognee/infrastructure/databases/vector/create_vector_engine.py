@@ -28,9 +28,6 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
             )
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
-        # from cognee.infrastructure.files.storage import LocalStorage
-
-        # LocalStorage.ensure_directory_exists(config["vector_db_url"])
 
         return LanceDBAdapter(
             url = config["vector_db_url"],

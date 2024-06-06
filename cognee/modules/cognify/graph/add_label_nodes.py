@@ -2,13 +2,10 @@ from uuid import uuid4
 from typing import List
 from datetime import datetime
 from pydantic import BaseModel
-
-from cognee.infrastructure.databases.vector import DataPoint
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
+from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 
 async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]) -> None:
-    vectordb_config = get_vectordb_config()
-    vector_client = vectordb_config.vector_engine
+    vector_engine = get_vector_engine()
 
     keyword_nodes = []
 
@@ -62,9 +59,9 @@ async def add_label_nodes(graph_client, parent_node_id: str, keywords: List[str]
     ]
 
     try:
-        await vector_client.create_collection(parent_node_id, payload_schema = PayloadSchema)
+        await vector_engine.create_collection(parent_node_id, payload_schema = PayloadSchema)
     except Exception as e:
         # It's ok if the collection already exists.
         print(e)
 
-    await vector_client.create_data_points(parent_node_id, keyword_data_points)
+    await vector_engine.create_data_points(parent_node_id, keyword_data_points)

@@ -1,6 +1,6 @@
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
+from cognee.infrastructure.databases.vector import get_vector_engine
 
 async def search_similarity(query: str, graph):
     graph_config = get_graph_config()
@@ -17,10 +17,8 @@ async def search_similarity(query: str, graph):
 
     graph_nodes = []
 
-    vector_config = get_vectordb_config()
-
     for layer_id in unique_layer_uuids:
-        vector_engine = vector_config.vector_engine
+        vector_engine = get_vector_engine()
 
         results = await vector_engine.search(layer_id, query_text = query, limit = 10)
         print("results", results)

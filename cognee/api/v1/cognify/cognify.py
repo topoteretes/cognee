@@ -61,14 +61,19 @@ async def cognify(datasets: Union[str, List[str]] = None):
         async with update_status_lock:
             task_status = get_task_status([dataset_name])
 
-            if task_status == "DATASET_PROCESSING_STARTED":
+            if dataset_name in task_status and task_status[dataset_name] == "DATASET_PROCESSING_STARTED":
                 logger.info(f"Dataset {dataset_name} is being processed.")
                 return
 
             update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
 
-        await cognify(dataset_name)
-        update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
+        try:
+            await cognify(dataset_name)
+            update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
+        except Exception as error:
+            update_task_status(dataset_name, "DATASET_PROCESSING_ERROR")
+            raise error
+
 
     # datasets is a list of dataset names
     if isinstance(datasets, list):

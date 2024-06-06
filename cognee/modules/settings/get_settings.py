@@ -40,7 +40,7 @@ def get_settings():
                 "value": llm_config.llm_model,
                 "label": llm_config.llm_model,
             } if llm_config.llm_model else None,
-            "apiKey": llm_config.llm_api_key[:-10] + "**********" if llm_config.llm_api_key else None,
+            "apiKey": (llm_config.llm_api_key[:-10] + "**********") if llm_config.llm_api_key else None,
             "providers": llm_providers,
             "models": {
                 "openai": [{

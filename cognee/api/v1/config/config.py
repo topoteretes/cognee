@@ -17,8 +17,8 @@ class config():
         relational_config.create_engine()
 
         vector_config = get_vectordb_config()
-        vector_config.vector_db_path = databases_directory_path
-        vector_config.create_engine()
+        if vector_config.vector_engine_provider == "lancedb":
+            vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
     @staticmethod
     def data_root_directory(data_root_directory: str):
