@@ -6,9 +6,16 @@ from cognee.shared.data_models import ChunkStrategy
 
 
 
-class LangchainChunkEngine():
-    @staticmethod
-    def chunk_data(
+class LangchainChunkEngine:
+    def __init__(self, chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
+        self.chunk_strategy = chunk_strategy
+        self.source_data = source_data
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+
+
+    def chunk_data(self,
         chunk_strategy = None,
         source_data = None,
         chunk_size = None,
@@ -28,16 +35,16 @@ class LangchainChunkEngine():
         """
 
         if chunk_strategy == ChunkStrategy.CODE:
-            chunked_data = LangchainChunkEngine.chunk_data_by_code(source_data,chunk_size, chunk_overlap)
+            chunked_data = self.chunk_data_by_code(source_data,self.chunk_size, self.chunk_overlap)
 
         elif chunk_strategy == ChunkStrategy.LANGCHAIN_CHARACTER:
-            chunked_data = LangchainChunkEngine.chunk_data_by_character(source_data,chunk_size, chunk_overlap)
+            chunked_data = self.chunk_data_by_character(source_data,self.chunk_size, self.chunk_overlap)
         else:
-            chunked_data = DefaultChunkEngine.chunk_data_by_paragraph(source_data,chunk_size, chunk_overlap)
+            chunked_data = "Invalid chunk strategy."
         return chunked_data
 
-    @staticmethod
-    def chunk_data_by_code(data_chunks, chunk_size, chunk_overlap, language=None):
+
+    def chunk_data_by_code(self, data_chunks, chunk_size, chunk_overlap= 10, language=None):
         from langchain_text_splitters import (
             Language,
             RecursiveCharacterTextSplitter,
@@ -53,10 +60,10 @@ class LangchainChunkEngine():
 
         return only_content
 
-    def chunk_data_by_character(self, data_chunks, chunk_size, chunk_overlap):
+    def chunk_data_by_character(self, data_chunks, chunk_size=1500, chunk_overlap=10):
         from langchain_text_splitters import RecursiveCharacterTextSplitter
-        splitter = RecursiveCharacterTextSplitter(chunk_size, chunk_overlap)
-        data = splitter.split(data_chunks)
+        splitter = RecursiveCharacterTextSplitter(chunk_size =chunk_size, chunk_overlap=chunk_overlap)
+        data = splitter.create_documents([data_chunks])
 
         only_content = [chunk.page_content for chunk in data]
 

@@ -38,7 +38,7 @@ greenlet = "^3.0.3"
 ruff = "^0.2.2"
 filetype = "^1.2.0"
 nltk = "^3.8.1"
-dlt = "0.4.11"
+dlt = "0.4.12"
 duckdb = {version = "^0.10.0", extras = ["dlt"]}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
@@ -72,7 +72,8 @@ spacy = "^3.7.4"
 protobuf = "<5.0.0"
 pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
-langchain-community = "0.0.38"
+langchain-text-splitters = "^0.2.1"
+
 
 
 [tool.poetry.extras]

@@ -89,3 +89,19 @@ class config():
     def set_chunk_strategy(chunk_strategy: object):
         chunk_config = get_chunk_config()
         chunk_config.chunk_strategy = chunk_strategy
+
+    @staticmethod
+    def set_chunk_engine(chunk_engine: object):
+        chunk_config = get_chunk_config()
+        chunk_config.chunk_engine = chunk_engine
+
+    @staticmethod
+    def set_chunk_overlap(chunk_overlap: object):
+        chunk_config = get_chunk_config()
+        chunk_config.chunk_overlap = chunk_overlap
+
+    @staticmethod
+    def set_chunk_size(chunk_size: object):
+        chunk_config = get_chunk_config()
+        chunk_config.chunk_size = chunk_size
+

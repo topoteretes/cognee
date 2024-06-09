@@ -5,6 +5,12 @@ from cognee.shared.data_models import ChunkStrategy
 
 
 class DefaultChunkEngine():
+    def __init__(self, chunk_strategy=None, chunk_size=None, chunk_overlap=None):
+        self.chunk_strategy = chunk_strategy
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+
     @staticmethod
     def _split_text_with_regex(
         text: str, separator: str, keep_separator: bool
@@ -25,8 +31,8 @@ class DefaultChunkEngine():
         return [s for s in splits if s != ""]
 
 
-    @staticmethod
-    def chunk_data(
+
+    def chunk_data(self,
         chunk_strategy = None,
         source_data = None,
         chunk_size = None,
@@ -45,19 +51,19 @@ class DefaultChunkEngine():
         - The chunked data.
         """
 
-        if chunk_strategy == ChunkStrategy.PARAGRAPH:
-            chunked_data = DefaultChunkEngine.chunk_data_by_paragraph(source_data,chunk_size, chunk_overlap)
-        elif chunk_strategy == ChunkStrategy.SENTENCE:
-            chunked_data = DefaultChunkEngine.chunk_by_sentence(source_data, chunk_size, chunk_overlap)
-        elif chunk_strategy == ChunkStrategy.EXACT:
-            chunked_data = DefaultChunkEngine.chunk_data_exact(source_data, chunk_size, chunk_overlap)
+        if self.chunk_strategy == ChunkStrategy.PARAGRAPH:
+            chunked_data = self.chunk_data_by_paragraph(source_data,chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        elif self.chunk_strategy == ChunkStrategy.SENTENCE:
+            chunked_data = self.chunk_by_sentence(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
+        elif self.chunk_strategy == ChunkStrategy.EXACT:
+            chunked_data = self.chunk_data_exact(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
 
 
         return chunked_data
 
 
-    @staticmethod
-    def chunk_data_exact(data_chunks, chunk_size, chunk_overlap):
+
+    def chunk_data_exact(self, data_chunks, chunk_size, chunk_overlap):
         data = "".join(data_chunks)
         chunks = []
         for i in range(0, len(data), chunk_size - chunk_overlap):
@@ -65,8 +71,8 @@ class DefaultChunkEngine():
         return chunks
 
 
-    @staticmethod
-    def chunk_by_sentence(data_chunks, chunk_size, overlap):
+
+    def chunk_by_sentence(self, data_chunks, chunk_size, chunk_overlap):
         # Split by periods, question marks, exclamation marks, and ellipses
         data = "".join(data_chunks)
 
@@ -77,15 +83,15 @@ class DefaultChunkEngine():
         sentence_chunks = []
         for sentence in sentences:
             if len(sentence) > chunk_size:
-                chunks = DefaultChunkEngine.chunk_data_exact([sentence], chunk_size, overlap)
+                chunks = self.chunk_data_exact(data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap)
                 sentence_chunks.extend(chunks)
             else:
                 sentence_chunks.append(sentence)
         return sentence_chunks
 
 
-    @staticmethod
-    def chunk_data_by_paragraph(data_chunks, chunk_size, overlap, bound = 0.75):
+
+    def chunk_data_by_paragraph(self, data_chunks, chunk_size, chunk_overlap, bound = 0.75):
         data = "".join(data_chunks)
         total_length = len(data)
         chunks = []
@@ -108,7 +114,7 @@ class DefaultChunkEngine():
                 # Update end_idx to include the paragraph delimiter
                 end_idx = next_paragraph_index + 2
 
-            end_index = end_idx + overlap
+            end_index = end_idx + chunk_overlap
 
             chunk_text = data[start_idx:end_index]
 
@@ -116,7 +122,7 @@ class DefaultChunkEngine():
                 chunk_text += data[end_index]
                 end_index += 1
 
-            end_idx = end_index - overlap
+            end_idx = end_index - chunk_overlap
 
             chunks.append(chunk_text.replace("\n", "").strip())
 

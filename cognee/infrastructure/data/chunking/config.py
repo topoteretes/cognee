@@ -7,9 +7,9 @@ from cognee.shared.data_models import ChunkStrategy
 
 class ChunkConfig(BaseSettings):
     chunk_size: int = 1500
-    chunk_overlap: int = 0
+    chunk_overlap: int = 10
     chunk_strategy: object = ChunkStrategy.PARAGRAPH
-    chunk_engine: object = DefaultChunkEngine()
+    chunk_engine = DefaultChunkEngine
 
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")

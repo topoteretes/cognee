@@ -5,7 +5,11 @@ import logging
 import nltk
 from asyncio import Lock
 from nltk.corpus import stopwords
+
+from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
+from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
 from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks, add_data_chunks_basic_rag
@@ -23,7 +27,7 @@ from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
-from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.data_models import KnowledgeGraph, ChunkStrategy
 from cognee.shared.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
@@ -94,7 +98,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
             dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
     chunk_config = get_chunk_config()
-    chunk_engine = chunk_config.chunk_engine
+    chunk_engine = get_chunk_engine()
     chunk_strategy = chunk_config.chunk_strategy
 
     async def process_batch(files_batch):
@@ -245,52 +249,52 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 
-#     async def test():
-#         # await prune.prune_system()
-#         # #
-#         # from cognee.api.v1.add import add
-#         # data_directory_path = os.path.abspath("../../../.data")
-#         # # print(data_directory_path)
-#         # # config.data_root_directory(data_directory_path)
-#         # # cognee_directory_path = os.path.abspath("../.cognee_system")
-#         # # config.system_root_directory(cognee_directory_path)
-#         #
-#         # await add("data://" +data_directory_path, "example")
+    async def test():
+        # await prune.prune_system()
+        # #
+        # from cognee.api.v1.add import add
+        # data_directory_path = os.path.abspath("../../../.data")
+        # # print(data_directory_path)
+        # # config.data_root_directory(data_directory_path)
+        # # cognee_directory_path = os.path.abspath("../.cognee_system")
+        # # config.system_root_directory(cognee_directory_path)
+        #
+        # await add("data://" +data_directory_path, "example")
 
-#         text = """import subprocess
-#                 def show_all_processes():
-#                     process = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE)
-#                     output, error = process.communicate()
+        text = """Conservative PP in the lead in Spain, according to estimate
+                An estimate has been published for Spain:
                 
-#                     if error:
-#                         print(f"Error: {error}")
-#                     else:
-#                         print(output.decode())
+                Opposition leader Alberto Núñez Feijóo’s conservative People’s party (PP): 32.4%
                 
-#                 show_all_processes()"""
+                Spanish prime minister Pedro Sánchez’s Socialist party (PSOE): 30.2%
+                
+                The far-right Vox party: 10.4%
+                
+                In Spain, the right has sought to turn the European election into a referendum on Sánchez.
+                
+                Ahead of the vote, public attention has focused on a saga embroiling the prime minister’s wife, Begoña Gómez, who is being investigated over allegations of corruption and influence-peddling, which Sanchez has dismissed as politically-motivated and totally baseless."""
 
-#         from cognee.api.v1.add import add
+        from cognee.api.v1.add import add
 
-#         await add([text], "example_dataset")
+        await add([text], "example_dataset")
 
-#         infrastructure_config.set_config( {"chunk_engine": LangchainChunkEngine() , "chunk_strategy": ChunkStrategy.CODE,'embedding_engine': LiteLLMEmbeddingEngine() })
-#         from cognee.shared.SourceCodeGraph import SourceCodeGraph
-#         from cognee.api.v1.config import config
+        from cognee.api.v1.config.config import config
+        config.set_chunk_engine(LangchainChunkEngine() )
+        config.set_chunk_strategy(ChunkStrategy.LANGCHAIN_CHARACTER)
+        config.embedding_engine = LiteLLMEmbeddingEngine()
 
-#         # config.set_graph_model(SourceCodeGraph)
-#         # config.set_classification_model(CodeContentPrediction)
-#         # graph = await cognify()
-#         vector_client = infrastructure_config.get_config("vector_engine")
+        graph = await cognify()
+        # vector_client = infrastructure_config.get_config("vector_engine")
+        #
+        # out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)
+        #
+        # print("results", out)
+        #
+        # from cognee.shared.utils import render_graph
+        #
+        # await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
 
-#         out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)
-
-#         print("results", out)
-#         #
-#         # from cognee.shared.utils import render_graph
-#         #
-#         # await render_graph(graph, include_color=True, include_nodes=False, include_size=False)
-
-#     import asyncio
-#     asyncio.run(test())
+    import asyncio
+    asyncio.run(test())
