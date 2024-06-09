@@ -2,13 +2,31 @@
 
 The goal of the blog is to discuss broader topics around the cognee project, including the motivation behind the project, the technical details, and the future of the project.
 
-## cognee library announcements
+
+## knowledge graphs + rags
+
+In progress
+
+[//]: # (1. [LLMOps stack + Graphs]&#40;posts/llmops-and-knowledge-graphs.md&#41;)
+
+[//]: # (2. [Where do knowledge graphs fit, and where do they not? A case study with dynamo.fyi]&#40;posts/where-do-knowledge-graphs-fit.md&#41;)
+
+[//]: # (3. [Knowledge Graphs vs basic RAGs, some metrics]&#40;posts/knowledge-graphs-vs-basic-rags.md&#41;)
+
+[//]: # ()
+
+
+## product announcements
 
 This section covers the release notes for the cognee library. It includes the new features, bug fixes, and improvements in each release.
 
 1. [Cognee - library release](posts/cognee-library-release.md)
+2. [Cognee - v0.1.11 announcement](posts/cognee-v0.1.1.md)
+3. [New website for cognee](posts/new-website-for-cognee.md)
 
-[//]: # (2. [Cognee - v0.1.4 announcement]&#40;posts/cognee-v0.1.4.md&#41;)
+
+
+
 
 ## Towards deterministic data pipelines for LLMs step by step
 This series mostly deals with product discovery, data engineering, and the development of robust AI memory data pipelines.
