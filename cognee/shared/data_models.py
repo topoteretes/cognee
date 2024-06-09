@@ -35,6 +35,7 @@ class ChunkStrategy(Enum):
     PARAGRAPH = "paragraph"
     SENTENCE = "sentence"
     CODE    = "code"
+    LANGCHAIN_CHARACTER = "langchain_character"
 
 class MemorySummary(BaseModel):
     """ Memory summary. """

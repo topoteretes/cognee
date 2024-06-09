@@ -5,6 +5,7 @@ The page is dedicated to collecting all research that was collected in the past 
 This is not an exhaustive list, and any PRs would be welcome
 
 ### Research Papers
+- [2024/06/04] [Transformers and episodic memory](https://arxiv.org/abs/2405.14992)
 - [2024/03/24] [Graph Chain-of-Thought: Augmenting Large Language Models by Reasoning on Graphs](https://arxiv.org/abs/2404.07103)
 - [2024/03/24] [Leave No Context Behind: Efficient Infinite Context Transformers with Infini-attention](https://arxiv.org/abs/2404.07143)
 - [2024/03/24] [Compound AI systems](https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/)
