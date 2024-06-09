@@ -29,6 +29,9 @@ class LangchainChunkEngine():
 
         if chunk_strategy == ChunkStrategy.CODE:
             chunked_data = LangchainChunkEngine.chunk_data_by_code(source_data,chunk_size, chunk_overlap)
+
+        elif chunk_strategy == ChunkStrategy.LANGCHAIN_CHARACTER:
+            chunked_data = LangchainChunkEngine.chunk_data_by_character(source_data,chunk_size, chunk_overlap)
         else:
             chunked_data = DefaultChunkEngine.chunk_data_by_paragraph(source_data,chunk_size, chunk_overlap)
         return chunked_data
@@ -47,6 +50,15 @@ class LangchainChunkEngine():
         code_chunks = python_splitter.create_documents([data_chunks])
 
         only_content = [chunk.page_content for chunk in code_chunks]
+
+        return only_content
+
+    def chunk_data_by_character(self, data_chunks, chunk_size, chunk_overlap):
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(chunk_size, chunk_overlap)
+        data = splitter.split(data_chunks)
+
+        only_content = [chunk.page_content for chunk in data]
 
         return only_content
 

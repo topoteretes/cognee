@@ -1,10 +1,43 @@
 import pandas as pd
 from pydantic import BaseModel
+
 from typing import List, Dict, Any, Union, Optional
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 from cognee.modules.topology.topology import TopologyEngine, GitHubRepositoryModel
 from cognee.infrastructure.databases.graph.config import get_graph_config
 
+import os
+import pandas as pd
+import json
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Union, Type, Any
+from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+
+
+
+
+class Relationship(BaseModel):
+    type: str = Field(..., description="The type of relationship, e.g., 'belongs_to'.")
+    source: Optional[str] = Field(None, description="The identifier of the source id of in the relationship being a directory or subdirectory")
+    target: Optional[str] = Field(None, description="The identifier of the target id in the relationship being the directory, subdirectory or file")
+    properties: Optional[Dict[str, Any]] = Field(None, description="A dictionary of additional properties and values related to the relationship.")
+
+class JSONEntity(BaseModel):
+    name: str
+    set_type_as: Optional[str] = None
+    property_columns: List[str]
+    description: Optional[str] = None
+
+class JSONPattern(BaseModel):
+    head: str
+    relation: str
+    tail: str
+    description: Optional[str] = None
+
+class JSONModel(BaseModel):
+    node_id: str
+    entities: List[JSONEntity]
+    patterns: List[JSONPattern]
 USER_ID = "default_user"
 
 async def add_topology(directory: str = "example", model: BaseModel = GitHubRepositoryModel) -> Any:
@@ -44,11 +77,12 @@ async def add_topology(directory: str = "example", model: BaseModel = GitHubRepo
         """ Flatten the entire repository model, starting with the top-level model """
         return recursive_flatten(repo_model)
 
-    flt_topology = flatten_repository(topology)
+    async def add_graph_topology():
 
-    df = pd.DataFrame(flt_topology)
+        flt_topology = flatten_repository(topology)
 
-    print(df.head(10))
+        df = pd.DataFrame(flt_topology)
+
 
     for _, row in df.iterrows():
         node_data = row.to_dict()
