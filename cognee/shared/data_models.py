@@ -37,6 +37,12 @@ class ChunkStrategy(Enum):
     CODE    = "code"
     LANGCHAIN_CHARACTER = "langchain_character"
 
+
+class ChunkEngine(Enum):
+    LANGCHAIN_ENGINE = "langchain"
+    DEFAULT_ENGINE = "default"
+    HAYSTACK_ENGINE = "haystack"
+
 class MemorySummary(BaseModel):
     """ Memory summary. """
     nodes: List[Node] = Field(..., default_factory=list)

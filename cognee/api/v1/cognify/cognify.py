@@ -27,7 +27,7 @@ from cognee.modules.data.get_content_categories import get_content_categories
 from cognee.modules.data.get_content_summary import get_content_summary
 from cognee.modules.data.get_cognitive_layers import get_cognitive_layers
 from cognee.modules.data.get_layer_graphs import get_layer_graphs
-from cognee.shared.data_models import KnowledgeGraph, ChunkStrategy
+from cognee.shared.data_models import KnowledgeGraph, ChunkStrategy, ChunkEngine
 from cognee.shared.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
@@ -281,7 +281,7 @@ if __name__ == "__main__":
         await add([text], "example_dataset")
 
         from cognee.api.v1.config.config import config
-        config.set_chunk_engine(LangchainChunkEngine() )
+        config.set_chunk_engine(ChunkEngine.LANGCHAIN_ENGINE )
         config.set_chunk_strategy(ChunkStrategy.LANGCHAIN_CHARACTER)
         config.embedding_engine = LiteLLMEmbeddingEngine()
 
