@@ -49,9 +49,9 @@ async def cognify(datasets: Union[str, List[str]] = None):
     stopwords.ensure_loaded()
     create_task_status_table()
 
-    graph_config = get_graph_config()
-    graph_db_type = graph_config.graph_engine
-    graph_client = await get_graph_client(graph_db_type)
+    # graph_config = get_graph_config()
+    # graph_db_type = graph_config.graph_engine
+    graph_client = await get_graph_client()
 
     relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine
@@ -180,7 +180,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
     graph_config = get_graph_config()
-    graph_client = await get_graph_client(graph_config.graph_engine)
+    graph_client = await get_graph_client()
     graph_topology = graph_config.graph_model
 
     if graph_topology == SourceCodeGraph:

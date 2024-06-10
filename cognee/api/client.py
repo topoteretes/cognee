@@ -73,9 +73,9 @@ async def get_dataset_graph(dataset_id: str):
     from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
     try:
-        graph_config = get_graph_config()
-        graph_engine = graph_config.graph_engine
-        graph_client = await get_graph_client(graph_engine)
+        # graph_config = get_graph_config()
+        # graph_engine = graph_config.graph_engine
+        graph_client = await get_graph_client()
         graph_url = await render_graph(graph_client.graph)
 
         return JSONResponse(

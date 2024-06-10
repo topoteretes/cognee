@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.graph.get_graph_client import get_graph_cli
 async def prune_system(graph = True, vector = True):
     if graph:
         graph_config = get_graph_config()
-        graph_client = await get_graph_client(graph_config.graph_engine)
+        graph_client = await get_graph_client()
         await graph_client.delete_graph()
 
     if vector:

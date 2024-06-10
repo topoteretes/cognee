@@ -42,9 +42,9 @@ USER_ID = "default_user"
 
 async def add_topology(directory: str = "example", model: BaseModel = GitHubRepositoryModel) -> Any:
     graph_config = get_graph_config()
-    graph_db_type = graph_config.graph_database_provider
+    # graph_db_type = graph_config.graph_database_provider
 
-    graph_client = await get_graph_client(graph_db_type)
+    graph_client = await get_graph_client()
 
     engine = TopologyEngine()
     topology = await engine.infer_from_directory_structure(node_id=USER_ID, repository=directory, model=model)

@@ -6,11 +6,11 @@ from .graph_db_interface import GraphDBInterface
 from .networkx.adapter import NetworkXAdapter
 
 
-async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None) -> GraphDBInterface :
+async def get_graph_client(graph_type: GraphDBType=None, graph_file_name: str = None) -> GraphDBInterface :
     """Factory function to get the appropriate graph client based on the graph type."""
     config = get_graph_config()
 
-    if graph_type == GraphDBType.NEO4J:
+    if config.graph_engine == GraphDBType.NEO4J:
         try:
             from .neo4j_driver.adapter import Neo4jAdapter
 
@@ -22,7 +22,7 @@ async def get_graph_client(graph_type: GraphDBType, graph_file_name: str = None)
         except:
             pass
 
-    elif graph_type == GraphDBType.FALKORDB:
+    elif config.graph_engine == GraphDBType.FALKORDB:
         try:
             from .falkordb.adapter import FalcorDBAdapter
 

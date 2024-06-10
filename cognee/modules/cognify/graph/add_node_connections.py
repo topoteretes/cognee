@@ -92,7 +92,7 @@ def graph_ready_output(results):
 if __name__ == "__main__":
 
     async def main():
-        graph_client = await get_graph_client(GraphDBType.NEO4J)
+        graph_client = await get_graph_client()
         graph = graph_client.graph
 
         # for nodes, attr in graph.nodes(data=True):
