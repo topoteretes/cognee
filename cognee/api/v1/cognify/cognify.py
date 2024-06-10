@@ -148,6 +148,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     for (dataset_name, files) in dataset_files:
         for file_metadata in files:
+            from cognee.infrastructure.databases.graph.config import get_graph_config
+            graph_config = get_graph_config()
             graph_topology = graph_config.graph_model
 
             if graph_topology == SourceCodeGraph:
