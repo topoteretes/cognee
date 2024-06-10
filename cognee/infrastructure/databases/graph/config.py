@@ -19,6 +19,7 @@ class GraphConfig(BaseSettings):
     )
     graph_engine: object = GraphDBType.NETWORKX
     graph_model: object = KnowledgeGraph
+    graph_topology: object = KnowledgeGraph
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

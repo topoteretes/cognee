@@ -1,0 +1,25 @@
+[
+    {
+        "node_id": "1",
+        "name": "Node 1",
+        "default_relationship": {
+            "type": "related_to",
+            "source": "1",
+            "target": "2"
+        },
+        "children": [
+            {
+                "node_id": "2",
+                "name": "Node 2",
+                "default_relationship": {
+                    "type": "related_to",
+                    "source": "2",
+                    "target": "3"
+                },
+                "children": []
+            }
+        ]
+    }
+]
+
+

@@ -84,13 +84,13 @@ async def add_topology(directory: str = "example", model: BaseModel = GitHubRepo
         df = pd.DataFrame(flt_topology)
 
 
-    for _, row in df.iterrows():
-        node_data = row.to_dict()
-        node_id = node_data.pop("node_id")
+        for _, row in df.iterrows():
+            node_data = row.to_dict()
+            node_id = node_data.pop("node_id")
 
-        # Remove "node_id" and get its value
-        await graph_client.add_node(node_id, node_data)
-        if pd.notna(row["relationship_source"]) and pd.notna(row["relationship_target"]):
-            await graph_client.add_edge(row["relationship_source"], row["relationship_target"], relationship_name=row["relationship_type"])
+            # Remove "node_id" and get its value
+            await graph_client.add_node(node_id, node_data)
+            if pd.notna(row["relationship_source"]) and pd.notna(row["relationship_target"]):
+                await graph_client.add_edge(row["relationship_source"], row["relationship_target"], relationship_name=row["relationship_type"])
 
     return graph_client.graph
