@@ -52,7 +52,7 @@ jobs:
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
 
-      - name: Run default Qdrant
+      - name: Run default Neo4j
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
