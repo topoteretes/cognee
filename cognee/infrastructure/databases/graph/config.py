@@ -19,7 +19,7 @@ class GraphConfig(BaseSettings):
     )
     graph_engine: object = GraphDBType.NETWORKX
     graph_model: object = KnowledgeGraph
-    graph_topology_task: bool = True
+    graph_topology_task: bool = False
     graph_topology: object = KnowledgeGraph
     infer_graph_topology: bool = True
     topology_file_path: str = os.path.join(
