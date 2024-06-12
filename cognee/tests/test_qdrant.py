@@ -68,3 +68,9 @@ async def main():
     search_results = await cognee.search("ADJACENT", {"query": "DefaultGraphModel__default_user"})
     assert len(search_results) != 0, "The search results list is empty."
     print("The search results list is not empty.")
+
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
