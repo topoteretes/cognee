@@ -1,4 +1,4 @@
-name: common
+name: test | weaviate
 
 on:
   pull_request:

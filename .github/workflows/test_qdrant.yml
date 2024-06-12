@@ -1,4 +1,4 @@
-name: common
+name: test | qdrant
 
 on:
   pull_request:
