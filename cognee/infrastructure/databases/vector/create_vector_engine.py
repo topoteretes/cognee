@@ -34,3 +34,5 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
             api_key = config["vector_db_key"],
             embedding_engine = embedding_engine,
         )
+
+    raise EnvironmentError(f"Vector provider not configured correctly: {config['vector_db_provider']}")

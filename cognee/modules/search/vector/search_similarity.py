@@ -21,8 +21,6 @@ async def search_similarity(query: str, graph):
         vector_engine = get_vector_engine()
 
         results = await vector_engine.search(layer_id, query_text = query, limit = 10)
-        print("results", results)
-        print("len_rs", len(results))
 
         if len(results) > 0:
             graph_nodes.extend([
