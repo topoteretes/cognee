@@ -1,20 +1,20 @@
 [
     {
-        "node_id": "1",
-        "name": "Node 1",
+        "node_id": "062c22dfd99b599f90cd2d325c8bcf69",
+        "name": "062c22df-d99b-599f-90cd-2d325c8bcf69",
         "default_relationship": {
             "type": "related_to",
-            "source": "1",
-            "target": "2"
+            "source": "062c22dfd99b599f90cd2d325c8bcf69",
+            "target": "6dfe01b607d25b7783c81d6c11ce2aa7"
         },
         "children": [
             {
-                "node_id": "2",
-                "name": "Node 2",
+                "node_id": "6dfe01b607d25b7783c81d6c11ce2aa7",
+                "name": "6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7",
                 "default_relationship": {
                     "type": "related_to",
-                    "source": "2",
-                    "target": "3"
+                    "source": "6dfe01b6-07d2-5b77-83c8-1d6c11ce2aa7",
+                    "target": "a27bb4fa897e53a594cab446e1d33dbf"
                 },
                 "children": []
             }

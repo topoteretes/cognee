@@ -19,7 +19,12 @@ class GraphConfig(BaseSettings):
     )
     graph_engine: object = GraphDBType.NETWORKX
     graph_model: object = KnowledgeGraph
+    graph_topology_task: bool = True
     graph_topology: object = KnowledgeGraph
+    infer_graph_topology: bool = True
+    topology_file_path: str = os.path.join(
+        get_relationaldb_config().db_path, "graph_topology.json"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -33,6 +38,7 @@ class GraphConfig(BaseSettings):
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
             "graph_engine": self.graph_engine,
+            "infer_graph_topology": self.infer_graph_topology,
         }
 
 

@@ -52,14 +52,16 @@ class DefaultChunkEngine():
         """
 
         if self.chunk_strategy == ChunkStrategy.PARAGRAPH:
-            chunked_data = self.chunk_data_by_paragraph(source_data,chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+            chunked_data, chunk_number = self.chunk_data_by_paragraph(source_data,chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         elif self.chunk_strategy == ChunkStrategy.SENTENCE:
-            chunked_data = self.chunk_by_sentence(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
+            chunked_data, chunk_number = self.chunk_by_sentence(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
         elif self.chunk_strategy == ChunkStrategy.EXACT:
-            chunked_data = self.chunk_data_exact(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
+            chunked_data, chunk_number = self.chunk_data_exact(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
+        else:
+            chunked_data, chunk_number = "Invalid chunk strategy.", [0, "Invalid chunk strategy."]
 
 
-        return chunked_data
+        return chunked_data, chunk_number
 
 
 
@@ -68,7 +70,11 @@ class DefaultChunkEngine():
         chunks = []
         for i in range(0, len(data), chunk_size - chunk_overlap):
             chunks.append(data[i:i + chunk_size])
-        return chunks
+        numbered_chunks = []
+        for i, chunk in enumerate(chunks):
+            numbered_chunk = [i + 1, chunk]
+            numbered_chunks.append(numbered_chunk)
+        return chunks, numbered_chunks
 
 
 
@@ -87,7 +93,12 @@ class DefaultChunkEngine():
                 sentence_chunks.extend(chunks)
             else:
                 sentence_chunks.append(sentence)
-        return sentence_chunks
+
+        numbered_chunks = []
+        for i, chunk in enumerate(sentence_chunks):
+            numbered_chunk = [i + 1, chunk]
+            numbered_chunks.append(numbered_chunk)
+        return sentence_chunks, numbered_chunks
 
 
 
@@ -129,4 +140,9 @@ class DefaultChunkEngine():
             # Update start_idx to be the current end_idx
             start_idx = end_idx
 
-        return chunks
+        numbered_chunks = []
+        for i, chunk in enumerate(chunks):
+            numbered_chunk = [i + 1, chunk]
+            numbered_chunks.append(numbered_chunk)
+
+        return chunks, numbered_chunks

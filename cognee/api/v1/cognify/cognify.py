@@ -113,7 +113,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                         text = "empty file"
                     if text == "":
                         text = "empty file"
-                    subchunks = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size, chunk_config.chunk_overlap)
+                    subchunks,_ = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size, chunk_config.chunk_overlap)
 
                     if dataset_name not in data_chunks:
                         data_chunks[dataset_name] = []
@@ -145,23 +145,37 @@ async def cognify(datasets: Union[str, List[str]] = None):
     batch_size = 20
     file_count = 0
     files_batch = []
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+    graph_config = get_graph_config()
+    graph_topology = graph_config.graph_model
+
+
+    if graph_config.infer_graph_topology and graph_config.graph_topology_task:
+        from cognee.modules.topology.topology import TopologyEngine
+        topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+        await topology_engine.add_graph_topology(dataset_files=dataset_files)
+    elif not graph_config.infer_graph_topology:
+        from cognee.modules.topology.topology import TopologyEngine
+        topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+        await topology_engine.add_graph_topology(graph_config.topology_file_path)
+    elif not graph_config.graph_topology_task:
+        parent_node_id = f"DefaultGraphModel__{USER_ID}"
+
 
     for (dataset_name, files) in dataset_files:
         for file_metadata in files:
-            from cognee.infrastructure.databases.graph.config import get_graph_config
-            graph_config = get_graph_config()
-            graph_topology = graph_config.graph_model
-
-            if graph_topology == SourceCodeGraph:
-                parent_node_id = f"{file_metadata['name']}.{file_metadata['extension']}"
+            if parent_node_id:
+                document_id = await add_document_node(
+                    graph_client,
+                    parent_node_id = parent_node_id,
+                    document_metadata = file_metadata,
+                )
             else:
-                parent_node_id = f"DefaultGraphModel__{USER_ID}"
-
-            document_id = await add_document_node(
-                graph_client,
-                parent_node_id=parent_node_id,
-                document_metadata=file_metadata,
-            )
+                document_id = await add_document_node(
+                    graph_client,
+                    parent_node_id=file_metadata['id'],
+                    document_metadata=file_metadata,
+                )
 
             files_batch.append((dataset_name, file_metadata, document_id))
             file_count += 1

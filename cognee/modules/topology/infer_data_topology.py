@@ -8,6 +8,8 @@ async def infer_data_topology(content: str, graph_topology=None):
     if graph_topology is None:
         graph_config = get_graph_config()
         graph_topology = graph_config.graph_topology
+
+    print("content: ", type(content))
     try:
         return (await extract_topology(
             content,
