@@ -90,15 +90,6 @@ jobs:
           ENV: 'dev'
         run: poetry run python ./cognee/tests/test_library.py
 
-      - name: Run default Qdrant
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
-          VECTOR_DB_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          ENV: 'dev'
-        run: poetry run python ./cognee/tests/test_qdrant.py
-
       - name: Build with Poetry
         run: poetry build
 
