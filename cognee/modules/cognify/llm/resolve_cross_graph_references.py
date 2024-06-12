@@ -1,5 +1,5 @@
 from typing import Dict, List
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
+from cognee.infrastructure.databases.vector import get_vector_engine
 
 async def resolve_cross_graph_references(nodes_by_layer: Dict):
     results = []
@@ -16,8 +16,7 @@ async def resolve_cross_graph_references(nodes_by_layer: Dict):
     return results
 
 async def get_nodes_by_layer(layer_id: str, layer_nodes: List):
-    vectordb_config = get_vectordb_config()
-    vector_engine = vectordb_config.vector_engine
+    vector_engine = get_vector_engine()
 
     score_points = await vector_engine.batch_search(
         layer_id,

@@ -17,8 +17,8 @@ class config():
         relational_config.create_engine()
 
         vector_config = get_vectordb_config()
-        vector_config.vector_db_path = databases_directory_path
-        vector_config.create_engine()
+        if vector_config.vector_engine_provider == "lancedb":
+            vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
     @staticmethod
     def data_root_directory(data_root_directory: str):
@@ -56,9 +56,9 @@ class config():
         cognify_config.cognitive_layer_model = cognitive_layer_model
 
     @staticmethod
-    def set_graph_engine(graph_engine: object):
+    def set_graph_database_provider(graph_database_provider: str):
         graph_config = get_graph_config()
-        graph_config.graph_engine = graph_engine
+        graph_config.graph_database_provider = graph_database_provider
 
     @staticmethod
     def llm_provider(llm_provider: str):
@@ -89,3 +89,48 @@ class config():
     def set_chunk_strategy(chunk_strategy: object):
         chunk_config = get_chunk_config()
         chunk_config.chunk_strategy = chunk_strategy
+
+    @staticmethod
+    def set_chunk_engine(chunk_engine: object):
+        chunk_config = get_chunk_config()
+        chunk_config.chunk_engine = chunk_engine
+
+    @staticmethod
+    def set_chunk_overlap(chunk_overlap: object):
+        chunk_config = get_chunk_config()
+        chunk_config.chunk_overlap = chunk_overlap
+
+    @staticmethod
+    def set_chunk_size(chunk_size: object):
+        chunk_config = get_chunk_config()
+        chunk_config.chunk_size = chunk_size
+
+
+    @staticmethod
+    def set_vector_engine_provider(vector_engine_provider: str):
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_engine_provider = vector_engine_provider
+
+    @staticmethod
+    def set_vector_db_key(db_key: str):
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_db_key = db_key
+
+
+    @staticmethod
+    def set_vector_db_url(db_url: str):
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_db_url = db_url
+
+    @staticmethod
+    def set_graphistry_username(graphistry_username: str):
+        base_config = get_base_config()
+        base_config.graphistry_username = graphistry_username
+
+    @staticmethod
+    def set_graphistry_password(graphistry_password: str):
+        base_config = get_base_config()
+        base_config.graphistry_password = graphistry_password
+
+
+

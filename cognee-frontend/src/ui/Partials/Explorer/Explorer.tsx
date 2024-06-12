@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import classNames from 'classnames';
-import { Spacer, Stack } from 'ohmy-ui';
+import { Spacer, Stack, Text } from 'ohmy-ui';
 import { getExplorationGraphUrl } from '@/modules/exploration';
 import { IFrameView, SearchView } from '@/ui/Partials';
 import { LoadingIndicator } from '@/ui/App';
@@ -13,12 +13,17 @@ interface ExplorerProps {
 }
 
 export default function Explorer({ dataset, className, style }: ExplorerProps) {
+  const [error, setError] = useState<Error | null>(null);
   const [graphUrl, setGraphUrl] = useState<string | null>(null);
 
   const exploreData = useCallback(() => {
     getExplorationGraphUrl(dataset)
       .then((graphUrl) => {
+        setError(null);
         setGraphUrl(graphUrl);
+      })
+      .catch((error) => {
+        setError(error);
       });
   }, [dataset]);
   
@@ -34,12 +39,18 @@ export default function Explorer({ dataset, className, style }: ExplorerProps) {
       className={classNames(styles.explorerContent, className)}
     >
       <div className={styles.graphExplorer}>
-        {!graphUrl ? (
-          <Spacer horizontal="2" wrap>
-            <LoadingIndicator />
-          </Spacer>
+        {error ? (
+          <Text color="red">{error.message}</Text>
         ) : (
-          <IFrameView src={graphUrl} />
+          <>
+            {!graphUrl ? (
+              <Spacer horizontal="2" wrap>
+                <LoadingIndicator />
+              </Spacer>
+            ) : (
+              <IFrameView src={graphUrl} />
+            )}
+          </>
         )}
       </div>
       <div className={styles.chat}>

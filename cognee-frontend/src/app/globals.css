@@ -6,6 +6,7 @@
     "Fira Mono", "Droid Sans Mono", "Courier New", monospace;
 
   --global-background-default: #0D051C;
+  --textarea-default-color: #0D051C !important;
 }
 
 * {

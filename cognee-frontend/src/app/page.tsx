@@ -112,7 +112,7 @@ export default function Home() {
             expireIn={notification.expireIn}
             onClose={notification.delete}
           >
-            <Text>{notification.message}</Text>
+            <Text nowrap>{notification.message}</Text>
           </Notification>
         ))}
       </NotificationContainer>

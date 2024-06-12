@@ -1,8 +1,7 @@
 
 from typing import TypedDict
 from pydantic import BaseModel, Field
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-from cognee.infrastructure.databases.vector import DataPoint
+from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 
 class TextChunk(TypedDict):
     text: str
@@ -10,8 +9,7 @@ class TextChunk(TypedDict):
     file_metadata: dict
 
 async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
-    config = get_vectordb_config()
-    vector_client = config.vector_engine
+    vector_engine = get_vector_engine()
 
     identified_chunks = []
 
@@ -21,7 +19,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
     for (dataset_name, chunks) in dataset_data_chunks.items():
         try:
 
-            await vector_client.create_collection(dataset_name, payload_schema = PayloadSchema)
+            await vector_engine.create_collection(dataset_name, payload_schema = PayloadSchema)
         except Exception as error:
             print(error)
             pass
@@ -38,7 +36,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
         identified_chunks.extend(dataset_chunks)
 
-        await vector_client.create_data_points(
+        await vector_engine.create_data_points(
             dataset_name,
             [
                 DataPoint[PayloadSchema](
@@ -53,8 +51,7 @@ async def add_data_chunks(dataset_data_chunks: dict[str, list[TextChunk]]):
 
 
 async def add_data_chunks_basic_rag(dataset_data_chunks: dict[str, list[TextChunk]]):
-    config = get_vectordb_config()
-    vector_client = config.vector_engine
+    vector_engine = get_vector_engine()
 
     identified_chunks = []
 
@@ -64,7 +61,7 @@ async def add_data_chunks_basic_rag(dataset_data_chunks: dict[str, list[TextChun
     for (dataset_name, chunks) in dataset_data_chunks.items():
         try:
 
-            await vector_client.create_collection("basic_rag", payload_schema = PayloadSchema)
+            await vector_engine.create_collection("basic_rag", payload_schema = PayloadSchema)
         except Exception as error:
             print(error)
 
@@ -80,7 +77,7 @@ async def add_data_chunks_basic_rag(dataset_data_chunks: dict[str, list[TextChun
 
         identified_chunks.extend(dataset_chunks)
 
-        await vector_client.create_data_points(
+        await vector_engine.create_data_points(
             "basic_rag",
             [
                 DataPoint[PayloadSchema](

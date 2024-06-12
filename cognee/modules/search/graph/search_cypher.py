@@ -10,7 +10,7 @@ async def search_cypher(query:str, graph: Union[nx.Graph, any]):
     """
     graph_config = get_graph_config()
 
-    if graph_config.graph_engine == GraphDBType.NEO4J:
+    if graph_config.graph_database_provider == "neo4j":
         result = await graph.run(query)
         return result
 

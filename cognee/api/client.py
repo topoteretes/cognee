@@ -69,18 +69,21 @@ async def delete_dataset(dataset_id: str):
 @app.get("/datasets/{dataset_id}/graph", response_model=list)
 async def get_dataset_graph(dataset_id: str):
     from cognee.shared.utils import render_graph
-    from cognee.infrastructure.databases.graph import get_graph_config
     from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
-    graph_config = get_graph_config()
-    graph_engine = graph_config.graph_engine
-    graph_client = await get_graph_client(graph_engine)
-    graph_url = await render_graph(graph_client.graph)
+    try:
+        graph_client = await get_graph_client()
+        graph_url = await render_graph(graph_client.graph)
 
-    return JSONResponse(
-        status_code = 200,
-        content = str(graph_url),
-    )
+        return JSONResponse(
+            status_code = 200,
+            content = str(graph_url),
+        )
+    except:
+        return JSONResponse(
+            status_code = 409,
+            content = "Graphistry credentials are not set. Please set them in your .env file.",
+        )
 
 @app.get("/datasets/{dataset_id}/data", response_model=list)
 async def get_dataset_data(dataset_id: str):
@@ -106,7 +109,7 @@ async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset
 
     return JSONResponse(
         status_code = 200,
-        content = { dataset["data_id"]: dataset["status"] for dataset in datasets_statuses },
+        content = datasets_statuses,
     )
 
 @app.get("/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
@@ -255,6 +258,7 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
         from cognee.base_config import get_base_config
         from cognee.infrastructure.databases.relational import get_relationaldb_config
         from cognee.infrastructure.databases.vector import get_vectordb_config
+        from cognee.infrastructure.databases.graph import get_graph_config
 
         cognee_directory_path = os.path.abspath(".cognee_system")
         databases_directory_path = os.path.join(cognee_directory_path, "databases")
@@ -264,8 +268,10 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
         relational_config.create_engine()
 
         vector_config = get_vectordb_config()
-        vector_config.vector_db_path = databases_directory_path
-        vector_config.create_engine()
+        vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
+
+        graph_config = get_graph_config()
+        graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
 
         base_config = get_base_config()
         data_directory_path = os.path.abspath(".data_storage")

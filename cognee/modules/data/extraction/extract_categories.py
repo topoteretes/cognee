@@ -15,12 +15,12 @@ async def extract_categories(content: str, response_model: Type[BaseModel]):
 
 def process_categories(llm_output) -> List[dict]:
     # Extract the first subclass from the list (assuming there could be more)
-    data_category = llm_output["label"]["subclass"][0]
+    data_category = llm_output["label"]["subclass"][0] if len(llm_output["label"]["subclass"]) > 0 else None
 
     data_type = llm_output["label"]["type"].lower()
 
     return [{
         "data_type": data_type,
         # The data_category is the value of the Enum member (e.g., "News stories and blog posts")
-        "category_name": data_category.value
+        "category_name": data_category.value if data_category else "Other types of text data",
     }]
