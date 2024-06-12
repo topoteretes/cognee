@@ -122,4 +122,15 @@ class config():
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
 
+    @staticmethod
+    def set_graphistry_username(graphistry_username: str):
+        base_config = get_base_config()
+        base_config.graphistry_username = graphistry_username
+
+    @staticmethod
+    def set_graphistry_password(graphistry_password: str):
+        base_config = get_base_config()
+        base_config.graphistry_password = graphistry_password
+
+
 
