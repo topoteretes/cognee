@@ -1,4 +1,4 @@
-name: test | qdrant
+name: test | weaviate
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
-  run_qdrant_integration_test:
+  run_weaviate_integration_test:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
@@ -52,11 +52,11 @@ jobs:
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
 
-      - name: Run default Qdrant
+      - name: Run default Weaviate
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
-          VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
+          VECTOR_DB_URL: ${{ secrets.WEAVIATE_API_URL }}
+          VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
           ENV: 'dev'
-        run: poetry run python ./cognee/tests/test_qdrant.py
+        run: poetry run python ./cognee/tests/test_weaviate.py

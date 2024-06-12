@@ -1,4 +1,4 @@
-name: common | common
+name: test | environments
 
 on:
   pull_request:

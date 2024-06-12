@@ -10,7 +10,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 
-async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = None):
+async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset"):
     if isinstance(data, str):
         if "data://" in data:
             # data is a data directory path
