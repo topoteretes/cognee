@@ -25,7 +25,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
 
     graph_config = get_graph_config()
 
-    if graph_config.graph_engine == GraphDBType.NETWORKX:
+    if graph_config.graph_database_provider == "NETWORKX":
         relevant_context = []
         target_layer_uuid = graph.nodes[node_id].get("layer_uuid")
 
@@ -36,7 +36,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
         return relevant_context
 
 
-    elif graph_config.graph_engine  == GraphDBType.NEO4J:
+    elif graph_config.graph_database_provider  == "neo4j":
         from neo4j import AsyncSession
 
         if isinstance(graph, AsyncSession):

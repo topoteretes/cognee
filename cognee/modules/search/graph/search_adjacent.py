@@ -26,7 +26,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
 
     graph_config = get_graph_config()
 
-    if graph_config.graph_engine == GraphDBType.NETWORKX:
+    if graph_config.graph_database_provider == "NETWORKX":
         if node_id not in graph:
             return {}
 
@@ -34,7 +34,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
         neighbor_descriptions = {neighbor: graph.nodes[neighbor].get('description') for neighbor in neighbors}
         return neighbor_descriptions
 
-    elif graph_config.graph_engine  == GraphDBType.NEO4J:
+    elif graph_config.graph_database_provider  == "neo4j":
         cypher_query = """
         MATCH (node {id: $node_id})-[:CONNECTED_TO]->(neighbor)
         RETURN neighbor.id AS neighbor_id, neighbor.description AS description

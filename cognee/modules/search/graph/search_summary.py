@@ -26,7 +26,7 @@ async def search_summary( query: str,  graph: Union[nx.Graph, any]) -> Dict[str,
     """
     graph_config = get_graph_config()
 
-    if graph_config.graph_engine == GraphDBType.NETWORKX:
+    if graph_config.graph_database_provider == "NETWORKX":
         summaries_and_ids = [
             {"document_id": strip_exact_regex(_, "DATA_SUMMARY__"), "Summary": data["summary"]}
             for _, data in graph.nodes(data=True)
@@ -43,7 +43,7 @@ async def search_summary( query: str,  graph: Union[nx.Graph, any]) -> Dict[str,
         return descriptions
 
 
-    elif graph_config.graph_engine == GraphDBType.NEO4J:
+    elif graph_config.graph_database_provider == "neo4j":
         cypher_query = f"""
         MATCH (n)
         WHERE n.id CONTAINS $query AND EXISTS(n.summary)

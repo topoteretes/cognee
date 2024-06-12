@@ -73,10 +73,10 @@ import cognee
 cognee.config.set_llm_model("openai")
 ```
 
-### set_graph_engine(graph_engine: object)
+### graph_database_provider(graph_engine: string)
 Sets the engine to manage graph processing tasks. 
 Parameters:  
-graph_engine (object): The engine for graph tasks.
+graph_database_provider (object): The engine for graph tasks.
 Example:
 ```python
 from cognee.shared.data_models import GraphDBType

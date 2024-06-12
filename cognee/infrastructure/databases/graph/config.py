@@ -17,7 +17,7 @@ class GraphConfig(BaseSettings):
     graph_file_path: str = os.path.join(
         get_relationaldb_config().db_path, graph_filename
     )
-    graph_engine: object = GraphDBType.NETWORKX
+    # graph_engine: object = GraphDBType.NETWORKX
     graph_model: object = KnowledgeGraph
     graph_topology_task: bool = False
     graph_topology: object = KnowledgeGraph
@@ -37,7 +37,7 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
-            "graph_engine": self.graph_engine,
+            # "graph_engine": self.graph_engine,
             "infer_graph_topology": self.infer_graph_topology,
         }
 

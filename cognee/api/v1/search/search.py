@@ -50,7 +50,7 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
     graph_config = get_graph_config()
-    graph_client = await get_graph_client(graph_config.graph_engine)
+    graph_client = await get_graph_client(graph_config.graph_database_provider)
     graph = graph_client.graph
 
     search_functions: Dict[SearchType, Callable] = {

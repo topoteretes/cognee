@@ -34,7 +34,7 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
     # Determine which client is in use based on the configuration
     graph_config = get_graph_config()
 
-    if graph_config.graph_engine == GraphDBType.NETWORKX:
+    if graph_config.graph_database_provider == "NETWORKX":
 
         categories_and_ids = [
             {"document_id": strip_exact_regex(_, "DATA_SUMMARY__"), "Summary": data["summary"]}
@@ -50,7 +50,7 @@ async def search_categories(query:str, graph: Union[nx.Graph, any], query_label:
         descriptions = {node: graph.nodes[node].get("description", "No desc available") for node in connected_nodes}
         return descriptions
 
-    elif graph_config.graph_engine == GraphDBType.NEO4J:
+    elif graph_config.graph_database_provider == "neo4j":
         # Logic for Neo4j
         cypher_query = """
         MATCH (n)

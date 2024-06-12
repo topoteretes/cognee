@@ -10,7 +10,7 @@ async def get_graph_client(graph_type: GraphDBType=None, graph_file_name: str = 
     """Factory function to get the appropriate graph client based on the graph type."""
     config = get_graph_config()
 
-    if config.graph_engine == GraphDBType.NEO4J:
+    if config.graph_database_provider == "neo4j":
         try:
             from .neo4j_driver.adapter import Neo4jAdapter
 
@@ -22,7 +22,7 @@ async def get_graph_client(graph_type: GraphDBType=None, graph_file_name: str = 
         except:
             pass
 
-    elif config.graph_engine == GraphDBType.FALKORDB:
+    elif config.graph_database_provider == "falkorb":
         try:
             from .falkordb.adapter import FalcorDBAdapter
 

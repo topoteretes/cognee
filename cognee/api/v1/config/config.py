@@ -56,9 +56,9 @@ class config():
         cognify_config.cognitive_layer_model = cognitive_layer_model
 
     @staticmethod
-    def set_graph_engine(graph_engine: object):
+    def set_graph_database_provider(graph_database_provider: str):
         graph_config = get_graph_config()
-        graph_config.graph_engine = graph_engine
+        graph_config.graph_database_provider = graph_database_provider
 
     @staticmethod
     def llm_provider(llm_provider: str):

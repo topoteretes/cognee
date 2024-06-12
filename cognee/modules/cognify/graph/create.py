@@ -45,7 +45,7 @@ async def add_node(client, parent_id: Optional[str], node_id: str, node_data: di
             graph_config = get_graph_config()
 
             # Add an edge if a parent ID is provided and the graph engine is NETWORKX
-            if parent_id and "default_relationship" in node_data and graph_config.graph_engine == GraphDBType.NETWORKX:
+            if parent_id and "default_relationship" in node_data and graph_config.graph_database_provider == "NETWORKX":
 
                 try:
                     await client.add_edge(parent_id, node_id, relationship_name = node_data["default_relationship"]["type"], edge_properties = node_data)

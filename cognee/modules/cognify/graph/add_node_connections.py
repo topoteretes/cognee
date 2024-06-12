@@ -41,7 +41,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                 graph_config = get_graph_config()
 
                 # For NetworkX
-                if graph_config.graph_engine == GraphDBType.NETWORKX:
+                if graph_config.graph_database_provider == "NETWORKX":
                     searched_node_id_found = await get_node_by_unique_id(graph.graph, relationship['searched_node_id'])
                     original_id_for_search_found = await get_node_by_unique_id(graph.graph, relationship['original_id_for_search'])
                     if searched_node_id_found and original_id_for_search_found:
@@ -54,7 +54,7 @@ async def connect_nodes_in_graph(graph, relationship_dict, score_threshold=0.9):
                         )
 
                 # For Neo4j
-                elif graph_config.graph_engine == GraphDBType.NEO4J:
+                elif graph_config.graph_database_provider == "neo4j":
                     # Neo4j specific logic to add an edge
                     # This is just a placeholder, replace it with actual Neo4j logic
                     print("query is ", f"""MATCH (a), (b) WHERE a.unique_id = '{relationship['searched_node_id']}' AND b.unique_id = '{relationship['original_id_for_search']}' CREATE (a)-[:CONNECTED {{weight:{relationship['score']}}}]->(b)""")
