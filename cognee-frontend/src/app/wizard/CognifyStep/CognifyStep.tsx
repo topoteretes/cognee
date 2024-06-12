@@ -1,8 +1,7 @@
-import { useCallback, useEffect } from 'react';
-import { CTAButton, Spacer, Stack, Text, useBoolean } from 'ohmy-ui';
+import { useEffect, useRef } from 'react';
+import { CTAButton, Stack, Text, useBoolean } from 'ohmy-ui';
 import { Divider } from '@/ui/Layout';
-import { CognifyLoadingIndicator, LoadingIndicator } from '@/ui/App';
-import { getExplorationGraphUrl } from '@/modules/exploration';
+import { CognifyLoadingIndicator } from '@/ui/App';
 import { WizardHeading } from '@/ui/Partials/Wizard';
 import cognifyDataset from '@/modules/datasets/cognifyDataset';
 
@@ -16,9 +15,14 @@ export default function CognifyStep({ onNext, dataset }: ConfigStepProps) {
     value: isCognifyRunning,
     setFalse: stopCognifyIndicator,
   } = useBoolean(true);
+  const cognifyPromise = useRef<Promise<void>>()
 
   useEffect(() => {
-    cognifyDataset(dataset)
+    if (cognifyPromise.current) {
+      return;
+    }
+    
+    cognifyPromise.current = cognifyDataset(dataset)
       .then(() => {
         stopCognifyIndicator();        
       });

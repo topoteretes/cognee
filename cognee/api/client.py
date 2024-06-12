@@ -69,12 +69,9 @@ async def delete_dataset(dataset_id: str):
 @app.get("/datasets/{dataset_id}/graph", response_model=list)
 async def get_dataset_graph(dataset_id: str):
     from cognee.shared.utils import render_graph
-    from cognee.infrastructure.databases.graph import get_graph_config
     from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
 
     try:
-        # graph_config = get_graph_config()
-        # graph_engine = graph_config.graph_engine
         graph_client = await get_graph_client()
         graph_url = await render_graph(graph_client.graph)
 
@@ -261,6 +258,7 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
         from cognee.base_config import get_base_config
         from cognee.infrastructure.databases.relational import get_relationaldb_config
         from cognee.infrastructure.databases.vector import get_vectordb_config
+        from cognee.infrastructure.databases.graph import get_graph_config
 
         cognee_directory_path = os.path.abspath(".cognee_system")
         databases_directory_path = os.path.join(cognee_directory_path, "databases")
@@ -271,6 +269,9 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
         vector_config = get_vectordb_config()
         vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
+
+        graph_config = get_graph_config()
+        graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
 
         base_config = get_base_config()
         data_directory_path = os.path.abspath(".data_storage")
