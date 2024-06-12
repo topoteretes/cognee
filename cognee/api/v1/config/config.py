@@ -105,3 +105,21 @@ class config():
         chunk_config = get_chunk_config()
         chunk_config.chunk_size = chunk_size
 
+
+    @staticmethod
+    def set_vector_engine_provider(vector_engine_provider: str):
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_engine_provider = vector_engine_provider
+
+    @staticmethod
+    def set_vector_db_key(db_key: str):
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_db_key = db_key
+
+
+    @staticmethod
+    def set_vector_db_url(db_url: str):
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_db_url = db_url
+
+

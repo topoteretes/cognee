@@ -95,10 +95,9 @@ cognee.add([text], "example_dataset") # Add a new piece of information
 
 cognee.cognify() # Use LLMs and cognee to create knowledge
 
-search_results = cognee.search("SIMILARITY", "computer science") # Query cognee for the knowledge
+search_results = cognee.search("SIMILARITY", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
 
-for result_text in search_results[0]:
-    print(result_text)
+print(search_results)
 
 ```
 Add alternative data types:

@@ -130,7 +130,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
                     logger.warning("File (%s) has an unknown file type. We are skipping it.", file_metadata["id"])
 
         added_chunks = await add_data_chunks(data_chunks)
-        await add_data_chunks_basic_rag(data_chunks)
+        # await add_data_chunks_basic_rag(data_chunks)
 
         await asyncio.gather(
             *[process_text(
