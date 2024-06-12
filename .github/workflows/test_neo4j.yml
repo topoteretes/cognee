@@ -1,4 +1,4 @@
-name: common
+name: test neo4j
 
 on:
   pull_request:
