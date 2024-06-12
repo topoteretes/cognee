@@ -21,6 +21,8 @@ async def main():
 
     cognee.config.set_graph_database_provider("neo4j")
 
+    await cognee.prune.prune_system()
+
     logging.debug("CURRENCT CWD: %s", pathlib.Path(__file__).parent)
     logging.debug("CURRENCT CWD: %s", os.getcwd())
 
@@ -49,9 +51,9 @@ async def main():
 
     await cognee.cognify(["cs_explanations"])
 
-    # search_results = await cognee.search("SIMILARITY", {"query": "computer science"})
-    # assert len(search_results) != 0, "The search results list is empty."
-    # print("The search results list is not empty.")
+    search_results = await cognee.search("SIMILARITY", {"query": "computer science"})
+    assert len(search_results) != 0, "The search results list is empty."
+    print("The search results list is not empty.")
     #
     # search_results = await cognee.search("CATEGORIES", {"query": "DefaultGraphModel__default_user"})
     # assert len(search_results) != 0, "The search results list is empty."
