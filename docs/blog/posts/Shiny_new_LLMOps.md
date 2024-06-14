@@ -1,3 +1,15 @@
+---
+draft: False
+date: 2024-06-14
+tags:
+  - LLMOps
+  - Graphs
+  - Vector Stores
+  - Feature Storage
+authors:
+  - tricalt
+---
+
 # LLMOps stack + Graphs
 
 ### The past: Berlin startup scene
