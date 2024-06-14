@@ -71,6 +71,9 @@ I believe that these terms are interchangeable and that a new in-context Feature
 
 The challenge is, thus, not connecting Vector and Graph stores or giving a RAG system a 10% performance boost.
 
+The main issues still remain
+![Shiny_new_LLMOps/llm_problems.png](Shiny_new_LLMOps/llm_problems.png)
+
 The challenge and solution lie in creating a new type of probabilistic data engine—one with an interface as simple as SQL, but which can retrieve and structure information in real time, optimizing what we feed the LLM based on solid evaluations.
 
 ---
