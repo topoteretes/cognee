@@ -47,7 +47,7 @@ Since recently, we’ve been able to combine graphs and vector data stores to cr
 
 In [his recent blog post](https://medium.com/enterprise-rag/understanding-the-knowledge-graph-rag-opportunity-694b61261a9c), co-founder of WhyHow.AI, Chia Jeng Yang, explained what a typical RAG pipeline looks like. He also introduced Graph Ops and Vector Ops as new elements of the RAG stack which can lead to more stable retrieval patterns.
 
-![Shiny%20new%20LLMOps%209964a0e749ec4842b7c5d363a5e90a77/Untitled.png](Shiny%20new%20LLMOps%209964a0e749ec4842b7c5d363a5e90a77/Untitled.png)
+![Shiny_new_LLMOps/Untitled.png](Shiny_new_LLMOps/Untitled.png)
 
 The argument Zhegin [made a few months ago is now taking shape](https://investingbyapproximation.substack.com/p/the-stunning-rise-of-llmops-navigating?r=2jos7&utm_campaign=post&utm_medium=web&triedRedirect=true). We are seeing feature stores evolve into tools that manage vector and graph stores.
 
