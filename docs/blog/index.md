@@ -21,9 +21,9 @@ This section covers the release notes for the cognee library. It includes the ne
 
 1. [Cognee - library release](posts/cognee-library-release.md)
 
-[//]: # (2. [Cognee - v0.1.11 announcement]&#40;posts/cognee-v0.1.1.md&#41;)
+[//]: # (2. [Cognee - v0.1.12 announcement]&#40;posts/cognee-v0.1.12.md&#41;)
 
-[//]: # (3. [New website for cognee]&#40;posts/new-website-for-cognee.md&#41;)
+3. [New website for cognee](posts/cognee-new-website.md)
 
 
 

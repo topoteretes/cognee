@@ -12,7 +12,7 @@ authors:
 
 # LLMOps stack + Graphs
 
-### The past: Berlin startup scene
+### **The past: Berlin startup scene**
 
 Machine learning has had its place in the business models of companies for several years, but due to high labor costs, lack of generalizability, and long development cycles, it often did not meet the early days' expectations. With the rise of ChatGPT, however, foundation models and LLMs are reemerging as the next step in the evolution in the Machine Learning stack, democratizing it for the end users.
 
@@ -24,7 +24,7 @@ Often, I would see a data scientist building tons of features for their companyâ
 
 ---
 
-### Pandemic and fall out of grace
+### **Pandemic and fall out of grace**
 
 Over the years, this low impact-high drain dynamic led to data science falling out of favor. The COVID pandemic seemed to deliver a death blow to the Berlin IT community, with many data scientists having been made redundant.
 
