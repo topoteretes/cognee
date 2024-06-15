@@ -73,6 +73,7 @@ protobuf = "<5.0.0"
 pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
 langchain-text-splitters = "^0.2.1"
+deepeval = "^0.21.55"
 
 
 
@@ -86,6 +87,7 @@ weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
 neo4j = ["neo4j", "py2neo"]
 notebook = ["ipykernel","overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
+evals = ['deepeval']
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

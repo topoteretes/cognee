@@ -1,6 +1,13 @@
 from deepeval.dataset import EvaluationDataset
 from pydantic import BaseModel
 
+import os
+from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.vector import get_vector_engine
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 from typing import List, Type
 from deepeval.test_case import LLMTestCase
@@ -18,31 +25,15 @@ dataset.add_test_cases_from_json_file(
     expected_output_key_name="expected_output",
     context_key_name="context"
 )
-
-print(dataset)
-# from deepeval.synthesizer import Synthesizer
 #
-# synthesizer = Synthesizer(model="gpt-3.5-turbo")
+# print(dataset)
 #
-# dataset = EvaluationDataset()
-# dataset.generate_goldens_from_docs(
-#     synthesizer=synthesizer,
-#     document_paths=['natural_language_processing.txt', 'soldiers_home.pdf', 'trump.txt'],
-#     max_goldens_per_document=10,
-#     num_evolutions=5,
-#     enable_breadth_evolve=True,
-# )
+#
+#
+# print(dataset.goldens)
+# print(dataset)
 
 
-print(dataset.goldens)
-print(dataset)
-
-
-
-
-import logging
-
-logger = logging.getLogger(__name__)
 
 class AnswerModel(BaseModel):
     response:str
@@ -64,27 +55,21 @@ def get_answer(content: str,context, model: Type[BaseModel]= AnswerModel):
         logger.error("Error extracting cognitive layers from content: %s", error, exc_info = True)
         raise error
 
-async def run_cognify_base_rag():
+async def run_cognify_task(dataset:str= 'test_datasets', dataset_name:str = 'initial_test' ):
     from cognee.api.v1.add import add
     from cognee.api.v1.prune import prune
     from cognee.api.v1.cognify.cognify import cognify
 
     await prune.prune_system()
 
-    await add("data://test_datasets", "initial_test")
+    await add(f"data://{dataset}", dataset_name)
 
-    graph = await cognify("initial_test")
+    graph = await cognify(dataset_name)
 
-
-
-    pass
+    return graph
 
 
-import os
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.vector import get_vector_engine
-
-async def cognify_search_base_rag(content:str, context:str):
+async def cognify_search_base_rag(content:str):
     base_config = get_base_config()
 
     cognee_directory_path = os.path.abspath(".cognee_system")
@@ -97,30 +82,56 @@ async def cognify_search_base_rag(content:str, context:str):
     print("results", return_)
     return return_
 
-async def cognify_search_graph(content:str, context:str):
+async def cognify_search_graph(content:str, search_type= 'SIMILARITY'):
     from cognee.api.v1.search.search import search
-    search_type = 'SIMILARITY'
-    params = {'query': 'Donald Trump'}
-
+    params = {'query': content}
     results = await search(search_type, params)
     print("results", results)
     return results
 
 
 
-def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase]) -> List[LLMTestCase]:
+async def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase], context_type:str =None) -> List[LLMTestCase]:
+
     test_cases = []
     for case in test_cases_raw:
+        if context_type == "naive_rag":
+            context = await cognify_search_base_rag(case.input)
+            print('naive rag', context)
+        elif context_type == "graph":
+            context = await cognify_search_graph(case.input)
+            print('graph', context)
+        else:
+            context = case.context
+
         test_case = LLMTestCase(
             input=case.input,
             # Generate actual output using the 'input' and 'additional_metadata'
-            actual_output= str(get_answer(case.input, case.context).model_dump()['response']),
+            actual_output= str(get_answer(case.input, context).model_dump()['response']),
             expected_output=case.expected_output,
             context=case.context,
             retrieval_context=["retrieval_context"],
         )
-        test_cases.append(test_case)
+    test_cases.append(test_case)
     return test_cases
+
+
+
+if __name__ == "__main__":
+
+    import asyncio
+
+    async def main():
+        # await run_cognify_base_rag()
+        # await cognify_search_base_rag("show_all_processes", "context")
+        # await cognify_search_graph("show_all_processes", "context")
+        dataset.test_cases = await convert_goldens_to_test_cases(dataset.test_cases,context_type="naive_rag")
+        from deepeval.metrics import HallucinationMetric
+        metric = HallucinationMetric()
+        dataset.evaluate([metric])
+    asyncio.run(main())
+
+
 
 # # Data preprocessing before setting the dataset test cases
 # dataset.test_cases = convert_goldens_to_test_cases(dataset.test_cases)
@@ -132,20 +143,10 @@ def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase]) -> List[LLM
 # metric = HallucinationMetric()
 # dataset.evaluate([metric])
 
-
-if __name__ == "__main__":
-
-    import asyncio
-
-    async def main():
-        # await run_cognify_base_rag()
-        # await cognify_search_base_rag("show_all_processes", "context")
-        await cognify_search_graph("show_all_processes", "context")
-    asyncio.run(main())
     # run_cognify_base_rag_and_search()
     # # Data preprocessing before setting the dataset test cases
     # dataset.test_cases = convert_goldens_to_test_cases(dataset.test_cases)
     # from deepeval.metrics import HallucinationMetric
     # metric = HallucinationMetric()
     # dataset.evaluate([metric])
-    pass
+    # pass
