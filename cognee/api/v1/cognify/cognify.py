@@ -1,4 +1,5 @@
 import asyncio
+import os
 from uuid import uuid4
 from typing import List, Union
 import logging
@@ -149,15 +150,23 @@ async def cognify(datasets: Union[str, List[str]] = None):
     graph_config = get_graph_config()
     graph_topology = graph_config.graph_model
 
+    print(graph_config.infer_graph_topology)
+    print(graph_config.graph_topology_task)
+
+
 
     if graph_config.infer_graph_topology and graph_config.graph_topology_task:
         from cognee.modules.topology.topology import TopologyEngine
         topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
         await topology_engine.add_graph_topology(dataset_files=dataset_files)
+        print('infered topology added')
+        parent_node_id=None
     elif not graph_config.infer_graph_topology:
         from cognee.modules.topology.topology import TopologyEngine
         topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
         await topology_engine.add_graph_topology(graph_config.topology_file_path)
+        print('provided topology added')
+        parent_node_id=None
     elif not graph_config.graph_topology_task:
         parent_node_id = f"DefaultGraphModel__{USER_ID}"
 
@@ -294,14 +303,30 @@ if __name__ == "__main__":
 
         from cognee.api.v1.add import add
 
+        dataset_name = "explanations"
+        print(os.getcwd())
+        data_dir = os.path.abspath("../../../.data")
+        print(os.getcwd())
+        from pathlib import Path
+        dir = Path.joinpath(Path.cwd(), ".data")
+
+        await add(f"data://{dir}", dataset_name="explanations")
+
         await add([text], "example_dataset")
 
         from cognee.api.v1.config.config import config
         config.set_chunk_engine(ChunkEngine.LANGCHAIN_ENGINE )
         config.set_chunk_strategy(ChunkStrategy.LANGCHAIN_CHARACTER)
         config.embedding_engine = LiteLLMEmbeddingEngine()
+        config.set_chunk_engine(ChunkEngine.LANGCHAIN_ENGINE)
+        config.set_graph_topology_task=True
+        config.set_infer_graph_topology=True
 
-        graph = await cognify()
+        from cognee.api.v1.datasets.datasets import datasets
+        print(datasets.list_datasets())
+
+        graph = await cognify("explanations")
+
         # vector_client = infrastructure_config.get_config("vector_engine")
         #
         # out = await vector_client.search(collection_name ="basic_rag", query_text="show_all_processes", limit=10)

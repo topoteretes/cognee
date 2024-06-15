@@ -19,8 +19,8 @@ class GraphConfig(BaseSettings):
         graph_filename
     )
     graph_model: object = KnowledgeGraph
-    graph_topology_task: bool = False
-    graph_topology: object = KnowledgeGraph
+    graph_topology_task: bool = True
+    graph_topology_model: object = KnowledgeGraph
     infer_graph_topology: bool = True
     topology_file_path: str = os.path.join(
         os.path.join(get_absolute_path(".cognee_system"), "databases"),
@@ -39,6 +39,7 @@ class GraphConfig(BaseSettings):
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
             "infer_graph_topology": self.infer_graph_topology,
+            "graph_topology_task": self.graph_topology_task,
         }
 
 

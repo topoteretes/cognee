@@ -132,5 +132,18 @@ class config():
         base_config = get_base_config()
         base_config.graphistry_password = graphistry_password
 
+    @staticmethod
+    def set_graph_topology_task(graph_topology_task: bool):
+        base_config = get_graph_config()
+        base_config.graph_topology_task = graph_topology_task
+
+    @staticmethod
+    def set_infer_graph_topology(infer_graph_topology: bool):
+        base_config = get_graph_config()
+        base_config.infer_graph_topology = infer_graph_topology
 
 
+    @staticmethod
+    def set_topology_file_path(topology_file_path: bool):
+        base_config = get_graph_config()
+        base_config.topology_file_path = topology_file_path
