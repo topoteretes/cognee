@@ -64,7 +64,7 @@ async def search_neighbour(graph: Union[nx.Graph, any], query: str,
 #     async def main():
 #         from cognee.shared.data_models import GraphDBType
 #
-#         graph_client = get_graph_client(GraphDBType.NETWORKX)
+#         graph_client = get_graph_engine(GraphDBType.NETWORKX)
 #         graph = await  graph_client.graph
 #
 #         await fetch_context(graph, "1")

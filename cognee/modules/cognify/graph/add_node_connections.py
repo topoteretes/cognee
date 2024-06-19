@@ -1,6 +1,6 @@
 import uuid
 
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.shared.data_models import GraphDBType
 from cognee.infrastructure.databases.graph.config import get_graph_config
 
@@ -92,7 +92,7 @@ def graph_ready_output(results):
 if __name__ == "__main__":
 
     async def main():
-        graph_client = await get_graph_client()
+        graph_client = await get_graph_engine()
         graph = graph_client.graph
 
         # for nodes, attr in graph.nodes(data=True):

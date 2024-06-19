@@ -235,8 +235,8 @@ class Category(BaseModel):
 
 class Document(BaseModel):
     id: str
+    type: str
     title: str
-    description: Optional[str] = None
 
 class UserLocation(BaseModel):
     location_id: str

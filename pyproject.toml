@@ -43,11 +43,11 @@ duckdb = {version = "^0.10.0", extras = ["dlt"]}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
 qdrant-client = "^1.9.0"
-duckdb-engine = "0.12.1"
+duckdb-engine = "0.13.0"
 graphistry = "^0.33.5"
 tenacity = "^8.2.3"
 weaviate-client = "^4.5.4"
-scikit-learn = "^1.4.1.post1"
+scikit-learn = "^1.5.0"
 fastembed = "0.2.7"
 pypdf = "^4.1.0"
 neo4j = "5.20.0"
@@ -73,6 +73,8 @@ protobuf = "<5.0.0"
 pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
 langchain-text-splitters = "^0.2.1"
+yake = {git = "https://github.com/LIAAD/yake"}
+keybert = "^0.8.5"
 
 
 

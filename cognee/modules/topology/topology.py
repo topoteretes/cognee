@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Union, Type
 
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relationaldb_config
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
@@ -104,7 +104,7 @@ class TopologyEngine:
 
 
             topology = await infer_data_topology(str(initial_chunks_and_ids))
-            graph_client = await get_graph_client()
+            graph_client = await get_graph_engine()
 
             for node in topology["nodes"]:
                 await graph_client.add_node(node["id"], node)
@@ -123,7 +123,7 @@ class TopologyEngine:
                 data = await self.load_data(file_path)
                 flt_topology = await self.recursive_flatten(data)
                 df = pd.DataFrame(flt_topology)
-                graph_client = await get_graph_client()
+                graph_client = await get_graph_engine()
 
                 print("df", df)
 

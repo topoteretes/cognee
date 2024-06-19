@@ -10,7 +10,7 @@ from cognee.modules.search.vector.search_similarity import search_similarity
 from cognee.modules.search.graph.search_categories import search_categories
 from cognee.modules.search.graph.search_neighbour import search_neighbour
 from cognee.modules.search.graph.search_summary import search_summary
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.shared.utils import send_telemetry
 from cognee.infrastructure.databases.graph.config import get_graph_config
 
@@ -49,8 +49,7 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
-    graph_config = get_graph_config()
-    graph_client = await get_graph_client(graph_config.graph_database_provider)
+    graph_client = await get_graph_engine()
     graph = graph_client.graph
 
     search_functions: Dict[SearchType, Callable] = {
@@ -103,7 +102,7 @@ if __name__ == "__main__":
 #         SearchType.SIMILARITY: {'query': 'your search query here'}
 #     }
 #     async def main():
-#         graph_client = get_graph_client(GraphDBType.NETWORKX)
+#         graph_client = get_graph_engine()
 
 #         await graph_client.load_graph_from_file()
 #         graph = graph_client.graph

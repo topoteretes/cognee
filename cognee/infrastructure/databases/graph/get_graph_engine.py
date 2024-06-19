@@ -1,12 +1,11 @@
 """Factory function to get the appropriate graph client based on the graph type."""
 
-from cognee.shared.data_models import GraphDBType
 from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
 from .networkx.adapter import NetworkXAdapter
 
 
-async def get_graph_client(graph_type: GraphDBType=None, graph_file_name: str = None) -> GraphDBInterface :
+async def get_graph_engine() -> GraphDBInterface :
     """Factory function to get the appropriate graph client based on the graph type."""
     config = get_graph_config()
 
@@ -34,8 +33,10 @@ async def get_graph_client(graph_type: GraphDBType=None, graph_file_name: str = 
             )
         except:
             pass
+
     graph_client = NetworkXAdapter(filename = config.graph_file_path)
-    if (graph_client.graph is None):
+
+    if graph_client.graph is None:
         await graph_client.load_graph_from_file()
 
     return graph_client

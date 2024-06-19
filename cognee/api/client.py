@@ -69,10 +69,10 @@ async def delete_dataset(dataset_id: str):
 @app.get("/datasets/{dataset_id}/graph", response_model=list)
 async def get_dataset_graph(dataset_id: str):
     from cognee.shared.utils import render_graph
-    from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+    from cognee.infrastructure.databases.graph import get_graph_engine
 
     try:
-        graph_client = await get_graph_client()
+        graph_client = await get_graph_engine()
         graph_url = await render_graph(graph_client.graph)
 
         return JSONResponse(
