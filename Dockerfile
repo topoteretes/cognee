@@ -26,7 +26,6 @@ RUN apt-get update -q && \
         curl \
         zip \
         jq \
-#        libgl1-mesa-glx \
         netcat-traditional && \
     pip install poetry && \
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \

@@ -1,0 +1,16 @@
+bin
+dist
+docs
+evals
+tests
+tools
+assets
+notebooks
+cognee-frontend
+
+.dlt
+.venv
+.github
+
+.idea
+.vscode

@@ -8314,14 +8314,13 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 cli = []
 duckdb = ["duckdb"]
 filesystem = []
-motherduck = ["duckdb", "pyarrow"]
+motherduck = ["duckdb"]
 neo4j = ["neo4j"]
 notebook = ["overrides"]
-parquet = ["pyarrow"]
 qdrant = ["qdrant-client"]
 weaviate = ["weaviate-client"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-content-hash = "0d47b955224bb4f7d52815e63d15b2230dcff86f91a4f79b5533c299f965018b"
+content-hash = "3e894bd32ee1d47a344ad4325731c064271b687b1f6af3c820436dc27f9d06a1"

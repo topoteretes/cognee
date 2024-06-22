@@ -26,14 +26,12 @@ services:
       - HOST=0.0.0.0
       - ENVIRONMENT=local
       - PYTHONPATH=.
-    profiles: ["exclude-from-up"]
     ports:
       - 8000:8000
       - 443:443
       - 80:80
       - 50051:50051
-      - 5678:5678
-#      - 5432:5432
+      - 5678:5678 # Debugging
     depends_on:
       - postgres
       - neo4j
