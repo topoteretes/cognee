@@ -1,20 +1,20 @@
 # Use an official Node.js runtime as a parent image
-FROM node:18.17.0
+FROM node:18-alpine
 
 # Set the working directory to /app
 WORKDIR /app
 
 # Copy package.json and package-lock.json to the working directory
-COPY package*.json ./
+COPY package.json package-lock.json ./
 
 # Install any needed packages specified in package.json
-RUN npm install
+RUN npm ci
 
 # Copy the rest of the application code to the working directory
-COPY . .
-
-# Make port 3000 available to the world outside this container
-EXPOSE 3000
+COPY src ./src
+COPY public ./public
+COPY next.config.mjs .
+COPY tsconfig.json .
 
 # Build the app and run it
-CMD ["sh", "-c", "npm run dev"]
+CMD npm run dev

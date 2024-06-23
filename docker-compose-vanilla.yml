@@ -5,21 +5,21 @@ services:
       - cognee-network
     build:
       context: .
-      dockerfile: Dockerfile-vanilla
+      dockerfile: Dockerfile
     volumes:
       - .:/app
-      - /app/cognee-frontend/
+      - /app/cognee-frontend/ # Ignore frontend code
     environment:
       - HOST=0.0.0.0
       - ENVIRONMENT=local
       - PYTHONPATH=.
     ports:
       - 8000:8000
-      - 5678:5678 # Debugging
+      # - 5678:5678 # Debugging
     deploy:
       resources:
         limits:
-          cpus: "4.0"
+          cpus: 4.0
           memory: 8GB
 
   frontend:
@@ -28,9 +28,11 @@ services:
       context: ./cognee-frontend
       dockerfile: Dockerfile
     volumes:
-      - "./cognee-frontend:/app"
+      - ./cognee-frontend/src:/app/src
+      - ./cognee-frontend/public:/app/public
     ports:
-      - "3000:3000"
+      - 3000:3000
+      # - 9229:9229 # Debugging
     networks:
       - cognee-network
 
