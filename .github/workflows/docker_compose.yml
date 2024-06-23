@@ -1,0 +1,44 @@
+name: Docker Compose Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  docker-compose-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Build Docker images
+      run: |
+        docker-compose -f docker-compose.yml build
+
+    - name: Run Docker Compose
+      run: |
+        docker-compose -f docker-compose.yml up -d
+
+    - name: Wait for services to be ready
+      run: |
+        # Add any necessary health checks or wait commands
+        sleep 30
+
+    # - name: Run tests
+    #   run: |
+    #     docker-compose -f docker-compose.yml run --rm <test-service> <test-command>
+    #   # Replace <test-service> with the name of the service running the tests
+    #   # Replace <test-command> with the actual command to run your tests
+
+    - name: Shut down Docker Compose
+      if: always()
+      run: |
+        docker-compose -f docker-compose.yml down
