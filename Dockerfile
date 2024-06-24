@@ -1,50 +1,28 @@
-FROM python:3.11
+FROM python:3.11-slim
 
 # Set build argument
 ARG DEBUG
-ARG API_ENABLED
 
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
-ENV API_ENABLED=${API_ENABLED}
 ENV PIP_NO_CACHE_DIR=true
 ENV PATH="${PATH}:/root/.poetry/bin"
-
-RUN pip install poetry
 
 WORKDIR /app
 COPY pyproject.toml poetry.lock /app/
 
+RUN pip install poetry
+
+# Create virtualenv
+RUN poetry config virtualenvs.create false
+
 # Install the dependencies
-RUN poetry config virtualenvs.create false && \
-    poetry install --no-root --no-dev
-
-RUN apt-get update -q && \
-    apt-get install -y -q \
-        gcc \
-        python3-dev \
-        curl \
-        zip \
-        jq \
-#        libgl1-mesa-glx \
-        netcat-traditional && \
-    pip install poetry && \
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip -qq awscliv2.zip && \
-    ./aws/install && \
-    apt-get clean && \
-    rm -rf \
-        awscliv2.zip \
-        /var/lib/apt/lists/* \
-        /tmp/* \
-        /var/tmp/*
-
-WORKDIR /app
+RUN poetry install --no-root --no-dev
+        
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
 
 COPY cognee/ /app/cognee
-
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
