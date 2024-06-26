@@ -74,7 +74,7 @@ or
 import cognee
 cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 ```
-If you are using Networkx, create an account on Graphistry to vizualize results:
+If you are using Networkx, create an account on Graphistry to visualize results:
 ```
    
    cognee.config.set_graphistry_username = "YOUR_USERNAME"

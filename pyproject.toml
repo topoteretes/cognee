@@ -30,7 +30,7 @@ sqlalchemy = "^2.0.21"
 instructor = "1.2.1"
 networkx = "^3.2.1"
 debugpy = "^1.8.0"
-pyarrow = "^15.0.0"
+pyarrow = "15.0.0"
 pylint = "^3.0.3"
 aiosqlite = "^0.20.0"
 pandas = "2.0.3"
@@ -77,12 +77,10 @@ yake = {git = "https://github.com/LIAAD/yake"}
 keybert = "^0.8.5"
 
 
-
 [tool.poetry.extras]
-parquet = ["pyarrow"]
 duckdb = ["duckdb"]
 filesystem = ["s3fs", "botocore"]
-motherduck = ["duckdb", "pyarrow"]
+motherduck = ["duckdb"]
 cli = ["pipdeptree", "cron-descriptor"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]

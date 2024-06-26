@@ -1,4 +1,4 @@
-name: publish prd |  Docker image
+name: publish prd | Docker image
 
 on:
   push:
