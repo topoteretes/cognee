@@ -75,6 +75,7 @@ anthropic = "^0.26.1"
 langchain-text-splitters = "^0.2.1"
 yake = {git = "https://github.com/LIAAD/yake"}
 keybert = "^0.8.5"
+pdfplumber = "^0.11.1"
 
 
 [tool.poetry.extras]

@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 async def save_document_node(document: Document, parent_node_id: UUID = None):
     graph_engine = get_graph_engine()
 
-    await graph_engine.add_node(document["id"], document.model_dump())
+    await graph_engine.add_node(document.id, document.model_dump())
 
     if parent_node_id:
         await graph_engine.add_edge(

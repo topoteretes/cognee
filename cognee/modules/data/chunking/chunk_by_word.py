@@ -3,6 +3,7 @@ import re
 def chunk_by_word(data: str):
     sentence_endings = r"[.;!?…]"
     paragraph_endings = r"[\n\r]"
+    last_processed_character = ""
 
     word = ""
     i = 0
@@ -14,8 +15,22 @@ def chunk_by_word(data: str):
             i = i + 1
             continue
 
+        def is_real_paragraph_end():
+            if re.match(sentence_endings, last_processed_character):
+                return True
+
+            j = i + 1
+            next_character = data[j] if j < len(data) else None
+            while next_character is not None and (re.match(paragraph_endings, next_character) or next_character == " "):
+                j += 1
+                next_character = data[j] if j < len(data) else None
+            if next_character.isupper():
+                return True
+
+            return False
+
         if re.match(paragraph_endings, character):
-            yield (word, "paragraph_end")
+            yield (word, "paragraph_end" if is_real_paragraph_end() else "word")
             word = ""
             i = i + 1
             continue
@@ -27,6 +42,7 @@ def chunk_by_word(data: str):
             continue
 
         word += character
+        last_processed_character = character
 
         if re.match(sentence_endings, character):
             # Check for ellipses.
@@ -39,3 +55,6 @@ def chunk_by_word(data: str):
             word = ""
 
         i += 1
+
+    if len(word) > 0:
+        yield (word, "word")

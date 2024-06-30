@@ -1,8 +1,13 @@
+import os
 import asyncio
 import inspect
 from typing import Union, Callable, Generator, AsyncGenerator, Coroutine, Any
-from cognee.modules.data.chunking import chunk_by_paragraph
 from cognee.modules.cognify.vector import save_data_chunks
+from cognee.modules.data.processing.process_documents import process_documents
+from cognee.modules.data.extraction.knowledge_graph.expand_knowledge_graph import expand_knowledge_graph
+from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.modules.data.deletion.prune_system import prune_system
 
 
 class Task():
@@ -12,14 +17,20 @@ class Task():
         Generator[Any, Any, Any],
         AsyncGenerator[Any, Any],
     ]
+    task_config: dict[str, Any] = {
+        "batch_size": 1,
+    }
     default_params: dict[str, Any] = {}
 
-    def __init__(self, executable, *args, **kwargs):
+    def __init__(self, executable, *args, task_config = None, **kwargs):
         self.executable = executable
         self.default_params = {
             "args": args,
             "kwargs": kwargs
         }
+
+        if task_config is not None:
+            self.task_config = task_config
 
     def run(self, *args, **kwargs):
         combined_args = self.default_params["args"] + args
@@ -27,12 +38,13 @@ class Task():
         return self.executable(*combined_args, **combined_kwargs)
 
 
-def run_tasks(tasks: [Task], data, batch_size = 1):
+def run_tasks(tasks: [Task], data):
     if len(tasks) == 0:
         yield data
         return
 
     running_task = tasks[0]
+    batch_size = running_task.task_config["batch_size"]
 
     if inspect.isasyncgenfunction(running_task.executable):
         results = []
@@ -47,10 +59,10 @@ def run_tasks(tasks: [Task], data, batch_size = 1):
                     yield from run_tasks(tasks[1:], results[0] if batch_size == 1 else results)
                     results = []
             except StopAsyncIteration:
+                if len(results) > 0:
+                    yield from run_tasks(tasks[1:], results[0] if batch_size == 1 else results)
+                    results = []
                 break
-
-        if len(results) > 0:
-            yield from run_tasks(tasks[1:], results)
 
     elif inspect.isgeneratorfunction(running_task.executable):
         results = []
@@ -63,7 +75,8 @@ def run_tasks(tasks: [Task], data, batch_size = 1):
                 results = []
 
         if len(results) > 0:
-            yield from run_tasks(tasks[1:], results)
+            yield from run_tasks(tasks[1:], results[0] if batch_size == 1 else results)
+            results = []
 
     elif inspect.iscoroutinefunction(running_task.executable):
         result = asyncio.run(running_task.run(data))
@@ -75,20 +88,24 @@ def run_tasks(tasks: [Task], data, batch_size = 1):
 
 
 if __name__ == "__main__":
-    tasks = [
-        Task(process_documents), # Identify documents and save then as a nodes in graph db
-        Task(extract_document_text), # Extract text based on the document type
-        Task(chunk_by_paragraph, paragraph_length = 1000, task_config = { "batch_size": 10 }), # Chunk the text into paragraphs
-        Task(save_data_chunks, collection_name = "paragraphs"), # Save the paragraph chunks in vector db and as nodes in graph db (connected to the document node and between each other)
-        Task(generate_knowledge_graph), # Generate knowledge graphs from the paragraph chunks and attach it to chunk nodes
-    ]
+    def main():
+        tasks = [
+            Task(process_documents, parent_node_id = "Boris's documents", task_config = { "batch_size": 10 }), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+            Task(save_data_chunks, collection_name = "chunks"), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
+            Task(expand_knowledge_graph, graph_model = KnowledgeGraph), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+        ]
 
-    text = """Lorem Ipsum is simply dummy text of the printing and typesetting industry... Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book… It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.
+        test_file_path = os.path.join(os.path.dirname(__file__), "./__tests__/artificial-inteligence.pdf")
 
-        Why do we use it?
-        It is a long established fact that a reader will be distracted by the readable content of a page when looking at its layout! The point of using Lorem Ipsum is that it has a more-or-less normal distribution of letters, as opposed to using 'Content here, content here', making it look like readable English. Many desktop publishing packages and web page editors now use Lorem Ipsum as their default model text, and a search for 'lorem ipsum' will uncover many web sites still in their infancy. Various versions have evolved over the years, sometimes by accident, sometimes on purpose (injected humour and the like).
-    """
+        test_document = PdfDocument(
+            title = "Artificial intelligence",
+            file_path = test_file_path,
+        )
 
-    for chunk in run_tasks(tasks, text):
-        print(chunk)
-        print("\n")
+        asyncio.run(prune_system())
+
+        for chunk in run_tasks(tasks, [test_document]):
+            print(chunk)
+            print("\n")
+
+    main()
