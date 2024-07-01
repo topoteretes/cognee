@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.12"
+version = "0.1.13"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic", "Boris Arzentar"]
 readme = "README.md"
@@ -56,7 +56,6 @@ matplotlib = "^3.8.3"
 nest-asyncio = "^1.6.0"
 structlog = "^24.1.0"
 tiktoken = "0.7.0"
-dspy-ai = "2.4.9"
 posthog = "^3.5.0"
 lancedb = "0.8.0"
 importlib-metadata = "7.1.0"
