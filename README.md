@@ -97,11 +97,11 @@ import cognee
 text = """Natural language processing (NLP) is an interdisciplinary
        subfield of computer science and information retrieval"""
 
-cognee.add([text], "example_dataset") # Add a new piece of information
+await cognee.add([text], "example_dataset") # Add a new piece of information
 
-cognee.cognify() # Use LLMs and cognee to create knowledge
+await cognee.cognify() # Use LLMs and cognee to create knowledge
 
-search_results = cognee.search("SIMILARITY", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
+await search_results = cognee.search("SIMILARITY", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
 
 print(search_results)
 
