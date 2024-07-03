@@ -1,8 +1,7 @@
 from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def search_similarity(query: str, graph):
+async def search_similarity(query: str, graph): # graph must be there in order to be compatible with generic call
     # graph_config = get_graph_config()
     #
     # graph_db_type = graph_config.graph_engine

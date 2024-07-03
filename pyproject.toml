@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.12"
+version = "0.1.13"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic", "Boris Arzentar"]
 readme = "README.md"
@@ -30,7 +30,7 @@ sqlalchemy = "^2.0.21"
 instructor = "1.2.1"
 networkx = "^3.2.1"
 debugpy = "^1.8.0"
-pyarrow = "^15.0.0"
+pyarrow = "15.0.0"
 pylint = "^3.0.3"
 aiosqlite = "^0.20.0"
 pandas = "2.0.3"
@@ -56,7 +56,6 @@ matplotlib = "^3.8.3"
 nest-asyncio = "^1.6.0"
 structlog = "^24.1.0"
 tiktoken = "0.7.0"
-dspy-ai = "2.4.10"
 posthog = "^3.5.0"
 lancedb = "0.8.0"
 importlib-metadata = "7.1.0"
@@ -76,12 +75,10 @@ langchain-text-splitters = "^0.2.1"
 deepeval = "^0.21.55"
 
 
-
 [tool.poetry.extras]
-parquet = ["pyarrow"]
 duckdb = ["duckdb"]
 filesystem = ["s3fs", "botocore"]
-motherduck = ["duckdb", "pyarrow"]
+motherduck = ["duckdb"]
 cli = ["pipdeptree", "cron-descriptor"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]

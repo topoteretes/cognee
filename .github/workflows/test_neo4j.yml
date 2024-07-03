@@ -1,4 +1,4 @@
-name: test neo4j
+name: test | neo4j
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
-  run_common:
+  run_neo4j_integration_test:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'

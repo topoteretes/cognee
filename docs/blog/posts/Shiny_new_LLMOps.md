@@ -16,21 +16,21 @@ authors:
 
 Machine learning has had its place in the business models of companies for several years, but due to high labor costs, lack of generalizability, and long development cycles, it often did not meet the early days' expectations. With the rise of ChatGPT, however, foundation models and LLMs are reemerging as the next step in the evolution in the Machine Learning stack, democratizing it for the end users.
 
-As a consultant and operator in the Berlin startup scene over the past ten years, I have seen the vocation of “Data Scientist” reflect this trend as well. Its initial popularity, decline, and resurgence have mirrored the rise and fall of the Roman Empire.
+As a consultant and operator in the Berlin startup scene over the past ten years, I have seen the vocation of “Data Scientist” reflect this trend as well. Its initial popularity, decline, and resurgence easily could have mirrored the rise and fall of the Roman Empire. Humble beginnings, grandiosity, and then the rigidity of thought of early Christianity. 
 
 In my early years as a data analyst in tier-II e-commerce businesses, data science was considered a prestigious, cutting-edge title. However,  most of these ventures lacked the experience or maturity to properly productionize their business models.
 
-Often, I would see a data scientist building tons of features for their company’s LLM models to only slightly outperform their basic KPIs. They were often stuck in the limbo of demoware, and only the businesses in which data was a key operational element would successfully deploy and run data science systems at scale.
+Often, I would see a data scientist building tons of features for their company’s AI models to only slightly improve on their basic KPIs. They were often stuck in the limbo of demoware, and only the businesses in which data was a key operational element would successfully deploy and run data science systems at scale.
 
 ---
 
 ### **Pandemic and fall out of grace**
 
-Over the years, this low impact-high drain dynamic led to data science falling out of favor. The COVID pandemic seemed to deliver a death blow to the Berlin IT community, with many data scientists having been made redundant.
+Over the years, this low impact-high drain dynamic led to data science falling out of favor. The COVID pandemic seemed to deliver a death blow to the Berlin Data Science community, with many data scientists being made redundant.
 
 This played out differently in larger markets and companies, where I saw more mature setups heavily relying on machine learning. However, from the perspective of most software *Mittelstand* (a German term for medium-sized enterprises), the technology was seen as a nice-to-have, not a must-have.
 
-Suddenly, with the release of ChatGPT, most knowledge previously required to operate machine-learning became obsolete,  with the only thing now needed being an API key. This dropped the barrier to entry to the floor and created a need for new tools to be built around these APIs.
+Suddenly, with the release of ChatGPT, most knowledge previously required to operate machine learning became obsolete,  with the only thing now needed being an API key. This dropped the barrier to entry to the floor and created a need for new tools to be built around these APIs.
 
 Tools like Langchain met this need perfectly, enabling everyone to interact with their data.
 
@@ -74,11 +74,11 @@ The challenge is, thus, not connecting Vector and Graph stores or giving a RAG s
 The main issues still remain
 ![Shiny_new_LLMOps/llm_problems.png](Shiny_new_LLMOps/llm_problems.png)
 
-The challenge and solution lie in creating a new type of probabilistic data engine—one with an interface as simple as SQL, but which can retrieve and structure information in real time, optimizing what we feed the LLM based on solid evaluations.
+The challenge and solution lie in creating a new type of probabilistic data engine—one with an interface as simple as SQL, but which can retrieve and structure information in real-time, optimizing what we feed the LLM based on solid evaluations.
 
 ---
 
-Striving to make sense of the best computing engine we know of—our mind—cognitive sciences may offer us clues on how to move forward..
+Striving to make sense of the best computing engine we know of—our mind—cognitive sciences may offer us clues on how to move forward.
 
 After all, we process, store, and retrieve data from our mental lexicon with ease, with inherent personalization and dynamic data enrichment.
 
@@ -86,20 +86,4 @@ I believe that understanding the way our mind carries out these processes may al
 
 With human language as the new SQL and cognitive theories as inspiration, the next generation of tooling is still on the horizon.
 
-The argument Zhegin made a few months ago is now taking shape. We see feature stores evolving into tools that manage vector and graph stores.
 
-We are still in the early stages. In a recent article, Jon Turrow from Madrona suggests that for the next generation of AI agent infrastructure, what Jia refers to as Graph Ops will become a personalization layer.
-
----
-
-I believe these terms are interchangeable and that a new in-context feature store, graph ops, and personalization are essentially the same thing.
-
-Moreover, vector and graph ops are not differentiation categories by themselves. The challenge is not connecting vector and graph stores or giving a RAG system a 10% performance boost.
-
-The challenge and solution lie in creating a new type of probabilistic data engine, with an interface as simple as SQL, that can retrieve and structure information in real time and optimize what we give to the LLM based on solid evaluations.
-
-I often refer to cognitive sciences and the best computing engine we know of—our mind.
-
-We process, store, and retrieve data from our mental lexicon with ease, where personalization is inherent, and data enrichment happens dynamically.
-
-With human language as the new SQL and cognitive theories as inspiration, the next generation of tooling is still on the horizon.

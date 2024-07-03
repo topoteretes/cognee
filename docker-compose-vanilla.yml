@@ -36,32 +36,6 @@ services:
     networks:
       - cognee-network
 
-  neo4j:
-    image: neo4j:latest
-    container_name: neo4j
-    profiles:
-      - neo4j
-    ports:
-      - 7474:7474
-      - 7687:7687
-    environment:
-      - NEO4J_AUTH=neo4j/pleaseletmein
-      - NEO4J_PLUGINS=["apoc"]
-    networks:
-      - cognee-network
-
-  falkordb:
-    image: falkordb/falkordb:edge
-    container_name: falkordb
-    profiles:
-      - falkordb
-    ports:
-      - 6379:6379
-      - 3001:3000
-    networks:
-      - cognee-network
-
 networks:
   cognee-network:
     name: cognee-network
-
