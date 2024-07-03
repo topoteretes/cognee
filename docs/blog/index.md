@@ -8,7 +8,7 @@ The goal of the blog is to discuss broader topics around the cognee project, inc
 
 1. [LLMOps stack + Graphs](posts/Shiny_new_LLMOps.md)
 
-[//]: # (2. [Where do knowledge graphs fit, and where do they not? A case study with dynamo.fyi]&#40;posts/where-do-knowledge-graphs-fit.md&#41;)
+2. [Where do knowledge graphs fit, and where do they not? A case study with dynamo.fyi](posts/wwhere-do-knowledge-graphs-fit-and-where-they-dont.md)
 
 [//]: # (3. [Knowledge Graphs vs basic RAGs, some metrics]&#40;posts/knowledge-graphs-vs-basic-rags.md&#41;)
 
