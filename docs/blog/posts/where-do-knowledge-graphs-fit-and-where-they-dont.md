@@ -13,7 +13,7 @@ authors:
 
 
 
-# Cognee - Recap
+# Cognee - Case study with Dynamo.fyi
 
 Over the past three months, we've been developing Cognee—a self-improving data storage system for AI applications and agents. Since our initial library release, we have:
 
