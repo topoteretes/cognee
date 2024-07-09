@@ -111,20 +111,41 @@ class Neo4jAdapter(GraphDBInterface):
         return [result["node"] for result in (await self.query(query))]
 
     async def extract_node(self, node_id: str):
-        query= """
-        MATCH(node {id: $node_id})
-        RETURN node
-        """
-
-        results = [node["node"] for node in (await self.query(query, dict(node_id = node_id)))]
+        results = self.extract_nodes([node_id])
 
         return results[0] if len(results) > 0 else None
+
+    async def extract_nodes(self, node_ids: List[str]):
+        query = """
+        UNWIND $node_ids AS id
+        MATCH (node {id: id})
+        RETURN node"""
+
+        params = {
+            "node_ids": node_ids
+        }
+
+        results = await self.query(query, params)
+
+        return results
 
     async def delete_node(self, node_id: str):
         node_id = id.replace(":", "_")
 
         query = f"MATCH (node:`{node_id}` {{id: $node_id}}) DETACH DELETE n"
         params = { "node_id": node_id }
+
+        return await self.query(query, params)
+
+    async def delete_nodes(self, node_ids: list[str]) -> None:
+        query = """
+        UNWIND $node_ids AS id
+        MATCH (node {id: id})
+        DETACH DELETE node"""
+
+        params = {
+            "node_ids": node_ids
+        }
 
         return await self.query(query, params)
 

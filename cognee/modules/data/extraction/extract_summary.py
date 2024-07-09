@@ -10,4 +10,4 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
 
     llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model)
 
-    return llm_output.model_dump()
+    return llm_output

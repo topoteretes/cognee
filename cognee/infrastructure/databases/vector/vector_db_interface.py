@@ -6,7 +6,7 @@ from .models.PayloadSchema import PayloadSchema
 class VectorDBInterface(Protocol):
     """ Collections """
     @abstractmethod
-    async def collection_exists(self, collection_name: str) -> bool:
+    async def has_collection(self, collection_name: str) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -28,7 +28,7 @@ class VectorDBInterface(Protocol):
     async def retrieve(
         self,
         collection_name: str,
-        data_point_id: str
+        data_point_ids: list[str]
     ): raise NotImplementedError
 
     """ Search """
@@ -51,3 +51,13 @@ class VectorDBInterface(Protocol):
         limit: int,
         with_vectors: bool = False
     ): raise NotImplementedError
+
+    @abstractmethod
+    async def delete_data_points(
+        self,
+        collection_name: str,
+        data_point_ids: list[str]
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def prune(self): raise NotImplementedError

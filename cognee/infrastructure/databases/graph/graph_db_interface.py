@@ -26,9 +26,21 @@ class GraphDBInterface(Protocol):
     ): raise NotImplementedError
 
     @abstractmethod
+    async def delete_nodes(
+        self,
+        node_ids: list[str]
+    ): raise NotImplementedError
+
+    @abstractmethod
     async def extract_node(
         self,
         node_id: str
+    ): raise NotImplementedError
+
+    @abstractmethod
+    async def extract_nodes(
+        self,
+        node_ids: list[str]
     ): raise NotImplementedError
 
     @abstractmethod

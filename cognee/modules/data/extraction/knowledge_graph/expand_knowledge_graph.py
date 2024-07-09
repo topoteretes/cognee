@@ -7,6 +7,9 @@ from ...processing.chunk_types.DocumentChunk import DocumentChunk
 from .extract_knowledge_graph import extract_content_graph
 
 async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]):
+    if len(data_chunks) == 0:
+        return data_chunks
+  
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
@@ -24,13 +27,26 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
         for node in graph.nodes:
             node_id = generate_node_id(node.id)
 
-            for node in graph.nodes:
-                graph_edges.append((
-                    str(chunk.chunk_id),
-                    node_id,
-                    "contains",
-                    dict(relationship_name = "contains"),
-                ))
+            graph_nodes.append((
+                node_id,
+                dict(
+                    id = node_id,
+                    chunk_id = str(chunk.chunk_id),
+                    document_id = str(chunk.document_id),
+                    name = node.name,
+                    type = node.type.lower().capitalize(),
+                    description = node.description,
+                    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            ))
+
+            graph_edges.append((
+                str(chunk.chunk_id),
+                node_id,
+                "contains",
+                dict(relationship_name = "contains"),
+            ))
 
             type_node_id = generate_node_id(node.type)
             type_node = await graph_engine.extract_node(type_node_id)
@@ -53,24 +69,10 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
 
             # Add relationship between entity type and entity itself: "Jake is Person"
             graph_edges.append((
-                node_id,
                 type_node_id,
-                "is",
-                dict(relationship_name = "is"),
-            ))
-
-            graph_nodes.append((
                 node_id,
-                dict(
-                    id = node_id,
-                    chunk_id = chunk.chunk_id,
-                    document_id = chunk.document_id,
-                    name = node.name,
-                    type = node.type.lower().capitalize(),
-                    description = node.description,
-                    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                )
+                "is_entity_type",
+                dict(relationship_name = "is_entity_type"),
             ))
 
             # Add relationship that came from graphs.

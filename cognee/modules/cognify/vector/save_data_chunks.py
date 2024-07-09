@@ -4,11 +4,28 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 
 async def save_data_chunks(data_chunks: list[DocumentChunk], collection_name: str):
-    # Add to vector storage
+    if len(data_chunks) == 0:
+        return data_chunks
+
     vector_engine = get_vector_engine()
+    graph_engine = await get_graph_engine()
 
-    await vector_engine.create_collection(collection_name, payload_schema = DocumentChunk)
+    # Remove and unlink existing chunks
+    if await vector_engine.has_collection(collection_name):
+        existing_chunks = [DocumentChunk.parse_obj(chunk.payload) for chunk in (await vector_engine.retrieve(
+            collection_name,
+            [str(chunk.chunk_id) for chunk in data_chunks],
+        ))]
 
+        if len(existing_chunks) > 0:
+            await vector_engine.delete_data_points(collection_name, [str(chunk.chunk_id) for chunk in existing_chunks])
+
+            await graph_engine.remove_connection_to_successors_of([chunk.chunk_id for chunk in existing_chunks], "next_chunk")
+            await graph_engine.remove_connection_to_predecessors_of([chunk.chunk_id for chunk in existing_chunks], "has_chunk")
+    else:
+        await vector_engine.create_collection(collection_name, payload_schema = DocumentChunk)
+
+    # Add to vector storage
     await vector_engine.create_data_points(
         collection_name,
         [
@@ -21,23 +38,51 @@ async def save_data_chunks(data_chunks: list[DocumentChunk], collection_name: st
     )
 
     # Add to graph storage
-    graph_engine = await get_graph_engine()
+    chunk_nodes = []
+    chunk_edges = []
 
-    await graph_engine.add_nodes([(str(chunk.chunk_id), chunk) for chunk in data_chunks])
-    await graph_engine.add_edges([(
-        str(chunk.document_id),
-        str(chunk.chunk_id),
-        "has_chunks",
-        dict(relationship_name = "has_chunks"),
-    ) for chunk in data_chunks])
+    for chunk in data_chunks:
+        chunk_nodes.append((
+            str(chunk.chunk_id),
+            dict(
+                chunk_id = str(chunk.chunk_id),
+                document_id = str(chunk.document_id),
+                word_count = chunk.word_count,
+                chunk_index = chunk.chunk_index,
+                cut_type = chunk.cut_type,
+                pages = chunk.pages,
+            )
+        ))
 
-    chunk_connections = [(
-        str(data_chunks[chunk_index - 1].chunk_id),
-        str(chunk.chunk_id),
-        "next_chunk",
-        dict(relationship_name = "next_chunk"),
-    ) for (chunk_index, chunk) in enumerate(data_chunks) if chunk_index > 0]
+        chunk_edges.append((
+            str(chunk.document_id),
+            str(chunk.chunk_id),
+            "has_chunk",
+            dict(relationship_name = "has_chunk"),
+        ))
 
-    await graph_engine.add_edges(chunk_connections)
+        previous_chunk_id = str(get_previous_chunk_id(data_chunks, chunk))
+        if previous_chunk_id is not None:
+            chunk_edges.append((
+                previous_chunk_id,
+                str(chunk.chunk_id),
+                "next_chunk",
+                dict(relationship_name = "next_chunk"),
+            ))
+
+    await graph_engine.add_nodes(chunk_nodes)
+    await graph_engine.add_edges(chunk_edges)
 
     return data_chunks
+
+
+def get_previous_chunk_id(document_chunks: list[DocumentChunk], current_chunk: DocumentChunk) -> DocumentChunk:
+    if current_chunk.chunk_index == 0:
+        return current_chunk.document_id
+
+    for chunk in document_chunks:
+        if str(chunk.document_id) == str(current_chunk.document_id) \
+            and chunk.chunk_index == current_chunk.chunk_index - 1:
+            return chunk.chunk_id
+
+    return None
