@@ -4,11 +4,12 @@ import csv
 import json
 import logging
 import os
+from typing import Any, Dict, List, Optional, Union, Type
 
+import asyncio
 import aiofiles
 import pandas as pd
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional, Union, Type
+from pydantic import BaseModel
 
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
@@ -18,8 +19,8 @@ from cognee.infrastructure.files.utils.extract_text_from_file import extract_tex
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.base_config import get_base_config
-from cognee.modules.topology.topology_data_models import NodeModel, RelationshipModel, Document, DirectoryModel, DirMetadata, GitHubRepositoryModel
-import asyncio
+from cognee.modules.topology.topology_data_models import NodeModel
+
 cognify_config = get_cognify_config()
 base_config = get_base_config()
 
@@ -59,12 +60,12 @@ class TopologyEngine:
     async def load_data(self, file_path: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """Load data from a JSON or CSV file."""
         try:
-            if file_path.endswith('.json'):
-                async with aiofiles.open(file_path, mode='r') as f:
+            if file_path.endswith(".json"):
+                async with aiofiles.open(file_path, mode="r") as f:
                     data = await f.read()
                     return json.loads(data)
-            elif file_path.endswith('.csv'):
-                async with aiofiles.open(file_path, mode='r') as f:
+            elif file_path.endswith(".csv"):
+                async with aiofiles.open(file_path, mode="r") as f:
                     content = await f.read()
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
@@ -97,7 +98,7 @@ class TopologyEngine:
                                                                    chunk_config.chunk_overlap)
 
                             if chunks_with_ids[0][0] == 1:
-                                initial_chunks_and_ids.append({base_file['id']: chunks_with_ids})
+                                initial_chunks_and_ids.append({base_file["id"]: chunks_with_ids})
 
                         except FileTypeException:
                             logger.warning("File (%s) has an unknown file type. We are skipping it.", file["id"])
@@ -118,14 +119,12 @@ class TopologyEngine:
             dataset_level_information = dataset_files[0][1]
 
             # Extract the list of valid IDs from the explanations
-            valid_ids = {item['id'] for item in dataset_level_information}
+            valid_ids = {item["id"] for item in dataset_level_information}
             try:
                 data = await self.load_data(file_path)
                 flt_topology = await self.recursive_flatten(data)
                 df = pd.DataFrame(flt_topology)
                 graph_client = await get_graph_engine()
-
-                print("df", df)
 
                 for _, row in df.iterrows():
                     node_data = row.to_dict()
@@ -142,7 +141,7 @@ class TopologyEngine:
 
                 return
             except Exception as e:
-                raise RuntimeError(f"Failed to add graph topology from {file_path}: {e}")
+                raise RuntimeError(f"Failed to add graph topology from {file_path}: {e}") from e
 
 
 
@@ -184,11 +183,11 @@ async def main():
 
     print(dataset_files)
     topology_engine = TopologyEngine(infer=True)
-    file_path = 'example_data.json'  # or 'example_data.csv'
+    file_path = "example_data.json"  # or 'example_data.csv'
     #
     # # Adding graph topology
     graph = await topology_engine.add_graph_topology(file_path, dataset_files=dataset_files)
-    # print(graph)
+    print(graph)
 
 # Run the main function
 if __name__ == "__main__":

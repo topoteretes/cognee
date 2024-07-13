@@ -10,7 +10,7 @@ from .models.TextSummary import TextSummary
 async def summarize_text_chunks(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel], collection_name: str = "summaries"):
     if len(data_chunks) == 0:
         return data_chunks
-  
+
     chunk_summaries = await asyncio.gather(
         *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
     )

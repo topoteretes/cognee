@@ -12,6 +12,7 @@ import tiktoken
 import nltk
 from posthog import Posthog
 from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.graph import get_graph_engine
 
 def send_telemetry(event_name: str):
     if os.getenv("TELEMETRY_DISABLED"):
@@ -183,6 +184,18 @@ def prepare_nodes(graph, include_size=False):
 
 async def render_graph(graph, include_nodes=False, include_color=False, include_size=False, include_labels=False):
     await register_graphistry()
+
+    if not isinstance(graph, nx.MultiDiGraph):
+        graph_engine = await get_graph_engine()
+        networkx_graph = nx.MultiDiGraph()
+
+        (nodes, edges) = await graph_engine.get_graph_data()
+
+        networkx_graph.add_nodes_from(nodes)
+        networkx_graph.add_edges_from(edges)
+
+        graph = networkx_graph
+
     edges = prepare_edges(graph)
     plotter = graphistry.edges(edges, "source", "target")
 

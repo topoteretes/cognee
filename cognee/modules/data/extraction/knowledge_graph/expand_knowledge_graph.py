@@ -7,9 +7,6 @@ from ...processing.chunk_types.DocumentChunk import DocumentChunk
 from .extract_knowledge_graph import extract_content_graph
 
 async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]):
-    if len(data_chunks) == 0:
-        return data_chunks
-  
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )

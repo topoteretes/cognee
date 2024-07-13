@@ -20,7 +20,7 @@ class DuckDBAdapter():
 
     def get_files_metadata(self, dataset_name: str):
         with self.get_connection() as connection:
-            return connection.sql(f"SELECT id, name, file_path, extension, mime_type, keywords FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
+            return connection.sql(f"SELECT id, name, file_path, extension, mime_type FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
 
     def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
         fields_query_parts = []

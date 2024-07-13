@@ -2,9 +2,10 @@
 import os
 import aiohttp
 import uvicorn
-import asyncio
 import json
+import asyncio
 import logging
+import sentry_sdk
 from typing import Dict, Any, List, Union, Optional, Literal
 from typing_extensions import Annotated
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
@@ -18,6 +19,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",  # Set the log message format
 )
 logger = logging.getLogger(__name__)
+
+sentry_sdk.init(
+    dsn = "https://656291a67023c007430e7166f4884876@o4507536670720000.ingest.de.sentry.io/4507588882989136",
+    traces_sample_rate = 1.0,
+    profiles_sample_rate = 1.0,
+)
 
 app = FastAPI(debug = True)
 
@@ -95,7 +102,6 @@ async def get_dataset_data(dataset_id: str):
         dict(
             id=data["id"],
             name=f"{data['name']}.{data['extension']}",
-            keywords=data["keywords"].split("|"),
             filePath=data["file_path"],
             mimeType=data["mime_type"],
         )
@@ -177,17 +183,17 @@ class CognifyPayload(BaseModel):
 @app.post("/cognify", response_model=dict)
 async def cognify(payload: CognifyPayload):
     """ This endpoint is responsible for the cognitive processing of the content."""
-    from cognee.api.v1.cognify.cognify import cognify as cognee_cognify
+    from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
     try:
         await cognee_cognify(payload.datasets)
         return JSONResponse(
-            status_code=200,
-            content="OK"
+            status_code = 200,
+            content = "OK"
         )
     except Exception as error:
         return JSONResponse(
-            status_code=409,
-            content={"error": str(error)}
+            status_code = 409,
+            content = {"error": str(error)}
         )
 
 class SearchPayload(BaseModel):

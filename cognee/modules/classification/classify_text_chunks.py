@@ -9,7 +9,7 @@ from ..data.extraction.extract_categories import extract_categories
 async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
     if len(data_chunks) == 0:
         return data_chunks
-  
+
     chunk_classifications = await asyncio.gather(
         *[extract_categories(chunk.text, classification_model) for chunk in data_chunks]
     )

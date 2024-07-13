@@ -13,7 +13,7 @@ class TextData(IngestionData):
         self.data = data
 
     def get_identifier(self):
-        keywords = self.get_metadata()["keywords"]
+        keywords = extract_keywords(self.data)
 
         return "text/plain" + "_" + "|".join(keywords)
 
@@ -24,7 +24,7 @@ class TextData(IngestionData):
 
     def ensure_metadata(self):
         if self.metadata is None:
-            self.metadata = dict(keywords = extract_keywords(self.data))
+            self.metadata = {}
 
     def get_data(self):
         return self.data
