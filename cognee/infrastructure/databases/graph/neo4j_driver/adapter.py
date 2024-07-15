@@ -72,7 +72,9 @@ class Neo4jAdapter(GraphDBInterface):
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})
         ON CREATE SET n += node.properties
-        RETURN ID(n) AS internal_id, n.id AS nodeId
+        WITH n, node.node_id AS label
+        CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
+        RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
         """
 
         nodes = [{
@@ -82,15 +84,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         results = await self.query(query, dict(nodes = nodes))
         return results
-
-        # for node in nodes:
-        #     node_id, node_properties = node
-        #     node_id = node_id.replace(":", "_")
-
-        #     await self.add_node(
-        #         node_id = node_id,
-        #         node_properties = node_properties,
-        #     )
 
     async def extract_node_description(self, node_id: str):
         query = """MATCH (n)-[r]->(m)
@@ -196,23 +189,15 @@ class Neo4jAdapter(GraphDBInterface):
           "from_node": edge[0],
           "to_node": edge[1],
           "relationship_name": edge[2],
-          "properties": edge[3] if edge[3] else {},
+          "properties": {
+              **(edge[3] if edge[3] else {}),
+              "source_node_id": edge[0],
+              "target_node_id": edge[1],
+          },
         } for edge in edges]
 
         results = await self.query(query, dict(edges = edges))
         return results
-
-        # for edge in edges:
-        #     from_node, to_node, relationship_name, edge_properties = edge
-        #     from_node = from_node.replace(":", "_")
-        #     to_node = to_node.replace(":", "_")
-
-        #     await self.add_edge(
-        #         from_node = from_node,
-        #         to_node = to_node,
-        #         relationship_name = relationship_name,
-        #         edge_properties = edge_properties
-        #     )
 
 
     async def get_disconnected_nodes(self) -> list[str]:
@@ -236,11 +221,22 @@ class Neo4jAdapter(GraphDBInterface):
 
         // Step 3: Aggregate components
         WITH COLLECT(component) AS components
-        RETURN components
+
+        // Step 4: Identify the largest connected component
+        UNWIND components AS component
+        WITH component
+        ORDER BY SIZE(component) DESC
+        LIMIT 1
+        WITH component AS largestComponent
+
+        // Step 5: Find nodes not in the largest connected component
+        MATCH (n)
+        WHERE NOT n IN largestComponent
+        RETURN COLLECT(ID(n)) AS ids
         """
 
-        component_nodes = await self.query(query)
-        return [node_id for component in component_nodes for node_id in component["nodeIds"]]
+        results = await self.query(query)
+        return results[0]["ids"] if len(results) > 0 else []
 
 
     async def filter_nodes(self, search_criteria):
@@ -308,7 +304,7 @@ class Neo4jAdapter(GraphDBInterface):
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
         result = await self.query(query)
         nodes = [(
-            record["id"],
+            record["properties"]["id"],
             record["properties"],
         ) for record in result]
 
@@ -318,8 +314,8 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         edges = [(
-            record["source"],
-            record["target"],
+            record["properties"]["source_node_id"],
+            record["properties"]["target_node_id"],
             record["type"],
             record["properties"],
         ) for record in result]

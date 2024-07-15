@@ -16,7 +16,7 @@ async def run_tasks(tasks: [Task], data):
     next_task_batch_size = next_task.task_config["batch_size"] if next_task else 1
 
     if inspect.isasyncgenfunction(running_task.executable):
-        logger.error(f"Running async generator task: `{running_task.executable.__name__}`")
+        logger.info(f"Running async generator task: `{running_task.executable.__name__}`")
         results = []
 
         async_iterator = running_task.run(data)
@@ -36,9 +36,10 @@ async def run_tasks(tasks: [Task], data):
 
             results = []
 
-        logger.error(f"Finished async generator task: `{running_task.executable.__name__}`")
+        logger.info(f"Finished async generator task: `{running_task.executable.__name__}`")
 
     elif inspect.isgeneratorfunction(running_task.executable):
+        logger.info(f"Running generator task: `{running_task.executable.__name__}`")
         results = []
 
         for partial_result in running_task.run(data):
@@ -55,6 +56,8 @@ async def run_tasks(tasks: [Task], data):
                 yield result
 
             results = []
+
+        logger.info(f"Running generator task: `{running_task.executable.__name__}`")
 
     elif inspect.iscoroutinefunction(running_task.executable):
         task_result = await running_task.run(data)
