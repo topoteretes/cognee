@@ -20,7 +20,7 @@ def get_llm_client():
             raise ValueError("LLM API key is not set.")
 
         from .openai.adapter import OpenAIAdapter
-        return OpenAIAdapter(llm_config.llm_api_key, llm_config.llm_model, llm_config.llm_streaming)
+        return OpenAIAdapter(api_key=llm_config.llm_api_key, model=llm_config.llm_model, transcription_model=llm_config.transcription_model, streaming=llm_config.llm_streaming)
     elif provider == LLMProvider.OLLAMA:
         if llm_config.llm_api_key is None:
             raise ValueError("LLM API key is not set.")

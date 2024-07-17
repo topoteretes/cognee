@@ -3,6 +3,7 @@ import logging
 from typing import Union
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.data.processing.document_types import PdfDocument, TextDocument
 from cognee.modules.cognify.vector import save_data_chunks
@@ -64,16 +65,12 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = "R
                 ]),
                 Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
             ]
-            gg =[ PdfDocument(title = file["name"], file_path = file["file_path"]) for file in files]
-
-
 
             pipeline = run_tasks(tasks, [
-                (
-                    PdfDocument(title = file["name"], file_path = file["file_path"]) \
-                    if file["extension"] == "pdf" \
-                    else TextDocument(title = file["name"], file_path = file["file_path"])
-                 ) for file in files
+                PdfDocument(title=file["name"], file_path=file["file_path"]) if file["extension"] == "pdf" else
+                AudioDocument(title=file["name"], file_path=file["file_path"]) if file["extension"] == "audio" else
+                TextDocument(title=file["name"], file_path=file["file_path"])
+                for file in files
             ])
 
             async for result in pipeline:
