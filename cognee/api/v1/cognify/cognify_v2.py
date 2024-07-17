@@ -64,6 +64,9 @@ async def cognify(datasets: Union[str, list[str]] = None):
                 ]),
                 Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
             ]
+            gg =[ PdfDocument(title = file["name"], file_path = file["file_path"]) for file in files]
+
+
 
             pipeline = run_tasks(tasks, [PdfDocument(title = file["name"], file_path = file["file_path"]) for file in files])
 
@@ -85,3 +88,21 @@ async def cognify(datasets: Union[str, list[str]] = None):
             awaitables.append(run_cognify_pipeline(dataset, db_engine.get_files_metadata(dataset)))
 
     return await asyncio.gather(*awaitables)
+
+
+#
+# if __name__ == "__main__":
+#     from cognee.api.v1.add import add
+#     from cognee.api.v1.datasets.datasets import datasets
+#
+#
+#     async def aa():
+#         await add("TEXT ABOUT NLP AND MONKEYS")
+#
+#         print(datasets.discover_datasets())
+#
+#         return
+
+
+
+    # asyncio.run(cognify())

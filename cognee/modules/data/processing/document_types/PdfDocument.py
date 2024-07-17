@@ -1,4 +1,5 @@
 # import pdfplumber
+import logging
 from uuid import uuid5, NAMESPACE_OID
 from typing import Optional
 from pypdf import PdfReader as pypdf_PdfReader
@@ -89,11 +90,12 @@ class PdfDocument(Document):
         self.id = uuid5(NAMESPACE_OID, title)
         self.title = title
         self.file_path = file_path
-
+        logging.debug("file_path: %s", self.file_path)
         reader = PdfReader(self.id, self.file_path)
         self.num_pages = reader.get_number_of_pages()
 
     def get_reader(self) -> PdfReader:
+        logging.debug("file_path: %s", self.file_path)
         reader = PdfReader(self.id, self.file_path)
         return reader
 
