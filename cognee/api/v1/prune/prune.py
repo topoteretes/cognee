@@ -10,8 +10,8 @@ class prune():
         LocalStorage.remove_all(data_root_directory)
 
     @staticmethod
-    async def prune_system(graph = True, vector = True):
-        await prune_system(graph, vector)
+    async def prune_system(graph = True, vector = True, metadata = False):
+        await prune_system(graph, vector, metadata)
 
 if __name__ == "__main__":
     import asyncio

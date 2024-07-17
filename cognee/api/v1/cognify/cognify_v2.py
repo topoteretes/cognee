@@ -4,7 +4,7 @@ from typing import Union
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
+from cognee.modules.data.processing.document_types import PdfDocument, TextDocument
 from cognee.modules.cognify.vector import save_data_chunks
 from cognee.modules.data.processing.process_documents import process_documents
 from cognee.modules.classification.classify_text_chunks import classify_text_chunks
@@ -21,7 +21,7 @@ logger = logging.getLogger("cognify.v2")
 
 update_status_lock = asyncio.Lock()
 
-async def cognify(datasets: Union[str, list[str]] = None):
+async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = "ROOT"):
     relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine
     create_task_status_table()
@@ -43,7 +43,7 @@ async def cognify(datasets: Union[str, list[str]] = None):
             cognee_config = get_cognify_config()
 
             tasks = [
-                Task(process_documents, parent_node_id = "Boris's documents", task_config = { "batch_size": 10 }), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+                Task(process_documents, parent_node_id = root_node_id, task_config = { "batch_size": 10 }), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
                 Task(establish_graph_topology, topology_model = KnowledgeGraph), # Set the graph topology for the document chunk data
                 Task(expand_knowledge_graph, graph_model = KnowledgeGraph), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
                 Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
@@ -65,7 +65,13 @@ async def cognify(datasets: Union[str, list[str]] = None):
                 Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
             ]
 
-            pipeline = run_tasks(tasks, [PdfDocument(title = file["name"], file_path = file["file_path"]) for file in files])
+            pipeline = run_tasks(tasks, [
+                (
+                    PdfDocument(title = file["name"], file_path = file["file_path"]) \
+                    if file["extension"] == "pdf" \
+                    else TextDocument(title = file["name"], file_path = file["file_path"])
+                 ) for file in files
+            ])
 
             async for result in pipeline:
                 print(result)

@@ -11,11 +11,11 @@ async def main():
     logging.basicConfig(level=logging.DEBUG)
 
     # print("Working dir: ", str(pathlib.Path(__file__).parent))
-    # data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.data")).resolve())
+    # data_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../.data")).resolve())
     # print("Data dir: ", data_directory_path)
     # cognee.config.data_root_directory(data_directory_path)
     #
-    # cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../../.cognee_system")).resolve())
+    # cognee_directory_path = str(pathlib.Path(path.join(pathlib.Path(__file__).parent, "../.cognee_system")).resolve())
     # print("System dir: ", cognee_directory_path)
     # cognee.config.system_root_directory(cognee_directory_path)
 

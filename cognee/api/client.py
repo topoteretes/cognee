@@ -20,13 +20,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-sentry_sdk.init(
-    dsn = "https://656291a67023c007430e7166f4884876@o4507536670720000.ingest.de.sentry.io/4507588882989136",
-    traces_sample_rate = 1.0,
-    profiles_sample_rate = 1.0,
-)
+if os.getenv("ENV") == "prod":
+    sentry_sdk.init(
+        dsn = os.getenv("SENTRY_REPORTING_URL"),
+        traces_sample_rate = 1.0,
+        profiles_sample_rate = 1.0,
+    )
 
-app = FastAPI(debug = True)
+app = FastAPI(debug = os.getenv("ENV") != "prod")
 
 origins = [
     "http://frontend:3000",
@@ -136,7 +137,7 @@ class AddPayload(BaseModel):
 @app.post("/add", response_model=dict)
 async def add(
     datasetId: str = Form(...),
-    data: List[UploadFile] = File(...),
+    data: List[UploadFile] = [File(...)],
 ):
     """ This endpoint is responsible for adding data to the graph."""
     from cognee.api.v1.add import add as cognee_add
@@ -261,27 +262,27 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        from cognee.base_config import get_base_config
+        # from cognee.base_config import get_base_config
         from cognee.infrastructure.databases.relational import get_relationaldb_config
-        from cognee.infrastructure.databases.vector import get_vectordb_config
-        from cognee.infrastructure.databases.graph import get_graph_config
+        # from cognee.infrastructure.databases.vector import get_vectordb_config
+        # from cognee.infrastructure.databases.graph import get_graph_config
 
-        cognee_directory_path = os.path.abspath(".cognee_system")
-        databases_directory_path = os.path.join(cognee_directory_path, "databases")
+        # cognee_directory_path = os.path.abspath(".cognee_system")
+        # databases_directory_path = os.path.join(cognee_directory_path, "databases")
 
         relational_config = get_relationaldb_config()
-        relational_config.db_path = databases_directory_path
+        # relational_config.db_path = databases_directory_path
         relational_config.create_engine()
 
-        vector_config = get_vectordb_config()
-        vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
+        # vector_config = get_vectordb_config()
+        # vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
-        graph_config = get_graph_config()
-        graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
+        # graph_config = get_graph_config()
+        # graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
 
-        base_config = get_base_config()
-        data_directory_path = os.path.abspath(".data_storage")
-        base_config.data_root_directory = data_directory_path
+        # base_config = get_base_config()
+        # data_directory_path = os.path.abspath(".data_storage")
+        # base_config.data_root_directory = data_directory_path
 
         from cognee.modules.data.deletion import prune_system
         asyncio.run(prune_system())

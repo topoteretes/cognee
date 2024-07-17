@@ -163,7 +163,7 @@ async def main():
     from cognee.api.v1.add import add
     dataset_name = "explanations"
     print(os.getcwd())
-    data_dir = os.path.abspath("../../../.data")
+    data_dir = os.path.abspath("../../.data")
     print(os.getcwd())
 
     await add(f"data://{data_dir}", dataset_name="explanations")

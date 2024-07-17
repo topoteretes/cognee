@@ -6,6 +6,3 @@ class Document(Protocol):
     type: str
     title: str
     file_path: str
-
-    def read(self, max_chunk_size: int):
-        raise NotImplementedError

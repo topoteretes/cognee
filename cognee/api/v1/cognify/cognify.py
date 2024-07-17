@@ -263,10 +263,10 @@ if __name__ == "__main__":
         # await prune.prune_system()
         # #
         # from cognee.api.v1.add import add
-        # data_directory_path = os.path.abspath("../../../.data")
+        # data_directory_path = os.path.abspath("../../.data")
         # # print(data_directory_path)
         # # config.data_root_directory(data_directory_path)
-        # # cognee_directory_path = os.path.abspath("../.cognee_system")
+        # # cognee_directory_path = os.path.abspath(".cognee_system")
         # # config.system_root_directory(cognee_directory_path)
         #
         # await add("data://" +data_directory_path, "example")

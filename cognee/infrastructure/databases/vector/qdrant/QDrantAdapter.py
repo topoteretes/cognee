@@ -61,7 +61,7 @@ class QDrantAdapter(VectorDBInterface):
 
     async def has_collection(self, collection_name: str) -> bool:
         client = self.get_qdrant_client()
-        result = await client.has_collection(collection_name)
+        result = await client.collection_exists(collection_name)
         await client.close()
         return result
 
