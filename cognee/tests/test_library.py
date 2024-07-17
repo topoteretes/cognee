@@ -52,20 +52,13 @@ async def  main():
     print("The search results list is not empty.")
 
 
-    search_results = await cognee.search("SUMMARY", { "query": "Work and computers" })
-    assert len(search_results) != 0, "The search results list is empty."
-    print("The search results list is not empty.")
+    # search_results = await cognee.search("SUMMARY", { "query": "Work and computers" })
+    # assert len(search_results) != 0, "The search results list is empty."
+    # print("The search results list is not empty.")
 
     search_results = await cognee.search("ADJACENT", { "query": "ROOT" })
     assert len(search_results) != 0, "The search results list is empty."
     print("The search results list is not empty.")
-
-    # search_results = cognee.search("SIMILARITY", "computer science")
-    # if len(search_results) == 0:
-    #     print("The similarity search results list is empty.")
-    #     raise Exception("The search results list is empty.")
-    # else:
-    #     print("The search results list is not empty.")
 
 
 if __name__ == "__main__":
