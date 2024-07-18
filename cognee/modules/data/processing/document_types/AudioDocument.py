@@ -15,11 +15,6 @@ class AudioReader:
         self.file_path = file_path
         self.llm_client = get_llm_client()  # You can choose different models like "tiny", "base", "small", etc.
 
-    def get_number_of_pages(self):
-        # Estimate the number of pages based on audio duration (1 minute = 1 page for simplicity)
-        result = self.llm_client.create_transcript(self.file_path)
-        duration = result['duration'] / 60  # Duration in minutes
-        return int(duration) + 1
 
     def read(self, max_chunk_size: Optional[int] = 1024):
         chunk_index = 0
