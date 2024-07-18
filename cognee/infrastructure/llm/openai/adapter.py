@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 from pathlib import Path
 from typing import List, Type
@@ -129,7 +130,7 @@ class OpenAIAdapter(LLMInterface):
         )
 
     @retry(stop = stop_after_attempt(5))
-    def create_transcript(self, input) -> BaseModel:
+    def create_transcript(self, input):
         """Generate a audio transcript from a user query."""
 
         if not os.path.isfile(input):
@@ -147,6 +148,30 @@ class OpenAIAdapter(LLMInterface):
 
         return transcription
 
+
+    @retry(stop = stop_after_attempt(5))
+    def transcribe_image(self, input) -> BaseModel:
+        with open(input, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+        return self.base_openai_client.chat.completions.create(
+            model=self.model,
+            messages=[
+                        {
+                          "role": "user",
+                          "content": [
+                            {"type": "text", "text": "What’s in this image?"},
+                            {
+                              "type": "image_url",
+                              "image_url": {
+                                "url": f"data:image/jpeg;base64,{encoded_image}",
+                              },
+                            },
+                          ],
+                        }
+                      ],
+            max_tokens=300,
+        )
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
         """Format and display the prompt for a user query."""
         if not text_input:
