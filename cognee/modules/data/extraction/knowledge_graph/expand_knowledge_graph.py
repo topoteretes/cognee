@@ -16,6 +16,8 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
     type_ids = [generate_node_id(node.type) for chunk_graph in chunk_graphs for node in chunk_graph.nodes]
     graph_node_type_ids = list(set(type_ids))
     graph_nodes_types = await graph_engine.extract_nodes(graph_node_type_ids)
+    node_types_map = {generate_node_id(node["type"]): node for node in graph_nodes_types}
+
     graph_nodes = []
     graph_edges = []
 
@@ -49,10 +51,8 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
             ))
 
             type_node_id = generate_node_id(node.type)
-            # type_node = await graph_engine.extract_node(type_node_id)
-            type_node_exists = any(node.id == type_node_id for node in graph_nodes_types)
 
-            if not type_node_exists:
+            if type_node_id not in node_types_map:
                 node_name = node.type.lower().capitalize()
 
                 type_node = (
@@ -67,20 +67,23 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                 )
 
                 graph_nodes.append(type_node)
+                node_types_map[type_node_id] = type_node
 
-            graph_edges.append((
-                str(chunk.chunk_id),
-                type_node_id,
-                "contains_entity_type",
-                dict(relationship_name = "contains_entity_type"),
-            ))
+                graph_edges.append((
+                    str(chunk.chunk_id),
+                    type_node_id,
+                    "contains_entity_type",
+                    dict(relationship_name = "contains_entity_type"),
+                ))
 
             # Add relationship between entity type and entity itself: "Jake is Person"
             graph_edges.append((
                 type_node_id,
                 node_id,
                 "is_entity_type",
-                dict(relationship_name = "is_entity_type"),
+                dict(
+                    relationship_name = "is_entity_type",
+                ),
             ))
 
             # Add relationship that came from graphs.

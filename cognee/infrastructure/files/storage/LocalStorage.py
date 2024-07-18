@@ -43,7 +43,8 @@ class LocalStorage(Storage):
 
     @staticmethod
     def remove(file_path: str):
-        os.remove(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
     @staticmethod
     def copy_file(source_file_path: str, destination_file_path: str):

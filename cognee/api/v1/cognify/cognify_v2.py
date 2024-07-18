@@ -64,15 +64,12 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = "R
                 ]),
                 Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
             ]
-            gg =[ PdfDocument(title = file["name"], file_path = file["file_path"]) for file in files]
-
-
 
             pipeline = run_tasks(tasks, [
                 (
-                    PdfDocument(title = file["name"], file_path = file["file_path"]) \
+                    PdfDocument(title = f"{file['name']}.{file['extension']}", file_path = file["file_path"]) \
                     if file["extension"] == "pdf" \
-                    else TextDocument(title = file["name"], file_path = file["file_path"])
+                    else TextDocument(title = f"{file['name']}.{file['extension']}", file_path = file["file_path"])
                  ) for file in files
             ])
 

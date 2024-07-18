@@ -33,8 +33,8 @@ export default function SearchView() {
     value: 'ADJACENT',
     label: 'Look for graph node\'s neighbors',
   }, {
-    value: 'CATEGORIES',
-    label: 'Search by categories (Comma separated categories)',
+    value: 'TRAVERSE',
+    label: 'Traverse through the graph and get knowledge',
   }];
   const [searchType, setSearchType] = useState(searchOptions[0]);
 

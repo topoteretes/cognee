@@ -255,10 +255,13 @@ class DefaultGraphModel(BaseModel):
     default_relationship: Relationship = Relationship(type = "has_properties")
 
 
-class ResponseSummaryModel(BaseModel):
-    """ Response summary model and existing document id """
-    document_id: str
-    response_summary: str
+class ChunkSummary(BaseModel):
+    text: str
+    chunk_id: str
+
+class ChunkSummaries(BaseModel):
+    """ Relevant summary and chunk id """
+    summaries: List[ChunkSummary]
 
 
 class MonitoringTool(str, Enum):

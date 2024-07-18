@@ -1,6 +1,7 @@
 """ Neo4j Adapter for Graph Database"""
 import json
 import logging
+import asyncio
 from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 from neo4j import AsyncSession
@@ -199,6 +200,13 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, dict(edges = edges))
         return results
 
+    async def get_edges(self, node_id: str):
+        query = """
+        MATCH (n {id: node_id})-[r]-()
+        RETURN r
+        """
+
+        return await self.query(query, dict(node_id = node_id))
 
     async def get_disconnected_nodes(self) -> list[str]:
         # return await self.query(
@@ -247,22 +255,72 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query)
 
 
-    async def get_predecessor_ids(self, node_id: str, edge_label: str) -> list[str]:
-        query = f"""
-        MATCH (node:`{node_id}`)-[r:{edge_label}]->(predecessor)
-        RETURN predecessor.id AS id
-        """
+    async def get_predecessor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
+        if edge_label is not None:
+            query = """
+            MATCH (node:`{node_id}`)-[r:{edge_label}]->(predecessor)
+            RETURN predecessor.id AS id
+            """
 
-        return [result["id"] for result in await self.query(query, dict(node_id = node_id))]
+            results = await self.query(
+                query,
+                dict(
+                    node_id = node_id,
+                    edge_label = edge_label,
+                )
+            )
 
-    async def get_successor_ids(self, node_id: str, edge_label: str) -> list[str]:
-        query = f"""
-        MATCH (node:`{node_id}`)<-[r:{edge_label}]-(successor)
-        RETURN successor.id AS id
-        """
+            return [result["id"] for result in results]
+        else:
+            query = """
+            MATCH (node:`{node_id}`)-[r]->(predecessor)
+            RETURN predecessor.id AS id
+            """
 
-        return [result["id"] for result in await self.query(query, dict(node_id = node_id))]
+            results = await self.query(
+                query,
+                dict(
+                    node_id = node_id,
+                )
+            )
 
+            return [result["id"] for result in results]
+
+    async def get_successor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
+        if edge_label is not None:
+            query = """
+            MATCH (node:`{node_id}`)<-[r:{edge_label}]-(successor)
+            RETURN successor.id AS id
+            """
+
+            results = await self.query(
+                query,
+                dict(
+                    node_id = node_id,
+                    edge_label = edge_label,
+                ),
+            )
+
+            return [result["id"] for result in results]
+        else:
+            query = """
+            MATCH (node:`{node_id}`)<-[r]-(successor)
+            RETURN successor.id AS id
+            """
+
+            results = await self.query(
+                query,
+                dict(
+                    node_id = node_id,
+                )
+            )
+
+            return [result["id"] for result in results]
+
+    async def get_neighbours(self, node_id: str) -> list[str]:
+        results = await asyncio.gather(*[self.get_predecessor_ids(node_id)], self.get_successor_ids(node_id))
+
+        return [*results[0], *results[1]]
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         query = f"""

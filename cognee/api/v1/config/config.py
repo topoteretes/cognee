@@ -16,6 +16,9 @@ class config():
         relational_config.db_path = databases_directory_path
         relational_config.create_engine()
 
+        graph_config = get_graph_config()
+        graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
+
         vector_config = get_vectordb_config()
         if vector_config.vector_engine_provider == "lancedb":
             vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")

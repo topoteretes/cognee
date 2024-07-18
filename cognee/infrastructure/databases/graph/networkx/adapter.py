@@ -62,6 +62,9 @@ class NetworkXAdapter(GraphDBInterface):
         self.graph.add_edges_from(edges)
         await self.save_graph_to_file(self.filename)
 
+    async def get_edges(self, node_id: str):
+        return list(self.graph.in_edges(node_id, data = True)) + list(self.graph.out_edges(node_id, data = True))
+
     async def delete_node(self, node_id: str) -> None:
         """Asynchronously delete a node from the graph if it exists."""
         if self.graph.has_node(id):
@@ -147,6 +150,13 @@ class NetworkXAdapter(GraphDBInterface):
                     nodes.append(successor_id)
 
             return nodes
+
+    async def get_neighbours(self, node_id: str) -> list:
+        neighbour_ids = list(self.graph.neighbors(node_id))
+
+        nodes = await self.extract_nodes(neighbour_ids)
+
+        return nodes
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         for node_id in node_ids:
