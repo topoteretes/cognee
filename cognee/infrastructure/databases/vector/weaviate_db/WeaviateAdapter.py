@@ -1,5 +1,4 @@
 import asyncio
-from uuid import UUID
 from typing import List, Optional
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
