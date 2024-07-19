@@ -92,7 +92,11 @@ class LanceDBAdapter(VectorDBInterface):
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         connection = await self.get_connection()
         collection = await connection.open_table(collection_name)
-        results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
+
+        if len(data_point_ids) == 1:
+            results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
+        else:
+            results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
 
         return [ScoredResult(
             id = result["id"],

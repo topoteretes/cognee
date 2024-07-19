@@ -152,7 +152,13 @@ class NetworkXAdapter(GraphDBInterface):
             return nodes
 
     async def get_neighbours(self, node_id: str) -> list:
+        if not self.graph.has_node(node_id):
+            return []
+
         neighbour_ids = list(self.graph.neighbors(node_id))
+
+        if len(neighbour_ids) == 0:
+            return []
 
         nodes = await self.extract_nodes(neighbour_ids)
 

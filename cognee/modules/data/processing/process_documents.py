@@ -1,13 +1,13 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from .document_types import Document
 
-async def process_documents(documents: list[Document], parent_node_id: str):
+async def process_documents(documents: list[Document], parent_node_id: str = None):
     graph_engine = await get_graph_engine()
 
     nodes = []
     edges = []
 
-    if await graph_engine.extract_node(parent_node_id) is None:
+    if parent_node_id and await graph_engine.extract_node(parent_node_id) is None:
         nodes.append((parent_node_id, {}))
 
     document_nodes = await graph_engine.extract_nodes([str(document.id) for document in documents])
@@ -18,12 +18,13 @@ async def process_documents(documents: list[Document], parent_node_id: str):
         if document_node is None:
             nodes.append((str(document.id), document.to_dict()))
 
-            edges.append((
-              parent_node_id,
-              str(document.id),
-              "has_document",
-              dict(relationship_name = "has_document"),
-            ))
+            if parent_node_id:
+                edges.append((
+                  parent_node_id,
+                  str(document.id),
+                  "has_document",
+                  dict(relationship_name = "has_document"),
+                ))
 
     if len(nodes) > 0:
         await graph_engine.add_nodes(nodes)

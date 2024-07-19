@@ -74,7 +74,7 @@ class TopologyEngine:
         except Exception as e:
             raise RuntimeError(f"Failed to load data from {file_path}: {e}")
 
-    async def add_graph_topology(self, file_path: str=None, dataset_files: list[tuple[Any, Any]]=None,):
+    async def add_graph_topology(self, file_path: str = None, files: list = None):
         """Add graph topology from a JSON or CSV file."""
         if self.infer:
             from cognee.modules.topology.infer_data_topology import infer_data_topology
@@ -85,38 +85,35 @@ class TopologyEngine:
             chunk_engine = get_chunk_engine()
             chunk_strategy = chunk_config.chunk_strategy
 
+            for base_file in files:
+                with open(base_file["file_path"], "rb") as file:
+                    try:
+                        file_type = guess_file_type(file)
+                        text = extract_text_from_file(file, file_type)
 
+                        subchunks, chunks_with_ids = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size,
+                                                                chunk_config.chunk_overlap)
 
-            for dataset_name, files in dataset_files:
-                for base_file in files:
-                    with open(base_file["file_path"], "rb") as file:
-                        try:
-                            file_type = guess_file_type(file)
-                            text = extract_text_from_file(file, file_type)
+                        if chunks_with_ids[0][0] == 1:
+                            initial_chunks_and_ids.append({base_file["id"]: chunks_with_ids})
 
-                            subchunks, chunks_with_ids = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size,
-                                                                   chunk_config.chunk_overlap)
-
-                            if chunks_with_ids[0][0] == 1:
-                                initial_chunks_and_ids.append({base_file["id"]: chunks_with_ids})
-
-                        except FileTypeException:
-                            logger.warning("File (%s) has an unknown file type. We are skipping it.", file["id"])
+                    except FileTypeException:
+                        logger.warning("File (%s) has an unknown file type. We are skipping it.", file["id"])
 
 
             topology = await infer_data_topology(str(initial_chunks_and_ids))
             graph_client = await get_graph_engine()
 
-            for node in topology["nodes"]:
-                await graph_client.add_node(node["id"], node)
-            for edge in topology["edges"]:
-                await graph_client.add_edge(edge["source_node_id"], edge["target_node_id"], relationship_name=edge["relationship_name"])
-
-
-
+            await graph_client.add_nodes([(node["id"], node) for node in topology["nodes"]])
+            await graph_client.add_edges((
+                edge["source_node_id"],
+                edge["target_node_id"],
+                edge["relationship_name"],
+                dict(relationship_name = edge["relationship_name"]),
+            ) for edge in topology["edges"])
 
         else:
-            dataset_level_information = dataset_files[0][1]
+            dataset_level_information = files[0][1]
 
             # Extract the list of valid IDs from the explanations
             valid_ids = {item["id"] for item in dataset_level_information}
@@ -135,9 +132,6 @@ class TopologyEngine:
                         raise ValueError(f"Node ID {node_id} not found in the dataset")
                     if pd.notna(row.get("relationship_source")) and pd.notna(row.get("relationship_target")):
                         await graph_client.add_edge(row["relationship_source"], row["relationship_target"], relationship_name=row["relationship_type"])
-
-                for dataset in dataset_files:
-                    print("dataset", dataset)
 
                 return
             except Exception as e:

@@ -1,6 +1,7 @@
 from typing import Union, Dict
 import networkx as nx
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
 
 async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: dict = None) -> Dict[str, str]:
     """
@@ -14,11 +15,20 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
     Returns:
     - Dict[str, str]: A dictionary containing the unique identifiers and descriptions of the neighbours of the given node.
     """
-    node_id = other_param.get('node_id') if other_param else query
+    node_id = other_param.get("node_id") if other_param else query
 
     if node_id is None:
         return {}
 
+    vector_engine = get_vector_engine()
+    collection_name = "classification"
+    data_points = await vector_engine.search(collection_name, query_text = node_id)
+
+    if len(data_points) == 0:
+        return []
+
     graph_engine = await get_graph_engine()
 
-    return await graph_engine.get_neighbours(node_id)
+    neighbours = await graph_engine.get_neighbours(data_points[0].id)
+
+    return [node["name"] for node in neighbours]

@@ -10,7 +10,7 @@ from ..data.extraction.extract_categories import extract_categories
 async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
     if len(data_chunks) == 0:
         return data_chunks
-    
+
     chunk_classifications = await asyncio.gather(
         *[extract_categories(chunk.text, classification_model) for chunk in data_chunks],
     )
@@ -40,7 +40,7 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
             list(set(classification_data_points)),
         ) if len(classification_data_points) > 0 else []
 
-        existing_points_map = {point.payload["text"]: point.payload for point in existing_data_points}
+        existing_points_map = {point.id: True for point in existing_data_points}
     else:
         existing_points_map = {}
         await vector_engine.create_collection(collection_name, payload_schema = Keyword)
@@ -53,9 +53,22 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
         chunk_classification = chunk_classifications[chunk_index]
 
         if chunk_classification.label.type not in existing_points_map:
+            data_points.append(
+                DataPoint[Keyword](
+                    id = str(chunk_classification.label.type),
+                    payload = Keyword.parse_obj({
+                        "text": chunk_classification.label.type,
+                        "chunk_id": str(data_chunk.chunk_id),
+                        "document_id": str(data_chunk.document_id),
+                    }),
+                    embed_field = "text",
+                )
+            )
+
             nodes.append((
                 str(chunk_classification.label.type),
                 dict(
+                    id = str(chunk_classification.label.type),
                     name = str(chunk_classification.label.type),
                     type = str(chunk_classification.label.type),
                 )
@@ -82,10 +95,11 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                         embed_field = "text",
                     )
                 )
-              
+
                 nodes.append((
                     str(classification_subclass.value),
                     dict(
+                        id = str(classification_subclass.value),
                         name = str(classification_subclass.value),
                         type = str(classification_subclass.value),
                     )

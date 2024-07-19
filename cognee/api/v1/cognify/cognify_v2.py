@@ -34,7 +34,7 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
         return await cognify(db_engine.get_datasets())
 
 
-    async def run_cognify_pipeline(dataset_name: str, files: list[dict], root_node_id:str):
+    async def run_cognify_pipeline(dataset_name: str, files: list[dict]):
         async with update_status_lock:
             task_status = get_task_status([dataset_name])
 
@@ -45,6 +45,19 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
             update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
         try:
             cognee_config = get_cognify_config()
+            graph_config = get_graph_config()
+            root_node_id = None
+
+            if graph_config.infer_graph_topology and graph_config.graph_topology_task:
+                from cognee.modules.topology.topology import TopologyEngine
+                topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+                root_node_id = await topology_engine.add_graph_topology(files = files)
+            elif not graph_config.infer_graph_topology:
+                from cognee.modules.topology.topology import TopologyEngine
+                topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+                await topology_engine.add_graph_topology(graph_config.topology_file_path)
+            elif not graph_config.graph_topology_task:
+                root_node_id = "ROOT"
 
             tasks = [
                 Task(process_documents, parent_node_id = root_node_id, task_config = { "batch_size": 10 }), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
@@ -91,32 +104,19 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
     awaitables = []
 
 
-    dataset_files = []
-    dataset_name = datasets.replace(".", "_").replace(" ", "_")
+    # dataset_files = []
+    # dataset_name = datasets.replace(".", "_").replace(" ", "_")
 
-    for added_dataset in existing_datasets:
-        if dataset_name in added_dataset:
-            dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
+    # for added_dataset in existing_datasets:
+    #     if dataset_name in added_dataset:
+    #         dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
 
-    graph_config = get_graph_config()
-
-    if graph_config.infer_graph_topology and graph_config.graph_topology_task:
-        from cognee.modules.topology.topology import TopologyEngine
-        topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-        await topology_engine.add_graph_topology(dataset_files=dataset_files)
-    elif not graph_config.infer_graph_topology:
-        from cognee.modules.topology.topology import TopologyEngine
-        topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-        await topology_engine.add_graph_topology(graph_config.topology_file_path)
-    elif not graph_config.graph_topology_task:
-        root_node_id = f"ROOT"
-
-    for (dataset, files) in dataset_files:
+    for dataset in datasets:
         if dataset in existing_datasets:
-            for file_metadata in files:
-                if root_node_id is None:
-                    root_node_id=file_metadata['id']
-                awaitables.append(run_cognify_pipeline(dataset, db_engine.get_files_metadata(dataset), root_node_id=root_node_id))
+            # for file_metadata in files:
+            #     if root_node_id is None:
+            #         root_node_id=file_metadata['id']
+            awaitables.append(run_cognify_pipeline(dataset, db_engine.get_files_metadata(dataset)))
 
     return await asyncio.gather(*awaitables)
 

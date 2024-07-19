@@ -1,6 +1,5 @@
 from typing import Union, Dict
 import networkx as nx
-from cognee.modules.search.llm.extraction.categorize_relevant_summary import categorize_relevant_summary
 from cognee.shared.data_models import ChunkSummaries
 from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -22,10 +21,4 @@ async def search_summary(query: str, graph: Union[nx.Graph, any]) -> Dict[str, s
         "chunk_id": summary.payload["chunk_id"],
       } for summary in summaries_results]
 
-    result = await categorize_relevant_summary(
-        query = query,
-        summaries = summaries,
-        response_model = ChunkSummaries,
-    )
-
-    return result.summaries
+    return summaries

@@ -16,7 +16,7 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
     type_ids = [generate_node_id(node.type) for chunk_graph in chunk_graphs for node in chunk_graph.nodes]
     graph_node_type_ids = list(set(type_ids))
     graph_nodes_types = await graph_engine.extract_nodes(graph_node_type_ids)
-    node_types_map = {generate_node_id(node["type"]): node for node in graph_nodes_types}
+    node_types_map = {node["id"]: node for node in graph_nodes_types}
 
     graph_nodes = []
     graph_edges = []
@@ -55,18 +55,15 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
             if type_node_id not in node_types_map:
                 node_name = node.type.lower().capitalize()
 
-                type_node = (
-                    type_node_id,
-                    dict(
-                        id = type_node_id,
-                        name = node_name,
-                        type = node_name,
-                        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    )
+                type_node = dict(
+                    id = type_node_id,
+                    name = node_name,
+                    type = node_name,
+                    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 )
 
-                graph_nodes.append(type_node)
+                graph_nodes.append((type_node_id, type_node))
                 node_types_map[type_node_id] = type_node
 
                 graph_edges.append((

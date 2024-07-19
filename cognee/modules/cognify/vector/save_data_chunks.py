@@ -1,4 +1,3 @@
-
 from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
@@ -45,6 +44,7 @@ async def save_data_chunks(data_chunks: list[DocumentChunk], collection_name: st
         chunk_nodes.append((
             str(chunk.chunk_id),
             dict(
+                id = str(chunk.chunk_id),
                 chunk_id = str(chunk.chunk_id),
                 document_id = str(chunk.document_id),
                 word_count = chunk.word_count,
