@@ -23,7 +23,11 @@ async def process_documents(documents: list[Document], parent_node_id: str = Non
                   parent_node_id,
                   str(document.id),
                   "has_document",
-                  dict(relationship_name = "has_document"),
+                  dict(
+                      relationship_name = "has_document",
+                      source_node_id = parent_node_id,
+                      target_node_id = str(document.id),
+                  ),
                 ))
 
     if len(nodes) > 0:

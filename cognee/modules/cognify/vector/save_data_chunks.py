@@ -58,16 +58,25 @@ async def save_data_chunks(data_chunks: list[DocumentChunk], collection_name: st
             str(chunk.document_id),
             str(chunk.chunk_id),
             "has_chunk",
-            dict(relationship_name = "has_chunk"),
+            dict(
+                relationship_name = "has_chunk",
+                source_node_id = str(chunk.document_id),
+                target_node_id = str(chunk.chunk_id),
+            ),
         ))
 
-        previous_chunk_id = str(get_previous_chunk_id(data_chunks, chunk))
+        previous_chunk_id = get_previous_chunk_id(data_chunks, chunk)
+
         if previous_chunk_id is not None:
             chunk_edges.append((
-                previous_chunk_id,
+                str(previous_chunk_id),
                 str(chunk.chunk_id),
                 "next_chunk",
-                dict(relationship_name = "next_chunk"),
+                dict(
+                    relationship_name = "next_chunk",
+                    source_node_id = str(previous_chunk_id),
+                    target_node_id = str(chunk.chunk_id),
+                ),
             ))
 
     await graph_engine.add_nodes(chunk_nodes)

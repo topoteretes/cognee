@@ -38,7 +38,7 @@ async def  main():
 
     await cognee.cognify([dataset_name], root_node_id = "ROOT")
 
-    search_results = await cognee.search("TRAVERSE", { "query": "Artificial intelligence" })
+    search_results = await cognee.search("TRAVERSE", { "query": "Text" })
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
@@ -50,7 +50,7 @@ async def  main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search("ADJACENT", { "query": "ROOT" })
+    search_results = await cognee.search("ADJACENT", { "query": "Articles" })
     assert len(search_results) != 0, "ROOT node has no neighbours."
     print("\n\nROOT node has neighbours.\n")
     for result in search_results:

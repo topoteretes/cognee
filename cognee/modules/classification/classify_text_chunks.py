@@ -55,7 +55,7 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
         if chunk_classification.label.type not in existing_points_map:
             data_points.append(
                 DataPoint[Keyword](
-                    id = str(chunk_classification.label.type),
+                    id = chunk_classification.label.type,
                     payload = Keyword.parse_obj({
                         "text": chunk_classification.label.type,
                         "chunk_id": str(data_chunk.chunk_id),
@@ -66,27 +66,31 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
             )
 
             nodes.append((
-                str(chunk_classification.label.type),
+                chunk_classification.label.type,
                 dict(
-                    id = str(chunk_classification.label.type),
-                    name = str(chunk_classification.label.type),
-                    type = str(chunk_classification.label.type),
+                    id = chunk_classification.label.type,
+                    name = chunk_classification.label.type,
+                    type = chunk_classification.label.type,
                 )
             ))
-            edges.append((
-                str(data_chunk.chunk_id),
-                str(chunk_classification.label.type),
-                "is_media_type",
-                dict(relationship_name = "is_media_type"),
-            ))
-
             existing_points_map[chunk_classification.label.type] = True
+
+        edges.append((
+            str(data_chunk.chunk_id),
+            chunk_classification.label.type,
+            "is_media_type",
+            dict(
+                relationship_name = "is_media_type",
+                source_node_id = str(data_chunk.chunk_id),
+                target_node_id = chunk_classification.label.type,
+            ),
+        ))
 
         for classification_subclass in chunk_classification.label.subclass:
             if classification_subclass.value not in existing_points_map:
                 data_points.append(
                     DataPoint[Keyword](
-                        id = str(classification_subclass.value),
+                        id = classification_subclass.value,
                         payload = Keyword.parse_obj({
                             "text": classification_subclass.value,
                             "chunk_id": str(data_chunk.chunk_id),
@@ -97,28 +101,36 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                 )
 
                 nodes.append((
-                    str(classification_subclass.value),
+                    classification_subclass.value,
                     dict(
-                        id = str(classification_subclass.value),
-                        name = str(classification_subclass.value),
-                        type = str(classification_subclass.value),
+                        id = classification_subclass.value,
+                        name = classification_subclass.value,
+                        type = classification_subclass.value,
                     )
                 ))
                 edges.append((
-                    str(chunk_classification.label.type),
-                    str(classification_subclass.value),
+                    chunk_classification.label.type,
+                    classification_subclass.value,
                     "contains",
-                    dict(relationship_name = "contains"),
-                ))
-                edges.append((
-                    str(data_chunk.chunk_id),
-                    str(classification_subclass.value),
-                    "is_classified_as",
-                    dict(relationship_name = "is_classified_as"),
+                    dict(
+                        relationship_name = "contains",
+                        source_node_id = chunk_classification.label.type,
+                        target_node_id = classification_subclass.value,
+                    ),
                 ))
 
                 existing_points_map[classification_subclass.value] = True
 
+            edges.append((
+                str(data_chunk.chunk_id),
+                classification_subclass.value,
+                "is_classified_as",
+                dict(
+                    relationship_name = "is_classified_as",
+                    source_node_id = str(data_chunk.chunk_id),
+                    target_node_id = classification_subclass.value,
+                ),
+            ))
 
     if len(nodes) > 0 or len(edges) > 0:
         await vector_engine.create_data_points(collection_name, data_points)

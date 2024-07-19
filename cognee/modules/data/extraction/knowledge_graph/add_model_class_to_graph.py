@@ -20,7 +20,11 @@ async def add_model_class_to_graph(
             parent,
             model_name,
             relationship,
-            dict(relationship_name = relationship),
+            dict(
+                relationship_name = relationship,
+                source_node_id = parent,
+                target_node_id = model_name,
+            ),
         )
 
     for field_name, field in model_class.model_fields.items():
@@ -46,7 +50,11 @@ async def add_model_class_to_graph(
                     model_name,
                     str(item_type),
                     field_name,
-                    dict(relationship_name = field_name),
+                    dict(
+                        relationship_name = field_name,
+                        source_node_id = model_name,
+                        target_node_id = str(item_type),
+                    ),
                 )
         else:
             await graph.add_node(str(field_type), dict(type = "value"))
@@ -54,5 +62,9 @@ async def add_model_class_to_graph(
                 model_name,
                 str(field_type),
                 field_name,
-                dict(relationship_name = field_name),
+                dict(
+                    relationship_name = field_name,
+                    source_node_id = model_name,
+                    target_node_id = str(field_type),
+                ),
             )

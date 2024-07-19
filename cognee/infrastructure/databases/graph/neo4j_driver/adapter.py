@@ -57,6 +57,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         if "name" not in serialized_properties:
             serialized_properties["name"] = node_id
+
         query = f"""MERGE (node:`{node_id}` {{id: $node_id}})
                 ON CREATE SET node += $properties
                 RETURN ID(node) AS internal_id, node.id AS nodeId"""
@@ -134,7 +135,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         results = await self.query(query, params)
 
-        return results
+        return [result["node"] for result in results]
 
     async def delete_node(self, node_id: str):
         node_id = id.replace(":", "_")
@@ -202,11 +203,13 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def get_edges(self, node_id: str):
         query = """
-        MATCH (n {id: node_id})-[r]-()
-        RETURN r
+        MATCH (n {id: $node_id})-[r]-(m)
+        RETURN n, r, m
         """
 
-        return await self.query(query, dict(node_id = node_id))
+        results = await self.query(query, dict(node_id = node_id))
+
+        return [(result["n"]["id"], result["m"]["id"], {"relationship_name": result["r"][1]}) for result in results]
 
     async def get_disconnected_nodes(self) -> list[str]:
         # return await self.query(
@@ -258,7 +261,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def get_predecessor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
         if edge_label is not None:
             query = """
-            MATCH (node:`{node_id}`)-[r:{edge_label}]->(predecessor)
+            MATCH (node:`{node_id}`)-[r:`{edge_label}`]->(predecessor)
             RETURN predecessor.id AS id
             """
 
@@ -289,7 +292,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def get_successor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
         if edge_label is not None:
             query = """
-            MATCH (node:`{node_id}`)<-[r:{edge_label}]-(successor)
+            MATCH (node:`{node_id}`)<-[r:`{edge_label}`]-(successor)
             RETURN successor.id AS id
             """
 
