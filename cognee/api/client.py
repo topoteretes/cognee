@@ -266,9 +266,9 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
         relational_config = get_relationaldb_config()
         relational_config.create_engine()
 
-        # from cognee.modules.data.deletion import prune_system, prune_data
-        # asyncio.run(prune_data())
-        # asyncio.run(prune_system(metadata = True))
+        from cognee.modules.data.deletion import prune_system, prune_data
+        asyncio.run(prune_data())
+        asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:
