@@ -30,9 +30,9 @@ jobs:
         # Test all python versions on ubuntu only
         include:
           - python-version: "3.9.x"
-            os: "ubuntu-latest"
+            os: "ubuntu-22.04"
           - python-version: "3.10.x"
-            os: "ubuntu-latest"
+            os: "ubuntu-22.04"
 #          - python-version: "3.12.x"
 #            os: "ubuntu-latest"
 
