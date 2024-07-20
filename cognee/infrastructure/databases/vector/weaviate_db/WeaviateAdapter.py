@@ -71,16 +71,30 @@ class WeaviateAdapter(VectorDBInterface):
             list(map(lambda data_point: data_point.get_embeddable_data(), data_points)))
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
+            vector = data_vectors[data_points.index(data_point)]
+            print(vector)
             return DataObject(
                 uuid = data_point.id,
                 properties = data_point.payload.dict(),
                 vector = data_vectors[data_points.index(data_point)]
             )
 
-        objects = list(map(convert_to_weaviate_data_points, data_points))
-        objects = [obj for obj in objects for _ in range(2)]
 
-        return self.get_collection(collection_name).data.insert_many(objects)
+        objects = list(map(convert_to_weaviate_data_points, data_points))
+        print("objects", len(objects))
+
+
+        collection =self.get_collection(collection_name)
+
+        with collection.batch.dynamic() as batch:
+            for data_row in objects:
+                batch.add_object(
+                    properties=data_row.properties,
+                    vector= data_row.vector
+                )
+
+        return
+        # return self.get_collection(collection_name).data.insert_many(objects)
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         from weaviate.classes.query import Filter
