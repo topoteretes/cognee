@@ -90,6 +90,12 @@ jobs:
           ENV: 'dev'
         run: poetry run python ./cognee/tests/test_library.py
 
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf ~/.cache
+          sudo rm -rf /tmp/*
+          df -h
+
       - name: Build with Poetry
         run: poetry build
 
