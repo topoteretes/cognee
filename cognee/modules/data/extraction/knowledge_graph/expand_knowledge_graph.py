@@ -88,6 +88,8 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                 "is_entity_type",
                 dict(
                     relationship_name = "is_entity_type",
+                    source_node_id = type_node_id,
+                    target_node_id = node_id,
                 ),
             ))
 

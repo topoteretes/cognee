@@ -112,7 +112,7 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                 nodes.append((
                     str(classification_subtype_id),
                     dict(
-                        id = classification_subtype_id,
+                        id = str(classification_subtype_id),
                         name = classification_subtype_label,
                         type = classification_subtype_label,
                     )
