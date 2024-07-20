@@ -5,21 +5,6 @@ from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 
-def extract_topics_yake(texts: list[str]):
-    from yake import KeywordExtractor
-
-    keyword_extractor = KeywordExtractor(
-        top = 3,
-        n = 2,
-        dedupLim = 0.2,
-        dedupFunc = "levenshtein", # "seqm" | "levenshtein"
-        windowsSize = 1,
-    )
-
-    for text in texts:
-        topics = keyword_extractor.extract_keywords(preprocess_text(text))
-        yield [topic[0] for topic in topics]
-
 def extract_topics_keybert(texts: list[str]):
     from keybert import KeyBERT
 
@@ -98,16 +83,3 @@ def preprocess_text(text: str):
 #     text = [word for word in text if not word in stop_words]
 #     return " ".join(text)
 
-
-if __name__ == "__main__":
-    import os
-
-    file_dir = os.path.dirname(os.path.realpath(__file__))
-
-    with open(os.path.join(file_dir, "texts.json"), "r", encoding = "utf-8") as file:
-        import json
-        texts = json.load(file)
-
-    for topics in extract_topics_yake(texts):
-        print(topics)
-        print("\n")
