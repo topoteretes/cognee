@@ -23,7 +23,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
     graph_engine = await get_graph_engine()
 
     exact_node = await graph_engine.extract_node(node_id)
-    if exact_node is not None:
+    if exact_node is not None and "id" in exact_node:
         neighbours = await graph_engine.get_neighbours(exact_node["id"])
     else:
         vector_engine = get_vector_engine()

@@ -117,7 +117,6 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def extract_node(self, node_id: str) -> dict:
         if self.graph.has_node(node_id):
-
             return self.graph.nodes[node_id]
 
         return None
