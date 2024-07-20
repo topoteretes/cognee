@@ -15,7 +15,6 @@ export interface Data {
   name: string;
   filePath: string;
   mimeType: string;
-  keywords: string[];
 }
 
 interface DatasetLike {
@@ -112,9 +111,6 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
                 </td>
                 <td>
                   <Text>{dataItem.mimeType}</Text>
-                </td>
-                <td>
-                  <Text>{dataItem.keywords.join(", ")}</Text>
                 </td>
               </tr>
             ))}

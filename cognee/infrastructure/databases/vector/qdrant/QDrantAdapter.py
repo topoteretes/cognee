@@ -59,7 +59,7 @@ class QDrantAdapter(VectorDBInterface):
     async def embed_data(self, data: List[str]) -> List[float]:
         return await self.embedding_engine.embed_text(data)
 
-    async def collection_exists(self, collection_name: str) -> bool:
+    async def has_collection(self, collection_name: str) -> bool:
         client = self.get_qdrant_client()
         result = await client.collection_exists(collection_name)
         await client.close()
@@ -111,11 +111,11 @@ class QDrantAdapter(VectorDBInterface):
 
         return result
 
-    async def retrieve(self, collection_name: str, data_point_id: str):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         client = self.get_qdrant_client()
-        results = await client.retrieve(collection_name, [data_point_id], with_payload = True)
+        results = await client.retrieve(collection_name, data_point_ids, with_payload = True)
         await client.close()
-        return results[0] if len(results) > 0 else None
+        return results
 
     async def search(
         self,
@@ -184,6 +184,11 @@ class QDrantAdapter(VectorDBInterface):
         await client.close()
 
         return [filter(lambda result: result.score > 0.9, result_group) for result_group in results]
+
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        client = self.get_qdrant_client()
+        results = await client.delete(collection_name, data_point_ids)
+        return results
 
     async def prune(self):
         client = self.get_qdrant_client()

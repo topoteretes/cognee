@@ -8,7 +8,7 @@ def classify(data: Union[str, BinaryIO], filename: str = None):
         return TextData(data)
 
     if isinstance(data, BufferedReader):
-        return BinaryData(data)
+        return BinaryData(data, data.name.split("/")[-1] if data.name else filename)
 
     if hasattr(data, "file"):
         return BinaryData(data.file, filename)

@@ -16,17 +16,15 @@ def create_chunking_engine(config: ChunkingConfig):
             chunk_size=config["chunk_size"],
             chunk_overlap=config["chunk_overlap"],
             chunk_strategy=config["chunk_strategy"],
-
-
         )
     elif config["chunk_engine"] == ChunkEngine.DEFAULT_ENGINE:
-            from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
+        from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
 
-            return DefaultChunkEngine(
-                chunk_size=config["chunk_size"],
-                chunk_overlap=config["chunk_overlap"],
-                chunk_strategy=config["chunk_strategy"],
-            )
+        return DefaultChunkEngine(
+            chunk_size=config["chunk_size"],
+            chunk_overlap=config["chunk_overlap"],
+            chunk_strategy=config["chunk_strategy"],
+        )
     elif config["chunk_engine"] == ChunkEngine.HAYSTACK_ENGINE:
         from cognee.infrastructure.data.chunking.HaystackChunkEngine import HaystackChunkEngine
 

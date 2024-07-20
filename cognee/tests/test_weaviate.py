@@ -1,27 +1,56 @@
-import asyncio
+import os
+import logging
+import pathlib
+import cognee
 
-async def test_weaviate_integration():
-    from cognee import config, prune, add, cognify, search
+logging.basicConfig(level=logging.DEBUG)
 
-    config.set_vector_engine_provider("weaviate")
-    # config.set_vector_db_url("TEST_URL")
-    # config.set_vector_db_key("TEST_KEY")
+async def main():
+    cognee.config.set_vector_engine_provider("weaviate")
+    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_weaviate")).resolve())
+    cognee.config.data_root_directory(data_directory_path)
+    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_weaviate")).resolve())
+    cognee.config.system_root_directory(cognee_directory_path)
 
-    prune.prune_system()
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata = True)
 
-    text = """
-      Incapillo is a Pleistocene-age caldera (a depression formed by the collapse of a volcano) in the La Rioja Province of Argentina. It is the southernmost volcanic centre in the Andean Central Volcanic Zone (CVZ) that erupted during the Pleistocene. Incapillo is one of several ignimbrite[a] or caldera systems that, along with 44 active stratovolcanoes, are part of the CVZ.
-      Subduction of the Nazca Plate beneath the South American Plate is responsible for most of the volcanism in the CVZ. After activity in the volcanic arc of the western Maricunga Belt ceased six million years ago, volcanism commenced in the Incapillo region, forming the high volcanic edifices Monte Pissis, Cerro Bonete Chico and Sierra de Veladero. Later, a number of lava domes were emplaced between these volcanoes.
-      Incapillo is the source of the Incapillo ignimbrite, a medium-sized deposit comparable to the Katmai ignimbrite. The Incapillo ignimbrite was erupted 0.52 ± 0.03 and 0.51 ± 0.04 million years ago and has a volume of about 20.4 cubic kilometres (4.9 cu mi). A caldera with dimensions of 5 by 6 kilometres (3.1 mi × 3.7 mi) formed during the eruption. Later volcanism generated more lava domes within the caldera and a debris flow in the Sierra de Veladero. The lake within the caldera may overlie an area of ongoing hydrothermal activity.
+    dataset_name = "cs_explanations"
+
+    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+    await cognee.add([explanation_file_path], dataset_name)
+
+    text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
+    At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
+    Classical physics cannot explain the operation of these quantum devices, and a scalable quantum computer could perform some calculations exponentially faster (with respect to input size scaling) than any modern "classical" computer. In particular, a large-scale quantum computer could break widely used encryption schemes and aid physicists in performing physical simulations; however, the current state of the technology is largely experimental and impractical, with several obstacles to useful applications. Moreover, scalable quantum computers do not hold promise for many practical tasks, and for many important tasks quantum speedups are proven impossible.
+    The basic unit of information in quantum computing is the qubit, similar to the bit in traditional digital electronics. Unlike a classical bit, a qubit can exist in a superposition of its two "basis" states. When measuring a qubit, the result is a probabilistic output of a classical bit, therefore making quantum computers nondeterministic in general. If a quantum computer manipulates the qubit in a particular way, wave interference effects can amplify the desired measurement results. The design of quantum algorithms involves creating procedures that allow a quantum computer to perform calculations efficiently and quickly.
+    Physically engineering high-quality qubits has proven challenging. If a physical qubit is not sufficiently isolated from its environment, it suffers from quantum decoherence, introducing noise into calculations. Paradoxically, perfectly isolating qubits is also undesirable because quantum computations typically need to initialize qubits, perform controlled qubit interactions, and measure the resulting quantum states. Each of those operations introduces errors and suffers from noise, and such inaccuracies accumulate.
+    In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
     """
 
-    await add(text)
+    await cognee.add([text], dataset_name)
 
-    await cognify()
+    await cognee.cognify([dataset_name])
 
-    result = await search("SIMILARITY", { "query": "volcanic eruption" })
+    search_results = await cognee.search("TRAVERSE", { "query": "Artificial intelligence" })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("\n\nExtracted sentences are:\n")
+    for result in search_results:
+        print(f"{result}\n")
 
-    print(result)
+    search_results = await cognee.search("SUMMARY", { "query": "Work and computers" })
+    assert len(search_results) != 0, "Query related summaries don't exist."
+    print("\n\nQuery related summaries exist:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    search_results = await cognee.search("ADJACENT", { "query": "ROOT" })
+    assert len(search_results) != 0, "ROOT node has no neighbours."
+    print("\n\nROOT node has neighbours.\n")
+    for result in search_results:
+        print(f"{result}\n")
+
 
 if __name__ == "__main__":
-    asyncio.run(test_weaviate_integration())
+    import asyncio
+    asyncio.run(main())

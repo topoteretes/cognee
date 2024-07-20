@@ -7,7 +7,8 @@ class Storage(Protocol):
     def retrieve(self, file_path: str):
         pass
 
-    def remove(self, file_path: str):
+    @staticmethod
+    def remove(file_path: str):
         pass
 
 class StorageManager():

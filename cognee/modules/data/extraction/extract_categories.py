@@ -11,16 +11,4 @@ async def extract_categories(content: str, response_model: Type[BaseModel]):
 
     llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model)
 
-    return process_categories(llm_output.model_dump())
-
-def process_categories(llm_output) -> List[dict]:
-    # Extract the first subclass from the list (assuming there could be more)
-    data_category = llm_output["label"]["subclass"][0] if len(llm_output["label"]["subclass"]) > 0 else None
-
-    data_type = llm_output["label"]["type"].lower()
-
-    return [{
-        "data_type": data_type,
-        # The data_category is the value of the Enum member (e.g., "News stories and blog posts")
-        "category_name": data_category.value if data_category else "Other types of text data",
-    }]
+    return llm_output

@@ -17,7 +17,7 @@ class BinaryData(IngestionData):
     def get_identifier(self):
         metadata = self.get_metadata()
 
-        return metadata["mime_type"] + "_" + "|".join(metadata["keywords"])
+        return self.name + "_" + metadata["mime_type"]
 
     def get_metadata(self):
         self.ensure_metadata()

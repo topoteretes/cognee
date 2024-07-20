@@ -19,7 +19,6 @@ class AnthropicAdapter(LLMInterface):
         )
         self.model = model
 
-    @retry(stop = stop_after_attempt(5))
     async def acreate_structured_output(
         self,
         text_input: str,
@@ -31,7 +30,7 @@ class AnthropicAdapter(LLMInterface):
         return await self.aclient(
             model = self.model,
             max_tokens = 4096,
-            max_retries = 0,
+            max_retries = 5,
             messages = [{
                 "role": "user",
                 "content": f"""Use the given format to extract information

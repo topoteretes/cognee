@@ -2,10 +2,9 @@ import duckdb
 import os
 class DuckDBAdapter():
     def __init__(self, db_path: str, db_name: str):
+        self.db_location = os.path.abspath(os.path.join(db_path, db_name))
 
-        db_location = os.path.abspath(os.path.join(db_path, db_name))
-
-        self.get_connection = lambda: duckdb.connect(db_location)
+        self.get_connection = lambda: duckdb.connect(self.db_location)
 
     def get_datasets(self):
         with self.get_connection() as connection:
@@ -20,7 +19,7 @@ class DuckDBAdapter():
 
     def get_files_metadata(self, dataset_name: str):
         with self.get_connection() as connection:
-            return connection.sql(f"SELECT id, name, file_path, extension, mime_type, keywords FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
+            return connection.sql(f"SELECT id, name, file_path, extension, mime_type FROM {dataset_name}.file_metadata;").to_df().to_dict("records")
 
     def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
         fields_query_parts = []
@@ -163,3 +162,11 @@ class DuckDBAdapter():
             connection.sql(select_data_sql)
             drop_data_sql = "DROP TABLE cognify;"
             connection.sql(drop_data_sql)
+
+    def delete_database(self):
+        from cognee.infrastructure.files.storage import LocalStorage
+
+        LocalStorage.remove(self.db_location)
+
+        if LocalStorage.file_exists(self.db_location + ".wal"):
+            LocalStorage.remove(self.db_location + ".wal")

@@ -40,7 +40,7 @@ class FalcorDBAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         pass
 
-    async def retrieve(self, collection_name: str, data_point_id: str):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         pass
 
     async def search(
@@ -51,4 +51,7 @@ class FalcorDBAdapter(VectorDBInterface):
         limit: int = 10,
         with_vector: bool = False,
     ):
+        pass
+
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         pass

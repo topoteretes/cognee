@@ -97,7 +97,6 @@ async def add_files(file_paths: List[str], dataset_name: str):
                     "file_path": file_metadata["file_path"],
                     "extension": file_metadata["extension"],
                     "mime_type": file_metadata["mime_type"],
-                    "keywords": "|".join(file_metadata["keywords"]),
                 }
 
     run_info = pipeline.run(

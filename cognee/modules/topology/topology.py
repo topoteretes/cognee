@@ -4,22 +4,23 @@ import csv
 import json
 import logging
 import os
+from typing import Any, Dict, List, Optional, Union, Type
 
+import asyncio
 import aiofiles
 import pandas as pd
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional, Union, Type
+from pydantic import BaseModel
 
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relationaldb_config
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.base_config import get_base_config
-from cognee.modules.topology.topology_data_models import NodeModel, RelationshipModel, Document, DirectoryModel, DirMetadata, GitHubRepositoryModel
-import asyncio
+from cognee.modules.topology.topology_data_models import NodeModel
+
 cognify_config = get_cognify_config()
 base_config = get_base_config()
 
@@ -59,12 +60,12 @@ class TopologyEngine:
     async def load_data(self, file_path: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """Load data from a JSON or CSV file."""
         try:
-            if file_path.endswith('.json'):
-                async with aiofiles.open(file_path, mode='r') as f:
+            if file_path.endswith(".json"):
+                async with aiofiles.open(file_path, mode="r") as f:
                     data = await f.read()
                     return json.loads(data)
-            elif file_path.endswith('.csv'):
-                async with aiofiles.open(file_path, mode='r') as f:
+            elif file_path.endswith(".csv"):
+                async with aiofiles.open(file_path, mode="r") as f:
                     content = await f.read()
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
@@ -73,7 +74,7 @@ class TopologyEngine:
         except Exception as e:
             raise RuntimeError(f"Failed to load data from {file_path}: {e}")
 
-    async def add_graph_topology(self, file_path: str=None, dataset_files: list[tuple[Any, Any]]=None,):
+    async def add_graph_topology(self, file_path: str = None, files: list = None):
         """Add graph topology from a JSON or CSV file."""
         if self.infer:
             from cognee.modules.topology.infer_data_topology import infer_data_topology
@@ -84,48 +85,43 @@ class TopologyEngine:
             chunk_engine = get_chunk_engine()
             chunk_strategy = chunk_config.chunk_strategy
 
+            for base_file in files:
+                with open(base_file["file_path"], "rb") as file:
+                    try:
+                        file_type = guess_file_type(file)
+                        text = extract_text_from_file(file, file_type)
 
+                        subchunks, chunks_with_ids = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size,
+                                                                chunk_config.chunk_overlap)
 
-            for dataset_name, files in dataset_files:
-                for base_file in files:
-                    with open(base_file["file_path"], "rb") as file:
-                        try:
-                            file_type = guess_file_type(file)
-                            text = extract_text_from_file(file, file_type)
+                        if chunks_with_ids[0][0] == 1:
+                            initial_chunks_and_ids.append({base_file["id"]: chunks_with_ids})
 
-                            subchunks, chunks_with_ids = chunk_engine.chunk_data(chunk_strategy, text, chunk_config.chunk_size,
-                                                                   chunk_config.chunk_overlap)
-
-                            if chunks_with_ids[0][0] == 1:
-                                initial_chunks_and_ids.append({base_file['id']: chunks_with_ids})
-
-                        except FileTypeException:
-                            logger.warning("File (%s) has an unknown file type. We are skipping it.", file["id"])
+                    except FileTypeException:
+                        logger.warning("File (%s) has an unknown file type. We are skipping it.", file["id"])
 
 
             topology = await infer_data_topology(str(initial_chunks_and_ids))
-            graph_client = await get_graph_client()
+            graph_client = await get_graph_engine()
 
-            for node in topology["nodes"]:
-                await graph_client.add_node(node["id"], node)
-            for edge in topology["edges"]:
-                await graph_client.add_edge(edge["source_node_id"], edge["target_node_id"], relationship_name=edge["relationship_name"])
-
-
-
+            await graph_client.add_nodes([(node["id"], node) for node in topology["nodes"]])
+            await graph_client.add_edges((
+                edge["source_node_id"],
+                edge["target_node_id"],
+                edge["relationship_name"],
+                dict(relationship_name = edge["relationship_name"]),
+            ) for edge in topology["edges"])
 
         else:
-            dataset_level_information = dataset_files[0][1]
+            dataset_level_information = files[0][1]
 
             # Extract the list of valid IDs from the explanations
-            valid_ids = {item['id'] for item in dataset_level_information}
+            valid_ids = {item["id"] for item in dataset_level_information}
             try:
                 data = await self.load_data(file_path)
                 flt_topology = await self.recursive_flatten(data)
                 df = pd.DataFrame(flt_topology)
-                graph_client = await get_graph_client()
-
-                print("df", df)
+                graph_client = await get_graph_engine()
 
                 for _, row in df.iterrows():
                     node_data = row.to_dict()
@@ -137,12 +133,9 @@ class TopologyEngine:
                     if pd.notna(row.get("relationship_source")) and pd.notna(row.get("relationship_target")):
                         await graph_client.add_edge(row["relationship_source"], row["relationship_target"], relationship_name=row["relationship_type"])
 
-                for dataset in dataset_files:
-                    print("dataset", dataset)
-
                 return
             except Exception as e:
-                raise RuntimeError(f"Failed to add graph topology from {file_path}: {e}")
+                raise RuntimeError(f"Failed to add graph topology from {file_path}: {e}") from e
 
 
 
@@ -164,7 +157,7 @@ async def main():
     from cognee.api.v1.add import add
     dataset_name = "explanations"
     print(os.getcwd())
-    data_dir = os.path.abspath("../../../.data")
+    data_dir = os.path.abspath("../../.data")
     print(os.getcwd())
 
     await add(f"data://{data_dir}", dataset_name="explanations")
@@ -184,11 +177,11 @@ async def main():
 
     print(dataset_files)
     topology_engine = TopologyEngine(infer=True)
-    file_path = 'example_data.json'  # or 'example_data.csv'
+    file_path = "example_data.json"  # or 'example_data.csv'
     #
     # # Adding graph topology
     graph = await topology_engine.add_graph_topology(file_path, dataset_files=dataset_files)
-    # print(graph)
+    print(graph)
 
 # Run the main function
 if __name__ == "__main__":

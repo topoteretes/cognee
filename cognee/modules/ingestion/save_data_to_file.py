@@ -17,8 +17,8 @@ def save_data_to_file(data: Union[str, BinaryIO], dataset_name: str, filename: s
     file_metadata = classified_data.get_metadata()
     if "name" not in file_metadata or file_metadata["name"] is None:
         letters = string.ascii_lowercase
-        random_string = ''.join(random.choice(letters) for _ in range(32))
-        file_metadata["name"] = "file" + random_string
+        random_string = "".join(random.choice(letters) for _ in range(32))
+        file_metadata["name"] = "text_" + random_string + ".txt"
     file_name = file_metadata["name"]
     LocalStorage(storage_path).store(file_name, classified_data.get_data())
 

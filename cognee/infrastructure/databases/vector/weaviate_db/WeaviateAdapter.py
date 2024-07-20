@@ -1,5 +1,4 @@
 import asyncio
-from uuid import UUID
 from typing import List, Optional
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
@@ -31,7 +30,7 @@ class WeaviateAdapter(VectorDBInterface):
     async def embed_data(self, data: List[str]) -> List[float]:
         return await self.embedding_engine.embed_text(data)
 
-    async def collection_exists(self, collection_name: str) -> bool:
+    async def has_collection(self, collection_name: str) -> bool:
         future = asyncio.Future()
 
         future.set_result(self.client.collections.exists(collection_name))
@@ -72,25 +71,41 @@ class WeaviateAdapter(VectorDBInterface):
             list(map(lambda data_point: data_point.get_embeddable_data(), data_points)))
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
+            vector = data_vectors[data_points.index(data_point)]
             return DataObject(
                 uuid = data_point.id,
                 properties = data_point.payload.dict(),
-                vector = data_vectors[data_points.index(data_point)]
+                vector = vector
             )
+
 
         objects = list(map(convert_to_weaviate_data_points, data_points))
 
-        return self.get_collection(collection_name).data.insert_many(objects)
+        collection = self.get_collection(collection_name)
 
-    async def retrieve(self, collection_name: str, data_point_id: str):
+        with collection.batch.dynamic() as batch:
+            for data_row in objects:
+                batch.add_object(
+                    properties = data_row.properties,
+                    vector = data_row.vector
+                )
+
+        return
+        # return self.get_collection(collection_name).data.insert_many(objects)
+
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+        from weaviate.classes.query import Filter
         future = asyncio.Future()
 
-        data_point = self.get_collection(collection_name).query.fetch_object_by_id(UUID(data_point_id))
+        data_points = self.get_collection(collection_name).query.fetch_objects(
+            filters = Filter.by_id().contains_any(data_point_ids)
+        )
 
-        data_point.payload = data_point.properties
-        del data_point.properties
+        for data_point in data_points:
+            data_point.payload = data_point.properties
+            del data_point.properties
 
-        future.set_result(data_point)
+        future.set_result(data_points)
 
         return await future
 
@@ -131,6 +146,17 @@ class WeaviateAdapter(VectorDBInterface):
             return self.search(collection_name, query_vector=query_vector, limit=limit, with_vector=with_vectors)
 
         return [await query_search(query_vector) for query_vector in await self.embed_data(query_texts)]
+        
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        from weaviate.classes.query import Filter
+        future = asyncio.Future()
+
+        result = self.get_collection(collection_name).data.delete_many(
+            filters = Filter.by_id().contains_any(data_point_ids)
+        )
+        future.set_result(result)
+
+        return await future
 
     async def prune(self):
         self.client.collections.delete_all()

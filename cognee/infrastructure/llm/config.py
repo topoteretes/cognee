@@ -9,6 +9,7 @@ class LLMConfig(BaseSettings):
     llm_api_key: Optional[str] = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
+    transcription_model: str = "whisper-1"
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
@@ -18,6 +19,9 @@ class LLMConfig(BaseSettings):
             "model": self.llm_model,
             "endpoint": self.llm_endpoint,
             "apiKey": self.llm_api_key,
+            "temperature": self.llm_temperature,
+            "streaming": self.llm_stream,
+            "transcriptionModel": self.transcription_model
         }
 
 @lru_cache

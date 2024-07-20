@@ -1,5 +1,10 @@
 import asyncio
+import base64
+import os
+from pathlib import Path
 from typing import List, Type
+
+import aiofiles
 import openai
 import instructor
 from pydantic import BaseModel
@@ -9,6 +14,8 @@ from cognee.base_config import get_base_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import MonitoringTool
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 class OpenAIAdapter(LLMInterface):
     name = "OpenAI"
@@ -16,20 +23,22 @@ class OpenAIAdapter(LLMInterface):
     api_key: str
   
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
-    def __init__(self, api_key: str, model: str, streaming: bool = False):
+    def __init__(self, api_key: str, model: str, transcription_model:str, streaming: bool = False):
         base_config = get_base_config()
 
-        if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
-            from langfuse.openai import AsyncOpenAI, OpenAI
-        elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
-            from langsmith import wrappers
-            from openai import AsyncOpenAI
-            AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
-        else:
-            from openai import AsyncOpenAI, OpenAI
+        # if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
+        #     from langfuse.openai import AsyncOpenAI, OpenAI
+        # elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
+        #     from langsmith import wrappers
+        #     from openai import AsyncOpenAI
+        #     AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
+        # else:
+        from openai import AsyncOpenAI, OpenAI
 
         self.aclient = instructor.from_openai(AsyncOpenAI(api_key = api_key))
         self.client = instructor.from_openai(OpenAI(api_key = api_key))
+        self.base_openai_client = OpenAI(api_key = api_key)
+        self.transcription_model = "whisper-1"
         self.model = model
         self.api_key = api_key
         self.streaming = streaming
@@ -120,6 +129,49 @@ class OpenAIAdapter(LLMInterface):
             response_model = response_model,
         )
 
+    @retry(stop = stop_after_attempt(5))
+    def create_transcript(self, input):
+        """Generate a audio transcript from a user query."""
+
+        if not os.path.isfile(input):
+            raise FileNotFoundError(f"The file {input} does not exist.")
+
+        with open(input, 'rb') as audio_file:
+            audio_data = audio_file.read()
+
+
+
+        transcription = self.base_openai_client.audio.transcriptions.create(
+                  model=self.transcription_model ,
+                  file=Path(input),
+                )
+
+        return transcription
+
+
+    @retry(stop = stop_after_attempt(5))
+    def transcribe_image(self, input) -> BaseModel:
+        with open(input, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+        return self.base_openai_client.chat.completions.create(
+            model=self.model,
+            messages=[
+                        {
+                          "role": "user",
+                          "content": [
+                            {"type": "text", "text": "What’s in this image?"},
+                            {
+                              "type": "image_url",
+                              "image_url": {
+                                "url": f"data:image/jpeg;base64,{encoded_image}",
+                              },
+                            },
+                          ],
+                        }
+                      ],
+            max_tokens=300,
+        )
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
         """Format and display the prompt for a user query."""
         if not text_input:

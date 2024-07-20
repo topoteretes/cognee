@@ -6,21 +6,19 @@ import nltk
 from asyncio import Lock
 from nltk.corpus import stopwords
 
-from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 from cognee.modules.cognify.graph.add_node_connections import group_nodes_by_layer, \
     graph_ready_output, connect_nodes_in_graph
-from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks, add_data_chunks_basic_rag
+from cognee.modules.cognify.graph.add_data_chunks import add_data_chunks
 from cognee.modules.cognify.graph.add_document_node import add_document_node
 from cognee.modules.cognify.graph.add_classification_nodes import add_classification_nodes
 from cognee.modules.cognify.graph.add_cognitive_layer_graphs import add_cognitive_layer_graphs
 from cognee.modules.cognify.graph.add_summary_nodes import add_summary_nodes
 from cognee.modules.cognify.llm.resolve_cross_graph_references import resolve_cross_graph_references
-from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.cognify.graph.add_cognitive_layers import add_cognitive_layers
-# from cognee.modules.cognify.graph.initialize_graph import initialize_graph
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.modules.data.get_content_categories import get_content_categories
@@ -49,9 +47,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
     stopwords.ensure_loaded()
     create_task_status_table()
 
-    # graph_config = get_graph_config()
-    # graph_db_type = graph_config.graph_engine
-    graph_client = await get_graph_client()
+    graph_client = await get_graph_engine()
 
     relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine
@@ -89,8 +85,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     added_datasets = db_engine.get_datasets()
 
-    dataset_files = []
     # datasets is a dataset name string
+    dataset_files = []
     dataset_name = datasets.replace(".", "_").replace(" ", "_")
 
     for added_dataset in added_datasets:
@@ -145,10 +141,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
     batch_size = 20
     file_count = 0
     files_batch = []
-    from cognee.infrastructure.databases.graph.config import get_graph_config
-    graph_config = get_graph_config()
-    graph_topology = graph_config.graph_model
 
+    graph_config = get_graph_config()
 
     if graph_config.infer_graph_topology and graph_config.graph_topology_task:
         from cognee.modules.topology.topology import TopologyEngine
@@ -173,8 +167,8 @@ async def cognify(datasets: Union[str, List[str]] = None):
             else:
                 document_id = await add_document_node(
                     graph_client,
-                    parent_node_id=file_metadata['id'],
-                    document_metadata=file_metadata,
+                    parent_node_id = file_metadata['id'],
+                    document_metadata = file_metadata,
                 )
 
             files_batch.append((dataset_name, file_metadata, document_id))
@@ -196,7 +190,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
     print(f"Processing chunk ({chunk_id}) from document ({file_metadata['id']}).")
 
     graph_config = get_graph_config()
-    graph_client = await get_graph_client()
+    graph_client = await get_graph_engine()
     graph_topology = graph_config.graph_model
 
     if graph_topology == SourceCodeGraph:
@@ -205,8 +199,6 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
         classified_categories = await get_content_categories(input_text)
     else:
         classified_categories = [{"data_type": "text", "category_name": "Unclassified text"}]
-
-    # await add_label_nodes(graph_client, document_id, chunk_id, file_metadata["keywords"].split("|"))
 
     await add_classification_nodes(
         graph_client,
@@ -271,10 +263,10 @@ if __name__ == "__main__":
         # await prune.prune_system()
         # #
         # from cognee.api.v1.add import add
-        # data_directory_path = os.path.abspath("../../../.data")
+        # data_directory_path = os.path.abspath("../../.data")
         # # print(data_directory_path)
         # # config.data_root_directory(data_directory_path)
-        # # cognee_directory_path = os.path.abspath("../.cognee_system")
+        # # cognee_directory_path = os.path.abspath(".cognee_system")
         # # config.system_root_directory(cognee_directory_path)
         #
         # await add("data://" +data_directory_path, "example")

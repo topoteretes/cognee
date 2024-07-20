@@ -5,7 +5,7 @@ from cognee.root_dir import get_absolute_path
 from cognee.shared.data_models import MonitoringTool
 
 class BaseConfig(BaseSettings):
-    data_root_directory: str = get_absolute_path(".data")
+    data_root_directory: str = get_absolute_path(".data_storage")
     monitoring_tool: object = MonitoringTool.LANGFUSE
     graphistry_username: Optional[str] = None
     graphistry_password: Optional[str] = None

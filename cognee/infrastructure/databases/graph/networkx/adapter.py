@@ -44,7 +44,7 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def get_graph(self):
         return self.graph
-    
+
     async def add_edge(
         self,
         from_node: str,
@@ -62,11 +62,30 @@ class NetworkXAdapter(GraphDBInterface):
         self.graph.add_edges_from(edges)
         await self.save_graph_to_file(self.filename)
 
+    async def get_edges(self, node_id: str):
+        return list(self.graph.in_edges(node_id, data = True)) + list(self.graph.out_edges(node_id, data = True))
+
     async def delete_node(self, node_id: str) -> None:
         """Asynchronously delete a node from the graph if it exists."""
         if self.graph.has_node(id):
             self.graph.remove_node(id)
             await self.save_graph_to_file(self.filename)
+
+    async def delete_nodes(self, node_ids: List[str]) -> None:
+        self.graph.remove_nodes_from(node_ids)
+        await self.save_graph_to_file(self.filename)
+
+    async def get_disconnected_nodes(self) -> List[str]:
+        connected_components = list(nx.weakly_connected_components(self.graph))
+
+        disconnected_nodes = []
+        biggest_subgraph = max(connected_components, key = len)
+
+        for component in connected_components:
+            if component != biggest_subgraph:
+                disconnected_nodes.extend(list(component))
+
+        return disconnected_nodes
 
     async def extract_node_description(self, node_id: str) -> Dict[str, Any]:
         descriptions = []
@@ -98,11 +117,69 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def extract_node(self, node_id: str) -> dict:
         if self.graph.has_node(node_id):
-
             return self.graph.nodes[node_id]
 
         return None
 
+    async def extract_nodes(self, node_ids: List[str]) -> List[dict]:
+        return [self.graph.nodes[node_id] for node_id in node_ids if self.graph.has_node(node_id)]
+
+    async def get_predecessor_ids(self, node_id: str, edge_label: str = None) -> list:
+        if self.graph.has_node(node_id):
+            if edge_label is None:
+                return list(self.graph.predecessors(node_id))
+
+            nodes = []
+
+            for predecessor_id in list(self.graph.predecessors(node_id)):
+                if self.graph.has_edge(predecessor_id, node_id, edge_label):
+                    nodes.append(predecessor_id)
+
+            return nodes
+
+    async def get_successor_ids(self, node_id: str, edge_label: str = None) -> list:
+        if self.graph.has_node(node_id):
+            if edge_label is None:
+                return list(self.graph.successors(node_id))
+
+            nodes = []
+
+            for successor_id in list(self.graph.successors(node_id)):
+                if self.graph.has_edge(node_id, successor_id, edge_label):
+                    nodes.append(successor_id)
+
+            return nodes
+
+    async def get_neighbours(self, node_id: str) -> list:
+        if not self.graph.has_node(node_id):
+            return []
+
+        neighbour_ids = list(self.graph.neighbors(node_id))
+
+        if len(neighbour_ids) == 0:
+            return []
+
+        nodes = await self.extract_nodes(neighbour_ids)
+
+        return nodes
+
+    async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
+        for node_id in node_ids:
+            if self.graph.has_node(node_id):
+                for predecessor_id in list(self.graph.predecessors(node_id)):
+                    if self.graph.has_edge(predecessor_id, node_id, edge_label):
+                        self.graph.remove_edge(predecessor_id, node_id, edge_label)
+
+        await self.save_graph_to_file(self.filename)
+
+    async def remove_connection_to_successors_of(self, node_ids: list[str], edge_label: str) -> None:
+        for node_id in node_ids:
+            if self.graph.has_node(node_id):
+                for successor_id in list(self.graph.successors(node_id)):
+                    if self.graph.has_edge(node_id, successor_id, edge_label):
+                        self.graph.remove_edge(node_id, successor_id, edge_label)
+
+        await self.save_graph_to_file(self.filename)
 
     async def save_graph_to_file(self, file_path: str=None) -> None:
         """Asynchronously save the graph to a file in JSON format."""
@@ -113,6 +190,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         async with aiofiles.open(file_path, "w") as file:
             await file.write(json.dumps(graph_data))
+
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""

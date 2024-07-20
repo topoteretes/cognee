@@ -2,9 +2,10 @@
 import os
 import aiohttp
 import uvicorn
-import asyncio
 import json
+import asyncio
 import logging
+import sentry_sdk
 from typing import Dict, Any, List, Union, Optional, Literal
 from typing_extensions import Annotated
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
@@ -19,7 +20,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(debug = True)
+if os.getenv("ENV") == "prod":
+    sentry_sdk.init(
+        dsn = os.getenv("SENTRY_REPORTING_URL"),
+        traces_sample_rate = 1.0,
+        profiles_sample_rate = 1.0,
+    )
+
+app = FastAPI(debug = os.getenv("ENV") != "prod")
 
 origins = [
     "http://frontend:3000",
@@ -69,10 +77,10 @@ async def delete_dataset(dataset_id: str):
 @app.get("/datasets/{dataset_id}/graph", response_model=list)
 async def get_dataset_graph(dataset_id: str):
     from cognee.shared.utils import render_graph
-    from cognee.infrastructure.databases.graph.get_graph_client import get_graph_client
+    from cognee.infrastructure.databases.graph import get_graph_engine
 
     try:
-        graph_client = await get_graph_client()
+        graph_client = await get_graph_engine()
         graph_url = await render_graph(graph_client.graph)
 
         return JSONResponse(
@@ -95,7 +103,6 @@ async def get_dataset_data(dataset_id: str):
         dict(
             id=data["id"],
             name=f"{data['name']}.{data['extension']}",
-            keywords=data["keywords"].split("|"),
             filePath=data["file_path"],
             mimeType=data["mime_type"],
         )
@@ -129,8 +136,8 @@ class AddPayload(BaseModel):
 
 @app.post("/add", response_model=dict)
 async def add(
+    data: List[UploadFile],
     datasetId: str = Form(...),
-    data: List[UploadFile] = File(...),
 ):
     """ This endpoint is responsible for adding data to the graph."""
     from cognee.api.v1.add import add as cognee_add
@@ -177,17 +184,17 @@ class CognifyPayload(BaseModel):
 @app.post("/cognify", response_model=dict)
 async def cognify(payload: CognifyPayload):
     """ This endpoint is responsible for the cognitive processing of the content."""
-    from cognee.api.v1.cognify.cognify import cognify as cognee_cognify
+    from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
     try:
         await cognee_cognify(payload.datasets)
         return JSONResponse(
-            status_code=200,
-            content="OK"
+            status_code = 200,
+            content = "OK"
         )
     except Exception as error:
         return JSONResponse(
-            status_code=409,
-            content={"error": str(error)}
+            status_code = 409,
+            content = {"error": str(error)}
         )
 
 class SearchPayload(BaseModel):
@@ -255,30 +262,13 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        from cognee.base_config import get_base_config
         from cognee.infrastructure.databases.relational import get_relationaldb_config
-        from cognee.infrastructure.databases.vector import get_vectordb_config
-        from cognee.infrastructure.databases.graph import get_graph_config
-
-        cognee_directory_path = os.path.abspath(".cognee_system")
-        databases_directory_path = os.path.join(cognee_directory_path, "databases")
-
         relational_config = get_relationaldb_config()
-        relational_config.db_path = databases_directory_path
         relational_config.create_engine()
 
-        vector_config = get_vectordb_config()
-        vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
-
-        graph_config = get_graph_config()
-        graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
-
-        base_config = get_base_config()
-        data_directory_path = os.path.abspath(".data_storage")
-        base_config.data_root_directory = data_directory_path
-
-        from cognee.modules.data.deletion import prune_system
-        asyncio.run(prune_system())
+        from cognee.modules.data.deletion import prune_system, prune_data
+        asyncio.run(prune_data())
+        asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:

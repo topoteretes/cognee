@@ -33,7 +33,7 @@ class LanceDBAdapter(VectorDBInterface):
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         return await self.embedding_engine.embed_text(data)
 
-    async def collection_exists(self, collection_name: str) -> bool:
+    async def has_collection(self, collection_name: str) -> bool:
         connection = await self.get_connection()
         collection_names = await connection.table_names()
         return collection_name in collection_names
@@ -47,7 +47,7 @@ class LanceDBAdapter(VectorDBInterface):
             vector: Vector(vector_size)
             payload: payload_schema
 
-        if not await self.collection_exists(collection_name):
+        if not await self.has_collection(collection_name):
             connection = await self.get_connection()
             return await connection.create_table(
                 name = collection_name,
@@ -58,7 +58,7 @@ class LanceDBAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         connection = await self.get_connection()
 
-        if not await self.collection_exists(collection_name):
+        if not await self.has_collection(collection_name):
             await self.create_collection(
                 collection_name,
                 payload_schema = type(data_points[0].payload),
@@ -89,17 +89,20 @@ class LanceDBAdapter(VectorDBInterface):
 
         await collection.add(lance_data_points)
 
-    async def retrieve(self, collection_name: str, data_point_id: str):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         connection = await self.get_connection()
         collection = await connection.open_table(collection_name)
-        results = await collection.query().where(f"id = '{data_point_id}'").to_pandas()
-        result = results.to_dict("index")[0]
 
-        return ScoredResult(
+        if len(data_point_ids) == 1:
+            results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
+        else:
+            results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
+
+        return [ScoredResult(
             id = result["id"],
             payload = result["payload"],
             score = 1,
-        )
+        ) for result in results.to_dict("index").values()]
 
     async def search(
         self,
@@ -122,8 +125,8 @@ class LanceDBAdapter(VectorDBInterface):
 
         return [ScoredResult(
             id = str(result["id"]),
-            score = float(result["_distance"]),
             payload = result["payload"],
+            score = float(result["_distance"]),
         ) for result in results.to_dict("index").values()]
 
     async def batch_search(
@@ -143,6 +146,12 @@ class LanceDBAdapter(VectorDBInterface):
                 with_vector = with_vectors,
             ) for query_vector in query_vectors]
         )
+
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        connection = await self.get_connection()
+        collection = await connection.open_table(collection_name)
+        results = await collection.delete(f"id IN {tuple(data_point_ids)}")
+        return results
 
     async def prune(self):
         # Clean up the database if it was set up as temporary
