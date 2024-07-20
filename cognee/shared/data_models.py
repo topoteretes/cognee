@@ -148,31 +148,31 @@ class ContentType(BaseModel):
     type: str
 
 class TextContent(ContentType):
-    type: str = "TEXT"
+    type: str = "TEXTUAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[TextSubclass]
 
 class AudioContent(ContentType):
-    type: str = "AUDIO"
+    type: str = "AUDIO_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[AudioSubclass]
 
 class ImageContent(ContentType):
-    type: str = "IMAGE"
+    type: str = "IMAGE_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[ImageSubclass]
 
 class VideoContent(ContentType):
-    type: str = "VIDEO"
+    type: str = "VIDEO_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[VideoSubclass]
 
 class MultimediaContent(ContentType):
-    type: str = "MULTIMEDIA"
+    type: str = "MULTIMEDIA_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[MultimediaSubclass]
 
 class Model3DContent(ContentType):
-    type: str = "3D_MODEL"
+    type: str = "3D_MODEL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[Model3DSubclass]
 
 class ProceduralContent(ContentType):
-    type: str = "PROCEDURAL"
+    type: str = "PROCEDURAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
     subclass: List[ProceduralSubclass]
 
 class DefaultContentPrediction(BaseModel):

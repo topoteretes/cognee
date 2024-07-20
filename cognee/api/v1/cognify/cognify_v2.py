@@ -52,7 +52,7 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
                 from cognee.modules.topology.topology import TopologyEngine
                 topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
                 root_node_id = await topology_engine.add_graph_topology(files = files)
-            elif not graph_config.infer_graph_topology:
+            elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
                 from cognee.modules.topology.topology import TopologyEngine
                 topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
                 await topology_engine.add_graph_topology(graph_config.topology_file_path)

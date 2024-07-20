@@ -78,6 +78,7 @@ class WeaviateAdapter(VectorDBInterface):
             )
 
         objects = list(map(convert_to_weaviate_data_points, data_points))
+        objects = [obj for obj in objects for _ in range(2)]
 
         return self.get_collection(collection_name).data.insert_many(objects)
 

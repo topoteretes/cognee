@@ -21,7 +21,7 @@ class GraphConfig(BaseSettings):
     graph_model: object = KnowledgeGraph
     graph_topology_task: bool = False
     graph_topology: object = KnowledgeGraph
-    infer_graph_topology: bool = True
+    infer_graph_topology: bool = False
     topology_file_path: str = os.path.join(
         os.path.join(get_absolute_path(".cognee_system"), "databases"),
         "graph_topology.json"
