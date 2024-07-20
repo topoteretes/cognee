@@ -22,7 +22,7 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
 
     vector_engine = get_vector_engine()
     collection_name = "classification"
-    data_points = await vector_engine.search(collection_name, query_text = node_id)
+    data_points = await vector_engine.search(collection_name, query_text = node_id, limit = 5)
 
     if len(data_points) == 0:
         return []

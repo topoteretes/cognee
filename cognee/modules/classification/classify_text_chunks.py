@@ -1,5 +1,6 @@
 
 import asyncio
+from uuid import uuid5, NAMESPACE_OID
 from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -19,15 +20,16 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
 
     for chunk_index, chunk in enumerate(data_chunks):
         chunk_classification = chunk_classifications[chunk_index]
-        classification_data_points.append(chunk_classification.label.type)
-        classification_data_points.append(chunk_classification.label.type)
+        classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
+        classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
 
         for classification_subclass in chunk_classification.label.subclass:
-            classification_data_points.append(classification_subclass.value)
+            classification_data_points.append(uuid5(NAMESPACE_OID, classification_subclass.value))
 
     vector_engine = get_vector_engine()
 
     class Keyword(BaseModel):
+        id: str
         text: str
         chunk_id: str
         document_id: str
@@ -51,13 +53,16 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
 
     for (chunk_index, data_chunk) in enumerate(data_chunks):
         chunk_classification = chunk_classifications[chunk_index]
+        classification_type_label = chunk_classification.label.type
+        classification_type_id = uuid5(NAMESPACE_OID, classification_type_label)
 
-        if chunk_classification.label.type not in existing_points_map:
+        if classification_type_id not in existing_points_map:
             data_points.append(
                 DataPoint[Keyword](
-                    id = chunk_classification.label.type,
+                    id = str(classification_type_id),
                     payload = Keyword.parse_obj({
-                        "text": chunk_classification.label.type,
+                        "id": str(classification_type_id),
+                        "text": classification_type_label,
                         "chunk_id": str(data_chunk.chunk_id),
                         "document_id": str(data_chunk.document_id),
                     }),
@@ -66,33 +71,37 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
             )
 
             nodes.append((
-                chunk_classification.label.type,
+                str(classification_type_id),
                 dict(
-                    id = chunk_classification.label.type,
-                    name = chunk_classification.label.type,
-                    type = chunk_classification.label.type,
+                    id = str(classification_type_id),
+                    name = classification_type_label,
+                    type = classification_type_label,
                 )
             ))
-            existing_points_map[chunk_classification.label.type] = True
+            existing_points_map[classification_type_id] = True
 
         edges.append((
             str(data_chunk.chunk_id),
-            chunk_classification.label.type,
+            str(classification_type_id),
             "is_media_type",
             dict(
                 relationship_name = "is_media_type",
                 source_node_id = str(data_chunk.chunk_id),
-                target_node_id = chunk_classification.label.type,
+                target_node_id = str(classification_type_id),
             ),
         ))
 
         for classification_subclass in chunk_classification.label.subclass:
-            if classification_subclass.value not in existing_points_map:
+            classification_subtype_label = classification_subclass.value
+            classification_subtype_id = uuid5(NAMESPACE_OID, classification_subtype_label)
+          
+            if classification_subtype_id not in existing_points_map:
                 data_points.append(
                     DataPoint[Keyword](
-                        id = classification_subclass.value,
+                        id = str(classification_subtype_id),
                         payload = Keyword.parse_obj({
-                            "text": classification_subclass.value,
+                            "id": str(classification_subtype_id),
+                            "text": classification_subtype_label,
                             "chunk_id": str(data_chunk.chunk_id),
                             "document_id": str(data_chunk.document_id),
                         }),
@@ -101,34 +110,34 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                 )
 
                 nodes.append((
-                    classification_subclass.value,
+                    str(classification_subtype_id),
                     dict(
-                        id = classification_subclass.value,
-                        name = classification_subclass.value,
-                        type = classification_subclass.value,
+                        id = classification_subtype_id,
+                        name = classification_subtype_label,
+                        type = classification_subtype_label,
                     )
                 ))
                 edges.append((
-                    chunk_classification.label.type,
-                    classification_subclass.value,
+                    str(classification_type_id),
+                    str(classification_subtype_id),
                     "contains",
                     dict(
                         relationship_name = "contains",
-                        source_node_id = chunk_classification.label.type,
-                        target_node_id = classification_subclass.value,
+                        source_node_id = str(classification_type_id),
+                        target_node_id = str(classification_subtype_id),
                     ),
                 ))
 
-                existing_points_map[classification_subclass.value] = True
+                existing_points_map[classification_subtype_id] = True
 
             edges.append((
                 str(data_chunk.chunk_id),
-                classification_subclass.value,
+                str(classification_subtype_id),
                 "is_classified_as",
                 dict(
                     relationship_name = "is_classified_as",
                     source_node_id = str(data_chunk.chunk_id),
-                    target_node_id = classification_subclass.value,
+                    target_node_id = str(classification_subtype_id),
                 ),
             ))
 
