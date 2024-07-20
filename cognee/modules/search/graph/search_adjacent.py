@@ -20,15 +20,19 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
     if node_id is None:
         return {}
 
-    vector_engine = get_vector_engine()
-    collection_name = "classification"
-    data_points = await vector_engine.search(collection_name, query_text = node_id, limit = 5)
-
-    if len(data_points) == 0:
-        return []
-
     graph_engine = await get_graph_engine()
 
-    neighbours = await graph_engine.get_neighbours(data_points[0].id)
+    exact_node = await graph_engine.extract_node(node_id)
+    if exact_node is not None:
+        neighbours = await graph_engine.get_neighbours(exact_node["id"])
+    else:
+        vector_engine = get_vector_engine()
+        collection_name = "classification"
+        data_points = await vector_engine.search(collection_name, query_text = node_id, limit = 5)
+
+        if len(data_points) == 0:
+            return []
+
+        neighbours = await graph_engine.get_neighbours(data_points[0].id)
 
     return [node["name"] for node in neighbours]
