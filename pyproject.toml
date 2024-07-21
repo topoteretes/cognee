@@ -69,6 +69,7 @@ pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
 pdfplumber = "^0.11.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
+iso639 = "^0.1.4"
 
 
 
