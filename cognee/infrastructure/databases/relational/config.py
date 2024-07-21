@@ -11,8 +11,10 @@ class RelationalConfig(BaseSettings):
     db_port: str =  "5432"
     db_user: str = "cognee"
     db_password: str =  "cognee"
-    database_engine: object = create_relational_engine(db_path, db_name)
+    db_provider: str = "duckdb"
+    database_engine: object = create_relational_engine(db_path, db_name, db_provider)
     db_file_path: str = os.path.join(db_path, db_name)
+
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
@@ -29,6 +31,7 @@ class RelationalConfig(BaseSettings):
             "db_user": self.db_user,
             "db_password": self.db_password,
             "db_engine": self.database_engine,
+            "db_provider": self.db_provider,
         }
 
 @lru_cache

@@ -5,6 +5,9 @@ from fastapi_users.db import SQLAlchemyBaseUserTableUUID, SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
+from cognee.infrastructure.databases.relational import get_relationaldb_config
+from cognee.infrastructure.databases.relational.create_relational_engine import create_relational_engine
+
 DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 
 
@@ -17,8 +20,10 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
 
 
 
+llm_config = get_relationaldb_config()
 
-engine = create_async_engine(DATABASE_URL)
+
+engine = create_relational_engine(llm_config.db_path, llm_config.db_name, llm_config.db_provider)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
 
