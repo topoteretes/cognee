@@ -1,12 +1,35 @@
 import os
 from sqlalchemy import create_engine, MetaData, Table, Column, String, Boolean, TIMESTAMP, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 class SQLAlchemyAdapter():
-    def __init__(self, db_type: str, db_path: str, db_name: str):
+    def __init__(self, db_type: str, db_path: str, db_name: str, db_user:str, db_password:str, db_host:str, db_port:str):
         self.db_location = os.path.abspath(os.path.join(db_path, db_name))
-        self.engine = create_engine(f"{db_type}:///{self.db_location}")
-        self.Session = sessionmaker(bind=self.engine)
+        # self.engine = create_engine(f"{db_type}:///{self.db_location}")
+        if db_type == "duckdb":
+            self.engine = create_engine(f"duckdb:///{self.db_location}")
+            self.Session = sessionmaker(bind=self.engine)
+
+        else:
+            print("Name: ", db_name)
+            print("User: ", db_user)
+            print("Password: ", db_password)
+            print("Host: ", db_host)
+            print("Port: ", db_port)
+            self.engine = create_async_engine(f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}")
+            self.Session = sessionmaker(bind=self.engine, class_=AsyncSession, expire_on_commit=False)
+
+
+    async def get_async_session(self):
+        async_session_maker = self.Session
+        async with async_session_maker() as session:
+            yield session
+
+    def get_session(self):
+        session_maker = self.Session
+        with session_maker() as session:
+            yield session
 
     def get_datasets(self):
         with self.engine.connect() as connection:

@@ -6,13 +6,13 @@ from .create_relational_engine import create_relational_engine
 
 class RelationalConfig(BaseSettings):
     db_path: str =  os.path.join(get_absolute_path(".cognee_system"), "databases")
-    db_name: str =  "cognee.db"
+    db_name: str =  "cognee_db"
     db_host: str =  "localhost"
     db_port: str =  "5432"
     db_user: str = "cognee"
     db_password: str =  "cognee"
-    db_provider: str = "duckdb"
-    database_engine: object = create_relational_engine(db_path, db_name, db_provider)
+    db_provider: str = "postgresql+asyncpg"
+    # database_engine: object = create_relational_engine(db_path, db_name, db_provider)
     db_file_path: str = os.path.join(db_path, db_name)
 
 
@@ -20,7 +20,8 @@ class RelationalConfig(BaseSettings):
 
     def create_engine(self):
         self.db_file_path = os.path.join(self.db_path, self.db_name)
-        self.database_engine = create_relational_engine(self.db_path, self.db_name)
+        self.database_engine = create_relational_engine(self.db_path, self.db_name, self.db_provider, self.db_host, self.db_port, self.db_user, self.db_password)
+        return self.database_engine
 
     def to_dict(self) -> dict:
         return {

@@ -10,7 +10,8 @@ from fastapi_users.authentication import (
 )
 from fastapi_users.db import SQLAlchemyUserDatabase
 
-from app.db import User, get_user_db
+
+from cognee.infrastructure.databases.relational.user_authentication.authentication_db import User, get_user_db
 
 SECRET = "SECRET"
 

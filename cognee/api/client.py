@@ -26,8 +26,13 @@ if os.getenv("ENV") == "prod":
         traces_sample_rate = 1.0,
         profiles_sample_rate = 1.0,
     )
-
-app = FastAPI(debug = os.getenv("ENV") != "prod")
+from contextlib import asynccontextmanager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Not needed if you setup a migration system like Alembic
+    await create_db_and_tables()
+    yield
+app = FastAPI(debug = os.getenv("ENV") != "prod", lifespan=lifespan)
 
 origins = [
     "http://frontend:3000",
@@ -338,8 +343,8 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
         relational_config.create_engine()
 
         from cognee.modules.data.deletion import prune_system, prune_data
-        asyncio.run(prune_data())
-        asyncio.run(prune_system(metadata = True))
+        # asyncio.run(prune_data())
+        # asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:
