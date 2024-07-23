@@ -31,7 +31,7 @@ class Group(Base):
     __tablename__ = 'groups'
     id = Column(UUID, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
-    users = relationship('User', secondary=user_group, back_populates='groups')
+    users = relationship('users', secondary=user_group, back_populates='groups')
     permissions = relationship('Permission', secondary=group_permission, back_populates='groups')
 
 class Permission(Base):

@@ -1,8 +1,14 @@
 import asyncio
+import hashlib
 import logging
+import uuid
 from typing import Union
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from cognee.infrastructure.databases.graph import get_graph_config
+from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
+from cognee.infrastructure.databases.relational.user_authentication.users import get_user_permissions, fastapi_users
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
@@ -25,7 +31,21 @@ logger = logging.getLogger("cognify.v2")
 
 update_status_lock = asyncio.Lock()
 
-async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = None):
+class PermissionDeniedException(Exception):
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
+async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = None, user_id:str="default_user"):
+    session: AsyncSession = async_session_maker()
+    user = await fastapi_users.get_user_manager.get(user_id)
+    user_permissions = await get_user_permissions(user, session)
+    hash_object = hashlib.sha256(user.encode())
+    hashed_user_id = hash_object.hexdigest()
+    required_permission = "write"
+    if required_permission not in user_permissions:
+        raise PermissionDeniedException("Not enough permissions")
+
     relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine
     create_task_status_table()
@@ -60,7 +80,7 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
                 root_node_id = "ROOT"
 
             tasks = [
-                Task(process_documents, parent_node_id = root_node_id, task_config = { "batch_size": 10 }), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+                Task(process_documents, parent_node_id = root_node_id, task_config = { "batch_size": 10 }, user_id = hashed_user_id, user_permissions=user_permissions), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
                 Task(establish_graph_topology, topology_model = KnowledgeGraph), # Set the graph topology for the document chunk data
                 Task(expand_knowledge_graph, graph_model = KnowledgeGraph), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
                 Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
