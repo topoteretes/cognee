@@ -9,8 +9,8 @@ from fastapi_users.authentication import (
     JWTStrategy,
 )
 from fastapi_users.db import SQLAlchemyUserDatabase
-
-
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.orm import Session
 from cognee.infrastructure.databases.relational.user_authentication.authentication_db import User, get_user_db
 
 SECRET = "SECRET"
@@ -54,3 +54,18 @@ auth_backend = AuthenticationBackend(
 fastapi_users = FastAPIUsers[User, uuid.UUID](get_user_manager, [auth_backend])
 
 current_active_user = fastapi_users.current_user(active=True)
+
+
+async def get_user_permissions(user: User, session: Session):
+    permissions = set()
+    for group in user.groups:
+        permissions.update(permission.name for permission in group.permissions)
+    return permissions
+
+def has_permission(permission: str):
+    async def permission_checker(user: User = Depends(current_active_user), session: Session = Depends(get_user_db)):
+        user_permissions = await get_user_permissions(user, session)
+        if permission not in user_permissions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        return True
+    return Depends(permission_checker)

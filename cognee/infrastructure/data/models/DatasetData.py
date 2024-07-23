@@ -1,9 +1,9 @@
 from uuid import uuid4
 from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, UUID, ForeignKey
-from cognee.infrastructure.databases.relational import ModelBase
+from cognee.infrastructure.databases.relational import Base
 
-class DatasetData(ModelBase):
+class DatasetData(Base):
     __tablename__ = "dataset_data"
 
     id = Column(UUID, primary_key = True, default = uuid4())

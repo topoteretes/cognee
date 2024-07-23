@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.relational.user_authentication.routers import permission_router
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -80,7 +82,7 @@ app.include_router(
     tags=["users"],
 )
 
-
+app.include_router(permission_router, prefix="/manage", tags=["management"])
 @app.get("/authenticated-route")
 async def authenticated_route(user: User = Depends(current_active_user)):
     return {"message": f"Hello {user.email}!"}

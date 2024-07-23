@@ -2,10 +2,10 @@ from typing import List
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, Mapped
 from sqlalchemy import Column, Text, DateTime, UUID
-from cognee.infrastructure.databases.relational import ModelBase
+from cognee.infrastructure.databases.relational import Base
 from .DatasetData import DatasetData
 
-class Dataset(ModelBase):
+class Dataset(Base):
     __tablename__ = "dataset"
 
     id = Column(UUID, primary_key = True)

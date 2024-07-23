@@ -1,4 +1,4 @@
-from .ModelBase import ModelBase
+from .ModelBase import Base
 from .DatabaseEngine import DatabaseEngine
 from .sqlite.SqliteEngine import SqliteEngine
 from .duckdb.DuckDBAdapter import DuckDBAdapter
