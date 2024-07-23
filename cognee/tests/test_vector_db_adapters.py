@@ -8,7 +8,7 @@ import pytest
 
 logging.basicConfig(level=logging.DEBUG)
 
-DATABASE_NAMES = ["weaviate", "qdrant"]
+DATABASE_NAMES = ["weaviate", "qdrant", "lancedb"]
 
 @pytest.mark.parametrize("database_name", DATABASE_NAMES)
 async def test_vector_db_adapter(database_name: str):
