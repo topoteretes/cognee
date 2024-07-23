@@ -1,15 +1,21 @@
+
+
 import os
 import logging
 import pathlib
 import cognee
+import pytest
 
 logging.basicConfig(level=logging.DEBUG)
 
-async def main():
-    cognee.config.set_vector_engine_provider("weaviate")
-    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_weaviate")).resolve())
+DATABASE_NAMES = ["weaviate", "qdrant"]
+
+@pytest.mark.parametrize("database_name", DATABASE_NAMES)
+async def test_vector_db_adapter(database_name: str):
+    cognee.config.set_vector_engine_provider(database_name)
+    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, f".data_storage/test_{database_name}")).resolve())
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_weaviate")).resolve())
+    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, f".cognee_system/test_{database_name}")).resolve())
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
@@ -53,4 +59,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    tasks = [test_vector_db_adapter(database_name) for database_name in DATABASE_NAMES]
+    asyncio.gather(*tasks)
