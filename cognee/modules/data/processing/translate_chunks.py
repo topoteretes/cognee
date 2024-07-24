@@ -1,17 +1,11 @@
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from langdetect import detect, LangDetectException
-import iso639
-from dotenv import load_dotenv
-load_dotenv()
 
 import logging
 
-# Basic configuration of the logging system
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from cognee.base_config import get_base_config
 
-
-
+BaseConfig = get_base_config()
 
 async def translate_text(text, source_language:str='sr', target_language:str='en', region_name='eu-west-1'):
     """

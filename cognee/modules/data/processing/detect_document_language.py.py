@@ -1,14 +1,6 @@
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+
 from langdetect import detect, LangDetectException
-import iso639
-from dotenv import load_dotenv
-load_dotenv()
 import logging
-# Basic configuration of the logging system
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
 
 
 
