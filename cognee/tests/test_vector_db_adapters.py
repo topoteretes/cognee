@@ -12,7 +12,9 @@ DATABASE_NAMES = ["weaviate", "qdrant", "lancedb"]
 
 @pytest.mark.parametrize("database_name", DATABASE_NAMES)
 async def test_vector_db_adapter(database_name: str):
-    cognee.config.set_vector_engine_provider(database_name)
+    url = os.getenv(f"{database_name.upper()}_DB_URL")
+    apiKey = os.getenv(f"{database_name.upper()}_DB_KEY")
+    cognee.config.set_vector_engine_provider(database_name, url, apiKey)
     data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, f".data_storage/test_{database_name}")).resolve())
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, f".cognee_system/test_{database_name}")).resolve())
