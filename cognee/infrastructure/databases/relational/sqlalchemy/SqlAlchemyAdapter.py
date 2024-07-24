@@ -9,25 +9,20 @@ class SQLAlchemyAdapter():
         # self.engine = create_engine(f"{db_type}:///{self.db_location}")
         if db_type == "duckdb":
             self.engine = create_engine(f"duckdb:///{self.db_location}")
-            self.Session = sessionmaker(bind=self.engine)
+            self.sessionmaker = sessionmaker(bind=self.engine)
 
         else:
-            print("Name: ", db_name)
-            print("User: ", db_user)
-            print("Password: ", db_password)
-            print("Host: ", db_host)
-            print("Port: ", db_port)
             self.engine = create_async_engine(f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}")
-            self.Session = sessionmaker(bind=self.engine, class_=AsyncSession, expire_on_commit=False)
+            self.sessionmaker = sessionmaker(bind=self.engine, class_=AsyncSession, expire_on_commit=False)
 
 
     async def get_async_session(self):
-        async_session_maker = self.Session
+        async_session_maker = self.sessionmaker
         async with async_session_maker() as session:
             yield session
 
     def get_session(self):
-        session_maker = self.Session
+        session_maker = self.sessionmaker
         with session_maker() as session:
             yield session
 

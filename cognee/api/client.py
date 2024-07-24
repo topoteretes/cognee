@@ -83,9 +83,6 @@ app.include_router(
 )
 
 app.include_router(permission_router, prefix="/manage", tags=["management"])
-@app.get("/authenticated-route")
-async def authenticated_route(user: User = Depends(current_active_user)):
-    return {"message": f"Hello {user.email}!"}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
