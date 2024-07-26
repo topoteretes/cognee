@@ -321,9 +321,9 @@ class Neo4jAdapter(GraphDBInterface):
             return [result["id"] for result in results]
 
     async def get_neighbours(self, node_id: str) -> list[str]:
-        results = await asyncio.gather(*[self.get_predecessor_ids(node_id)], self.get_successor_ids(node_id))
+        predecessor_ids, successor_ids = await asyncio.gather(self.get_predecessor_ids(node_id), self.get_successor_ids(node_id))
 
-        return [*results[0], *results[1]]
+        return [*predecessor_ids, *successor_ids]
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         query = f"""
