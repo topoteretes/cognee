@@ -8,7 +8,7 @@ import logging
 import sentry_sdk
 from typing import Dict, Any, List, Union, Optional, Literal
 from typing_extensions import Annotated
-from fastapi import FastAPI, HTTPException, Form, File, UploadFile, Query
+from fastapi import FastAPI, HTTPException, Form, UploadFile, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
