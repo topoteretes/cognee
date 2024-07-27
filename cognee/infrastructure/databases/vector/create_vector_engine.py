@@ -26,7 +26,7 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                 api_key = config["vector_db_key"],
                 embedding_engine = embedding_engine
             )
-    else:
+    elif config["vector_db_provider"] == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
         return LanceDBAdapter(
@@ -34,5 +34,5 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
             api_key = config["vector_db_key"],
             embedding_engine = embedding_engine,
         )
-
-    raise EnvironmentError(f"Vector provider not configured correctly: {config['vector_db_provider']}")
+    else:
+        raise EnvironmentError(f"Vector provider not configured correctly: {config['vector_db_provider']}")

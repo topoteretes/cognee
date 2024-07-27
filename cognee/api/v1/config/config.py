@@ -110,9 +110,11 @@ class config():
 
 
     @staticmethod
-    def set_vector_engine_provider(vector_engine_provider: str):
+    def set_vector_engine_provider(vector_engine_provider: str, url: str, apiKey: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_engine_provider = vector_engine_provider
+        vector_db_config.url = url
+        vector_db_config.apiKey = apiKey
 
     @staticmethod
     def set_vector_db_key(db_key: str):
