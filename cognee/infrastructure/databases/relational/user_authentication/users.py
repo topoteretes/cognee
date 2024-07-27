@@ -61,6 +61,9 @@ auth_backend = AuthenticationBackend(
 
 fastapi_users = FastAPIUsers[User, uuid.UUID](get_user_manager, [auth_backend])
 
+async def fast_api_users_init():
+    return fastapi_users
+
 current_active_user = fastapi_users.current_user(active=True)
 
 

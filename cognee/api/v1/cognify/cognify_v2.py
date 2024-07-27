@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
 from cognee.infrastructure.databases.relational.user_authentication.users import has_permission_document, \
-    get_user_permissions, get_async_session_context
+    get_user_permissions, get_async_session_context, fast_api_users_init
 # from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
 # from cognee.infrastructure.databases.relational.user_authentication.users import get_user_permissions, fastapi_users
 from cognee.modules.cognify.config import get_cognify_config
@@ -40,7 +40,7 @@ class PermissionDeniedException(Exception):
         self.message = message
         super().__init__(self.message)
 
-async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = None, user_id:str="default_user"):
+async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = None):
 
     relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine
@@ -57,8 +57,9 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
             file["name"] = file["name"].replace(" ", "_")
 
             async with get_async_session_context() as session:
+                active_user = await fast_api_users_init()
 
-                out = await has_permission_document(user_id, file["id"], "write", session)
+                out = await has_permission_document(active_user.current_user(active=True), file["id"], "write", session)
 
 
                 async with update_status_lock:
