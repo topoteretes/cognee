@@ -12,6 +12,7 @@ from fastapi_users.authentication import (
 from fastapi_users.exceptions import UserAlreadyExists
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi import Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from cognee.infrastructure.databases.relational.user_authentication.authentication_db import User, get_user_db, \
@@ -241,3 +242,11 @@ async def give_permission_document(user: Optional[User], document_id: str, permi
     )
     session.add(acl_entry)
     await session.commit()
+
+
+async def get_document_ids_for_user(user_id: uuid.UUID, session: AsyncSession) -> list[str]:
+    result = await session.execute(
+        select(ACL.document_id).filter_by(user_id=user_id)
+    )
+    document_ids = [row[0] for row in result.fetchall()]
+    return document_ids
