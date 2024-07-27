@@ -10,13 +10,12 @@ async def run_tasks(tasks: [Task], data):
         return
 
     running_task = tasks[0]
-    batch_size = running_task.task_config["batch_size"]
     leftover_tasks = tasks[1:]
     next_task = leftover_tasks[0] if len(leftover_tasks) > 1 else None
-    # next_task_batch_size = next_task.task_config["batch_size"] if next_task else 1
+    next_task_batch_size = next_task.task_config["batch_size"] if next_task else 1
 
     if inspect.isasyncgenfunction(running_task.executable):
-        logger.info(f"Running async generator task: `{running_task.executable.__name__}`")
+        logger.info("Running async generator task: `%s`", running_task.executable.__name__)
         try:
             results = []
 
@@ -25,8 +24,8 @@ async def run_tasks(tasks: [Task], data):
             async for partial_result in async_iterator:
                 results.append(partial_result)
 
-                if len(results) == batch_size:
-                    async for result in run_tasks(leftover_tasks, results[0] if batch_size == 1 else results):
+                if len(results) == next_task_batch_size:
+                    async for result in run_tasks(leftover_tasks, results[0] if next_task_batch_size == 1 else results):
                         yield result
 
                     results = []
@@ -37,7 +36,7 @@ async def run_tasks(tasks: [Task], data):
 
                 results = []
 
-            logger.info(f"Finished async generator task: `{running_task.executable.__name__}`")
+            logger.info("Finished async generator task: `%s`", running_task.executable.__name__)
         except Exception as error:
             logger.error(
                 "Error occurred while running async generator task: `%s`\n%s\n",
@@ -48,15 +47,15 @@ async def run_tasks(tasks: [Task], data):
             raise error
 
     elif inspect.isgeneratorfunction(running_task.executable):
-        logger.info(f"Running generator task: `{running_task.executable.__name__}`")
+        logger.info("Running generator task: `%s`", running_task.executable.__name__)
         try:
             results = []
 
             for partial_result in running_task.run(data):
                 results.append(partial_result)
 
-                if len(results) == batch_size:
-                    async for result in run_tasks(leftover_tasks, results[0] if batch_size == 1 else results):
+                if len(results) == next_task_batch_size:
+                    async for result in run_tasks(leftover_tasks, results[0] if next_task_batch_size == 1 else results):
                         yield result
 
                     results = []
@@ -67,7 +66,7 @@ async def run_tasks(tasks: [Task], data):
 
                 results = []
 
-            logger.info(f"Running generator task: `{running_task.executable.__name__}`")
+            logger.info("Finished generator task: `%s`", running_task.executable.__name__)
         except Exception as error:
             logger.error(
                 "Error occurred while running generator task: `%s`\n%s\n",
@@ -78,13 +77,35 @@ async def run_tasks(tasks: [Task], data):
             raise error
 
     elif inspect.iscoroutinefunction(running_task.executable):
-        task_result = await running_task.run(data)
+        logger.info("Running coroutine task: `%s`", running_task.executable.__name__)
+        try:
+            task_result = await running_task.run(data)
 
-        async for result in run_tasks(leftover_tasks, task_result):
-            yield result
+            async for result in run_tasks(leftover_tasks, task_result):
+                yield result
 
+            logger.info("Finished coroutine task: `%s`", running_task.executable.__name__)
+        except Exception as error:
+            logger.error(
+                "Error occurred while running coroutine task: `%s`\n%s\n",
+                running_task.executable.__name__,
+                str(error),
+                exc_info = True,
+            )
+                
     elif inspect.isfunction(running_task.executable):
-        task_result = running_task.run(data)
+        logger.info("Running function task: `%s`", running_task.executable.__name__)
+        try:
+            task_result = running_task.run(data)
 
-        async for result in run_tasks(leftover_tasks, task_result):
-            yield result
+            async for result in run_tasks(leftover_tasks, task_result):
+                yield result
+
+            logger.info("Finished function task: `%s`", running_task.executable.__name__)
+        except Exception as error:
+            logger.error(
+                "Error occurred while running function task: `%s`\n%s\n",
+                running_task.executable.__name__,
+                str(error),
+                exc_info = True,
+            )

@@ -60,8 +60,8 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
                 root_node_id = "ROOT"
 
             tasks = [
-                Task(process_documents, parent_node_id = root_node_id, task_config = { "batch_size": 10 }), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                Task(establish_graph_topology, topology_model = KnowledgeGraph), # Set the graph topology for the document chunk data
+                Task(process_documents, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+                Task(establish_graph_topology, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
                 Task(expand_knowledge_graph, graph_model = KnowledgeGraph), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
                 Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
                 Task(
