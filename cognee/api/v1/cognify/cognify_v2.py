@@ -7,8 +7,8 @@ from typing import Union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.graph import get_graph_config
-from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
-from cognee.infrastructure.databases.relational.user_authentication.users import get_user_permissions, fastapi_users
+# from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
+# from cognee.infrastructure.databases.relational.user_authentication.users import get_user_permissions, fastapi_users
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
@@ -37,14 +37,14 @@ class PermissionDeniedException(Exception):
         super().__init__(self.message)
 
 async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = None, user_id:str="default_user"):
-    session: AsyncSession = async_session_maker()
-    user = await fastapi_users.get_user_manager.get(user_id)
-    user_permissions = await get_user_permissions(user, session)
-    hash_object = hashlib.sha256(user.encode())
-    hashed_user_id = hash_object.hexdigest()
-    required_permission = "write"
-    if required_permission not in user_permissions:
-        raise PermissionDeniedException("Not enough permissions")
+    # session: AsyncSession = async_session_maker()
+    # user = await fastapi_users.get_user_manager.get(user_id)
+    # user_permissions = await get_user_permissions(user, session)
+    # hash_object = hashlib.sha256(user.encode())
+    # hashed_user_id = hash_object.hexdigest()
+    # required_permission = "write"
+    # if required_permission not in user_permissions:
+    #     raise PermissionDeniedException("Not enough permissions")
 
     relational_config = get_relationaldb_config()
     db_engine = relational_config.database_engine

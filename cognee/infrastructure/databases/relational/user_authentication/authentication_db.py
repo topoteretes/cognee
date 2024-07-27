@@ -14,7 +14,7 @@ from fastapi_users.exceptions import UserAlreadyExists
 from fastapi_users.authentication import JWTStrategy
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session, relationship
 from cognee.infrastructure.databases.relational.user_authentication.schemas import UserRead, UserCreate
-from cognee.infrastructure.databases.relational.user_authentication.users import get_user_manager, get_jwt_strategy
+# from cognee.infrastructure.databases.relational.user_authentication.users import get_user_manager, get_jwt_strategy
 from fastapi.security import OAuth2PasswordRequestForm
 # Association table for many-to-many relationship between users and groups
 user_group = Table('user_group', Base.metadata,
@@ -31,14 +31,15 @@ group_permission = Table('group_permission', Base.metadata,
 class User(SQLAlchemyBaseUserTableUUID, Base):
     __tablename__ = 'users'
     groups = relationship('Group', secondary=user_group, back_populates='users')
+    acls = relationship('ACL', back_populates='user')
 
 class Group(Base):
     __tablename__ = 'groups'
-    id = Column(UUID, primary_key=True, index=True)
+    id = Column(UUID, primary_key=True, index=True, default=uuid.uuid4)
     name = Column(String, unique=True, index=True)
-    users = relationship('users', secondary=user_group, back_populates='groups')
+    users = relationship('User', secondary=user_group, back_populates='groups')
     permissions = relationship('Permission', secondary=group_permission, back_populates='groups')
-
+    acls = relationship('ACL', back_populates='group')
 class Permission(Base):
     __tablename__ = 'permissions'
     id = Column(UUID, primary_key=True, index=True)
@@ -47,15 +48,14 @@ class Permission(Base):
 
 class ACL(Base):
     __tablename__ = 'acls'
-    id = Column(UUID, primary_key=True, index=True)
-    document_id = Column(UUID, ForeignKey('documents.id'))
+    id = Column(UUID, primary_key=True, index=True, default=uuid.uuid4)
+    document_id = Column(UUID, ForeignKey('dataset_data.id'))
     user_id = Column(UUID, ForeignKey('users.id'), nullable=True)
     group_id = Column(UUID, ForeignKey('groups.id'), nullable=True)
     permission = Column(String)  # 'read', 'write', 'execute'
-    document = relationship('dataset_data', back_populates='acls')
-    user = relationship('users', back_populates='acls')
-    group = relationship('groups', back_populates='acls')
-
+    document = relationship('DatasetData', back_populates='acls')
+    user = relationship('User', back_populates='acls')
+    group = relationship('Group', back_populates='acls')
 
 relational_config = get_relationaldb_config()
 
@@ -77,99 +77,3 @@ async def get_user_db(session: AsyncSession = Depends(get_async_session)):
     yield SQLAlchemyUserDatabase(session, User)
 
 
-async def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# Define context managers for dependencies
-get_async_session_context = asynccontextmanager(get_async_session)
-get_user_db_context = asynccontextmanager(get_user_db)
-get_user_manager_context = asynccontextmanager(get_user_manager)
-
-async def create_user_method(email: str, password: str, is_superuser: bool = False):
-    try:
-        async with get_async_session_context() as session:
-            async with get_user_db_context(session) as user_db:
-                async with get_user_manager_context(user_db) as user_manager:
-                    user = await user_manager.create(
-                        UserCreate(email=email, password=password, is_superuser=is_superuser)
-                    )
-                    print(f"User created: {user.email}")
-    except UserAlreadyExists:
-        print(f"User {email} already exists")
-
-async def authenticate_user_method(email: str, password: str) -> Optional[User]:
-    try:
-        async with get_async_session_context() as session:
-            async with get_user_db_context(session) as user_db:
-                async with get_user_manager_context(user_db) as user_manager:
-                    credentials = OAuth2PasswordRequestForm(username=email, password=password)
-                    user = await user_manager.authenticate(credentials)
-                    if user is None or not user.is_active:
-                        return None
-                    return user
-    except Exception as e:
-        print(f"Error during authentication: {e}")
-        return None
-
-async def reset_user_password_method(email: str, new_password: str) -> bool:
-    async with get_async_session_context() as session:
-        async with get_user_db_context(session) as user_db:
-            user = await user_db.get_by_email(email)
-            if not user:
-                return False
-            user.hashed_password = await hash_password(new_password)
-            await user_db.update(user)
-            return True
-
-# async def generate_verification_token(email: str, tokens_db: dict) -> str:
-#     async with get_async_session_context() as session:
-#         async with get_user_db_context(session) as user_db:
-#             if not await user_db.get_by_email(email):
-#                 raise ValueError("User does not exist")
-#             token = str(uuid.uuid4())
-#             tokens_db[token] = email
-#             return token
-
-# async def verify_user_method(token: str, tokens_db: dict) -> bool:
-#     async with get_async_session_context() as session:
-#         async with get_user_db_context(session) as user_db:
-#             email = tokens_db.get(token)
-#             if not email or not await user_db.get_by_email(email):
-#                 return False
-#             user = await user_db.get_by_email(email)
-#             user.is_verified = True
-#             await user_db.update(user)
-#             return True
-
-
-async def user_create_token(user: User) -> Optional[str]:
-    try:
-        async with get_async_session_context() as session:
-            async with get_user_db_context(session) as user_db:
-                async with get_user_manager_context(user_db) as user_manager:
-                    if user is None:
-                        return None
-                    strategy = get_jwt_strategy()
-                    token = await strategy.write_token(user)
-                    if token is not None:
-                        return token
-                    else:
-                        return None
-    except:
-        return None
-
-async def user_check_token(token: str) -> bool:
-    try:
-        async with get_async_session_context() as session:
-            async with get_user_db_context(session) as user_db:
-                async with get_user_manager_context(user_db) as user_manager:
-                    if token is None:
-                        return False
-                    strategy = get_jwt_strategy()
-                    user = await strategy.read_token(token, user_manager)
-                    if user is None or not user.is_active:
-                        return False
-                    else:
-                        return True
-    except:
-        return False

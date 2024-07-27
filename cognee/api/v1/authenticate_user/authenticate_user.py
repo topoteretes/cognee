@@ -1,4 +1,4 @@
-from cognee.infrastructure.databases.relational.user_authentication.authentication_db import authenticate_user_method
+from cognee.infrastructure.databases.relational.user_authentication.users import authenticate_user_method
 
 
 async def authenticate_user():

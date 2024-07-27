@@ -1,4 +1,4 @@
-from cognee.infrastructure.databases.relational.user_authentication.authentication_db import user_check_token
+from cognee.infrastructure.databases.relational.user_authentication.users import user_check_token
 
 
 
