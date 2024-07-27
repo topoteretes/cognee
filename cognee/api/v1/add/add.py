@@ -3,7 +3,11 @@ from os import path
 import asyncio
 import dlt
 import duckdb
+from fastapi_users import fastapi_users
+
 import cognee.modules.ingestion as ingestion
+from cognee.infrastructure.databases.relational.user_authentication.users import give_permission_document, \
+    get_async_session_context, current_active_user, create_default_user
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
 from cognee.shared.utils import send_telemetry
@@ -48,7 +52,7 @@ async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_nam
 
     return []
 
-async def add_files(file_paths: List[str], dataset_name: str):
+async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "default_user"):
     base_config = get_base_config()
     data_directory_path = base_config.data_root_directory
 
@@ -82,12 +86,17 @@ async def add_files(file_paths: List[str], dataset_name: str):
     )
 
     @dlt.resource(standalone = True, merge_key = "id")
-    def data_resources(file_paths: str):
+    def data_resources(file_paths: str, user_id: str = user_id):
         for file_path in file_paths:
             with open(file_path.replace("file://", ""), mode = "rb") as file:
                 classified_data = ingestion.classify(file)
 
                 data_id = ingestion.identify(classified_data)
+                async with get_async_session_context() as session:
+                    if user_id is None:
+                        current_active_user = create_default_user()
+
+                    give_permission_document(current_active_user, data_id, "write", session= session)
 
                 file_metadata = classified_data.get_metadata()
 

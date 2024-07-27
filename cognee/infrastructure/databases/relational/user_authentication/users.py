@@ -12,9 +12,10 @@ from fastapi_users.authentication import (
 from fastapi_users.exceptions import UserAlreadyExists
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from cognee.infrastructure.databases.relational.user_authentication.authentication_db import User, get_user_db, \
-    get_async_session
+    get_async_session, ACL
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.authentication import JWTStrategy
 from cognee.infrastructure.databases.relational.user_authentication.schemas import UserRead, UserCreate
@@ -86,13 +87,13 @@ get_async_session_context = asynccontextmanager(get_async_session)
 get_user_db_context = asynccontextmanager(get_user_db)
 get_user_manager_context = asynccontextmanager(get_user_manager)
 
-async def create_user_method(email: str, password: str, is_superuser: bool = False):
+async def create_user_method(email: str, password: str, is_superuser: bool = False, is_active: bool = True):
     try:
         async with get_async_session_context() as session:
             async with get_user_db_context(session) as user_db:
                 async with get_user_manager_context(user_db) as user_manager:
                     user = await user_manager.create(
-                        UserCreate(email=email, password=password, is_superuser=is_superuser)
+                        UserCreate(email=email, password=password, is_superuser=is_superuser, is_active=is_active)
                     )
                     print(f"User created: {user.email}")
     except UserAlreadyExists:
@@ -175,3 +176,65 @@ async def user_check_token(token: str) -> bool:
     except:
         return False
 
+async def has_permission_document(user: User, document_id: str, permission: str, session: AsyncSession) -> bool:
+    # Check if the user has the specified permission for the document
+    acl_entry = await session.execute(
+        """
+        SELECT 1 FROM acls
+        WHERE user_id = :user_id AND document_id = :document_id AND permission = :permission
+        """,
+        {'user_id': str(user.id), 'document_id': str(document_id), 'permission': permission}
+    )
+    if acl_entry.scalar_one_or_none():
+        return True
+
+    # Check if any of the user's groups have the specified permission for the document
+    group_acl_entry = await session.execute(
+        """
+        SELECT 1 FROM acls
+        JOIN user_group ON acls.group_id = user_group.group_id
+        WHERE user_group.user_id = :user_id AND acls.document_id = :document_id AND acls.permission = :permission
+        """,
+        {'user_id': str(user.id), 'document_id': str(document_id), 'permission': permission}
+    )
+    if group_acl_entry.scalar_one_or_none():
+        return True
+
+    return False
+
+async def create_default_user():
+    async with get_async_session_context() as session:
+        default_user_email = "default_user@example.com"
+        default_user_password = "default_password"
+
+        user = await create_user_method(
+                email=default_user_email,
+                password=await hash_password(default_user_password),
+                is_superuser=True,
+                is_active=True)
+        session.add(user)
+        out = await session.commit()
+        await session.refresh(user)
+        return out.id
+
+async def give_permission_document(user: Optional[User], document_id: str, permission: str,
+                                   session: AsyncSession):
+
+    acl_entry = ACL(
+        document_id=document_id,
+        user_id=user.id,
+        permission=permission
+    )
+    session.add(acl_entry)
+    await session.commit()
+
+
+    if user.is_superuser:
+        permission = 'all_permissions'  # Example permission, change as needed
+    acl_entry = ACL(
+        document_id=document_id,
+        user_id=user.id,
+        permission=permission
+    )
+    session.add(acl_entry)
+    await session.commit()
