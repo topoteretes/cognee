@@ -86,7 +86,7 @@ async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "d
     )
 
     @dlt.resource(standalone = True, merge_key = "id")
-    def data_resources(file_paths: str, user_id: str = user_id):
+    async def data_resources(file_paths: str, user_id: str = user_id):
         for file_path in file_paths:
             with open(file_path.replace("file://", ""), mode = "rb") as file:
                 classified_data = ingestion.classify(file)
@@ -94,9 +94,9 @@ async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "d
                 data_id = ingestion.identify(classified_data)
                 async with get_async_session_context() as session:
                     if user_id is None:
-                        current_active_user = create_default_user()
+                        current_active_user = await create_default_user()
 
-                    give_permission_document(current_active_user, data_id, "write", session= session)
+                    await give_permission_document(current_active_user, data_id, "write", session= session)
 
                 file_metadata = classified_data.get_metadata()
 
