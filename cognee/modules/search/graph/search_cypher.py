@@ -11,6 +11,5 @@ async def search_cypher(query: str):
         graph_engine = await get_graph_engine()
         result = await graph_engine.graph().run(query)
         return result
-
     else:
         raise ValueError("Unsupported search type for the used graph engine.")

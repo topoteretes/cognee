@@ -29,7 +29,7 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
     vector_engine = get_vector_engine()
 
     class Keyword(BaseModel):
-        id: str
+        uuid: str
         text: str
         chunk_id: str
         document_id: str
@@ -61,7 +61,7 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                 DataPoint[Keyword](
                     id = str(classification_type_id),
                     payload = Keyword.parse_obj({
-                        "id": str(classification_type_id),
+                        "uuid": str(classification_type_id),
                         "text": classification_type_label,
                         "chunk_id": str(data_chunk.chunk_id),
                         "document_id": str(data_chunk.document_id),
@@ -100,7 +100,7 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                     DataPoint[Keyword](
                         id = str(classification_subtype_id),
                         payload = Keyword.parse_obj({
-                            "id": str(classification_subtype_id),
+                            "uuid": str(classification_subtype_id),
                             "text": classification_subtype_label,
                             "chunk_id": str(data_chunk.chunk_id),
                             "document_id": str(data_chunk.document_id),

@@ -1,5 +1,6 @@
 import json
 import asyncio
+from uuid import uuid5, NAMESPACE_OID
 from datetime import datetime
 from typing import Type
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ from ...processing.chunk_types.DocumentChunk import DocumentChunk
 from .extract_knowledge_graph import extract_content_graph
 
 class EntityNode(BaseModel):
-    id: str
+    uuid: str
     name: str
     type: str
     description: str
@@ -24,7 +25,9 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
     vector_engine = get_vector_engine()
     graph_engine = await get_graph_engine()
 
-    if await vector_engine.has_collection(collection_name):
+    has_collection = await vector_engine.has_collection(collection_name)
+
+    if not has_collection:
         await vector_engine.create_collection(collection_name)
 
     processed_nodes = {}
@@ -84,7 +87,7 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
 
             if node_id not in existing_nodes_map:
                 node_data = dict(
-                    id = node_id,
+                    uuid = node_id,
                     name = node_name,
                     type = node_name,
                     description = node.description,
@@ -101,7 +104,7 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                 ))
 
                 data_points.append(DataPoint[EntityNode](
-                    id = node_id,
+                    id = str(uuid5(NAMESPACE_OID, node_id)),
                     payload = node_data,
                     embed_field = "name",
                 ))
@@ -138,7 +141,7 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
 
             if type_node_id not in existing_nodes_map:
                 type_node_data = dict(
-                    id = type_node_id,
+                    uuid = type_node_id,
                     name = type_node_name,
                     type = type_node_id,
                     description = type_node_name,
@@ -152,7 +155,7 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                 )))
 
                 data_points.append(DataPoint[EntityNode](
-                    id = type_node_id,
+                    id = str(uuid5(NAMESPACE_OID, type_node_id)),
                     payload = type_node_data,
                     embed_field = "name",
                 ))
@@ -171,12 +174,6 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                         source_node_id = str(chunk.chunk_id),
                         target_node_id = type_node_id,
                     ),
-                ))
-
-                data_points.append(DataPoint[EntityNode](
-                    id = type_node_id,
-                    payload = type_node_data,
-                    embed_field = "name",
                 ))
 
                 existing_edges_map[edge_key] = True

@@ -51,14 +51,15 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.get_session()
 
     async def has_node(self, node_id: str) -> bool:
-        return self.query(
+        results = self.query(
             """
-                MATCH (n)-[r]->(m)
-                WHERE n.id = $node_id OR m.id = $node_id
-                RETURN COUNT(r) > 0 AS edge_exists
+                MATCH (n)
+                WHERE n.id = $node_id
+                RETURN COUNT(n) > 0 AS node_exists
             """,
             {"node_id": node_id}
         )
+        return results[0]["node_exists"] if len(results) > 0 else False
 
     async def add_node(self, node_id: str, node_properties: Dict[str, Any] = None):
         node_id = node_id.replace(":", "_")
@@ -170,7 +171,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
         query = f"""
             MATCH (from_node:`{from_node}`)-[relationship:`{edge_label}`]->(to_node:`{to_node}`)
-            RETURN COUNT(relationship) > 0 AS edge_exists'
+            RETURN COUNT(relationship) > 0 AS edge_exists
         """
 
         edge_exists = await self.query(query)
@@ -194,7 +195,7 @@ class Neo4jAdapter(GraphDBInterface):
             }
 
             results = await self.query(query, params)
-            return [result for result in results]
+            return [result["edge_exists"] for result in results]
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info = True)
             raise error
