@@ -1,18 +1,16 @@
 
-import networkx as nx
-from typing import Union
-from cognee.shared.data_models import GraphDBType
-from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.graph import get_graph_engine, get_graph_config
 
-async def search_cypher(query:str, graph: Union[nx.Graph, any]):
+async def search_cypher(query: str):
     """
     Use a Cypher query to search the graph and return the results.
     """
     graph_config = get_graph_config()
 
     if graph_config.graph_database_provider == "neo4j":
-        result = await graph.run(query)
+        graph_engine = await get_graph_engine()
+        result = await graph_engine.graph().run(query)
         return result
 
     else:
-        raise ValueError("Unsupported graph engine type.")
+        raise ValueError("Unsupported search type for the used graph engine.")

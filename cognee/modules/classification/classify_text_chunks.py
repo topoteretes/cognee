@@ -118,9 +118,9 @@ async def classify_text_chunks(data_chunks: list[DocumentChunk], classification_
                     )
                 ))
                 edges.append((
-                    str(classification_type_id),
                     str(classification_subtype_id),
-                    "contains",
+                    str(classification_type_id),
+                    "is_subtype_of",
                     dict(
                         relationship_name = "contains",
                         source_node_id = str(classification_type_id),

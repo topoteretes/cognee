@@ -1,4 +1,3 @@
-
 import os
 import logging
 import pathlib
@@ -38,23 +37,43 @@ async def  main():
 
     await cognee.cognify([dataset_name], root_node_id = "ROOT")
 
-    search_results = await cognee.search("TRAVERSE", { "query": "Text" })
+    from cognee.infrastructure.databases.vector import get_vector_engine
+    vector_engine = get_vector_engine()
+    random_node = (await vector_engine.search("entities", "AI"))[0]
+    random_node_name = random_node.payload["name"]
+
+    search_results = await cognee.search("SIMILARITY", { "query": random_node_name })
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search("SUMMARY", { "query": "Work and computers" })
+    search_results = await cognee.search("TRAVERSE", { "query": random_node_name })
+    assert len(search_results) != 0, "The search results list is empty."
+    print("\n\nExtracted sentences are:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    search_results = await cognee.search("SUMMARY", { "query": random_node_name })
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\n\nQuery related summaries exist:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search("ADJACENT", { "query": "Articles" })
-    assert len(search_results) != 0, "ROOT node has no neighbours."
-    print("\n\nROOT node has neighbours.\n")
+    search_results = await cognee.search("ADJACENT", { "query": random_node_name })
+    assert len(search_results) != 0, "Large language model query found no neighbours."
+    print("\n\Large language model query found neighbours.\n")
     for result in search_results:
         print(f"{result}\n")
+
+
+    from cognee.shared.utils import render_graph
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    graph = graph_engine.graph
+
+    await render_graph(graph)
 
 
 if __name__ == "__main__":
