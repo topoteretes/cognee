@@ -28,7 +28,7 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
     has_collection = await vector_engine.has_collection(collection_name)
 
     if not has_collection:
-        await vector_engine.create_collection(collection_name)
+        await vector_engine.create_collection(collection_name, payload_schema = EntityNode)
 
     processed_nodes = {}
     type_node_edges = []

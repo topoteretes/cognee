@@ -21,8 +21,8 @@ async def search_adjacent(query: str) -> list[(str, str)]:
 
     exact_node = await graph_engine.extract_node(node_id)
 
-    if exact_node is not None and "id" in exact_node:
-        neighbours = await graph_engine.get_neighbours(exact_node["id"])
+    if exact_node is not None and "uuid" in exact_node:
+        neighbours = await graph_engine.get_neighbours(exact_node["uuid"])
     else:
         vector_engine = get_vector_engine()
         results = await asyncio.gather(

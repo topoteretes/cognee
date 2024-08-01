@@ -2,6 +2,7 @@
 
 import os
 import json
+import asyncio
 import logging
 from typing import Dict, Any, List
 import aiofiles
@@ -168,7 +169,12 @@ class NetworkXAdapter(GraphDBInterface):
         if not self.graph.has_node(node_id):
             return []
 
-        neighbour_ids = list(self.graph.neighbors(node_id))
+        predecessor_ids, successor_ids = await asyncio.gather(
+            self.get_predecessor_ids(node_id),
+            self.get_successor_ids(node_id),
+        )
+
+        neighbour_ids = predecessor_ids + successor_ids
 
         if len(neighbour_ids) == 0:
             return []

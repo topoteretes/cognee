@@ -11,8 +11,8 @@ async def search_traverse(query: str):
 
     exact_node = await graph_engine.extract_node(node_id)
 
-    if exact_node is not None and "id" in exact_node:
-        edges = await graph_engine.get_edges(exact_node["id"])
+    if exact_node is not None and "uuid" in exact_node:
+        edges = await graph_engine.get_edges(exact_node["uuid"])
 
         for edge in edges:
             rules.add(f"{edge[0]} {edge[2]['relationship_name']} {edge[1]}")
