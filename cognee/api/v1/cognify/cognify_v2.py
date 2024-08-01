@@ -1,18 +1,11 @@
 import asyncio
-import hashlib
 import logging
 import uuid
 from typing import Union
 
-from fastapi_users import fastapi_users
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from cognee.infrastructure.databases.graph import get_graph_config
-from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
 from cognee.infrastructure.databases.relational.user_authentication.users import has_permission_document, \
-    get_user_permissions, get_async_session_context, fast_api_users_init
-# from cognee.infrastructure.databases.relational.user_authentication.authentication_db import async_session_maker
-# from cognee.infrastructure.databases.relational.user_authentication.users import get_user_permissions, fastapi_users
+    get_async_session_context, fast_api_users_init
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational.config import get_relationaldb_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
@@ -62,8 +55,6 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
                 out = await has_permission_document(active_user.current_user(active=True), file["id"], "write", session)
 
                 if out:
-
-
                     async with update_status_lock:
                         task_status = get_task_status([dataset_name])
 
@@ -89,9 +80,9 @@ async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = No
                             root_node_id = "ROOT"
 
                         tasks = [
-                            Task(process_documents, parent_node_id = root_node_id, task_config = { "batch_size": 10 }, user_id = hashed_user_id, user_permissions=user_permissions), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                            Task(establish_graph_topology, topology_model = KnowledgeGraph), # Set the graph topology for the document chunk data
-                            Task(expand_knowledge_graph, graph_model = KnowledgeGraph), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+                            Task(process_documents, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+                            Task(establish_graph_topology, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
+                            Task(expand_knowledge_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
                             Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
                             Task(
                                 save_data_chunks,

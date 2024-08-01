@@ -50,6 +50,17 @@ class Neo4jAdapter(GraphDBInterface):
     async def graph(self):
         return await self.get_session()
 
+    async def has_node(self, node_id: str) -> bool:
+        results = self.query(
+            """
+                MATCH (n)
+                WHERE n.id = $node_id
+                RETURN COUNT(n) > 0 AS node_exists
+            """,
+            {"node_id": node_id}
+        )
+        return results[0]["node_exists"] if len(results) > 0 else False
+
     async def add_node(self, node_id: str, node_properties: Dict[str, Any] = None):
         node_id = node_id.replace(":", "_")
 
@@ -157,6 +168,39 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
+    async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
+        query = f"""
+            MATCH (from_node:`{from_node}`)-[relationship:`{edge_label}`]->(to_node:`{to_node}`)
+            RETURN COUNT(relationship) > 0 AS edge_exists
+        """
+
+        edge_exists = await self.query(query)
+        return edge_exists
+
+    async def has_edges(self, edges):
+        query = """
+            UNWIND $edges AS edge
+            MATCH (a)-[r]->(b)
+            WHERE id(a) = edge.from_node AND id(b) = edge.to_node AND type(r) = edge.relationship_name
+            RETURN edge.from_node AS from_node, edge.to_node AS to_node, edge.relationship_name AS relationship_name, count(r) > 0 AS edge_exists
+        """
+
+        try:
+            params = {
+                "edges": [{
+                    "from_node": edge[0],
+                    "to_node": edge[1],
+                    "relationship_name": edge[2],
+                } for edge in edges],
+            }
+
+            results = await self.query(query, params)
+            return [result["edge_exists"] for result in results]
+        except Neo4jError as error:
+            logger.error("Neo4j query error: %s", error, exc_info = True)
+            raise error
+
+
     async def add_edge(self, from_node: str, to_node: str, relationship_name: str, edge_properties: Optional[Dict[str, Any]] = {}):
         serialized_properties = self.serialize_properties(edge_properties)
         from_node = from_node.replace(":", "_")
@@ -198,8 +242,12 @@ class Neo4jAdapter(GraphDBInterface):
           },
         } for edge in edges]
 
-        results = await self.query(query, dict(edges = edges))
-        return results
+        try:
+            results = await self.query(query, dict(edges = edges))
+            return results
+        except Neo4jError as error:
+            logger.error("Neo4j query error: %s", error, exc_info = True)
+            raise error
 
     async def get_edges(self, node_id: str):
         query = """
@@ -261,8 +309,9 @@ class Neo4jAdapter(GraphDBInterface):
     async def get_predecessor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
         if edge_label is not None:
             query = """
-            MATCH (node:`{node_id}`)-[r:`{edge_label}`]->(predecessor)
-            RETURN predecessor.id AS id
+            MATCH (node)<-[r]-(predecessor)
+            WHERE node.id = $node_id AND type(r) = $edge_label
+            RETURN predecessor.id AS predecessor_id
             """
 
             results = await self.query(
@@ -273,11 +322,12 @@ class Neo4jAdapter(GraphDBInterface):
                 )
             )
 
-            return [result["id"] for result in results]
+            return [result["predecessor_id"] for result in results]
         else:
             query = """
-            MATCH (node:`{node_id}`)-[r]->(predecessor)
-            RETURN predecessor.id AS id
+            MATCH (node)<-[r]-(predecessor)
+            WHERE node.id = $node_id
+            RETURN predecessor.id AS predecessor_id
             """
 
             results = await self.query(
@@ -287,13 +337,14 @@ class Neo4jAdapter(GraphDBInterface):
                 )
             )
 
-            return [result["id"] for result in results]
+            return [result["predecessor_id"] for result in results]
 
     async def get_successor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
         if edge_label is not None:
             query = """
-            MATCH (node:`{node_id}`)<-[r:`{edge_label}`]-(successor)
-            RETURN successor.id AS id
+            MATCH (node)-[r]->(successor)
+            WHERE node.id = $node_id AND type(r) = $edge_label
+            RETURN successor.id AS successor_id
             """
 
             results = await self.query(
@@ -304,11 +355,12 @@ class Neo4jAdapter(GraphDBInterface):
                 ),
             )
 
-            return [result["id"] for result in results]
+            return [result["successor_id"] for result in results]
         else:
             query = """
-            MATCH (node:`{node_id}`)<-[r]-(successor)
-            RETURN successor.id AS id
+            MATCH (node)-[r]->(successor)
+            WHERE node.id = $node_id
+            RETURN successor.id AS successor_id
             """
 
             results = await self.query(
@@ -318,12 +370,12 @@ class Neo4jAdapter(GraphDBInterface):
                 )
             )
 
-            return [result["id"] for result in results]
+            return [result["successor_id"] for result in results]
 
     async def get_neighbours(self, node_id: str) -> list[str]:
-        results = await asyncio.gather(*[self.get_predecessor_ids(node_id)], self.get_successor_ids(node_id))
+        predecessor_ids, successor_ids = await asyncio.gather(self.get_predecessor_ids(node_id), self.get_successor_ids(node_id))
 
-        return [*results[0], *results[1]]
+        return [*predecessor_ids, *successor_ids]
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         query = f"""

@@ -1,21 +1,18 @@
-from typing import Union, Dict
-import networkx as nx
+import asyncio
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: dict = None) -> Dict[str, str]:
+async def search_adjacent(query: str) -> list[(str, str)]:
     """
     Find the neighbours of a given node in the graph and return their ids and descriptions.
 
     Parameters:
-    - graph (Union[nx.Graph, AsyncSession]): The graph object or Neo4j session.
-    - query (str): Unused in this implementation but could be used for future enhancements.
-    - other_param (dict, optional): A dictionary that may contain 'node_id' to specify the node.
+    - query (str): The query string to filter nodes by.
 
     Returns:
-    - Dict[str, str]: A dictionary containing the unique identifiers and descriptions of the neighbours of the given node.
+    - list[(str, str)]: A list containing the unique identifiers and names of the neighbours of the given node.
     """
-    node_id = other_param.get("node_id") if other_param else query
+    node_id = query
 
     if node_id is None:
         return {}
@@ -23,16 +20,24 @@ async def search_adjacent(graph: Union[nx.Graph, any], query: str, other_param: 
     graph_engine = await get_graph_engine()
 
     exact_node = await graph_engine.extract_node(node_id)
-    if exact_node is not None and "id" in exact_node:
-        neighbours = await graph_engine.get_neighbours(exact_node["id"])
+
+    if exact_node is not None and "uuid" in exact_node:
+        neighbours = await graph_engine.get_neighbours(exact_node["uuid"])
     else:
         vector_engine = get_vector_engine()
-        collection_name = "classification"
-        data_points = await vector_engine.search(collection_name, query_text = node_id, limit = 5)
+        results = await asyncio.gather(
+            vector_engine.search("entities", query_text = query, limit = 10),
+            vector_engine.search("classification", query_text = query, limit = 10),
+        )
+        results = [*results[0], *results[1]]
+        relevant_results = [result for result in results if result.score < 0.5][:5]
 
-        if len(data_points) == 0:
+        if len(relevant_results) == 0:
             return []
 
-        neighbours = await graph_engine.get_neighbours(data_points[0].id)
+        node_neighbours = await asyncio.gather(*[graph_engine.get_neighbours(result.id) for result in relevant_results])
+        neighbours = []
+        for neighbour_ids in node_neighbours:
+            neighbours.extend(neighbour_ids)
 
-    return [node["name"] for node in neighbours]
+    return neighbours

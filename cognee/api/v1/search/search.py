@@ -11,7 +11,6 @@ from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_traverse import search_traverse
 from cognee.modules.search.graph.search_summary import search_summary
 from cognee.modules.search.graph.search_similarity import search_similarity
-from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.shared.utils import send_telemetry
 
 class SearchType(Enum):
@@ -63,9 +62,6 @@ async def search(search_type: str, params: Dict[str, Any]) -> List:
 
 
 async def specific_search(query_params: List[SearchParameters]) -> List:
-    graph_client = await get_graph_engine()
-    graph = graph_client.graph
-
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SUMMARY: search_summary,
@@ -81,7 +77,7 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
         search_func = search_functions.get(search_param.search_type)
         if search_func:
             # Schedule the coroutine for execution and store the task
-            task = search_func(**search_param.params, graph = graph)
+            task = search_func(**search_param.params)
             search_tasks.append(task)
 
     # Use asyncio.gather to run all scheduled tasks concurrently
@@ -92,7 +88,7 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
 
     send_telemetry("cognee.search")
 
-    return results
+    return results[0] if len(results) == 1 else results
 
 
 

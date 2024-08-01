@@ -1,10 +1,12 @@
 import asyncio
+import logging
 from typing import List, Optional
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
 from ..models.ScoredResult import ScoredResult
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
+logger = logging.getLogger("WeaviateAdapter")
 
 class WeaviateAdapter(VectorDBInterface):
     name = "Weaviate"
@@ -78,20 +80,25 @@ class WeaviateAdapter(VectorDBInterface):
                 vector = vector
             )
 
-
-        objects = list(map(convert_to_weaviate_data_points, data_points))
+        data_points = list(map(convert_to_weaviate_data_points, data_points))
 
         collection = self.get_collection(collection_name)
 
-        with collection.batch.dynamic() as batch:
-            for data_row in objects:
-                batch.add_object(
-                    properties = data_row.properties,
-                    vector = data_row.vector
-                )
-
-        return
-        # return self.get_collection(collection_name).data.insert_many(objects)
+        try:
+            if len(data_points) > 1:
+                return collection.data.insert_many(data_points)
+            else:
+                return collection.data.insert(data_points[0])
+            # with collection.batch.dynamic() as batch:
+            #     for point in data_points:
+            #         batch.add_object(
+            #             uuid = point.uuid,
+            #             properties = point.properties,
+            #             vector = point.vector
+            #         )
+        except Exception as error:
+            logger.error("Error creating data points: %s", str(error))
+            raise error
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         from weaviate.classes.query import Filter

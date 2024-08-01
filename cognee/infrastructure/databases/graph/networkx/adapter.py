@@ -2,6 +2,7 @@
 
 import os
 import json
+import asyncio
 import logging
 from typing import Dict, Any, List
 import aiofiles
@@ -25,6 +26,8 @@ class NetworkXAdapter(GraphDBInterface):
         self.filename = filename
 
 
+    async def has_node(self, node_id: str) -> bool:
+        return self.graph.has_node(node_id)
 
     async def add_node(
         self,
@@ -44,6 +47,18 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def get_graph(self):
         return self.graph
+
+    async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
+        return self.graph.has_edge(from_node, to_node, key = edge_label)
+
+    async def has_edges(self, edges):
+        result = []
+
+        for (from_node, to_node, edge_label) in edges:
+            if await self.has_edge(from_node, to_node, edge_label):
+                result.append((from_node, to_node, edge_label))
+
+        return result
 
     async def add_edge(
         self,
@@ -154,7 +169,12 @@ class NetworkXAdapter(GraphDBInterface):
         if not self.graph.has_node(node_id):
             return []
 
-        neighbour_ids = list(self.graph.neighbors(node_id))
+        predecessor_ids, successor_ids = await asyncio.gather(
+            self.get_predecessor_ids(node_id),
+            self.get_successor_ids(node_id),
+        )
+
+        neighbour_ids = predecessor_ids + successor_ids
 
         if len(neighbour_ids) == 0:
             return []

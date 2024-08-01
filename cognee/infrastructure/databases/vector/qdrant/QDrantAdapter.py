@@ -1,8 +1,11 @@
+import logging
 from typing import List, Dict, Optional
 from qdrant_client import AsyncQdrantClient, models
 from ..vector_db_interface import VectorDBInterface
 from ..models.DataPoint import DataPoint
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+
+logger = logging.getLogger("QDrantAdapter")
 
 # class CollectionConfig(BaseModel, extra = "forbid"):
 #     vector_config: Dict[str, models.VectorParams] = Field(..., description="Vectors configuration" )
@@ -102,14 +105,17 @@ class QDrantAdapter(VectorDBInterface):
 
         points = [convert_to_qdrant_point(point) for point in data_points]
 
-        result = await client.upload_points(
-            collection_name = collection_name,
-            points = points
-        )
-
-        await client.close()
-
-        return result
+        try:
+            result = await client.upload_points(
+                collection_name = collection_name,
+                points = points
+            )
+            return result
+        except Exception as error:
+            logger.error("Error uploading data points to Qdrant: %s", str(error))
+            raise error
+        finally:
+            await client.close()
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         client = self.get_qdrant_client()
@@ -122,7 +128,7 @@ class QDrantAdapter(VectorDBInterface):
         collection_name: str,
         query_text: Optional[str] = None,
         query_vector: Optional[List[float]] = None,
-        limit: int = None,
+        limit: int = 5,
         with_vector: bool = False
     ):
         if query_text is None and query_vector is None:
