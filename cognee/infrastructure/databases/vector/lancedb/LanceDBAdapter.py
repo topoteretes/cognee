@@ -101,7 +101,7 @@ class LanceDBAdapter(VectorDBInterface):
         return [ScoredResult(
             id = result["id"],
             payload = result["payload"],
-            score = 1,
+            score = 0,
         ) for result in results.to_dict("index").values()]
 
     async def search(
@@ -109,7 +109,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 10,
+        limit: int = 5,
         with_vector: bool = False,
     ):
         if query_text is None and query_vector is None:
@@ -123,11 +123,25 @@ class LanceDBAdapter(VectorDBInterface):
 
         results = await collection.vector_search(query_vector).limit(limit).to_pandas()
 
+        result_values = list(results.to_dict("index").values())
+
+        min_value = 100
+        max_value = 0
+
+        for result in result_values:
+            value = float(result["_distance"])
+            if value > max_value:
+                max_value = value
+            if value < min_value:
+                min_value = value
+
+        normalized_values = [(result["_distance"] - min_value) / (max_value - min_value) for result in result_values]
+
         return [ScoredResult(
             id = str(result["id"]),
             payload = result["payload"],
-            score = float(result["_distance"]),
-        ) for result in results.to_dict("index").values()]
+            score = normalized_values[value_index],
+        ) for value_index, result in enumerate(result_values)]
 
     async def batch_search(
         self,

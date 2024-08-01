@@ -4,10 +4,12 @@ from ..tasks.Task import Task
 
 logger = logging.getLogger("run_tasks(tasks: [Task], data)")
 
-async def run_tasks(tasks: [Task], data):
+async def run_tasks(tasks: [Task], data = None):
     if len(tasks) == 0:
         yield data
         return
+
+    args = [data] if data is not None else []
 
     running_task = tasks[0]
     leftover_tasks = tasks[1:]
@@ -19,7 +21,7 @@ async def run_tasks(tasks: [Task], data):
         try:
             results = []
 
-            async_iterator = running_task.run(data)
+            async_iterator = running_task.run(*args)
 
             async for partial_result in async_iterator:
                 results.append(partial_result)
@@ -51,7 +53,7 @@ async def run_tasks(tasks: [Task], data):
         try:
             results = []
 
-            for partial_result in running_task.run(data):
+            for partial_result in running_task.run(*args):
                 results.append(partial_result)
 
                 if len(results) == next_task_batch_size:
@@ -79,7 +81,7 @@ async def run_tasks(tasks: [Task], data):
     elif inspect.iscoroutinefunction(running_task.executable):
         logger.info("Running coroutine task: `%s`", running_task.executable.__name__)
         try:
-            task_result = await running_task.run(data)
+            task_result = await running_task.run(*args)
 
             async for result in run_tasks(leftover_tasks, task_result):
                 yield result
@@ -96,7 +98,7 @@ async def run_tasks(tasks: [Task], data):
     elif inspect.isfunction(running_task.executable):
         logger.info("Running function task: `%s`", running_task.executable.__name__)
         try:
-            task_result = running_task.run(data)
+            task_result = running_task.run(*args)
 
             async for result in run_tasks(leftover_tasks, task_result):
                 yield result

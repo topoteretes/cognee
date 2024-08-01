@@ -1,21 +1,36 @@
+import asyncio
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def search_traverse(query: str, graph): # graph must be there in order to be compatible with generic call
+async def search_traverse(query: str):
+    node_id = query
+    rules = set()
+
     graph_engine = await get_graph_engine()
     vector_engine = get_vector_engine()
 
-    results = await vector_engine.search("classification", query_text = query, limit = 10)
+    exact_node = await graph_engine.extract_node(node_id)
 
-    rules = []
+    if exact_node is not None and "uuid" in exact_node:
+        edges = await graph_engine.get_edges(exact_node["uuid"])
 
-    if len(results) > 0:
-        for result in results:
-            graph_node_id = result.id
+        for edge in edges:
+            rules.add(f"{edge[0]} {edge[2]['relationship_name']} {edge[1]}")
+    else:
+        results = await asyncio.gather(
+            vector_engine.search("entities", query_text = query, limit = 10),
+            vector_engine.search("classification", query_text = query, limit = 10),
+        )
+        results = [*results[0], *results[1]]
+        relevant_results = [result for result in results if result.score < 0.5][:5]
 
-            edges = await graph_engine.get_edges(graph_node_id)
+        if len(relevant_results) > 0:
+            for result in relevant_results:
+                graph_node_id = result.id
 
-            for edge in edges:
-                rules.append(f"{edge[0]} {edge[2]['relationship_name']} {edge[1]}")
+                edges = await graph_engine.get_edges(graph_node_id)
 
-    return rules
+                for edge in edges:
+                    rules.add(f"{edge[0]} {edge[2]['relationship_name']} {edge[1]}")
+
+    return list(rules)
