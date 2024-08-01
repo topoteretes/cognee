@@ -67,15 +67,6 @@ async def  main():
         print(f"{result}\n")
 
 
-    from cognee.shared.utils import render_graph
-    from cognee.infrastructure.databases.graph import get_graph_engine
-
-    graph_engine = await get_graph_engine()
-    graph = graph_engine.graph
-
-    await render_graph(graph)
-
-
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
