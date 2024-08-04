@@ -4,14 +4,15 @@ from enum import Enum
 from typing import Dict, Any, Callable, List
 from pydantic import BaseModel, field_validator
 
-from cognee.infrastructure.databases.relational.user_authentication.users import fast_api_users_init, \
-    has_permission_document, get_async_session_context, get_document_ids_for_user
 from cognee.modules.search.graph import search_cypher
 from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_traverse import search_traverse
 from cognee.modules.search.graph.search_summary import search_summary
 from cognee.modules.search.graph.search_similarity import search_similarity
 from cognee.shared.utils import send_telemetry
+from cognee.modules.users.permissions.methods import get_document_ids_for_user
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 
 class SearchType(Enum):
     ADJACENT = "ADJACENT"
@@ -41,19 +42,19 @@ class SearchParameters(BaseModel):
         return value
 
 
-async def search(search_type: str, params: Dict[str, Any]) -> List:
-    active_user = await fast_api_users_init()
-    async with get_async_session_context() as session:
+async def search(search_type: str, params: Dict[str, Any], user: User = None) -> List:
+    if user is None:
+        user = await get_default_user()
+  
+    extract_documents = await get_document_ids_for_user(user.id)
+    search_params = SearchParameters(search_type = search_type, params = params)
+    searches = await specific_search([search_params])
 
-        extract_documents = await get_document_ids_for_user(active_user.current_user(active=True), session=session)
-        search_params = SearchParameters(search_type = search_type, params = params)
-        searches = await specific_search([search_params])
-
-        filtered_searches =[]
-        for document in searches:
-            for document_id in extract_documents:
-                if document_id in document:
-                    filtered_searches.append(document)
+    filtered_searches = []
+    for document in searches:
+        for document_id in extract_documents:
+            if document_id in document:
+                filtered_searches.append(document)
 
 
     return filtered_searches

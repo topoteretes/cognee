@@ -1,13 +1,10 @@
 import asyncio
 import logging
-import uuid
 from typing import Union
 
 from cognee.infrastructure.databases.graph import get_graph_config
-from cognee.infrastructure.databases.relational.user_authentication.users import has_permission_document, \
-    get_async_session_context, fast_api_users_init
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
 from cognee.shared.data_models import KnowledgeGraph
@@ -23,6 +20,9 @@ from cognee.modules.data.extraction.knowledge_graph.establish_graph_topology imp
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.pipelines import run_tasks, run_tasks_parallel
 from cognee.modules.tasks import create_task_status_table, update_task_status, get_task_status
+from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.permissions.methods import check_permissions_on_documents
 
 logger = logging.getLogger("cognify.v2")
 
@@ -33,113 +33,98 @@ class PermissionDeniedException(Exception):
         self.message = message
         super().__init__(self.message)
 
-async def cognify(datasets: Union[str, list[str]] = None, root_node_id: str = None):
-
-    relational_config = get_relationaldb_config()
-    db_engine = relational_config.database_engine
+async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
+    db_engine = get_relational_engine()
     create_task_status_table()
 
     if datasets is None or len(datasets) == 0:
-        return await cognify(db_engine.get_datasets())
+        return await cognify(await db_engine.get_datasets())
 
+    if user is None:
+        user = await get_default_user()
 
     async def run_cognify_pipeline(dataset_name: str, files: list[dict]):
+        documents = [
+            PdfDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "pdf" else
+            AudioDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "audio" else
+            ImageDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "image" else
+            TextDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"])
+            for file in files
+        ]
 
-        for file in files:
-            file["id"] = str(uuid.uuid4())
-            file["name"] = file["name"].replace(" ", "_")
+        await check_permissions_on_documents(user, "read", [document.id for document in documents])
 
-            async with get_async_session_context() as session:
-                active_user = await fast_api_users_init()
+        async with update_status_lock:
+            task_status = get_task_status([dataset_name])
 
-                out = await has_permission_document(active_user.current_user(active=True), file["id"], "write", session)
+            if dataset_name in task_status and task_status[dataset_name] == "DATASET_PROCESSING_STARTED":
+                logger.info(f"Dataset {dataset_name} is being processed.")
+                return
 
-                if out:
-                    async with update_status_lock:
-                        task_status = get_task_status([dataset_name])
+            update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
+        try:
+            cognee_config = get_cognify_config()
+            graph_config = get_graph_config()
+            root_node_id = None
 
-                        if dataset_name in task_status and task_status[dataset_name] == "DATASET_PROCESSING_STARTED":
-                            logger.info(f"Dataset {dataset_name} is being processed.")
-                            return
+            if graph_config.infer_graph_topology and graph_config.graph_topology_task:
+                from cognee.modules.topology.topology import TopologyEngine
+                topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+                root_node_id = await topology_engine.add_graph_topology(files = files)
+            elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
+                from cognee.modules.topology.topology import TopologyEngine
+                topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+                await topology_engine.add_graph_topology(graph_config.topology_file_path)
+            elif not graph_config.graph_topology_task:
+                root_node_id = "ROOT"
 
-                        update_task_status(dataset_name, "DATASET_PROCESSING_STARTED")
-                    try:
-                        cognee_config = get_cognify_config()
-                        graph_config = get_graph_config()
-                        root_node_id = None
+            tasks = [
+                Task(process_documents, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+                Task(establish_graph_topology, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
+                Task(expand_knowledge_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+                Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
+                Task(
+                    save_data_chunks,
+                    collection_name = "chunks",
+                ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
+                run_tasks_parallel([
+                    Task(
+                        summarize_text_chunks,
+                        summarization_model = cognee_config.summarization_model,
+                        collection_name = "chunk_summaries",
+                    ), # Summarize the document chunks
+                    Task(
+                        classify_text_chunks,
+                        classification_model = cognee_config.classification_model,
+                    ),
+                ]),
+                Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
+            ]
 
-                        if graph_config.infer_graph_topology and graph_config.graph_topology_task:
-                            from cognee.modules.topology.topology import TopologyEngine
-                            topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-                            root_node_id = await topology_engine.add_graph_topology(files = files)
-                        elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
-                            from cognee.modules.topology.topology import TopologyEngine
-                            topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-                            await topology_engine.add_graph_topology(graph_config.topology_file_path)
-                        elif not graph_config.graph_topology_task:
-                            root_node_id = "ROOT"
+            pipeline = run_tasks(tasks, documents)
 
-                        tasks = [
-                            Task(process_documents, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                            Task(establish_graph_topology, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
-                            Task(expand_knowledge_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
-                            Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
-                            Task(
-                                save_data_chunks,
-                                collection_name = "chunks",
-                            ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
-                            run_tasks_parallel([
-                                Task(
-                                    summarize_text_chunks,
-                                    summarization_model = cognee_config.summarization_model,
-                                    collection_name = "chunk_summaries",
-                                ), # Summarize the document chunks
-                                Task(
-                                    classify_text_chunks,
-                                    classification_model = cognee_config.classification_model,
-                                ),
-                            ]),
-                            Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
-                        ]
+            async for result in pipeline:
+                print(result)
 
-                        pipeline = run_tasks(tasks, [
-                            PdfDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "pdf" else
-                            AudioDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "audio" else
-                            ImageDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "image" else
-                            TextDocument(title=f"{file['name']}.{file['extension']}", file_path=file["file_path"])
-                            for file in files
-                        ])
-
-                        async for result in pipeline:
-                            print(result)
-
-                        update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
-                    except Exception as error:
-                        update_task_status(dataset_name, "DATASET_PROCESSING_ERROR")
-                        raise error
+            update_task_status(dataset_name, "DATASET_PROCESSING_FINISHED")
+        except Exception as error:
+            update_task_status(dataset_name, "DATASET_PROCESSING_ERROR")
+            raise error
 
 
-        existing_datasets = db_engine.get_datasets()
+    existing_datasets = await db_engine.get_datasets()
+    awaitables = []
 
-        awaitables = []
+    for dataset in datasets:
+        dataset_name = generate_dataset_name(dataset)
 
+        if dataset_name in existing_datasets:
+            awaitables.append(run_cognify_pipeline(dataset, db_engine.get_files_metadata(dataset_name)))
 
-        # dataset_files = []
-        # dataset_name = datasets.replace(".", "_").replace(" ", "_")
+    return await asyncio.gather(*awaitables)
 
-        # for added_dataset in existing_datasets:
-        #     if dataset_name in added_dataset:
-        #         dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
-
-        for dataset in datasets:
-            if dataset in existing_datasets:
-                # for file_metadata in files:
-                #     if root_node_id is None:
-                #         root_node_id=file_metadata['id']
-                awaitables.append(run_cognify_pipeline(dataset, db_engine.get_files_metadata(dataset)))
-
-        return await asyncio.gather(*awaitables)
-
+def generate_dataset_name(dataset_name: str) -> str:
+    return dataset_name.replace(".", "_").replace(" ", "_")
 
 #
 # if __name__ == "__main__":

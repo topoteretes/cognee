@@ -5,16 +5,17 @@ from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.relational import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.files.storage import LocalStorage
 
 class config():
     @staticmethod
     def system_root_directory(system_root_directory: str):
         databases_directory_path = os.path.join(system_root_directory, "databases")
 
-        relational_config = get_relationaldb_config()
+        relational_config = get_relational_config()
         relational_config.db_path = databases_directory_path
-        relational_config.create_engine()
+        LocalStorage.ensure_directory_exists(databases_directory_path)
 
         graph_config = get_graph_config()
         graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")

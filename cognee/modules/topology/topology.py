@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.infrastructure.databases.relational import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.modules.cognify.config import get_cognify_config
@@ -162,11 +162,9 @@ async def main():
 
     await add(f"data://{data_dir}", dataset_name="explanations")
 
-    relational_config = get_relationaldb_config()
-    db_engine = relational_config.database_engine
+    db_engine = get_relational_engine()
 
-
-    datasets = db_engine.get_datasets()
+    datasets = await db_engine.get_datasets()
     dataset_files =[]
 
     for added_dataset in datasets:
@@ -180,7 +178,7 @@ async def main():
     file_path = "example_data.json"  # or 'example_data.csv'
     #
     # # Adding graph topology
-    graph = await topology_engine.add_graph_topology(file_path, dataset_files=dataset_files)
+    graph = await topology_engine.add_graph_topology(file_path, files = dataset_files)
     print(graph)
 
 # Run the main function

@@ -1,5 +1,5 @@
 export default function cognifyDataset(dataset: { id: string }) {
-  return fetch('http://0.0.0.0:8000/cognify', {
+  return fetch('http://127.0.0.1:8000/cognify', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -75,7 +75,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
 
     startSaving();
 
-    fetch('http://0.0.0.0:8000/settings', {
+    fetch('http://127.0.0.1:8000/settings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -138,7 +138,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
 
   useEffect(() => {
     const fetchConfig = async () => {
-      const response = await fetch('http://0.0.0.0:8000/settings');
+      const response = await fetch('http://127.0.0.1:8000/settings');
       const settings = await response.json();
 
       if (!settings.llm.model) {

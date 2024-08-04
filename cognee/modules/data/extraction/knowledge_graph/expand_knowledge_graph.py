@@ -1,7 +1,7 @@
 import json
 import asyncio
 from uuid import uuid5, NAMESPACE_OID
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -91,8 +91,8 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                     name = node_name,
                     type = node_name,
                     description = node.description,
-                    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 )
 
                 graph_nodes.append((
@@ -145,8 +145,8 @@ async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: 
                     name = type_node_name,
                     type = type_node_id,
                     description = type_node_name,
-                    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 )
 
                 graph_nodes.append((type_node_id, dict(

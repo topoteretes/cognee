@@ -36,7 +36,7 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
   const showRawData = useCallback((dataItem: Data) => {
     setSelectedData(dataItem);
 
-    fetch(`http://0.0.0.0:8000/datasets/${datasetId}/data/${dataItem.id}/raw`)
+    fetch(`http://127.0.0.1:8000/datasets/${datasetId}/data/${dataItem.id}/raw`)
       .then((response) => response.arrayBuffer())
       .then(setRawData);
 

@@ -60,6 +60,7 @@ services:
       - 3001:3000
     networks:
       - cognee-network
+
   postgres:
     image: postgres:latest
     container_name: postgres

@@ -1,8 +1,7 @@
-from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 def get_task_status(data_ids: [str]):
-    relational_config = get_relationaldb_config()
-    db_engine = relational_config.database_engine
+    db_engine = get_relational_engine()
 
     formatted_data_ids = ", ".join([f"'{data_id}'" for data_id in data_ids])
 

@@ -79,7 +79,6 @@ class DuckDBAdapter():
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS cognify (
                     document_id STRING,
-                    layer_id STRING,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT NULL,
                     processed BOOLEAN DEFAULT FALSE,
@@ -89,8 +88,8 @@ class DuckDBAdapter():
 
         # Prepare the insert statement
         insert_query = """
-            INSERT INTO cognify (document_id, layer_id)
-            VALUES (?, ?);
+            INSERT INTO cognify (document_id)
+            VALUES (?);
         """
 
         # Insert each record into the "cognify" table
@@ -98,7 +97,6 @@ class DuckDBAdapter():
             with self.get_connection() as connection:
                 connection.execute(insert_query, [
                     record.get("document_id"),
-                    record.get("layer_id")
                 ])
 
     def fetch_cognify_data(self, excluded_document_id: str):
@@ -106,7 +104,6 @@ class DuckDBAdapter():
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS cognify (
             document_id STRING,
-            layer_id STRING,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT NULL,
             processed BOOLEAN DEFAULT FALSE,
@@ -118,7 +115,7 @@ class DuckDBAdapter():
             connection.execute(create_table_sql)
 
         # SQL command to select data from the "cognify" table
-        select_data_sql = f"SELECT document_id, layer_id, created_at, updated_at, processed FROM cognify WHERE document_id != '{excluded_document_id}' AND processed = FALSE;"
+        select_data_sql = f"SELECT document_id, created_at, updated_at, processed FROM cognify WHERE document_id != '{excluded_document_id}' AND processed = FALSE;"
 
         with self.get_connection() as connection:
             # Execute the query and fetch the results
@@ -144,7 +141,6 @@ class DuckDBAdapter():
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS cognify (
             document_id STRING,
-            layer_id STRING,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT NULL,
             processed BOOLEAN DEFAULT FALSE,
@@ -166,7 +162,8 @@ class DuckDBAdapter():
     def delete_database(self):
         from cognee.infrastructure.files.storage import LocalStorage
 
-        LocalStorage.remove(self.db_location)
+        if LocalStorage.file_exists(self.db_location):
+            LocalStorage.remove(self.db_location)
 
         if LocalStorage.file_exists(self.db_location + ".wal"):
             LocalStorage.remove(self.db_location + ".wal")

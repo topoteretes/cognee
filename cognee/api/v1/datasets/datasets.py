@@ -1,14 +1,13 @@
 from duckdb import CatalogException
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.tasks import get_task_status
-from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 class datasets():
     @staticmethod
-    def list_datasets():
-        relational_config = get_relationaldb_config()
-        db = relational_config.database_engine
-        return db.get_datasets()
+    async def list_datasets():
+        db = get_relational_engine()
+        return await db.get_datasets()
 
     @staticmethod
     def discover_datasets(directory_path: str):
@@ -16,8 +15,7 @@ class datasets():
 
     @staticmethod
     def list_data(dataset_name: str):
-        relational_config = get_relationaldb_config()
-        db = relational_config.database_engine
+        db = get_relational_engine()
         try:
             return db.get_files_metadata(dataset_name)
         except CatalogException:
@@ -32,8 +30,7 @@ class datasets():
 
     @staticmethod
     def delete_dataset(dataset_id: str):
-        relational_config = get_relationaldb_config()
-        db = relational_config.database_engine
+        db = get_relational_engine()
         try:
             return db.delete_table(dataset_id)
         except CatalogException:

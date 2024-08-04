@@ -3,7 +3,6 @@ import os
 import aiohttp
 import uvicorn
 import json
-import asyncio
 import logging
 import sentry_sdk
 from typing import Dict, Any, List, Union, Optional, Literal
@@ -13,7 +12,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.relational.user_authentication.routers import permission_router
+from cognee.infrastructure.databases.relational import create_db_and_tables
 
 # Set up logging
 logging.basicConfig(
@@ -28,13 +27,16 @@ if os.getenv("ENV") == "prod":
         traces_sample_rate = 1.0,
         profiles_sample_rate = 1.0,
     )
+
 from contextlib import asynccontextmanager
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Not needed if you setup a migration system like Alembic
     await create_db_and_tables()
     yield
-app = FastAPI(debug = os.getenv("ENV") != "prod", lifespan=lifespan)
+
+app = FastAPI(debug = os.getenv("ENV") != "prod", lifespan = lifespan)
 
 origins = [
     "http://frontend:3000",
@@ -50,70 +52,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from contextlib import asynccontextmanager
+from cognee.api.v1.users.routers import get_auth_router, get_register_router,\
+    get_reset_password_router, get_verify_router, get_users_router
 
-from fastapi import Depends, FastAPI
-
-from cognee.infrastructure.databases.relational.user_authentication.authentication_db import User, create_db_and_tables
-from cognee.infrastructure.databases.relational.user_authentication.schemas import UserCreate, UserRead, UserUpdate
-from cognee.infrastructure.databases.relational.user_authentication.users import auth_backend, current_active_user, fastapi_users
+from cognee.api.v1.permissions.get_permissions_router import get_permissions_router
 
 app.include_router(
-    fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["auth"]
-)
-app.include_router(
-    fastapi_users.get_register_router(UserRead, UserCreate),
-    prefix="/auth",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_reset_password_router(),
-    prefix="/auth",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_verify_router(UserRead),
-    prefix="/auth",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_users_router(UserRead, UserUpdate),
-    prefix="/users",
-    tags=["users"],
+    get_auth_router(),
+    prefix = "/auth/jwt",
+    tags = ["auth"]
 )
 
-app.include_router(permission_router, prefix="/manage", tags=["management"])
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Not needed if you setup a migration system like Alembic
-    await create_db_and_tables()
-    yield
 app.include_router(
-    fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["auth"]
-)
-app.include_router(
-    fastapi_users.get_register_router(UserRead, UserCreate),
-    prefix="/auth",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_reset_password_router(),
-    prefix="/auth",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_verify_router(UserRead),
-    prefix="/auth",
-    tags=["auth"],
-)
-app.include_router(
-    fastapi_users.get_users_router(UserRead, UserUpdate),
-    prefix="/users",
-    tags=["users"],
+    get_register_router(),
+    prefix = "/auth",
+    tags = ["auth"],
 )
 
+app.include_router(
+    get_reset_password_router(),
+    prefix = "/auth",
+    tags = ["auth"],
+)
 
+app.include_router(
+    get_verify_router(),
+    prefix = "/auth",
+    tags = ["auth"],
+)
+
+app.include_router(
+    get_users_router(),
+    prefix = "/users",
+    tags = ["users"],
+)
+
+app.include_router(
+    get_permissions_router(),
+    prefix = "/permissions",
+    tags = ["permissions"],
+)
 
 @app.get("/")
 async def root():
@@ -135,7 +113,7 @@ class Payload(BaseModel):
 @app.get("/datasets", response_model=list)
 async def get_datasets():
     from cognee.api.v1.datasets.datasets import datasets
-    return datasets.list_datasets()
+    return await datasets.list_datasets()
 
 @app.delete("/datasets/{dataset_id}", response_model=dict)
 async def delete_dataset(dataset_id: str):
@@ -294,8 +272,8 @@ async def search(payload: SearchPayload):
 
 @app.get("/settings", response_model=dict)
 async def get_settings():
-    from cognee.modules.settings import get_settings
-    return get_settings()
+    from cognee.modules.settings import get_settings as get_cognee_settings
+    return get_cognee_settings()
 
 class LLMConfig(BaseModel):
     provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"]]
@@ -334,13 +312,10 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        from cognee.infrastructure.databases.relational import get_relationaldb_config
-        relational_config = get_relationaldb_config()
-        relational_config.create_engine()
-
+        import asyncio
         from cognee.modules.data.deletion import prune_system, prune_data
-        # asyncio.run(prune_data())
-        # asyncio.run(prune_system(metadata = True))
+        asyncio.run(prune_data())
+        asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:

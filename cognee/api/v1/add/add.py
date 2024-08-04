@@ -3,18 +3,20 @@ from os import path
 import asyncio
 import dlt
 import duckdb
-from fastapi_users import fastapi_users
 
 import cognee.modules.ingestion as ingestion
-from cognee.infrastructure.databases.relational.user_authentication.users import give_permission_document, \
-    get_async_session_context, current_active_user, create_default_user
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
 from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_config, create_db_and_tables
+from cognee.modules.users.methods import create_default_user
+from cognee.modules.users.permissions.methods import give_permission_on_document
+from cognee.modules.users.models import User
 
-async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset"):
+async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset", user: User = None):
+    await create_db_and_tables()
+
     if isinstance(data, str):
         if "data://" in data:
             # data is a data directory path
@@ -48,11 +50,11 @@ async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_nam
             file_paths.append(save_data_to_file(data_item, dataset_name))
 
     if len(file_paths) > 0:
-        return await add_files(file_paths, dataset_name)
+        return await add_files(file_paths, dataset_name, user)
 
     return []
 
-async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "default_user"):
+async def add_files(file_paths: List[str], dataset_name: str,  user):
     base_config = get_base_config()
     data_directory_path = base_config.data_root_directory
 
@@ -73,12 +75,24 @@ async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "d
         else:
             processed_file_paths.append(file_path)
 
-    relational_config = get_relationaldb_config()
-    db = duckdb.connect(relational_config.db_file_path)
+    relational_config = get_relational_config()
 
-    destination = dlt.destinations.duckdb(
-        credentials = db,
-    )
+    if relational_config.db_provider == "duckdb":
+        db = duckdb.connect(relational_config.db_file_path)
+
+        destination = dlt.destinations.duckdb(
+          credentials = db,
+        )
+    else:
+        destination = dlt.destinations.postgres(
+            credentials = {
+                "host": relational_config.db_host,
+                "port": relational_config.db_port,
+                "user": relational_config.db_user,
+                "password": relational_config.db_password,
+                "database": relational_config.db_name,
+            },
+        )
 
     pipeline = dlt.pipeline(
         pipeline_name = "file_load_from_filesystem",
@@ -86,17 +100,18 @@ async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "d
     )
 
     @dlt.resource(standalone = True, merge_key = "id")
-    async def data_resources(file_paths: str, user_id: str = user_id):
+    async def data_resources(file_paths: str, user: User):
         for file_path in file_paths:
             with open(file_path.replace("file://", ""), mode = "rb") as file:
                 classified_data = ingestion.classify(file)
 
                 data_id = ingestion.identify(classified_data)
-                async with get_async_session_context() as session:
-                    if user_id is None:
-                        current_active_user = await create_default_user()
 
-                    await give_permission_document(current_active_user, data_id, "write", session= session)
+                if user is None:
+                    user = await create_default_user()
+
+                    await give_permission_on_document(user, data_id, "read")
+                    await give_permission_on_document(user, data_id, "write")
 
                 file_metadata = classified_data.get_metadata()
 
@@ -109,7 +124,7 @@ async def add_files(file_paths: List[str], dataset_name: str,  user_id: str = "d
                 }
 
     run_info = pipeline.run(
-        data_resources(processed_file_paths),
+        data_resources(processed_file_paths, user),
         table_name = "file_metadata",
         dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset",
         write_disposition = "merge",
