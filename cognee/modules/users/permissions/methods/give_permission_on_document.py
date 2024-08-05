@@ -12,18 +12,18 @@ async def give_permission_on_document(
     document_resource = Resource(resource_id = document_id)
 
     async with db_engine.get_async_session() as session:
-        permission = (await session.execute(select(Permission).filter(Permission.name == permission_name))).first()
+        permission = (await session.execute(select(Permission).filter(Permission.name == permission_name))).scalars().first()
 
         if permission is None:
             permission = Permission(name = permission_name)
 
-    acl = ACL(principal_id = user.id)
-    acl.permission = permission
-    acl.resources.append(document_resource)
+        acl = ACL(principal_id = user.id)
+        acl.permission = permission
+        acl.resources.append(document_resource)
 
-    session.add(acl)
+        session.add(acl)
 
-    await session.commit()
+        await session.commit()
 
 
     # if user.is_superuser:

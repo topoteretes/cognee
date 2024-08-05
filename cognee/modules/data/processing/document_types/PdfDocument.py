@@ -1,6 +1,6 @@
 # import pdfplumber
 import logging
-from uuid import uuid5, NAMESPACE_OID
+from uuid import UUID, uuid5, NAMESPACE_OID
 from typing import Optional
 from pypdf import PdfReader as pypdf_PdfReader
 from cognee.modules.data.chunking import chunk_by_paragraph
@@ -8,10 +8,10 @@ from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChu
 from .Document import Document
 
 class PdfReader():
-    id: str
+    id: UUID
     file_path: str
 
-    def __init__(self, id: str, file_path: str):
+    def __init__(self, id: UUID, file_path: str):
         self.id = id
         self.file_path = file_path
 
@@ -86,8 +86,8 @@ class PdfDocument(Document):
     num_pages: int
     file_path: str
 
-    def __init__(self, title: str, file_path: str):
-        self.id = uuid5(NAMESPACE_OID, title)
+    def __init__(self, id: UUID, title: str, file_path: str):
+        self.id = id or uuid5(NAMESPACE_OID, title)
         self.title = title
         self.file_path = file_path
         logging.debug("file_path: %s", self.file_path)

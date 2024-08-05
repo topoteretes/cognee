@@ -1,3 +1,4 @@
+from uuid import uuid4
 from typing import List
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, Mapped
@@ -6,14 +7,14 @@ from cognee.infrastructure.databases.relational import Base
 from .DatasetData import DatasetData
 
 class Dataset(Base):
-    __tablename__ = "dataset"
+    __tablename__ = "datasets"
 
-    id = Column(UUID, primary_key = True)
+    id = Column(UUID(as_uuid = True), primary_key = True, default = uuid4)
+
     name = Column(Text)
-    description = Column(Text, nullable = True)
 
-    created_at = Column(DateTime, default = datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate = datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone = True), default = lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone = True), onupdate = lambda: datetime.now(timezone.utc))
 
     data: Mapped[List["Data"]] = relationship(
         secondary = DatasetData.__tablename__,
