@@ -119,7 +119,7 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
         dataset_name = generate_dataset_name(dataset)
 
         if dataset_name in existing_datasets:
-            awaitables.append(run_cognify_pipeline(dataset, db_engine.get_files_metadata(dataset_name)))
+            awaitables.append(run_cognify_pipeline(dataset, await db_engine.get_files_metadata(dataset_name)))
 
     return await asyncio.gather(*awaitables)
 

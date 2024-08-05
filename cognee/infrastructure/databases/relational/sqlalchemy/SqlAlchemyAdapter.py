@@ -60,8 +60,12 @@ class SQLAlchemyAdapter():
 
     async def get_files_metadata(self, dataset_name: str):
         async with self.engine.connect() as connection:
-            result = await connection.execute(text(f"SELECT id, name, file_path, extension, mime_type FROM {dataset_name}.file_metadata;"))
-            return [dict(row) for row in result]
+            result = await connection.execute(
+                text(f"SELECT id, name, file_path, extension, mime_type FROM {dataset_name}.file_metadata;"))
+            rows = result.fetchall()
+            metadata = [{"id": row.id, "name": row.name, "file_path": row.file_path, "extension": row.extension,
+                         "mime_type": row.mime_type} for row in rows]
+            return metadata
 
     async def delete_table(self, table_name: str):
         async with self.engine.connect() as connection:
