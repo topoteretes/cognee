@@ -15,18 +15,18 @@ class PermissionDeniedException(Exception):
 
 
 async def check_permissions_on_documents(user: User, permission_type: str, document_ids: list[str], session):
+
+    logging.info("This is the user: %s", user.__dict__)
     try:
         user_group_ids = [group.id for group in user.groups]
 
-        result = await session.execute(
-            select(ACL).filter(
-                ACL.principal_id.in_([user.id, *user_group_ids]),
-                ACL.permission.name == permission_type
-            )
+        acls = await session.execute(
+            select(ACL)
+            .join(ACL.permission)
+            .where(ACL.principal_id.in_([user.id, *user_group_ids]))
+            .where(ACL.permission.has(name=permission_type))
         )
-        acls = result.scalars().all()
-
-        resource_ids = [resource.resource_id for acl in acls for resource in acl.resources]
+        resource_ids = [resource.resource_id for acl in acls.scalars().all() for resource in acl.resources]
         has_permissions = all(document_id in resource_ids for document_id in document_ids)
 
         if not has_permissions:
