@@ -153,7 +153,19 @@ class SQLAlchemyAdapter():
             connection.execute(text("DELETE FROM cognify;"))
             connection.execute(text("DROP TABLE cognify;"))
 
+    async def drop_tables(self, connection):
+        try:
+            await connection.execute(text("DROP TABLE IF EXISTS group_permission CASCADE"))
+            await connection.execute(text("DROP TABLE IF EXISTS permissions CASCADE"))
+            # Add more DROP TABLE statements for other tables as needed
+            print("Database tables dropped successfully.")
+        except Exception as e:
+            print(f"Error dropping database tables: {e}")
+
     async def delete_database(self):
         async with self.engine.begin() as connection:
-            from ..ModelBase import Base
-            await connection.run_sync(Base.metadata.drop_all)
+            try:
+                await self.drop_tables(connection)
+                print("Database tables dropped successfully.")
+            except Exception as e:
+                print(f"Error dropping database tables: {e}")

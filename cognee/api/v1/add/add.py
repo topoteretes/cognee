@@ -108,11 +108,13 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
                 data_id = ingestion.identify(classified_data)
 
                 if user is None:
-                    user = await create_default_user()
+                    try:
+                        user = await create_default_user()
 
-                    await give_permission_on_document(user, data_id, "read")
-                    await give_permission_on_document(user, data_id, "write")
-
+                        await give_permission_on_document(user, data_id, "read")
+                        await give_permission_on_document(user, data_id, "write")
+                    except:
+                        pass
                 file_metadata = classified_data.get_metadata()
 
                 yield {

@@ -35,7 +35,7 @@ async def  main():
 
     await cognee.add([text], dataset_name)
 
-    await cognee.cognify([dataset_name], root_node_id = "ROOT")
+    await cognee.cognify([dataset_name])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
     vector_engine = get_vector_engine()
