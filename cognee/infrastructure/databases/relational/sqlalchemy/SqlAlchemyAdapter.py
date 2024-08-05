@@ -57,11 +57,11 @@ class SQLAlchemyAdapter():
             result = connection.execute(text(f"SELECT id, name, file_path, extension, mime_type FROM {dataset_name}.file_metadata;"))
             return [dict(row) for row in result]
 
-    def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
+    async def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
         fields_query_parts = [f"{item['name']} {item['type']}" for item in table_config]
-        with self.engine.connect() as connection:
-            connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
-            connection.execute(text(f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"))
+        async with self.engine.connect() as connection:
+            await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
+            await connection.execute(text(f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"))
 
     def delete_table(self, table_name: str):
         with self.engine.connect() as connection:
