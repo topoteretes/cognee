@@ -35,7 +35,7 @@ class PermissionDeniedException(Exception):
 
 async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
     db_engine = get_relational_engine()
-    create_task_status_table()
+    await create_task_status_table()
 
     if datasets is None or len(datasets) == 0:
         return await cognify(await db_engine.get_datasets())

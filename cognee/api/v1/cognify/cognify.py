@@ -45,7 +45,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
     # Has to be loaded in advance, multithreading doesn't work without it.
     nltk.download("stopwords", quiet=True)
     stopwords.ensure_loaded()
-    create_task_status_table()
+    await create_task_status_table()
 
     graph_client = await get_graph_engine()
 
