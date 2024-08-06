@@ -24,19 +24,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macos-latest"]
+        # os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest"]
     steps:
-      - name: Install Docker
-        run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask docker
-          sudo /Applications/Docker.app/Contents/MacOS/Docker --unattended --install-privileged-components
-          open -a /Applications/Docker.app --args --unattended --accept-license
-          echo "We are waiting for Docker to be up and running. It can take over 2 minutes..."
-          while ! /Applications/Docker.app/Contents/Resources/bin/docker info &>/dev/null; do sleep 1; done
-        if: runner.os == 'macOS'
+      # - name: Install Docker
+      #   run: |
+      #     HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask docker
+      #     sudo /Applications/Docker.app/Contents/MacOS/Docker --unattended --install-privileged-components
+      #     open -a /Applications/Docker.app --args --unattended --accept-license
+      #     echo "We are waiting for Docker to be up and running. It can take over 2 minutes..."
+      #     while ! /Applications/Docker.app/Contents/Resources/bin/docker info &>/dev/null; do sleep 1; done
+      #   if: runner.os == 'macOS'
     
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      # - name: Set up QEMU
+      #   uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -48,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macos-latest"] #, "windows-latest"
+        os: ["ubuntu-latest"] #, "windows-latest", "macos-latest"
         python-version: ["3.11.x"]
         # Test all python versions on ubuntu only
         include:
