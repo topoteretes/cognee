@@ -35,6 +35,18 @@ jobs:
       run:
         shell: bash
 
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+        ports:
+          - 5432:5432
+
     steps:
       - name: Check out
         uses: actions/checkout@v2
