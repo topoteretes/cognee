@@ -18,8 +18,13 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
-  install_docker:
-    runs-on: "ubuntu-latest"
+  setup_docker:
+    name: Set up Docker Buildx
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-latest"]
     steps:
       - name: Install Docker
         run: |
@@ -29,16 +34,7 @@ jobs:
           echo "We are waiting for Docker to be up and running. It can take over 2 minutes..."
           while ! /Applications/Docker.app/Contents/Resources/bin/docker info &>/dev/null; do sleep 1; done
         if: runner.os == 'macOS'
-
-  setup_docker:
-    name: Set up Docker Buildx
-    runs-on: ${{ matrix.os }}
-    needs: install_docker
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ["ubuntu-latest", "macos-latest"]
-    steps:
+    
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
