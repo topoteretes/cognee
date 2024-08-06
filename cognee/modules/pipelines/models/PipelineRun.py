@@ -10,8 +10,7 @@ class PipelineRun(Base):
 
     created_at = Column(DateTime(timezone = True), default = lambda: datetime.now(timezone.utc))
 
-    run_name = Column(String, index = True)
-
     status = Column(String)
 
+    run_id = Column(UUID(as_uuid = True), index = True)
     run_info = Column(JSON)

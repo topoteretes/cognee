@@ -1,5 +1,6 @@
 from duckdb import CatalogException
 from cognee.modules.ingestion import discover_directory_datasets
+from cognee.modules.data.operations.get_dataset_data import get_dataset_data
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -14,10 +15,9 @@ class datasets():
         return list(discover_directory_datasets(directory_path).keys())
 
     @staticmethod
-    async def list_data(dataset_name: str):
-        db = get_relational_engine()
+    async def list_data(dataset_id: str, dataset_name: str = None):
         try:
-            return await db.get_files_metadata(dataset_name)
+            return await get_dataset_data(dataset_id = dataset_id, dataset_name = dataset_name)
         except CatalogException:
             return None
 

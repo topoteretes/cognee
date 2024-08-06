@@ -7,7 +7,7 @@ import styles from './SearchView.module.css';
 interface Message {
   id: string;
   user: 'user' | 'system';
-  text: string;
+  text: any;
 }
 
 interface SelectOption {
@@ -98,7 +98,9 @@ export default function SearchView() {
                 [styles.userMessage]: message.user === "user",
               })}
             >
-              {message.text}
+              {message?.text && (
+                typeof(message.text) == "string" ? message.text : JSON.stringify(message.text)
+              )}
             </Text>
           ))}
         </Stack>

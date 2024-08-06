@@ -67,7 +67,6 @@ function useDatasets() {
   const fetchDatasets = useCallback(() => {
     fetch('http://127.0.0.1:8000/datasets')
       .then((response) => response.json())
-      .then((datasets) => datasets.map((dataset: string) => ({ id: dataset, name: dataset })))
       .then((datasets) => {
         setDatasets(datasets);
 

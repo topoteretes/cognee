@@ -48,15 +48,15 @@ export default function Home() {
       });
   }, [showNotification])
 
-  const onDatasetCognify = useCallback((dataset: { id: string }) => {
-    showNotification(`Cognification started for dataset "${dataset.id}".`, 5000);
+  const onDatasetCognify = useCallback((dataset: { id: string, name: string }) => {
+    showNotification(`Cognification started for dataset "${dataset.name}".`, 5000);
 
     return cognifyDataset(dataset)
       .then(() => {
-        showNotification(`Dataset "${dataset.id}" cognified.`, 5000);
+        showNotification(`Dataset "${dataset.name}" cognified.`, 5000);
       })
       .catch(() => {
-        showNotification(`Dataset "${dataset.id}" cognification failed. Please try again.`, 5000);
+        showNotification(`Dataset "${dataset.name}" cognification failed. Please try again.`, 5000);
       });
   }, [showNotification]);
 

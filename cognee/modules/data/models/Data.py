@@ -23,3 +23,15 @@ class Data(Base):
         secondary = DatasetData.__tablename__,
         back_populates = "data"
     )
+
+    def to_json(self) -> dict:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "extension": self.extension,
+            "mimeType": self.mime_type,
+            "rawDataLocation": self.raw_data_location,
+            "createdAt": self.created_at.isoformat(),
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+            # "datasets": [dataset.to_json() for dataset in self.datasets]
+        }

@@ -13,8 +13,9 @@ import RawDataPreview from './RawDataPreview';
 export interface Data {
   id: string;
   name: string;
-  filePath: string;
   mimeType: string;
+  extension: string;
+  rawDataLocation: string;
 }
 
 interface DatasetLike {
@@ -80,7 +81,6 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
               <th>Name</th>
               <th>File path</th>
               <th>MIME type</th>
-              <th>Keywords</th>
             </tr>
           </thead>
           <tbody>
@@ -104,10 +104,10 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
                   <Text>{dataItem.id}</Text>
                 </td>
                 <td>
-                  <Text>{dataItem.name}</Text>
+                  <Text>{dataItem.name}.{dataItem.extension}</Text>
                 </td>
                 <td>
-                  <Text>{dataItem.filePath}</Text>
+                  <Text>{dataItem.rawDataLocation}</Text>
                 </td>
                 <td>
                   <Text>{dataItem.mimeType}</Text>

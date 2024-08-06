@@ -56,15 +56,6 @@ class SQLAlchemyAdapter():
             await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
             await connection.execute(text(f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"))
 
-    async def get_files_metadata(self, dataset_name: str):
-        async with self.engine.connect() as connection:
-            result = await connection.execute(
-                text(f"SELECT id, name, file_path, extension, mime_type FROM {dataset_name}.file_metadata;"))
-            rows = result.fetchall()
-            metadata = [{"id": row.id, "name": row.name, "file_path": row.file_path, "extension": row.extension,
-                         "mime_type": row.mime_type} for row in rows]
-            return metadata
-
     async def delete_table(self, table_name: str):
         async with self.engine.connect() as connection:
             await connection.execute(text(f"DROP TABLE IF EXISTS {table_name};"))

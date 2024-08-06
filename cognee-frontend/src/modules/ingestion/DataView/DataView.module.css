@@ -12,6 +12,7 @@
 }
 
 .dataTable {
+  color: white;
   border-collapse: collapse;
 }
 .dataTable td, .dataTable th {

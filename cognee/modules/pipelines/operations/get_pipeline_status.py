@@ -1,19 +1,20 @@
+from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import PipelineRun
 
-async def get_pipeline_status(pipeline_names: [str]):
+async def get_pipeline_status(pipeline_ids: list[UUID]):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
         query = select(
             PipelineRun,
             func.row_number().over(
-                partition_by = PipelineRun.run_name,
+                partition_by = PipelineRun.run_id,
                 order_by = PipelineRun.created_at.desc(),
             ).label("rn")
-        ).filter(PipelineRun.run_name.in_(pipeline_names)).subquery()
+        ).filter(PipelineRun.run_id.in_(pipeline_ids)).subquery()
 
         aliased_pipeline_run = aliased(PipelineRun, query)
 
@@ -24,7 +25,7 @@ async def get_pipeline_status(pipeline_names: [str]):
         runs = (await session.execute(latest_runs)).scalars().all()
 
         pipeline_statuses = {
-            run.run_name: run.status for run in runs
+            str(run.run_id): run.status for run in runs
         }
 
         return pipeline_statuses

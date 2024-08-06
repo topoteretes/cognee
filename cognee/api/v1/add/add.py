@@ -130,6 +130,7 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
                         await session.merge(data)
                     else:
                         data = Data(
+                            id = data_id,
                             name = file_metadata["name"],
                             raw_data_location = file_metadata["file_path"],
                             extension = file_metadata["extension"],
@@ -138,6 +139,8 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
                         dataset.data.append(data)
 
                         await session.merge(dataset)
+
+                        await session.commit()
 
                 yield {
                     "id": data_id,

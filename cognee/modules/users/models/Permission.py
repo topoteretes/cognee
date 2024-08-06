@@ -1,6 +1,6 @@
 from uuid import uuid4
 from datetime import datetime, timezone
-# from sqlalchemy.orm import relationship, Mapped
+# from sqlalchemy.orm import relationship
 from sqlalchemy import Column, DateTime, UUID, String
 from cognee.infrastructure.databases.relational import Base
 
@@ -15,9 +15,3 @@ class Permission(Base):
     name = Column(String, unique = True, nullable = False, index = True)
 
     # acls = relationship("ACL", back_populates = "permission")
-
-    # groups: Mapped[list["Group"]] = relationship(
-    #     "Group",
-    #     secondary = "group_permissions",
-    #     back_populates = "permissions",
-    # )

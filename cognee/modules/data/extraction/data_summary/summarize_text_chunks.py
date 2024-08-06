@@ -26,6 +26,7 @@ async def summarize_text_chunks(data_chunks: list[DocumentChunk], summarization_
                 id = str(chunk.chunk_id),
                 payload = dict(
                     chunk_id = str(chunk.chunk_id),
+                    document_id = str(chunk.document_id),
                     text = chunk_summaries[chunk_index].summary,
                 ),
                 embed_field = "text",

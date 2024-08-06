@@ -1,4 +1,5 @@
 import  logging
+from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -14,7 +15,7 @@ class PermissionDeniedException(Exception):
         super().__init__(self.message)
 
 
-async def check_permissions_on_documents(user: User, permission_type: str, document_ids: list[str]):
+async def check_permissions_on_documents(user: User, permission_type: str, document_ids: list[UUID]):
     try:
         user_group_ids = [group.id for group in user.groups]
 
@@ -29,7 +30,7 @@ async def check_permissions_on_documents(user: User, permission_type: str, docum
                 .where(ACL.permission.has(name = permission_type))
             )
             acls = result.unique().scalars().all()
-            resource_ids = [str(resource.resource_id) for acl in acls for resource in acl.resources]
+            resource_ids = [resource.resource_id for acl in acls for resource in acl.resources]
             has_permissions = all(document_id in resource_ids for document_id in document_ids)
 
             if not has_permissions:

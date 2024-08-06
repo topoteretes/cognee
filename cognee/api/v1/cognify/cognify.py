@@ -30,6 +30,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
 from cognee.modules.tasks import get_task_status
+from cognee.modules.data.operations.get_dataset_data import get_dataset_data
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -90,7 +91,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     for added_dataset in added_datasets:
         if dataset_name in added_dataset:
-            dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
+            dataset_files.append((added_dataset, await get_dataset_data(dataset_name = added_dataset)))
 
     chunk_config = get_chunk_config()
     chunk_engine = get_chunk_engine()

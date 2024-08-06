@@ -108,7 +108,7 @@ def health_check():
     """
     return {"status": "OK"}
 
-@app.get("/datasets", response_model=list)
+@app.get("/datasets", response_model = list)
 async def get_datasets():
     try:
         from cognee.api.v1.datasets.datasets import datasets
@@ -116,18 +116,12 @@ async def get_datasets():
 
         return JSONResponse(
             status_code = 200,
-            content = [{
-                "id": str(dataset.id),
-                "name": dataset.name,
-                "created_at": dataset.created_at,
-                "updated_at": dataset.updated_at,
-                "data": dataset.data,
-            } for dataset in datasets],
+            content = [dataset.to_json() for dataset in datasets],
         )
     except Exception as error:
         raise HTTPException(status_code = 500, detail=f"Error retrieving datasets: {str(error)}") from error
 
-@app.delete("/datasets/{dataset_id}", response_model=dict)
+@app.delete("/datasets/{dataset_id}", response_model = dict)
 async def delete_dataset(dataset_id: str):
     from cognee.api.v1.datasets.datasets import datasets
     await datasets.delete_dataset(dataset_id)
@@ -159,17 +153,14 @@ async def get_dataset_graph(dataset_id: str):
 @app.get("/datasets/{dataset_id}/data", response_model=list)
 async def get_dataset_data(dataset_id: str):
     from cognee.api.v1.datasets.datasets import datasets
-    dataset_data = await datasets.list_data(dataset_id)
+
+    dataset_data = await datasets.list_data(dataset_id = dataset_id)
+
     if dataset_data is None:
-        raise HTTPException(status_code=404, detail=f"Dataset ({dataset_id}) not found.")
+        raise HTTPException(status_code = 404, detail = f"Dataset ({dataset_id}) not found.")
+
     return [
-        dict(
-            id=data["id"],
-            name=f"{data['name']}.{data['extension']}",
-            filePath=data["file_path"],
-            mimeType=data["mime_type"],
-        )
-        for data in dataset_data
+        data.to_json() for data in dataset_data
     ]
 
 @app.get("/datasets/status", response_model=dict)
@@ -193,10 +184,12 @@ async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset
 async def get_raw_data(dataset_id: str, data_id: str):
     from cognee.api.v1.datasets.datasets import datasets
     dataset_data = await datasets.list_data(dataset_id)
+
     if dataset_data is None:
-        raise HTTPException(status_code=404, detail=f"Dataset ({dataset_id}) not found.")
-    data = [data for data in dataset_data if data["id"] == data_id][0]
-    return data["file_path"]
+        raise HTTPException(status_code = 404, detail = f"Dataset ({dataset_id}) not found.")
+
+    data = [data for data in dataset_data if str(data.id) == data_id][0]
+    return data.raw_data_location
 
 class AddPayload(BaseModel):
     data: Union[str, UploadFile, List[Union[str, UploadFile]]]
@@ -276,18 +269,21 @@ async def search(payload: SearchPayload):
     from cognee.api.v1.search import search as cognee_search
     try:
         search_type = payload.query_params["searchType"]
+
         params = {
             "query": payload.query_params["query"],
         }
+
         results = await cognee_search(search_type, params)
+
         return JSONResponse(
-            status_code=200,
-            content=json.dumps(results)
+            status_code = 200,
+            content = results,
         )
     except Exception as error:
         return JSONResponse(
-            status_code=409,
-            content={"error": str(error)}
+            status_code = 409,
+            content = {"error": str(error)}
         )
 
 @app.get("/settings", response_model=dict)

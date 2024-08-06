@@ -1,4 +1,4 @@
-export default function cognifyDataset(dataset: { id: string }) {
+export default function cognifyDataset(dataset: { id: string, name: string }) {
   return fetch('http://127.0.0.1:8000/cognify', {
     method: 'POST',
     headers: {

@@ -12,6 +12,16 @@ async def search_similarity(query: str) -> list[str, str]:
 
     similar_results = await vector_engine.search("chunks", query, limit = 5)
 
-    results = [result.payload for result in similar_results]
+    results = [
+        parse_payload(result.payload) for result in similar_results
+    ]
 
     return results
+
+
+def parse_payload(payload: dict) -> dict:
+    return {
+        "text": payload["text"],
+        "chunk_id": payload["chunk_id"],
+        "document_id": payload["document_id"],
+    }

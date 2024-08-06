@@ -17,6 +17,9 @@ from cognee.modules.data.processing.filter_affected_chunks import filter_affecte
 from cognee.modules.data.processing.remove_obsolete_chunks import remove_obsolete_chunks
 from cognee.modules.data.extraction.knowledge_graph.expand_knowledge_graph import expand_knowledge_graph
 from cognee.modules.data.extraction.knowledge_graph.establish_graph_topology import establish_graph_topology
+from cognee.modules.data.models import Dataset, Data
+from cognee.modules.data.operations.get_dataset_data import get_dataset_data
+from cognee.modules.data.operations.retrieve_datasets import retrieve_datasets
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.pipelines import run_tasks, run_tasks_parallel
 from cognee.modules.users.models import User
@@ -40,20 +43,25 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
     if datasets is None or len(datasets) == 0:
         return await cognify(await db_engine.get_datasets())
 
+    if type(datasets[0]) == str:
+        datasets = await retrieve_datasets(datasets)
 
     if user is None:
         user = await get_default_user()
 
-    async def run_cognify_pipeline(dataset_name: str, files: list[dict]):
+    async def run_cognify_pipeline(dataset: Dataset):
+        data: list[Data] = await get_dataset_data(dataset_id = dataset.id)
+
         documents = [
-            PdfDocument(id = file["id"], title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "pdf" else
-            AudioDocument(id = file["id"], title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "audio" else
-            ImageDocument(id = file["id"], title=f"{file['name']}.{file['extension']}", file_path=file["file_path"]) if file["extension"] == "image" else
-            TextDocument(id = file["id"], title=f"{file['name']}.{file['extension']}", file_path=file["file_path"])
-            for file in files
+            PdfDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location) if data_item.extension == "pdf" else
+            AudioDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location) if data_item.extension == "audio" else
+            ImageDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location) if data_item.extension == "image" else
+            TextDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location)
+            for data_item in data
         ]
 
         document_ids = [document.id for document in documents]
+        document_ids_str = list(map(str, document_ids))
 
         await check_permissions_on_documents(
             user,
@@ -61,16 +69,19 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             document_ids,
         )
 
-        async with update_status_lock:
-            task_status = await get_pipeline_status([dataset_name])
+        dataset_id = dataset.id
+        dataset_name = generate_dataset_name(dataset.name)
 
-            if dataset_name in task_status and task_status[dataset_name] == "DATASET_PROCESSING_STARTED":
-                logger.info(f"Dataset {dataset_name} is being processed.")
+        async with update_status_lock:
+            task_status = await get_pipeline_status([dataset_id])
+
+            if dataset_id in task_status and task_status[dataset_id] == "DATASET_PROCESSING_STARTED":
+                logger.info("Dataset %s is already being processed.", dataset_name)
                 return
 
-            await log_pipeline_status(dataset_name, "DATASET_PROCESSING_STARTED", {
+            await log_pipeline_status(dataset_id, "DATASET_PROCESSING_STARTED", {
                 "dataset_name": dataset_name,
-                "files": document_ids,
+                "files": document_ids_str,
             })
         try:
             cognee_config = get_cognify_config()
@@ -80,7 +91,7 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             if graph_config.infer_graph_topology and graph_config.graph_topology_task:
                 from cognee.modules.topology.topology import TopologyEngine
                 topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-                root_node_id = await topology_engine.add_graph_topology(files = files)
+                root_node_id = await topology_engine.add_graph_topology(files = data)
             elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
                 from cognee.modules.topology.topology import TopologyEngine
                 topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
@@ -116,14 +127,14 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             async for result in pipeline:
                 print(result)
 
-            await log_pipeline_status(dataset_name, "DATASET_PROCESSING_FINISHED", {
+            await log_pipeline_status(dataset_id, "DATASET_PROCESSING_FINISHED", {
                 "dataset_name": dataset_name,
-                "files": document_ids,
+                "files": document_ids_str,
             })
         except Exception as error:
-            await log_pipeline_status(dataset_name, "DATASET_PROCESSING_ERROR", {
+            await log_pipeline_status(dataset_id, "DATASET_PROCESSING_ERROR", {
                 "dataset_name": dataset_name,
-                "files": document_ids,
+                "files": document_ids_str,
             })
             raise error
 
@@ -131,31 +142,14 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
     existing_datasets = [dataset.name for dataset in list(await db_engine.get_datasets())]
     awaitables = []
 
-    for dataset_name in datasets:
-        dataset_name = generate_dataset_name(dataset_name)
+    for dataset in datasets:
+        dataset_name = generate_dataset_name(dataset.name)
 
         if dataset_name in existing_datasets:
-            awaitables.append(run_cognify_pipeline(dataset_name, await db_engine.get_files_metadata(dataset_name)))
+            awaitables.append(run_cognify_pipeline(dataset))
 
     return await asyncio.gather(*awaitables)
 
 
 def generate_dataset_name(dataset_name: str) -> str:
     return dataset_name.replace(".", "_").replace(" ", "_")
-
-#
-# if __name__ == "__main__":
-#     from cognee.api.v1.add import add
-#     from cognee.api.v1.datasets.datasets import datasets
-#
-#
-#     async def aa():
-#         await add("TEXT ABOUT NLP AND MONKEYS")
-#
-#         print(datasets.discover_datasets())
-#
-#         return
-
-
-
-    # asyncio.run(cognify())
