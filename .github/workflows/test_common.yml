@@ -20,6 +20,7 @@ jobs:
 
   install_docker:
     if: runner.os == 'macOS'
+    runs-on: "ubuntu-latest"
     steps:
       - name: Install Docker
         run: |
