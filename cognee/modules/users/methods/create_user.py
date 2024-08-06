@@ -10,6 +10,7 @@ async def create_user(
     is_superuser: bool = False,
     is_active: bool = True,
     is_verified: bool = False,
+    auto_login: bool = False,
 ):
     try:
         relational_engine = get_relational_engine()
@@ -26,6 +27,10 @@ async def create_user(
                             is_verified = is_verified,
                         )
                     )
+
+                    if auto_login:
+                        await session.refresh(user)
+
                     return user
                     print(f"User created: {user.email}")
     except UserAlreadyExists as error:

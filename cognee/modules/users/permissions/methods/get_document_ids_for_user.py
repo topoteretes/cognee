@@ -16,7 +16,7 @@ async def get_document_ids_for_user(user_id: UUID) -> list[str]:
                         ACL.permission.name == "read",
                     )
             )
-            document_ids = [row[0] for row in result.fetchall()]
+            document_ids = [row[0] for row in result.scalars().all()]
             return document_ids
 
 

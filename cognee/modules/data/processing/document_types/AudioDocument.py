@@ -1,5 +1,5 @@
-from uuid import uuid5, NAMESPACE_OID
-from typing import Optional, Generator
+from uuid import UUID, uuid5, NAMESPACE_OID
+from typing import Optional
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.data.chunking import chunk_by_paragraph
@@ -7,10 +7,10 @@ from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChu
 from cognee.modules.data.processing.document_types.Document import Document
 
 class AudioReader:
-    id: str
+    id: UUID
     file_path: str
 
-    def __init__(self, id: str, file_path: str):
+    def __init__(self, id: UUID, file_path: str):
         self.id = id
         self.file_path = file_path
         self.llm_client = get_llm_client()  # You can choose different models like "tiny", "base", "small", etc.
@@ -87,12 +87,10 @@ class AudioDocument(Document):
     title: str
     file_path: str
 
-    def __init__(self, title: str, file_path: str):
-        self.id = uuid5(NAMESPACE_OID, title)
+    def __init__(self, id: UUID, title: str, file_path: str):
+        self.id = id or uuid5(NAMESPACE_OID, title)
         self.title = title
         self.file_path = file_path
-
-        reader = AudioReader(self.id, self.file_path)
 
     def get_reader(self) -> AudioReader:
         reader = AudioReader(self.id, self.file_path)

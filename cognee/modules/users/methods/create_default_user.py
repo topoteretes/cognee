@@ -1,5 +1,4 @@
 import hashlib
-# from cognee.infrastructure.databases.relational import get_relational_engine
 from .create_user import create_user
 
 async def create_default_user():
@@ -12,11 +11,8 @@ async def create_default_user():
         is_superuser = True,
         is_active = True,
         is_verified = True,
+        auto_login = True,
     )
-
-    # db_engine = get_relational_engine()
-    # async with db_engine.get_async_session() as session:
-    #     await session.refresh(user)
 
     return user
 

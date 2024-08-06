@@ -8,7 +8,7 @@ from .PipelineTask import PipelineTask
 class Pipeline(Base):
     __tablename__ = "pipelines"
 
-    id = Column(UUID, primary_key = True, default = uuid4)
+    id = Column(UUID(as_uuid = True), primary_key = True, default = uuid4)
 
     name = Column(String)
     description = Column(Text, nullable = True)

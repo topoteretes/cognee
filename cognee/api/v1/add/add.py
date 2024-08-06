@@ -9,10 +9,11 @@ from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
 from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.relational import get_relational_config, create_db_and_tables
-from cognee.modules.users.methods import create_default_user
+from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine, create_db_and_tables
+from cognee.modules.users.methods import create_default_user, get_default_user
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.modules.users.models import User
+from cognee.modules.data.operations.ensure_dataset_exists import ensure_dataset_exists
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset", user: User = None):
     await create_db_and_tables()
@@ -99,6 +100,9 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
         destination = destination,
     )
 
+    dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset"
+    dataset = await ensure_dataset_exists(dataset_name)
+
     @dlt.resource(standalone = True, merge_key = "id")
     async def data_resources(file_paths: str, user: User):
         for file_path in file_paths:
@@ -107,15 +111,33 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
 
                 data_id = ingestion.identify(classified_data)
 
-                if user is None:
-                    try:
-                        user = await create_default_user()
-
-                        await give_permission_on_document(user, data_id, "read")
-                        await give_permission_on_document(user, data_id, "write")
-                    except:
-                        pass
                 file_metadata = classified_data.get_metadata()
+
+                from sqlalchemy import select
+                from cognee.modules.data.models import Data
+                db_engine = get_relational_engine()
+                async with db_engine.get_async_session() as session:
+                    data = (await session.execute(
+                        select(Data).filter(Data.id == data_id)
+                    )).scalar_one_or_none()
+
+                    if data is not None:
+                        data.name = file_metadata["name"]
+                        data.raw_data_location = file_metadata["file_path"]
+                        data.extension = file_metadata["extension"]
+                        data.mime_type = file_metadata["mime_type"]
+
+                        await session.merge(data)
+                    else:
+                        data = Data(
+                            name = file_metadata["name"],
+                            raw_data_location = file_metadata["file_path"],
+                            extension = file_metadata["extension"],
+                            mime_type = file_metadata["mime_type"],
+                        )
+                        dataset.data.append(data)
+
+                        await session.merge(dataset)
 
                 yield {
                     "id": data_id,
@@ -125,10 +147,20 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
                     "mime_type": file_metadata["mime_type"],
                 }
 
+                await give_permission_on_document(user, data_id, "read")
+                await give_permission_on_document(user, data_id, "write")
+
+
+    if user is None:
+        user = await get_default_user()
+
+        if user is None:
+            user = await create_default_user()
+
     run_info = pipeline.run(
         data_resources(processed_file_paths, user),
         table_name = "file_metadata",
-        dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset",
+        dataset_name = dataset_name,
         write_disposition = "merge",
     )
     send_telemetry("cognee.add")
