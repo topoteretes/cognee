@@ -20,7 +20,7 @@ jobs:
 
   setup_docker:
     name: Set up Docker Buildx
-    uses: docker/setup-buildx-action@v1
+    uses: docker/setup-buildx-action@v3
 
   run_neo4j_integration_test:
     name: test
