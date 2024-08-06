@@ -91,4 +91,8 @@ jobs:
           POSTGRES_DB: cognee_db
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          DESTINATION__POSTGRES__CREDENTIALS__HOST: 127.0.0.1
+          DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__DATABASE: cognee_db
         run: poetry run python ./cognee/tests/test_neo4j.py
