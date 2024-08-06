@@ -1,24 +1,24 @@
 from uuid import uuid4
-from typing import List
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, Mapped
 from sqlalchemy import Column, String, DateTime, UUID, Text
-from cognee.infrastructure.databases.relational import ModelBase
+from cognee.infrastructure.databases.relational import Base
 from .PipelineTask import PipelineTask
 
-class Task(ModelBase):
+class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(UUID, primary_key = True, default = uuid4())
+    id = Column(UUID(as_uuid = True), primary_key = True, default = uuid4)
+
     name = Column(String)
     description = Column(Text, nullable = True)
 
     executable = Column(Text)
 
-    created_at = Column(DateTime, default = datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate = datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone = True), default = lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone = True), onupdate = lambda: datetime.now(timezone.utc))
 
-    datasets: Mapped[List["Pipeline"]] = relationship(
+    datasets: Mapped[list["Pipeline"]] = relationship(
         secondary = PipelineTask.__tablename__,
         back_populates = "task"
     )

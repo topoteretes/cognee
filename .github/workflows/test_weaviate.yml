@@ -18,15 +18,34 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
+  setup_docker:
+    name: Set up Docker Buildx
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
   run_weaviate_integration_test:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
 
     defaults:
       run:
         shell: bash
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+        ports:
+          - 5432:5432
 
     steps:
       - name: Check out
@@ -52,6 +71,13 @@ jobs:
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
 
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h localhost -p 5432 -U cognee; do
+            sleep 1
+          done
+
       - name: Run default Weaviate
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -59,4 +85,13 @@ jobs:
           VECTOR_DB_URL: ${{ secrets.WEAVIATE_API_URL }}
           VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
           ENV: 'dev'
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          DESTINATION__POSTGRES__CREDENTIALS__HOST: 127.0.0.1
+          DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__DATABASE: cognee_db
         run: poetry run python ./cognee/tests/test_weaviate.py

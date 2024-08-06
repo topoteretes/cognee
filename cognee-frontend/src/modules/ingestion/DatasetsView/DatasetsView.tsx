@@ -40,7 +40,7 @@ export default function DatasetsView({
       .finally(() => enableCognifyRun());
   }
 
-  const [dataset, setExplorationDataset] = useState<{ id: string } | null>(null);
+  const [dataset, setExplorationDataset] = useState<{ id: string, name: string } | null>(null);
   const {
     value: isExplorationWindowShown,
     setTrue: showExplorationWindow,
@@ -97,7 +97,7 @@ export default function DatasetsView({
       </Stack>
       <Modal onClose={hideExplorationWindow} isOpen={isExplorationWindowShown} className={styles.explorerModal}>
         <Spacer horizontal="2" vertical="3" wrap>
-          <Text>{dataset?.id}</Text>
+          <Text>{dataset?.name}</Text>
         </Spacer> 
         <Explorer dataset={dataset!} />
       </Modal>

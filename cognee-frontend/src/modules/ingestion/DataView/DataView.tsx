@@ -13,8 +13,9 @@ import RawDataPreview from './RawDataPreview';
 export interface Data {
   id: string;
   name: string;
-  filePath: string;
   mimeType: string;
+  extension: string;
+  rawDataLocation: string;
 }
 
 interface DatasetLike {
@@ -36,7 +37,7 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
   const showRawData = useCallback((dataItem: Data) => {
     setSelectedData(dataItem);
 
-    fetch(`http://0.0.0.0:8000/datasets/${datasetId}/data/${dataItem.id}/raw`)
+    fetch(`http://127.0.0.1:8000/datasets/${datasetId}/data/${dataItem.id}/raw`)
       .then((response) => response.arrayBuffer())
       .then(setRawData);
 
@@ -80,7 +81,6 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
               <th>Name</th>
               <th>File path</th>
               <th>MIME type</th>
-              <th>Keywords</th>
             </tr>
           </thead>
           <tbody>
@@ -104,10 +104,10 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
                   <Text>{dataItem.id}</Text>
                 </td>
                 <td>
-                  <Text>{dataItem.name}</Text>
+                  <Text>{dataItem.name}.{dataItem.extension}</Text>
                 </td>
                 <td>
-                  <Text>{dataItem.filePath}</Text>
+                  <Text>{dataItem.rawDataLocation}</Text>
                 </td>
                 <td>
                   <Text>{dataItem.mimeType}</Text>

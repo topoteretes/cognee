@@ -30,9 +30,10 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.tasks import create_task_status_table, update_task_status
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
 from cognee.modules.tasks import get_task_status
+from cognee.modules.data.operations.get_dataset_data import get_dataset_data
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.infrastructure.databases.relational.config import get_relationaldb_config
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 USER_ID = "default_user"
 
@@ -45,15 +46,14 @@ async def cognify(datasets: Union[str, List[str]] = None):
     # Has to be loaded in advance, multithreading doesn't work without it.
     nltk.download("stopwords", quiet=True)
     stopwords.ensure_loaded()
-    create_task_status_table()
+    await create_task_status_table()
 
     graph_client = await get_graph_engine()
 
-    relational_config = get_relationaldb_config()
-    db_engine = relational_config.database_engine
+    db_engine = get_relational_engine()
 
     if datasets is None or len(datasets) == 0:
-        datasets = db_engine.get_datasets()
+        datasets = await db_engine.get_datasets()
 
     awaitables = []
 
@@ -83,7 +83,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
         graphs = await asyncio.gather(*awaitables)
         return graphs[0]
 
-    added_datasets = db_engine.get_datasets()
+    added_datasets = await db_engine.get_datasets()
 
     # datasets is a dataset name string
     dataset_files = []
@@ -91,7 +91,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
 
     for added_dataset in added_datasets:
         if dataset_name in added_dataset:
-            dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
+            dataset_files.append((added_dataset, await get_dataset_data(dataset_name = added_dataset)))
 
     chunk_config = get_chunk_config()
     chunk_engine = get_chunk_engine()
@@ -167,7 +167,7 @@ async def cognify(datasets: Union[str, List[str]] = None):
             else:
                 document_id = await add_document_node(
                     graph_client,
-                    parent_node_id = file_metadata['id'],
+                    parent_node_id = file_metadata["id"],
                     document_metadata = file_metadata,
                 )
 
@@ -226,7 +226,7 @@ async def process_text(chunk_collection: str, chunk_id: str, input_text: str, fi
 
 
     if cognify_config.connect_documents is True:
-        db_engine = get_relationaldb_config().database_engine
+        db_engine = get_relational_engine()
         relevant_documents_to_connect = db_engine.fetch_cognify_data(excluded_document_id = document_id)
 
         list_of_nodes = []

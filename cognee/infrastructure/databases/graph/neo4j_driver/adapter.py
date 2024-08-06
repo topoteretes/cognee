@@ -21,7 +21,8 @@ class Neo4jAdapter(GraphDBInterface):
     ):
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
-            auth = (graph_database_username, graph_database_password)
+            auth = (graph_database_username, graph_database_password),
+            max_connection_lifetime = 120
         )
 
     async def close(self) -> None:

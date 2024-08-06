@@ -3,10 +3,8 @@
 import csv
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional, Union, Type
 
-import asyncio
 import aiofiles
 import pandas as pd
 from pydantic import BaseModel
@@ -14,15 +12,9 @@ from pydantic import BaseModel
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.infrastructure.databases.relational import get_relationaldb_config
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
-from cognee.modules.cognify.config import get_cognify_config
-from cognee.base_config import get_base_config
 from cognee.modules.topology.topology_data_models import NodeModel
-
-cognify_config = get_cognify_config()
-base_config = get_base_config()
 
 logger = logging.getLogger("topology")
 
@@ -136,53 +128,3 @@ class TopologyEngine:
                 return
             except Exception as e:
                 raise RuntimeError(f"Failed to add graph topology from {file_path}: {e}") from e
-
-
-
-async def main():
-    # text = """Conservative PP in the lead in Spain, according to estimate
-    #         An estimate has been published for Spain:
-    #
-    #         Opposition leader Alberto Núñez Feijóo’s conservative People’s party (PP): 32.4%
-    #
-    #         Spanish prime minister Pedro Sánchez’s Socialist party (PSOE): 30.2%
-    #
-    #         The far-right Vox party: 10.4%
-    #
-    #         In Spain, the right has sought to turn the European election into a referendum on Sánchez.
-    #
-    #         Ahead of the vote, public attention has focused on a saga embroiling the prime minister’s wife, Begoña Gómez, who is being investigated over allegations of corruption and influence-peddling, which Sanchez has dismissed as politically-motivated and totally baseless."""
-    # text_two = """The far-right Vox party: 10.4%"""
-
-    from cognee.api.v1.add import add
-    dataset_name = "explanations"
-    print(os.getcwd())
-    data_dir = os.path.abspath("../../.data")
-    print(os.getcwd())
-
-    await add(f"data://{data_dir}", dataset_name="explanations")
-
-    relational_config = get_relationaldb_config()
-    db_engine = relational_config.database_engine
-
-
-    datasets = db_engine.get_datasets()
-    dataset_files =[]
-
-    for added_dataset in datasets:
-        if dataset_name in added_dataset:
-            dataset_files.append((added_dataset, db_engine.get_files_metadata(added_dataset)))
-
-
-
-    print(dataset_files)
-    topology_engine = TopologyEngine(infer=True)
-    file_path = "example_data.json"  # or 'example_data.csv'
-    #
-    # # Adding graph topology
-    graph = await topology_engine.add_graph_topology(file_path, dataset_files=dataset_files)
-    print(graph)
-
-# Run the main function
-if __name__ == "__main__":
-    asyncio.run(main())

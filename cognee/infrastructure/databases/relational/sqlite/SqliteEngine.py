@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.future import select
 from cognee.infrastructure.files.storage.LocalStorage import LocalStorage
 from ..DatabaseEngine import DatabaseEngine
-from ..ModelBase import ModelBase
+from ..ModelBase import Base
 from ..utils import with_rollback
 
 class SqliteEngine(DatabaseEngine):
@@ -60,7 +60,7 @@ class SqliteEngine(DatabaseEngine):
 
     async def create_tables(self):
         async with self.engine.begin() as connection:
-            return await connection.run_sync(ModelBase.metadata.create_all)
+            return await connection.run_sync(Base.metadata.create_all)
 
     async def create(self, data):
         async with with_rollback(self.session_maker()) as session:

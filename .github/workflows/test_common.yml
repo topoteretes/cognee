@@ -18,6 +18,30 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
+  setup_docker:
+    name: Set up Docker Buildx
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest"]
+    steps:
+      # - name: Install Docker
+      #   run: |
+      #     HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask docker
+      #     sudo /Applications/Docker.app/Contents/MacOS/Docker --unattended --install-privileged-components
+      #     open -a /Applications/Docker.app --args --unattended --accept-license
+      #     echo "We are waiting for Docker to be up and running. It can take over 2 minutes..."
+      #     while ! /Applications/Docker.app/Contents/Resources/bin/docker info &>/dev/null; do sleep 1; done
+      #   if: runner.os == 'macOS'
+    
+      # - name: Set up QEMU
+      #   uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
   run_common:
     name: test
     needs: get_docs_changes
@@ -25,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macos-latest"] #, "windows-latest"
+        os: ["ubuntu-latest"] #, "windows-latest", "macos-latest"
         python-version: ["3.11.x"]
         # Test all python versions on ubuntu only
         include:
@@ -39,6 +63,18 @@ jobs:
     defaults:
       run:
         shell: bash
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+        ports:
+          - 5432:5432
 
     runs-on: ${{ matrix.os }}
 
@@ -79,6 +115,12 @@ jobs:
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
 
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h localhost -p 5432 -U cognee; do
+            sleep 1
+          done
 
       - name: Run tests
         run: poetry run pytest tests/
@@ -88,6 +130,15 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENV: 'dev'
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          DESTINATION__POSTGRES__CREDENTIALS__HOST: 127.0.0.1
+          DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__DATABASE: cognee_db
         run: poetry run python ./cognee/tests/test_library.py
 
       - name: Clean up disk space
