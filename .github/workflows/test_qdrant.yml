@@ -18,6 +18,13 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
+  setup_docker:
+    name: Set up Docker Buildx
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
   run_qdrant_integration_test:
     name: test
     needs: get_docs_changes
