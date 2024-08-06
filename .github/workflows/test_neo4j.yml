@@ -63,13 +63,6 @@ jobs:
           virtualenvs-in-project: true
           installer-parallel: true
 
-      - name: Wait for PostgreSQL to be ready
-        run: |
-          echo "Waiting for PostgreSQL to be ready..."
-          until pg_isready -h localhost -p 5432 -U cognee; do
-            sleep 1
-          done
-
       - name: Install dependencies
         run: poetry install --no-interaction
 
@@ -77,6 +70,13 @@ jobs:
         run: |
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h localhost -p 5432 -U cognee; do
+            sleep 1
+          done
 
       - name: Run default Neo4j
         env:
