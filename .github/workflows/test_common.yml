@@ -19,7 +19,6 @@ jobs:
     uses: ./.github/workflows/get_docs_changes.yml
 
   install_docker:
-    if: runner.os == 'macOS'
     runs-on: "ubuntu-latest"
     steps:
       - name: Install Docker
@@ -29,6 +28,7 @@ jobs:
           open -a /Applications/Docker.app --args --unattended --accept-license
           echo "We are waiting for Docker to be up and running. It can take over 2 minutes..."
           while ! /Applications/Docker.app/Contents/Resources/bin/docker info &>/dev/null; do sleep 1; done
+        if: runner.os == 'macOS'
 
   setup_docker:
     name: Set up Docker Buildx
