@@ -33,6 +33,7 @@ jobs:
   setup_docker:
     name: Set up Docker Buildx
     runs-on: ${{ matrix.os }}
+    needs: install_docker
     strategy:
       fail-fast: false
       matrix:
