@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from ...processing.chunk_types.DocumentChunk import DocumentChunk
 from .add_model_class_to_graph import add_model_class_to_graph
 
-async def establish_graph_topology(data_chunks: list[DocumentChunk], topology_model: Type[BaseModel]):
+async def chunk_to_graph_decomposition(data_chunks: list[DocumentChunk], topology_model: Type[BaseModel]):
     if topology_model == KnowledgeGraph:
         return data_chunks
 
