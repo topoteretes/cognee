@@ -18,7 +18,7 @@ async def chunk_extract_summary_task(data_chunks: list[DocumentChunk], summariza
 
     vector_engine = get_vector_engine()
 
-    await vector_engine.create_collection(collection_name, payload_schema = TextSummary)
+    await vector_engine.create_collection(collection_name, payload_schema=TextSummary)
 
     await vector_engine.create_data_points(
         collection_name,
