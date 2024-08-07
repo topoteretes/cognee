@@ -83,6 +83,10 @@ weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
 neo4j = ["neo4j", "py2neo"]
 notebook = ["ipykernel","overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
+langchain = ["langfuse"]
+
+
+poetry install cognee --extras=langchain
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
