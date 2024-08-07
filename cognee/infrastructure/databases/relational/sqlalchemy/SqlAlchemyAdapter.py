@@ -58,7 +58,7 @@ class SQLAlchemyAdapter():
 
     async def delete_table(self, table_name: str):
         async with self.engine.connect() as connection:
-            await connection.execute(text(f"DROP TABLE IF EXISTS {table_name};"))
+            await connection.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE;"))
 
     async def insert_data(self, schema_name: str, table_name: str, data: list[dict]):
         columns = ", ".join(data[0].keys())
@@ -101,9 +101,10 @@ class SQLAlchemyAdapter():
     async def delete_database(self):
         async with self.engine.connect() as connection:
             try:
-                async with self.engine.begin() as connection:
-                    await connection.run_sync(Base.metadata.drop_all)
-
+                async with connection.begin() as trans:
+                    for table in Base.metadata.sorted_tables:
+                        drop_table_query = text(f'DROP TABLE IF EXISTS {table.name} CASCADE')
+                        await connection.execute(drop_table_query)
                 print("Database deleted successfully.")
             except Exception as e:
                 print(f"Error deleting database: {e}")

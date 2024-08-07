@@ -9,14 +9,14 @@ from cognee.modules.data.processing.document_types.AudioDocument import AudioDoc
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.data.processing.document_types import PdfDocument, TextDocument
-from cognee.modules.cognify.vector import save_data_chunks
-from cognee.modules.data.processing.process_documents import process_documents
-from cognee.modules.classification.classify_text_chunks import classify_text_chunks
-from cognee.modules.data.extraction.data_summary.summarize_text_chunks import summarize_text_chunks
-from cognee.modules.data.processing.filter_affected_chunks import filter_affected_chunks
-from cognee.modules.data.processing.remove_obsolete_chunks import remove_obsolete_chunks
-from cognee.modules.data.extraction.knowledge_graph.expand_knowledge_graph import expand_knowledge_graph
-from cognee.modules.data.extraction.knowledge_graph.establish_graph_topology import establish_graph_topology
+# from cognee.modules.cognify.vector import save_data_chunks
+# from cognee.modules.data.processing.process_documents import process_documents
+# from cognee.modules.classification.classify_text_chunks import classify_text_chunks
+# from cognee.modules.data.extraction.data_summary.summarize_text_chunks import summarize_text_chunks
+# from cognee.modules.data.processing.filter_affected_chunks import filter_affected_chunks
+# from cognee.modules.data.processing.remove_obsolete_chunks import remove_obsolete_chunks
+# from cognee.modules.data.extraction.knowledge_graph.expand_knowledge_graph import expand_knowledge_graph
+# from cognee.modules.data.extraction.knowledge_graph.establish_graph_topology import establish_graph_topology
 from cognee.modules.data.models import Dataset, Data
 from cognee.modules.data.operations.get_dataset_data import get_dataset_data
 from cognee.modules.data.operations.retrieve_datasets import retrieve_datasets
