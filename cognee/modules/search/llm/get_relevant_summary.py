@@ -4,7 +4,6 @@ from cognee.modules.cognify.config import get_cognify_config
 from .extraction.categorize_relevant_summary import categorize_relevant_summary
 
 logger = logging.getLogger(__name__)
-
 async def get_cognitive_layers(content: str, categories: List[Dict]):
     try:
         cognify_config = get_cognify_config()

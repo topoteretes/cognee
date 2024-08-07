@@ -3,7 +3,7 @@ import asyncio
 from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
-from cognee.modules.data.extraction.data_summary.models.TextSummary import TextSummary
+from cognee.tasks.chunk_extract_summary.models.TextSummary import TextSummary
 from cognee.modules.data.extraction.extract_summary import extract_summary
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 

@@ -128,6 +128,7 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
                         data.mime_type = file_metadata["mime_type"]
 
                         await session.merge(data)
+                        await session.commit()
                     else:
                         data = Data(
                             id = data_id,
