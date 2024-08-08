@@ -89,18 +89,6 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             cognee_config = get_cognify_config()
             graph_config = get_graph_config()
             root_node_id = None
-            #
-            # if graph_config.infer_graph_topology and graph_config.graph_topology_task:
-            #     from cognee.modules.topology.topology import TopologyEngine
-            #     topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-            #     root_node_id = await topology_engine.add_graph_topology(files = data)
-            # elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
-            #     from cognee.modules.topology.topology import TopologyEngine
-            #     topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-            #     await topology_engine.add_graph_topology(graph_config.topology_file_path)
-            # elif not graph_config.graph_topology_task:
-            #     root_node_id = "ROOT"
-
             tasks = [
                 Task(document_to_ontology, root_node_id = root_node_id),
                 Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type

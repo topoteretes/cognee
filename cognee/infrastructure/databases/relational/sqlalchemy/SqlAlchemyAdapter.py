@@ -70,11 +70,13 @@ class SQLAlchemyAdapter():
     async def delete_table(self, table_name: str):
         async with self.engine.begin() as connection:
             await connection.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE;"))
+
             await connection.close()
     async def insert_data(self, schema_name: str, table_name: str, data: list[dict]):
         columns = ", ".join(data[0].keys())
         values = ", ".join([f"({', '.join([f':{key}' for key in row.keys()])})" for row in data])
         insert_query = text(f"INSERT INTO {schema_name}.{table_name} ({columns}) VALUES {values};")
+
         async with self.engine.begin() as connection:
             await connection.execute(insert_query, data)
             await connection.close()
