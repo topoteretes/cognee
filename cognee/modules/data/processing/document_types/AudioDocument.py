@@ -89,14 +89,16 @@ class AudioDocument(Document):
     type: str = "audio"
     title: str
     file_path: str
+    chunking_strategy:str
 
-    def __init__(self, id: UUID, title: str, file_path: str):
+    def __init__(self, id: UUID, title: str, file_path: str, chunking_strategy:str="paragraph"):
         self.id = id or uuid5(NAMESPACE_OID, title)
         self.title = title
         self.file_path = file_path
+        self.chunking_strategy = chunking_strategy
 
     def get_reader(self) -> AudioReader:
-        reader = AudioReader(self.id, self.file_path)
+        reader = AudioReader(self.id, self.file_path, self.chunking_strategy)
         return reader
 
     def to_dict(self) -> dict:
