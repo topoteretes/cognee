@@ -12,6 +12,7 @@ from .Document import Document
 class PdfReader():
     id: UUID
     file_path: str
+    chunking_strategy: str
 
     def __init__(self, id: UUID, file_path: str, chunking_strategy:str = "paragraph"):
         self.id = id

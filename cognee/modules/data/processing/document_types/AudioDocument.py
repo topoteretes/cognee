@@ -11,7 +11,7 @@ from cognee.tasks.chunking.chunking_registry import get_chunking_function
 class AudioReader:
     id: UUID
     file_path: str
-    chunking_function:callable
+    chunking_strategy:str
 
     def __init__(self, id: UUID, file_path: str, chunking_strategy:str = "paragraph"):
         self.id = id
