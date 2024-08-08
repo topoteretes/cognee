@@ -2,19 +2,23 @@ from uuid import UUID, uuid5, NAMESPACE_OID
 from typing import Optional
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.modules.data.chunking import chunk_by_paragraph
+
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
+from cognee.tasks.chunking import chunk_by_paragraph
+from cognee.tasks.chunking.chunking_registry import get_chunking_function
+
 
 class ImageReader:
     id: UUID
     file_path: str
+    chunking_strategy:str
 
-    def __init__(self, id: UUID, file_path: str):
+    def __init__(self, id: UUID, file_path: str, chunking_strategy:str = "paragraph"):
         self.id = id
         self.file_path = file_path
-        self.llm_client = get_llm_client()  # You can choose different models like "tiny", "base", "small", etc.
-
+        self.llm_client = get_llm_client() # You can choose different models like "tiny", "base", "small", etc.
+        self.chunking_function = get_chunking_function(chunking_strategy)
 
     def read(self, max_chunk_size: Optional[int] = 1024):
         chunk_index = 0

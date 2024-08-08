@@ -6,3 +6,4 @@ class Document(Protocol):
     type: str
     title: str
     file_path: str
+    chunking_strategy:str

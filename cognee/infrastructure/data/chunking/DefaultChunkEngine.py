@@ -4,6 +4,8 @@ import re
 from cognee.shared.data_models import ChunkStrategy
 
 
+# /Users/vasa/Projects/cognee/cognee/infrastructure/data/chunking/DefaultChunkEngine.py
+
 class DefaultChunkEngine():
     def __init__(self, chunk_strategy=None, chunk_size=None, chunk_overlap=None):
         self.chunk_strategy = chunk_strategy

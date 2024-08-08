@@ -1,4 +1,4 @@
-from cognee.modules.data.chunking import chunk_by_paragraph
+from cognee.tasks.chunking import chunk_by_paragraph
 
 if __name__ == "__main__":
     def test_chunking_on_whole_text():

@@ -2,19 +2,22 @@ from uuid import UUID, uuid5, NAMESPACE_OID
 from typing import Optional
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.modules.data.chunking import chunk_by_paragraph
+
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
+
+from cognee.tasks.chunking.chunking_registry import get_chunking_function
 
 class AudioReader:
     id: UUID
     file_path: str
+    chunking_function:callable
 
-    def __init__(self, id: UUID, file_path: str):
+    def __init__(self, id: UUID, file_path: str, chunking_strategy:str = "paragraph"):
         self.id = id
         self.file_path = file_path
         self.llm_client = get_llm_client()  # You can choose different models like "tiny", "base", "small", etc.
-
+        self.chunking_function = get_chunking_function(chunking_strategy)
 
     def read(self, max_chunk_size: Optional[int] = 1024):
         chunk_index = 0
@@ -37,7 +40,7 @@ class AudioReader:
             chunked_pages.append(page_index)
             page_index += 1
 
-            for chunk_data in chunk_by_paragraph(page_text, max_chunk_size, batch_paragraphs=True):
+            for chunk_data in self.chunking_function(page_text, max_chunk_size, batch_paragraphs=True):
                 if chunk_size + chunk_data["word_count"] <= max_chunk_size:
                     paragraph_chunks.append(chunk_data)
                     chunk_size += chunk_data["word_count"]
