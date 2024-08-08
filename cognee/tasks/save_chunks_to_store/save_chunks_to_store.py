@@ -2,7 +2,7 @@ from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 
-async def save_chunks_to_store_task(data_chunks: list[DocumentChunk], collection_name: str):
+async def save_chunks_to_store(data_chunks: list[DocumentChunk], collection_name: str):
     if len(data_chunks) == 0:
         return data_chunks
 

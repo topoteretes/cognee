@@ -6,7 +6,7 @@ from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChu
 # from cognee.infrastructure.databases.vector import get_vector_engine
 
 
-async def chunk_remove_disconnected_task(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
+async def chunk_remove_disconnected(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
     graph_engine = await get_graph_engine()
 
     document_ids = set((data_chunk.document_id for data_chunk in data_chunks))

@@ -8,7 +8,7 @@ from cognee.modules.data.extraction.extract_summary import extract_summary
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 
 
-async def chunk_extract_summary_task(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel], collection_name: str = "summaries"):
+async def chunk_extract_summary(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel], collection_name: str = "summaries"):
     if len(data_chunks) == 0:
         return data_chunks
 

@@ -8,7 +8,7 @@ from cognee.modules.data.extraction.extract_categories import extract_categories
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 
 
-async def chunk_naive_llm_classifier_task(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
+async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
     if len(data_chunks) == 0:
         return data_chunks
 

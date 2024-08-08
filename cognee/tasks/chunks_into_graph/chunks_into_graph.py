@@ -18,7 +18,7 @@ class EntityNode(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-async def chunks_into_graph_task(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel], collection_name: str):
+async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel], collection_name: str):
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )

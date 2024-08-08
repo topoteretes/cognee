@@ -92,25 +92,25 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             tasks = [
                 Task(document_to_ontology, root_node_id = root_node_id),
                 Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                Task(chunk_to_graph_decomposition_task, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
-                Task(chunks_into_graph_task, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
-                Task(chunk_update_check_task, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
+                Task(chunk_to_graph_decomposition, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
+                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+                Task(chunk_update_check, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
                 Task(
-                    save_chunks_to_store_task,
+                    save_chunks_to_store,
                     collection_name = "chunks",
                 ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
                 run_tasks_parallel([
                     Task(
-                        chunk_extract_summary_task,
+                        chunk_extract_summary,
                         summarization_model = cognee_config.summarization_model,
                         collection_name = "chunk_summaries",
                     ), # Summarize the document chunks
                     Task(
-                        chunk_naive_llm_classifier_task,
+                        chunk_naive_llm_classifier,
                         classification_model = cognee_config.classification_model,
                     ),
                 ]),
-                Task(chunk_remove_disconnected_task), # Remove the obsolete document chunks.
+                Task(chunk_remove_disconnected), # Remove the obsolete document chunks.
             ]
 
             pipeline = run_tasks(tasks, documents)
