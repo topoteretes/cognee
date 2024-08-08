@@ -19,15 +19,15 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import check_permissions_on_documents
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
-from cognee.tasks.chunk_extract_summary.chunk_extract_summary import chunk_extract_summary_task
-from cognee.tasks.chunk_naive_llm_classifier.chunk_naive_llm_classifier import chunk_naive_llm_classifier_task
-from cognee.tasks.chunk_remove_disconnected.chunk_remove_disconnected import chunk_remove_disconnected_task
-from cognee.tasks.chunk_to_graph_decomposition.chunk_to_graph_decomposition import chunk_to_graph_decomposition_task
+from cognee.tasks.chunk_extract_summary.chunk_extract_summary import chunk_extract_summary
+from cognee.tasks.chunk_naive_llm_classifier.chunk_naive_llm_classifier import chunk_naive_llm_classifier
+from cognee.tasks.chunk_remove_disconnected.chunk_remove_disconnected import chunk_remove_disconnected
+from cognee.tasks.chunk_to_graph_decomposition.chunk_to_graph_decomposition import chunk_to_graph_decomposition
 from cognee.tasks.document_to_ontology.document_to_ontology import document_to_ontology
-from cognee.tasks.save_chunks_to_store.save_chunks_to_store import save_chunks_to_store_task
-from cognee.tasks.chunk_update_check.chunk_update_check import chunk_update_check_task
+from cognee.tasks.save_chunks_to_store.save_chunks_to_store import save_chunks_to_store
+from cognee.tasks.chunk_update_check.chunk_update_check import chunk_update_check
 from cognee.tasks.chunks_into_graph.chunks_into_graph import \
-    chunks_into_graph_task
+    chunks_into_graph
 from cognee.tasks.source_documents_to_chunks.source_documents_to_chunks import source_documents_to_chunks
 
 logger = logging.getLogger("cognify.v2")
