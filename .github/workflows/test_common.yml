@@ -24,6 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # os: ["ubuntu-latest", "macos-latest"]
         os: ["ubuntu-latest"]
     steps:
       - name: Set up Docker Buildx
@@ -36,13 +37,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest"]
+        os: ["ubuntu-latest"] #, "windows-latest", "macos-latest"
         python-version: ["3.11.x"]
+        # Test all python versions on ubuntu only
         include:
           - python-version: "3.9.x"
             os: "ubuntu-22.04"
           - python-version: "3.10.x"
             os: "ubuntu-22.04"
+#          - python-version: "3.12.x"
+#            os: "ubuntu-latest"
 
     defaults:
       run:
@@ -59,11 +63,6 @@ jobs:
           - postgres_data:/var/lib/postgresql/data
         ports:
           - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U $POSTGRES_USER"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
 
     runs-on: ${{ matrix.os }}
 
@@ -89,6 +88,7 @@ jobs:
         shell: cmd
 
       - name: Install Poetry
+        # https://github.com/snok/install-poetry#running-on-windows
         uses: snok/install-poetry@v1.3.2
         with:
           virtualenvs-create: true
@@ -106,7 +106,7 @@ jobs:
       - name: Wait for PostgreSQL to be ready
         run: |
           echo "Waiting for PostgreSQL to be ready..."
-          until docker run --rm --network container:${{ services.postgres.id }} postgres:latest pg_isready -U cognee; do
+          until pg_isready -h localhost -p 5432 -U cognee; do
             sleep 1
           done
 
@@ -142,6 +142,62 @@ jobs:
         run: |
          cd dist
          pip install *.whl
+
+      # - run: |
+      #     poetry run
+      #   if: runner.os != 'Windows'
+      #   name: Run common tests with minimum dependencies Linux/MAC
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+
+      # - run: |
+      #     poetry run python ./cognee/tests/test_library.py
+      #   if: runner.os == 'Windows'
+      #   name: Run common tests with minimum dependencies Windows
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+      #   shell: cmd
+
+      # - name: Install  dependencies
+      #   run: poetry install --no-interaction
+
+      # - name: Build with Poetry
+      #   run: poetry build
+
+      # - name: Install Package
+      #   run: |
+      #     cd dist
+      #     pip install *.whl
+
+      # - name: Download NLTK Punkt Tokenizer Models
+      #   run: |
+      #     python -m nltk.downloader punkt
+      # - run: |
+      #     poetry run python ./cognee/tests/test_library.py
+      #   if: runner.os != 'Windows'
+      #   name: Run pipeline smoke tests with minimum deps Linux/MAC
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+
+      # - name: Download NLTK Punkt Tokenizer Models
+      #   run: |
+      #     python -m nltk.downloader punkt
+      # - run: |
+      #     poetry run python ./cognee/tests/test_library.py
+      #   if: runner.os == 'Windows'
+      #   name: Run smoke tests with minimum deps Windows
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
+      #   shell: cmd
+
 
   matrix_job_required_check:
     name: common | common tests
