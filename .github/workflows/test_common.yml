@@ -106,7 +106,7 @@ jobs:
       - name: Wait for PostgreSQL to be ready
         run: |
           echo "Waiting for PostgreSQL to be ready..."
-          until docker exec ${RUNNER_USER_NAME}-postgres pg_isready -U cognee; do
+          until docker run --rm --network container:${{ services.postgres.id }} postgres:latest pg_isready -U cognee; do
             sleep 1
           done
 
