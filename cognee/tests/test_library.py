@@ -6,6 +6,7 @@ import cognee
 logging.basicConfig(level = logging.DEBUG)
 
 async def  main():
+
     data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_library")).resolve())
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_library")).resolve())
@@ -69,4 +70,4 @@ async def  main():
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    asyncio.run(main(), debug=True)

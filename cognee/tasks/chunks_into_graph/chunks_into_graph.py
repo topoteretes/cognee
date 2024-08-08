@@ -6,8 +6,9 @@ from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
-from ...processing.chunk_types.DocumentChunk import DocumentChunk
-from .extract_knowledge_graph import extract_content_graph
+from cognee.modules.data.extraction.knowledge_graph.extract_content_graph import extract_content_graph
+from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+
 
 class EntityNode(BaseModel):
     uuid: str
@@ -17,7 +18,7 @@ class EntityNode(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-async def expand_knowledge_graph(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel], collection_name: str):
+async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel], collection_name: str):
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )

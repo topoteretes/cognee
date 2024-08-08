@@ -9,14 +9,6 @@ from cognee.modules.data.processing.document_types.AudioDocument import AudioDoc
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.data.processing.document_types import PdfDocument, TextDocument
-from cognee.modules.cognify.vector import save_data_chunks
-from cognee.modules.data.processing.process_documents import process_documents
-from cognee.modules.classification.classify_text_chunks import classify_text_chunks
-from cognee.modules.data.extraction.data_summary.summarize_text_chunks import summarize_text_chunks
-from cognee.modules.data.processing.filter_affected_chunks import filter_affected_chunks
-from cognee.modules.data.processing.remove_obsolete_chunks import remove_obsolete_chunks
-from cognee.modules.data.extraction.knowledge_graph.expand_knowledge_graph import expand_knowledge_graph
-from cognee.modules.data.extraction.knowledge_graph.establish_graph_topology import establish_graph_topology
 from cognee.modules.data.models import Dataset, Data
 from cognee.modules.data.operations.get_dataset_data import get_dataset_data
 from cognee.modules.data.operations.retrieve_datasets import retrieve_datasets
@@ -27,6 +19,16 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import check_permissions_on_documents
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
+from cognee.tasks.chunk_extract_summary.chunk_extract_summary import chunk_extract_summary
+from cognee.tasks.chunk_naive_llm_classifier.chunk_naive_llm_classifier import chunk_naive_llm_classifier
+from cognee.tasks.chunk_remove_disconnected.chunk_remove_disconnected import chunk_remove_disconnected
+from cognee.tasks.chunk_to_graph_decomposition.chunk_to_graph_decomposition import chunk_to_graph_decomposition
+from cognee.tasks.document_to_ontology.document_to_ontology import document_to_ontology
+from cognee.tasks.save_chunks_to_store.save_chunks_to_store import save_chunks_to_store
+from cognee.tasks.chunk_update_check.chunk_update_check import chunk_update_check
+from cognee.tasks.chunks_into_graph.chunks_into_graph import \
+    chunks_into_graph
+from cognee.tasks.source_documents_to_chunks.source_documents_to_chunks import source_documents_to_chunks
 
 logger = logging.getLogger("cognify.v2")
 
@@ -87,39 +89,28 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             cognee_config = get_cognify_config()
             graph_config = get_graph_config()
             root_node_id = None
-
-            if graph_config.infer_graph_topology and graph_config.graph_topology_task:
-                from cognee.modules.topology.topology import TopologyEngine
-                topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-                root_node_id = await topology_engine.add_graph_topology(files = data)
-            elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
-                from cognee.modules.topology.topology import TopologyEngine
-                topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
-                await topology_engine.add_graph_topology(graph_config.topology_file_path)
-            elif not graph_config.graph_topology_task:
-                root_node_id = "ROOT"
-
             tasks = [
-                Task(process_documents, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                Task(establish_graph_topology, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
-                Task(expand_knowledge_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
-                Task(filter_affected_chunks, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
+                Task(document_to_ontology, root_node_id = root_node_id),
+                Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
+                Task(chunk_to_graph_decomposition, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
+                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+                Task(chunk_update_check, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
                 Task(
-                    save_data_chunks,
+                    save_chunks_to_store,
                     collection_name = "chunks",
                 ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
                 run_tasks_parallel([
                     Task(
-                        summarize_text_chunks,
+                        chunk_extract_summary,
                         summarization_model = cognee_config.summarization_model,
                         collection_name = "chunk_summaries",
                     ), # Summarize the document chunks
                     Task(
-                        classify_text_chunks,
+                        chunk_naive_llm_classifier,
                         classification_model = cognee_config.classification_model,
                     ),
                 ]),
-                Task(remove_obsolete_chunks), # Remove the obsolete document chunks.
+                Task(chunk_remove_disconnected), # Remove the obsolete document chunks.
             ]
 
             pipeline = run_tasks(tasks, documents)

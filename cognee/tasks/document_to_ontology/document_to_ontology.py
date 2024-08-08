@@ -1,5 +1,7 @@
 """ This module contains the TopologyEngine class which is responsible for adding graph topology from a JSON or CSV file. """
 
+from cognee.infrastructure.databases.graph import get_graph_config
+from cognee.modules.cognify.config import get_cognify_config
 import csv
 import json
 import logging
@@ -14,9 +16,41 @@ from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_en
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
-from cognee.modules.topology.topology_data_models import NodeModel
+from cognee.tasks.document_to_ontology.models.models import NodeModel
 
 logger = logging.getLogger("topology")
+
+from cognee.infrastructure.databases.graph.config import get_graph_config
+
+
+from typing import Type
+from pydantic import BaseModel
+from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+
+
+async def extract_topology(content: str, response_model: Type[BaseModel]):
+    llm_client = get_llm_client()
+
+    system_prompt = read_query_prompt("extract_topology.txt")
+
+    llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model)
+
+    return llm_output.model_dump()
+
+
+async def infer_data_topology(content: str, graph_topology=None):
+    if graph_topology is None:
+        graph_config = get_graph_config()
+        graph_topology = graph_config.graph_topology
+    try:
+        return (await extract_topology(
+            content,
+            graph_topology
+        ))
+    except Exception as error:
+        logger.error("Error extracting topology from content: %s", error, exc_info = True)
+        raise error
 
 class TopologyEngine:
     def __init__(self, infer:bool) -> None:
@@ -69,8 +103,6 @@ class TopologyEngine:
     async def add_graph_topology(self, file_path: str = None, files: list = None):
         """Add graph topology from a JSON or CSV file."""
         if self.infer:
-            from cognee.modules.topology.infer_data_topology import infer_data_topology
-
             initial_chunks_and_ids = []
 
             chunk_config = get_chunk_config()
@@ -128,3 +160,23 @@ class TopologyEngine:
                 return
             except Exception as e:
                 raise RuntimeError(f"Failed to add graph topology from {file_path}: {e}") from e
+
+
+
+
+
+async def document_to_ontology(data, root_node_id):
+    cognee_config = get_cognify_config()
+    graph_config = get_graph_config()
+    root_node_id = None
+    if graph_config.infer_graph_topology and graph_config.graph_topology_task:
+        topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+        root_node_id = await topology_engine.add_graph_topology(files=data)
+    elif graph_config.infer_graph_topology and not graph_config.infer_graph_topology:
+
+        topology_engine = TopologyEngine(infer=graph_config.infer_graph_topology)
+        await topology_engine.add_graph_topology(graph_config.topology_file_path)
+    elif not graph_config.graph_topology_task:
+        root_node_id = "ROOT"
+
+    yield (data, root_node_id)

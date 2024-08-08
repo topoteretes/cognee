@@ -1,7 +1,8 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
-from .chunk_types import DocumentChunk
+from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 
-async def filter_affected_chunks(data_chunks: list[DocumentChunk], collection_name: str) -> list[DocumentChunk]:
+
+async def chunk_update_check(data_chunks: list[DocumentChunk], collection_name: str) -> list[DocumentChunk]:
     vector_engine = get_vector_engine()
 
     if not await vector_engine.has_collection(collection_name):

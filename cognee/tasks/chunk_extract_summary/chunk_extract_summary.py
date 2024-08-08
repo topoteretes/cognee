@@ -3,11 +3,12 @@ import asyncio
 from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
-from ...processing.chunk_types.DocumentChunk import DocumentChunk
-from ...extraction.extract_summary import extract_summary
-from .models.TextSummary import TextSummary
+from cognee.tasks.chunk_extract_summary.models.TextSummary import TextSummary
+from cognee.modules.data.extraction.extract_summary import extract_summary
+from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
 
-async def summarize_text_chunks(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel], collection_name: str = "summaries"):
+
+async def chunk_extract_summary(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel], collection_name: str = "summaries"):
     if len(data_chunks) == 0:
         return data_chunks
 
@@ -17,7 +18,7 @@ async def summarize_text_chunks(data_chunks: list[DocumentChunk], summarization_
 
     vector_engine = get_vector_engine()
 
-    await vector_engine.create_collection(collection_name, payload_schema = TextSummary)
+    await vector_engine.create_collection(collection_name, payload_schema=TextSummary)
 
     await vector_engine.create_data_points(
         collection_name,

@@ -1,8 +1,13 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
-from .document_types import Document
+from cognee.modules.data.processing.document_types.Document import Document
 
-async def process_documents(documents: list[Document], parent_node_id: str = None, user:str=None, user_permissions:str=None):
+
+async def source_documents_to_chunks(documents: list[Document], parent_node_id: str = None, user:str=None, user_permissions:str=None):
     graph_engine = await get_graph_engine()
+
+    if parent_node_id is None:
+        documents, parent_node_id = documents
+
 
     nodes = []
     edges = []
