@@ -3,17 +3,23 @@ import logging
 from uuid import UUID, uuid5, NAMESPACE_OID
 from typing import Optional
 from pypdf import PdfReader as pypdf_PdfReader
-from cognee.modules.data.chunking import chunk_by_paragraph
+
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.tasks.chunking import chunk_by_paragraph
+from cognee.tasks.chunking.chunking_registry import get_chunking_function
 from .Document import Document
 
 class PdfReader():
     id: UUID
     file_path: str
+    chunking_strategy: str
 
-    def __init__(self, id: UUID, file_path: str):
+    def __init__(self, id: UUID, file_path: str, chunking_strategy:str = "paragraph"):
         self.id = id
         self.file_path = file_path
+        self.chunking_strategy = chunking_strategy
+        self.chunking_function = get_chunking_function(chunking_strategy)
+
 
     def get_number_of_pages(self):
         file = pypdf_PdfReader(self.file_path)
@@ -33,7 +39,7 @@ class PdfReader():
             page_text = page.extract_text()
             chunked_pages.append(page_index)
 
-            for chunk_data in chunk_by_paragraph(page_text, max_chunk_size, batch_paragraphs = True):
+            for chunk_data in self.chunking_function(page_text, max_chunk_size, batch_paragraphs = True):
                 if chunk_size + chunk_data["word_count"] <= max_chunk_size:
                     paragraph_chunks.append(chunk_data)
                     chunk_size += chunk_data["word_count"]
@@ -85,18 +91,20 @@ class PdfDocument(Document):
     title: str
     num_pages: int
     file_path: str
+    chunking_strategy:str
 
-    def __init__(self, id: UUID, title: str, file_path: str):
+    def __init__(self, id: UUID, title: str, file_path: str, chunking_strategy:str="paragraph"):
         self.id = id or uuid5(NAMESPACE_OID, title)
         self.title = title
         self.file_path = file_path
         logging.debug("file_path: %s", self.file_path)
         reader = PdfReader(self.id, self.file_path)
         self.num_pages = reader.get_number_of_pages()
+        self.chunking_strategy = chunking_strategy
 
     def get_reader(self) -> PdfReader:
         logging.debug("file_path: %s", self.file_path)
-        reader = PdfReader(self.id, self.file_path)
+        reader = PdfReader(self.id, self.file_path, self.chunking_strategy)
         return reader
 
     def to_dict(self) -> dict:
