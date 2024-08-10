@@ -15,7 +15,7 @@ class PermissionDeniedException(Exception):
         super().__init__(self.message)
 
 
-async def check_permissions_on_documents(user: User, permission_type: str, document_ids: list[UUID]):
+async def check_permission_on_documents(user: User, permission_type: str, document_ids: list[UUID]):
     try:
         user_group_ids = [group.id for group in user.groups]
 

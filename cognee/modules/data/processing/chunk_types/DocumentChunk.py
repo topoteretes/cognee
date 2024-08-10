@@ -7,4 +7,3 @@ class DocumentChunk(BaseModel):
     chunk_id: str
     chunk_index: int
     cut_type: str
-    pages: list[int]

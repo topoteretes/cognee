@@ -2,7 +2,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.processing.document_types.Document import Document
 
 
-async def source_documents_to_chunks(documents: list[Document], parent_node_id: str = None, user:str=None, user_permissions:str=None):
+async def source_documents_to_chunks(documents: list[Document], parent_node_id: str = None):
     graph_engine = await get_graph_engine()
 
     if parent_node_id is None:
@@ -21,9 +21,6 @@ async def source_documents_to_chunks(documents: list[Document], parent_node_id: 
         document_node = document_nodes[document_index] if document_index in document_nodes else None
 
         if document_node is None:
-            document_dict = document.to_dict()
-            document_dict["user"] = user
-            document_dict["user_permissions"] = user_permissions
             nodes.append((str(document.id), document.to_dict()))
 
             if parent_node_id:
@@ -43,7 +40,5 @@ async def source_documents_to_chunks(documents: list[Document], parent_node_id: 
         await graph_engine.add_edges(edges)
 
     for document in documents:
-        document_reader = document.get_reader()
-
-        for document_chunk in document_reader.read(max_chunk_size = 1024):
+        for document_chunk in document.read():
             yield document_chunk
