@@ -1,6 +1,8 @@
 # cognee
 
 We build for developers who need a reliable, production-ready data layer for AI applications
+cognee implements scalable, modular data pipelines that allow for creating the LLM-enriched data layer using graph and vector stores.
+
 
 
 <p>
@@ -11,7 +13,7 @@ We build for developers who need a reliable, production-ready data layer for AI 
 
 
 <p>
-  <i> Developer-friendly framework for creating reliable data layer for AI applications using graph and vector stores for</i>
+  <i> cognee aims to be dbt for LLMOps</i>
 </p>
 
 <p>
@@ -29,9 +31,6 @@ We build for developers who need a reliable, production-ready data layer for AI 
   </a>
 </p>
 
-cognee aims to be dbt for LLMOps
-
-cognee implements scalable, modular data pipelines that allow for a creation of the LLM-enriched data layer using graph and vector stores.
 
 
 Try it in a Google collab  <a href="https://colab.research.google.com/drive/1jayZ5JRwDaUGFvCw9UZySBG-iB9gpYfu?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
