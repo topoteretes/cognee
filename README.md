@@ -3,17 +3,6 @@
 We build for developers who need a reliable, production-ready data layer for AI applications
 
 
-cognee implements scalable, modular data pipelines that allow for creating the LLM-enriched data layer using graph and vector stores.
-
-
-
-
-
-
-<p>
-  <i> cognee aims to be dbt for LLMOps</i>
-</p>
-
 <p>
   <a href="https://github.com/topoteretes/cognee/fork">
     <img src="https://img.shields.io/github/forks/topoteretes/cognee?style=for-the-badge" alt="cognee forks"/>
@@ -27,6 +16,17 @@ cognee implements scalable, modular data pipelines that allow for creating the L
   <a href="https://github.com/topoteretes/cognee/releases">
     <img src="https://img.shields.io/github/release/topoteretes/cognee?&label=Latest&style=for-the-badge" alt="cognee releases" />
   </a>
+</p>
+
+cognee implements scalable, modular data pipelines that allow for creating the LLM-enriched data layer using graph and vector stores.
+
+
+
+
+
+
+<p>
+  <i> cognee aims to be dbt for LLMOps</i>
 </p>
 
 
