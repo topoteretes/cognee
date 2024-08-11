@@ -1,6 +1,8 @@
 # cognee
 
 We build for developers who need a reliable, production-ready data layer for AI applications
+
+
 cognee implements scalable, modular data pipelines that allow for creating the LLM-enriched data layer using graph and vector stores.
 
 
