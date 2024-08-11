@@ -54,22 +54,18 @@ theme:
     - toc.follow
     # - toc.integrate
   palette:
-      - scheme: default
-        primary: black
-        accent: indigo
-        toggle:
-          icon: material/brightness-7
-          name: Switch to dark mode
-      - scheme: slate
-        primary: black
-        accent: indigo
-        toggle:
-          icon: material/brightness-4
-          name: Switch to light mode
+    - scheme: default
+      primary: '#1A1A1A'  # Dark text color
+      accent: '#3A619C'   # Blue accent
+    - scheme: slate
+      primary: '#1A1A1A'
+      accent: '#3A619C'
   font:
     text: Roboto
     code: Roboto Mono
   custom_dir: docs/overrides
+  extra_css:
+    - overrides/extra.css
 # Extensions
 markdown_extensions:
   - abbr
@@ -117,25 +113,22 @@ markdown_extensions:
   - pymdownx.tasklist:
       custom_checkbox: true
 nav:
-  - Introduction:
-    - Welcome to cognee: 'index.md'
-    - Quickstart: 'quickstart.md'
-    - Conceptual overview: 'conceptual_overview.md'
-    - Learning materials: 'rags.md'
-    - Blog: 'blog/index.md'
-    - Research: 'research.md'
-    - Local models: 'local_models.md'
-    - Api reference: 'api_reference.md'
+  - Overview:
+    - Overview: 'index.md'
+    - Start here:
+        - Installation: 'quickstart.md'
+        - Add data: 'data_ingestion.md'
+        - Create LLM enriched data store: 'templates.md'
+        - Explore data: 'search.md'
+#    - SDK:
+#      - Overview: 'sdk_overview.md'
+    - Configuration: 'configuration.md'
+    - What is cognee:
+      - Introduction: 'conceptual_overview.md'
+    - API reference: 'api_reference.md'
   - Blog:
       - "blog/index.md"
-  - Why cognee:
-      - "why.md"
-  - Research:
-      - "research.md"
-  - Api reference:
-      - 'api_reference.md'
-  - Team:
-      - "team.md"
+
 
 plugins:
   - mkdocs-jupyter:
