@@ -7,11 +7,7 @@ cognee implements scalable, modular data pipelines that allow for creating the L
 
 
 
-<p>
-  <a href="https://cognee.ai" target="_blank">
-    <img src="https://raw.githubusercontent.com/topoteretes/cognee/main/assets/cognee-logo.png" width="160px" alt="Cognee logo" />
-  </a>
-</p>
+
 
 
 <p>
