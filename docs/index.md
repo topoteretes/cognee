@@ -1,18 +1,10 @@
 # cognee 
 
-
-
-####  Deterministic LLMs Outputs for AI Engineers
-
-
+##  How developers build reliable AI apps
 
 _Open-source framework for loading and structuring LLM context to create accurate and explainable AI solutions using knowledge graphs and vector stores_
 
-
-
 ---
-
-
 
 [![Twitter Follow](https://img.shields.io/twitter/follow/tricalt?style=social)](https://twitter.com/tricalt)
 
@@ -20,7 +12,7 @@ _Open-source framework for loading and structuring LLM context to create accurat
 [![Downloads](https://img.shields.io/pypi/dm/cognee.svg)](https://pypi.python.org/pypi/cognee)
 
 
-[![Star on GitHub](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social)](https://github.com/topoteretes/cognee)
+[![Star us on GitHub](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social)](https://github.com/topoteretes/cognee)
 
 
 ### Let's learn about cogneeHub!
@@ -60,7 +52,7 @@ The question of using cognee is fundamentally a question of why to have determin
 
 1. **Cost-effective** — cognee extends the capabilities of your LLMs without the need for expensive data processing tools.
 
-2. **Self-contained** — cognee runs as a library and is simple to use
+2. **Self-contained** — cognee runs as a library and is simple to use.
 
 3. **Interpretable** — Navigate graphs instead of embeddings to understand your data.
 

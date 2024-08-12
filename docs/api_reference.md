@@ -86,28 +86,10 @@ cognee.config.set_graph_engine(GraphDBType.NEO4J)
 
 
 
-## API
+## API reference
 
 
-
-For each API endpoint, provide the following details:
-
-
-
-### Endpoint 1: Root
-- URL: /add
-- Method: POST
-- Auth Required: No
-- Description: Root endpoint that returns a welcome message.
-
-#### Response
-```json
-{
-  "message": "Hello, World, I am alive!"
-}
-```
-
-### Endpoint 1: Health Check
+### Health Check
 - URL: /health
 - Method: GET
 - Auth Required: No
@@ -115,8 +97,69 @@ For each API endpoint, provide the following details:
 #### Response
 ```json
 {
-  "status": "OK"
+  "status": 200,
+  "message": "Hello, World, I am alive!"
 }
+```
+
+### Add data to the system
+- URL: /add
+- Method: POST
+- Auth Required: No
+- Description: Upload files to the system to be later processed in pipelines.
+#### Request
+```json
+{
+  "dataset_id": "ID_OF_THE_DATASET_TO_PUT_DATA_IN", // Optional, we use "main" as default.
+  "files": File[]
+}
+```
+#### Response
+```json
+{
+  "status": 200,
+  "message": "OK"
+}
+```
+
+### Run the cognify pipeline
+- URL: /cognify
+- Method: POST
+- Auth Required: No
+- Description: Run the default cognee pipeline - cognify on provided datasets.
+#### Request
+```json
+{
+  "datasets": [{
+    "dataset_id": "ID_OF_THE_DATASET", // Optional, we use "main" as default.
+  }]
+}
+```
+#### Response
+```json
+{
+  "status": 200,
+  "message": "OK"
+}
+```
+
+### Retrieve the data
+- URL: /search
+- Method: POST
+- Auth Required: No
+- Description: Run the specific search with the provided query.
+#### Request
+```json
+{
+  "query_params": [{
+    "query": "QUERY_TO_MATCH_DATA",
+    "searchType": "SIMILARITY", // or TRAVERSE, ADJACENT, SUMMARY
+  }]
+}
+```
+#### Response
+```json
+SearchResult[]
 ```
 
 More endpoints are available in the FastAPI server. Documentation is in progress

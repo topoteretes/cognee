@@ -8,6 +8,8 @@ edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2024 cognee
 theme:
   name: material
+  logo: assets/logo.png
+  favicon: assets/favicon.png
   icon:
     repo: fontawesome/brands/github
     edit: material/pencil
@@ -45,31 +47,25 @@ theme:
     - navigation.prune
     - navigation.sections
     - navigation.tabs
-    # - navigation.tabs.sticky
     - navigation.top
     - navigation.tracking
+    - navigation.path
     - search.highlight
     - search.share
     - search.suggest
     - toc.follow
     # - toc.integrate
   palette:
-      - scheme: default
-        primary: black
-        accent: indigo
-        toggle:
-          icon: material/brightness-7
-          name: Switch to dark mode
-      - scheme: slate
-        primary: black
-        accent: indigo
-        toggle:
-          icon: material/brightness-4
-          name: Switch to light mode
+      - scheme: cognee
+        primary: custom
   font:
     text: Roboto
     code: Roboto Mono
   custom_dir: docs/overrides
+
+extra_css:
+  - stylesheets/extra.css
+
 # Extensions
 markdown_extensions:
   - abbr
