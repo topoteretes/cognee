@@ -232,13 +232,15 @@ async def add(
                 datasetId,
             )
             return JSONResponse(
-                status_code=200,
-                content="OK"
+                status_code = 200,
+                content = {
+                    "message": "OK"
+                }
             )
     except Exception as error:
         return JSONResponse(
-            status_code=409,
-            content={"error": str(error)}
+            status_code = 409,
+            content = {"error": str(error)}
         )
 
 class CognifyPayload(BaseModel):
@@ -252,7 +254,9 @@ async def cognify(payload: CognifyPayload):
         await cognee_cognify(payload.datasets)
         return JSONResponse(
             status_code = 200,
-            content = "OK"
+            content = {
+              "message": "OK"
+            }
         )
     except Exception as error:
         return JSONResponse(

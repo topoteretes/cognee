@@ -157,11 +157,19 @@ The base URL for all API requests is determined by the server's deployment envir
   **Form Parameters**:
   - `datasetId`: The ID of the dataset to add data to.
   - `data`: A list of files to upload.
+
+  **Request**
+  ```json
+  {
+    "dataset_id": "ID_OF_THE_DATASET_TO_PUT_DATA_IN", // Optional, we use "main" as default.
+    "files": File[]
+  }
+  ```
   
   **Response**:
   ```json
   {
-    "status": "OK"
+    "message": "OK"
   }
   ```
 
@@ -173,12 +181,16 @@ The base URL for all API requests is determined by the server's deployment envir
 - **Description**: Perform cognitive processing on the specified datasets.
   
   **Request Body**:
-  - `datasets`: A list of dataset IDs to process.
+  ```json
+  {
+    "datasets": ["ID_OF_THE_DATASET_1", "ID_OF_THE_DATASET_2", ...]
+  }
+  ```
   
   **Response**:
   ```json
   {
-    "status": "OK"
+    "message": "OK"
   }
   ```
 
@@ -189,10 +201,19 @@ The base URL for all API requests is determined by the server's deployment envir
 - **Auth Required**: No
 - **Description**: Search for nodes in the graph based on the provided query parameters.
   
-  **Request Body**:
-  - `query_params`: A dictionary of query parameters.
+  <!-- **Request Body**:
+  - `query_params`: A dictionary of query parameters. -->
   
-  **Response**:
+  **Request Body**:
+  ```json
+  {
+    "query_params": [{
+      "query": "QUERY_TO_MATCH_DATA",
+      "searchType": "SIMILARITY", // or TRAVERSE, ADJACENT, SUMMARY
+    }]
+  }
+  ```
+  **Response**
   ```json
   {
     "results": [
