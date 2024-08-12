@@ -27,5 +27,5 @@ Push or pull data to build custom functionality or create bespoke views for your
 ### Resources
 
 - [Research](research.md)
-- [Community](#)
+- [Community](https://discord.gg/52QTb5JK){:target="_blank"}
 
