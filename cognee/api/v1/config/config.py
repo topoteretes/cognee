@@ -45,19 +45,9 @@ class config():
         cognify_config.summarization_model=summarization_model
 
     @staticmethod
-    def set_labeling_model(labeling_model: object):
-        cognify_config = get_cognify_config()
-        cognify_config.labeling_model =labeling_model
-
-    @staticmethod
     def set_graph_model(graph_model: object):
         graph_config = get_graph_config()
         graph_config.graph_model = graph_model
-
-    @staticmethod
-    def set_cognitive_layer_model(cognitive_layer_model: object):
-        cognify_config = get_cognify_config()
-        cognify_config.cognitive_layer_model = cognitive_layer_model
 
     @staticmethod
     def set_graph_database_provider(graph_database_provider: str):
@@ -78,16 +68,6 @@ class config():
     def llm_model(llm_model: str):
         graph_config = get_graph_config()
         graph_config.llm_model = llm_model
-
-    @staticmethod
-    def intra_layer_score_treshold(intra_layer_score_treshold: str):
-        cognify_config = get_cognify_config()
-        cognify_config.intra_layer_score_treshold = intra_layer_score_treshold
-
-    @staticmethod
-    def connect_documents(connect_documents: bool):
-        cognify_config = get_cognify_config()
-        cognify_config.connect_documents = connect_documents
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):

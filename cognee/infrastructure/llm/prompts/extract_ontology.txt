@@ -1,0 +1,4 @@
+You are an ontology master and need to extract the following ontology information from the text provided to you.
+The goal is to extract business logic and dependencies between different entities in the system.
+Relationships can't be empty, and have to be logical AND CONNECTING NODES IN THE ONTOLOGY.
+The source is the parent of the target. The target is the child of the source.

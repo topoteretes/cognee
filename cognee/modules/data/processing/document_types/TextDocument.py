@@ -1,5 +1,5 @@
 from uuid import UUID, uuid5, NAMESPACE_OID
-from cognee.modules.data.chunking.DocumentChunker import DocumentChunker
+from cognee.modules.data.chunking.TextChunker import TextChunker
 from .Document import Document
 
 class TextDocument(Document):
@@ -13,10 +13,8 @@ class TextDocument(Document):
         self.file_path = file_path
 
     def read(self):
-        document_chunker = DocumentChunker(self.id)
-
-        def read_text_chunks(file_path):
-            with open(file_path, mode = "r", encoding = "utf-8") as file:
+        def get_text():
+            with open(self.file_path, mode = "r", encoding = "utf-8") as file:
                 while True:
                     text = file.read(1024)
 
@@ -24,9 +22,11 @@ class TextDocument(Document):
                         break
 
                     yield text
-        
-        for text_chunk in read_text_chunks(self.file_path):
-            yield from document_chunker.read(text_chunk)
+
+
+        chunker = TextChunker(self.id, get_text = get_text)
+
+        yield from chunker.read()
 
 
     def to_dict(self) -> dict:

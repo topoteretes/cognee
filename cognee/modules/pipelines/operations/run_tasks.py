@@ -94,6 +94,7 @@ async def run_tasks(tasks: [Task], data = None):
                 str(error),
                 exc_info = True,
             )
+            raise error
                 
     elif inspect.isfunction(running_task.executable):
         logger.info("Running function task: `%s`", running_task.executable.__name__)
@@ -111,3 +112,4 @@ async def run_tasks(tasks: [Task], data = None):
                 str(error),
                 exc_info = True,
             )
+            raise error

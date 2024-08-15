@@ -14,18 +14,16 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
-from cognee.tasks.chunk_extract_summary.chunk_extract_summary import chunk_extract_summary
-from cognee.tasks.chunk_naive_llm_classifier.chunk_naive_llm_classifier import chunk_naive_llm_classifier
-from cognee.tasks.chunk_remove_disconnected.chunk_remove_disconnected import chunk_remove_disconnected
-from cognee.tasks.chunk_to_graph_decomposition.chunk_to_graph_decomposition import chunk_to_graph_decomposition
-from cognee.tasks.document_to_ontology.document_to_ontology import document_to_ontology
-from cognee.tasks.save_chunks_to_store.save_chunks_to_store import save_chunks_to_store
-from cognee.tasks.chunk_update_check.chunk_update_check import chunk_update_check
-from cognee.tasks.chunks_into_graph.chunks_into_graph import \
-    chunks_into_graph
-from cognee.tasks.source_documents_to_chunks.source_documents_to_chunks import source_documents_to_chunks
-from cognee.tasks.check_permissions_on_documents.check_permissions_on_documents import check_permissions_on_documents
-from cognee.tasks.classify_documents.classify_documents import classify_documents
+from cognee.tasks import chunk_extract_summary, \
+    chunk_naive_llm_classifier, \
+    chunk_remove_disconnected, \
+    infer_data_ontology, \
+    save_chunks_to_store, \
+    chunk_update_check, \
+    chunks_into_graph, \
+    source_documents_to_chunks, \
+    check_permissions_on_documents, \
+    classify_documents
 
 logger = logging.getLogger("cognify.v2")
 
@@ -75,10 +73,9 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             tasks = [
                 Task(classify_documents),
                 Task(check_permissions_on_documents, user = user, permissions = ["write"]),
-                Task(document_to_ontology, root_node_id = root_node_id),
+                Task(infer_data_ontology, root_node_id = root_node_id, ontology_model = KnowledgeGraph),
                 Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                Task(chunk_to_graph_decomposition, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
-                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities", task_config = { "batch_size": 10 }), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
                 Task(chunk_update_check, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
                 Task(
                     save_chunks_to_store,

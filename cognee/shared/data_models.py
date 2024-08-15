@@ -194,23 +194,6 @@ class SummarizedContent(BaseModel):
     summary: str
     description: str
 
-class LabeledContent(BaseModel):
-    """Class for a single class label summary."""
-    content_labels: str
-
-
-class CognitiveLayerSubgroup(BaseModel):
-    """ CognitiveLayerSubgroup in a general layer """
-    id: int
-    name: str
-    description: str
-
-
-class DefaultCognitiveLayer(BaseModel):
-    """Cognitive  layer"""
-    category_name: str
-    cognitive_layers: List[CognitiveLayerSubgroup] = Field(..., default_factory=list)
-
 
 class GraphDBType(Enum):
     NETWORKX = auto()
