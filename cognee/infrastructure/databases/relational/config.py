@@ -11,7 +11,6 @@ class RelationalConfig(BaseSettings):
     db_user: str = "cognee"
     db_password: str =  "cognee"
     db_provider: str = "postgresql+asyncpg"
-    # db_provider: str = "duckdb"
     db_file_path: str = os.path.join(db_path, db_name)
 
 
