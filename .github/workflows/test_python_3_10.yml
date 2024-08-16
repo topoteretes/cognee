@@ -1,4 +1,4 @@
-name: test | environments
+name: test | python 3.10
 
 on:
   pull_request:
@@ -20,12 +20,9 @@ jobs:
 
   setup_docker:
     name: Set up Docker Buildx
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        # os: ["ubuntu-latest", "macos-latest"]
-        os: ["ubuntu-latest"]
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,20 +31,9 @@ jobs:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        os: ["ubuntu-latest"] #, "windows-latest", "macos-latest"
-        python-version: ["3.11.x"]
-        # Test all python versions on ubuntu only
-        include:
-          - python-version: "3.9.x"
-            os: "ubuntu-22.04"
-          - python-version: "3.10.x"
-            os: "ubuntu-22.04"
-#          - python-version: "3.12.x"
-#            os: "ubuntu-latest"
-
     defaults:
       run:
         shell: bash
@@ -64,8 +50,6 @@ jobs:
         ports:
           - 5432:5432
 
-    runs-on: ${{ matrix.os }}
-
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -73,7 +57,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version:  3.10.x
 
       - name: Install tzdata on windows
         run: |
@@ -143,70 +127,3 @@ jobs:
         run: |
          cd dist
          pip install *.whl
-
-      # - run: |
-      #     poetry run
-      #   if: runner.os != 'Windows'
-      #   name: Run common tests with minimum dependencies Linux/MAC
-      #   env:
-      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-
-      # - run: |
-      #     poetry run python ./cognee/tests/test_library.py
-      #   if: runner.os == 'Windows'
-      #   name: Run common tests with minimum dependencies Windows
-      #   env:
-      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-      #   shell: cmd
-
-      # - name: Install  dependencies
-      #   run: poetry install --no-interaction
-
-      # - name: Build with Poetry
-      #   run: poetry build
-
-      # - name: Install Package
-      #   run: |
-      #     cd dist
-      #     pip install *.whl
-
-      # - name: Download NLTK Punkt Tokenizer Models
-      #   run: |
-      #     python -m nltk.downloader punkt
-      # - run: |
-      #     poetry run python ./cognee/tests/test_library.py
-      #   if: runner.os != 'Windows'
-      #   name: Run pipeline smoke tests with minimum deps Linux/MAC
-      #   env:
-      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-
-      # - name: Download NLTK Punkt Tokenizer Models
-      #   run: |
-      #     python -m nltk.downloader punkt
-      # - run: |
-      #     poetry run python ./cognee/tests/test_library.py
-      #   if: runner.os == 'Windows'
-      #   name: Run smoke tests with minimum deps Windows
-      #   env:
-      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      #     QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-      #     QDRANT_API_URL: ${{ secrets.QDRANT_API_URL }}
-      #   shell: cmd
-
-
-  matrix_job_required_check:
-    name: common | common tests
-    needs: run_common
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check matrix job results
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: |
-          echo "One or more matrix job tests failed or were cancelled. You may need to re-run them." && exit 1
