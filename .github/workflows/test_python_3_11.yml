@@ -105,6 +105,13 @@ jobs:
       - name: Run tests
         run: poetry run pytest tests/
 
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h localhost -p 5432 -U cognee; do
+            sleep 1
+          done
+
       - name: Run default basic pipeline
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
