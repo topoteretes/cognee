@@ -20,12 +20,9 @@ jobs:
 
   setup_docker:
     name: Set up Docker Buildx
-    runs-on: ubuntu_latest
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # matrix:
-      #   # os: ["ubuntu-latest", "macos-latest"]
-      #   os: ["ubuntu-latest"]
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,10 +31,9 @@ jobs:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
-    runs-on: ubuntu_latest
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-
     defaults:
       run:
         shell: bash
@@ -46,6 +42,7 @@ jobs:
       postgres:
         image: postgres:latest
         env:
+          PGUSER: cognee
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
           POSTGRES_DB: cognee_db
@@ -53,6 +50,11 @@ jobs:
           - postgres_data:/var/lib/postgresql/data
         ports:
           - 5432:5432
+        healthcheck:
+          test: /usr/bin/pg_isready || exit 1
+          interval: 5s
+          timeout: 10s
+          retries: 120
 
     steps:
       - name: Check out
@@ -61,7 +63,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.x'
+          python-version:  '3.11.x'
 
       - name: Install Poetry
         # https://github.com/snok/install-poetry#running-on-windows
@@ -79,12 +81,12 @@ jobs:
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
 
-      - name: Wait for PostgreSQL to be ready
-        run: |
-          echo "Waiting for PostgreSQL to be ready..."
-          until pg_isready -h localhost -p 5432 -U cognee; do
-            sleep 1
-          done
+      # - name: Wait for PostgreSQL to be ready
+      #   run: |
+      #     echo "Waiting for PostgreSQL to be ready..."
+      #     until pg_isready -h localhost -p 5432 -U cognee; do
+      #       sleep 1
+      #     done
 
       - name: Run tests
         run: poetry run pytest tests/
@@ -94,6 +96,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENV: 'dev'
+          PGUSER: cognee
           DESTINATION__POSTGRES__CREDENTIALS__HOST: localhost
           DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
           DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
