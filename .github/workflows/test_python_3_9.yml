@@ -50,11 +50,6 @@ jobs:
           - postgres_data:/var/lib/postgresql/data
         ports:
           - 5432:5432
-        healthcheck:
-          test: /usr/bin/pg_isready || exit 1
-          interval: 5s
-          timeout: 10s
-          retries: 120
 
     steps:
       - name: Check out
@@ -81,12 +76,17 @@ jobs:
           mkdir .cognee_system
           echo $(pwd)/.cognee_system
 
-      # - name: Wait for PostgreSQL to be ready
-      #   run: |
-      #     echo "Waiting for PostgreSQL to be ready..."
-      #     until pg_isready -h localhost -p 5432 -U cognee; do
-      #       sleep 1
-      #     done
+      - name: Wait for PostgreSQL to be ready
+        env:
+          PGUSER: cognee
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h localhost -p 5432 -U cognee; do
+            sleep 1
+          done
 
       - name: Run tests
         run: poetry run pytest tests/
