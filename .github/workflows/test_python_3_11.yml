@@ -37,17 +37,6 @@ jobs:
     runs-on: ubuntu_latest
     strategy:
       fail-fast: false
-#       matrix:
-#         os: ["ubuntu-latest"] #, "windows-latest", "macos-latest"
-#         python-version: ["3.11.x"]
-#         # Test all python versions on ubuntu only
-#         include:
-#           - python-version: "3.9.x"
-#             os: "ubuntu-22.04"
-#           - python-version: "3.10.x"
-#             os: "ubuntu-22.04"
-# #          - python-version: "3.12.x"
-# #            os: "ubuntu-latest"
 
     defaults:
       run:
@@ -117,6 +106,11 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENV: 'dev'
+          DB_USER: cognee
+          DB_PASSWORD: cognee
+          DB_DB: cognee_db
+          DB_HOST: localhost
+          DB_PORT: 5432
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
           POSTGRES_DB: cognee_db
@@ -142,14 +136,3 @@ jobs:
         run: |
          cd dist
          pip install *.whl
-
-  # matrix_job_required_check:
-  #   name: common | common tests
-  #   needs: run_common
-  #   runs-on: ubuntu-latest
-  #   if: always()
-  #   steps:
-  #     - name: Check matrix job results
-  #       if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-  #       run: |
-  #         echo "One or more matrix job tests failed or were cancelled. You may need to re-run them." && exit 1
