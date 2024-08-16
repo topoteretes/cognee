@@ -62,6 +62,11 @@ jobs:
           POSTGRES_DB: cognee_db
         volumes:
           - postgres_data:/var/lib/postgresql/data
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
         ports:
           - 5432:5432
 
@@ -104,12 +109,12 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ENV: 'test'
-          DB_USER: cognee
-          DB_PASSWORD: cognee
-          DB_DB: cognee_db
-          DB_HOST: localhost
-          DB_PORT: 5432
+          ENV: 'dev'
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
           DESTINATION__POSTGRES__CREDENTIALS__HOST: localhost
           DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
           DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee

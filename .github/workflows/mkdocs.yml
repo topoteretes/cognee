@@ -29,7 +29,7 @@ jobs:
     steps:
 
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@master
 
       - name: Install Poetry
         uses: snok/install-poetry@v1.3.1
