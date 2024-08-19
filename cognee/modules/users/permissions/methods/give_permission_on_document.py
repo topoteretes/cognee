@@ -24,15 +24,3 @@ async def give_permission_on_document(
         session.add(acl)
 
         await session.commit()
-
-
-    # if user.is_superuser:
-    #     permission = "all_permissions"  # Example permission, change as needed
-
-    # acl_entry = ACL(
-    #     document_id=document_id,
-    #     user_id=user.id,
-    #     permission=permission
-    # )
-    # session.add(acl_entry)
-    # await session.commit()

@@ -127,7 +127,9 @@ class OntologyEngine:
                 dict(
                     source_node_id = generate_node_id(edge.source_id),
                     target_node_id = generate_node_id(edge.target_id),
-                    relationship_type = edge.relationship_type,
+                    relationship_name = edge.relationship_type,
+                    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             ) for edge in ontology.edges)
 
@@ -150,7 +152,18 @@ class OntologyEngine:
                     if node_id not in valid_ids:
                         raise ValueError(f"Node ID {node_id} not found in the dataset")
                     if pd.notna(row.get("relationship_source")) and pd.notna(row.get("relationship_target")):
-                        await graph_client.add_edge(row["relationship_source"], row["relationship_target"], relationship_name=row["relationship_type"])
+                        await graph_client.add_edge(
+                            row["relationship_source"],
+                            row["relationship_target"],
+                            relationship_name=row["relationship_type"],
+                            edge_properties = {
+                                "source_node_id": row["relationship_source"],
+                                "target_node_id": row["relationship_target"],
+                                "relationship_name": row["relationship_type"],
+                                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            },
+                        )
 
                 return
             except Exception as e:
