@@ -7,5 +7,4 @@ from .save_chunks_to_store.save_chunks_to_store import save_chunks_to_store
 from .source_documents_to_chunks.source_documents_to_chunks import source_documents_to_chunks
 from .infer_data_ontology.infer_data_ontology import infer_data_ontology
 from .check_permissions_on_documents.check_permissions_on_documents import check_permissions_on_documents
-from .save_chunks_to_store.save_chunks_to_store import save_chunks_to_store
 from .classify_documents.classify_documents import classify_documents
