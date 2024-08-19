@@ -2,13 +2,9 @@ import asyncio
 import logging
 from typing import Union
 
-from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
-from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.data.processing.document_types import PdfDocument, TextDocument
 from cognee.modules.data.models import Dataset, Data
 from cognee.modules.data.operations.get_dataset_data import get_dataset_data
 from cognee.modules.data.operations.retrieve_datasets import retrieve_datasets
@@ -16,19 +12,18 @@ from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.pipelines import run_tasks, run_tasks_parallel
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.permissions.methods import check_permissions_on_documents
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
-from cognee.tasks.chunk_extract_summary.chunk_extract_summary import chunk_extract_summary
-from cognee.tasks.chunk_naive_llm_classifier.chunk_naive_llm_classifier import chunk_naive_llm_classifier
-from cognee.tasks.chunk_remove_disconnected.chunk_remove_disconnected import chunk_remove_disconnected
-from cognee.tasks.chunk_to_graph_decomposition.chunk_to_graph_decomposition import chunk_to_graph_decomposition
-from cognee.tasks.document_to_ontology.document_to_ontology import document_to_ontology
-from cognee.tasks.save_chunks_to_store.save_chunks_to_store import save_chunks_to_store
-from cognee.tasks.chunk_update_check.chunk_update_check import chunk_update_check
-from cognee.tasks.chunks_into_graph.chunks_into_graph import \
-    chunks_into_graph
-from cognee.tasks.source_documents_to_chunks.source_documents_to_chunks import source_documents_to_chunks
+from cognee.tasks import chunk_extract_summary, \
+    chunk_naive_llm_classifier, \
+    chunk_remove_disconnected, \
+    infer_data_ontology, \
+    save_chunks_to_store, \
+    chunk_update_check, \
+    chunks_into_graph, \
+    source_documents_to_chunks, \
+    check_permissions_on_documents, \
+    classify_documents
 
 logger = logging.getLogger("cognify.v2")
 
@@ -52,24 +47,9 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
         user = await get_default_user()
 
     async def run_cognify_pipeline(dataset: Dataset):
-        data: list[Data] = await get_dataset_data(dataset_id = dataset.id)
+        data_documents: list[Data] = await get_dataset_data(dataset_id = dataset.id)
 
-        documents = [
-            PdfDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location, chunking_strategy="paragraph") if data_item.extension == "pdf" else
-            AudioDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location, chunking_strategy="paragraph") if data_item.extension == "audio" else
-            ImageDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location, chunking_strategy="paragraph") if data_item.extension == "image" else
-            TextDocument(id = data_item.id, title=f"{data_item.name}.{data_item.extension}", file_path=data_item.raw_data_location, chunking_strategy="paragraph")
-            for data_item in data
-        ]
-
-        document_ids = [document.id for document in documents]
-        document_ids_str = list(map(str, document_ids))
-
-        await check_permissions_on_documents(
-            user,
-            "read",
-            document_ids,
-        )
+        document_ids_str = [str(document.id) for document in data_documents]
 
         dataset_id = dataset.id
         dataset_name = generate_dataset_name(dataset.name)
@@ -87,13 +67,15 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             })
         try:
             cognee_config = get_cognify_config()
-            graph_config = get_graph_config()
+
             root_node_id = None
+
             tasks = [
-                Task(document_to_ontology, root_node_id = root_node_id),
+                Task(classify_documents),
+                Task(check_permissions_on_documents, user = user, permissions = ["write"]),
+                Task(infer_data_ontology, root_node_id = root_node_id, ontology_model = KnowledgeGraph),
                 Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                Task(chunk_to_graph_decomposition, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
-                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
+                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities", task_config = { "batch_size": 10 }), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
                 Task(chunk_update_check, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
                 Task(
                     save_chunks_to_store,
@@ -113,7 +95,7 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
                 Task(chunk_remove_disconnected), # Remove the obsolete document chunks.
             ]
 
-            pipeline = run_tasks(tasks, documents)
+            pipeline = run_tasks(tasks, data_documents)
 
             async for result in pipeline:
                 print(result)

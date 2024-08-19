@@ -17,8 +17,8 @@ class Directory(BaseModel):
     documents: List[Document] = []
     directories: List['Directory'] = []
 
-    # Allows recursive Directory Model
-    Directory.update_forward_refs()
+# Allows recursive Directory Model
+Directory.update_forward_refs()
 
 class RepositoryProperties(BaseModel):
     custom_properties: Optional[Dict[str, Any]] = None

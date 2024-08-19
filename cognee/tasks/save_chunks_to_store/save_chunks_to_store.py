@@ -50,7 +50,6 @@ async def save_chunks_to_store(data_chunks: list[DocumentChunk], collection_name
                 word_count = chunk.word_count,
                 chunk_index = chunk.chunk_index,
                 cut_type = chunk.cut_type,
-                pages = chunk.pages,
             )
         ))
 

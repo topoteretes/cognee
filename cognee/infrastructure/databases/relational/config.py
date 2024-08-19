@@ -6,12 +6,11 @@ from cognee.root_dir import get_absolute_path
 class RelationalConfig(BaseSettings):
     db_path: str =  os.path.join(get_absolute_path(".cognee_system"), "databases")
     db_name: str =  "cognee_db"
-    db_host: str =  "127.0.0.1"
+    db_host: str =  "localhost"
     db_port: str =  "5432"
     db_user: str = "cognee"
     db_password: str =  "cognee"
     db_provider: str = "postgresql+asyncpg"
-    # db_provider: str = "duckdb"
     db_file_path: str = os.path.join(db_path, db_name)
 
 

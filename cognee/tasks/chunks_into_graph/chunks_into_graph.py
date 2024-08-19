@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 from cognee.modules.data.extraction.knowledge_graph.extract_content_graph import extract_content_graph
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.modules.graph.utils import generate_node_id, generate_node_name
 
 
 class EntityNode(BaseModel):
@@ -81,10 +82,10 @@ async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[
 
         for node in graph.nodes:
             node_id = generate_node_id(node.id)
-            node_name = generate_name(node.name)
+            node_name = generate_node_name(node.name)
 
             type_node_id = generate_node_id(node.type)
-            type_node_name = generate_name(node.type)
+            type_node_name = generate_node_name(node.type)
 
             if node_id not in existing_nodes_map:
                 node_data = dict(
@@ -183,7 +184,7 @@ async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[
             for edge in graph.edges:
                 source_node_id = generate_node_id(edge.source_node_id)
                 target_node_id = generate_node_id(edge.target_node_id)
-                relationship_name = generate_name(edge.relationship_name)
+                relationship_name = generate_node_name(edge.relationship_name)
                 edge_key = source_node_id + target_node_id + relationship_name
 
                 if edge_key not in existing_edges_map:
@@ -192,7 +193,7 @@ async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[
                         generate_node_id(edge.target_node_id),
                         edge.relationship_name,
                         dict(
-                            relationship_name = generate_name(edge.relationship_name),
+                            relationship_name = generate_node_name(edge.relationship_name),
                             source_node_id = generate_node_id(edge.source_node_id),
                             target_node_id = generate_node_id(edge.target_node_id),
                             properties = json.dumps(edge.properties),
@@ -210,10 +211,3 @@ async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[
         await graph_engine.add_edges(graph_edges)
 
     return data_chunks
-
-
-def generate_name(name: str) -> str:
-    return name.lower().replace(" ", "_").replace("'", "")
-
-def generate_node_id(node_id: str) -> str:
-    return node_id.lower().replace(" ", "_").replace("'", "")

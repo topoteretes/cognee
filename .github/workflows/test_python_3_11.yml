@@ -1,4 +1,4 @@
-name: test | qdrant
+name: test | python 3.11
 
 on:
   pull_request:
@@ -21,16 +21,19 @@ jobs:
   setup_docker:
     name: Set up Docker Buildx
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-  run_qdrant_integration_test:
+  run_common:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
     defaults:
       run:
         shell: bash
@@ -39,6 +42,7 @@ jobs:
       postgres:
         image: postgres:latest
         env:
+          PGUSER: cognee
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
           POSTGRES_DB: cognee_db
@@ -54,9 +58,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.x'
+          python-version:  '3.11.x'
 
       - name: Install Poetry
+        # https://github.com/snok/install-poetry#running-on-windows
         uses: snok/install-poetry@v1.3.2
         with:
           virtualenvs-create: true
@@ -72,26 +77,43 @@ jobs:
           echo $(pwd)/.cognee_system
 
       - name: Wait for PostgreSQL to be ready
+        env:
+          PGUSER: cognee
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
         run: |
           echo "Waiting for PostgreSQL to be ready..."
           until pg_isready -h localhost -p 5432 -U cognee; do
             sleep 1
           done
 
-      - name: Run default Qdrant
+      - name: Run tests
+        run: poetry run pytest tests/
+
+      - name: Run default basic pipeline
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
-          VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
           ENV: 'dev'
-          POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: cognee
-          POSTGRES_DB: cognee_db
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          DESTINATION__POSTGRES__CREDENTIALS__HOST: 127.0.0.1
+          PGUSER: cognee
+          DESTINATION__POSTGRES__CREDENTIALS__HOST: localhost
           DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
           DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
           DESTINATION__POSTGRES__CREDENTIALS__DATABASE: cognee_db
-        run: poetry run python ./cognee/tests/test_qdrant.py
+          DESTINATION__POSTGRES__CREDENTIALS__PORT: 5432
+        run: poetry run python ./cognee/tests/test_library.py
+
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf ~/.cache
+          sudo rm -rf /tmp/*
+          df -h
+
+      - name: Build with Poetry
+        run: poetry build
+
+      - name: Install Package
+        run: |
+         cd dist
+         pip install *.whl

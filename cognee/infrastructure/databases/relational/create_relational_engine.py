@@ -1,6 +1,5 @@
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 
-
 def create_relational_engine(
     db_path: str,
     db_name: str,

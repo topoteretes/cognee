@@ -45,7 +45,10 @@ class SearchParameters(BaseModel):
 async def search(search_type: str, params: Dict[str, Any], user: User = None) -> List:
     if user is None:
         user = await get_default_user()
-  
+
+    if user is None:
+        raise PermissionError("No user found in the system. Please create a user.")
+
     own_document_ids = await get_document_ids_for_user(user.id)
     search_params = SearchParameters(search_type = search_type, params = params)
     search_results = await specific_search([search_params])

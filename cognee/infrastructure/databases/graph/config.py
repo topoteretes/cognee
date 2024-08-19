@@ -19,14 +19,7 @@ class GraphConfig(BaseSettings):
         graph_filename
     )
     graph_model: object = KnowledgeGraph
-    graph_topology_task: bool = False
     graph_topology: object = KnowledgeGraph
-    infer_graph_topology: bool = False
-    topology_file_path: str = os.path.join(
-        os.path.join(get_absolute_path(".cognee_system"), "databases"),
-        "graph_topology.json"
-    )
-
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -38,7 +31,6 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
-            "infer_graph_topology": self.infer_graph_topology,
         }
 
 
