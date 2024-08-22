@@ -28,4 +28,3 @@ Push or pull data to build custom functionality or create bespoke views for your
 
 - [Research](research.md)
 - [Community](https://discord.gg/52QTb5JK){:target="_blank"}
-
