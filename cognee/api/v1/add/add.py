@@ -13,7 +13,7 @@ from cognee.infrastructure.databases.relational import get_relational_config, ge
 from cognee.modules.users.methods import create_default_user, get_default_user
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.modules.users.models import User
-from cognee.modules.data.operations.ensure_dataset_exists import ensure_dataset_exists
+from cognee.modules.data.methods.create_dataset import create_dataset
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset", user: User = None):
     await create_db_and_tables()
@@ -55,7 +55,10 @@ async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_nam
 
     return []
 
-async def add_files(file_paths: List[str], dataset_name: str,  user):
+async def add_files(file_paths: List[str], dataset_name: str, user: User = None):
+    if user is None:
+        user = await get_default_user()
+  
     base_config = get_base_config()
     data_directory_path = base_config.data_root_directory
 
@@ -101,7 +104,7 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
     )
 
     dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset"
-    dataset = await ensure_dataset_exists(dataset_name)
+    dataset = await create_dataset(dataset_name, user.id)
 
     @dlt.resource(standalone = True, merge_key = "id")
     async def data_resources(file_paths: str, user: User):
@@ -115,7 +118,9 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
 
                 from sqlalchemy import select
                 from cognee.modules.data.models import Data
+
                 db_engine = get_relational_engine()
+
                 async with db_engine.get_async_session() as session:
                     data = (await session.execute(
                         select(Data).filter(Data.id == data_id)
@@ -154,12 +159,6 @@ async def add_files(file_paths: List[str], dataset_name: str,  user):
                 await give_permission_on_document(user, data_id, "read")
                 await give_permission_on_document(user, data_id, "write")
 
-
-    if user is None:
-        user = await get_default_user()
-
-        if user is None:
-            user = await create_default_user()
 
     run_info = pipeline.run(
         data_resources(processed_file_paths, user),

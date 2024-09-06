@@ -5,13 +5,13 @@ import {
   FormGroup,
   FormInput,
   FormLabel,
-  H3,
   Input,
   Spacer,
   Stack,
   useBoolean,
 } from 'ohmy-ui';
 import { LoadingIndicator } from '@/ui/App';
+import { fetch } from '@/utils';
 
 interface SelectOption {
   label: string;
@@ -75,7 +75,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
 
     startSaving();
 
-    fetch('http://127.0.0.1:8000/settings', {
+    fetch('/v1/settings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -138,7 +138,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
 
   useEffect(() => {
     const fetchConfig = async () => {
-      const response = await fetch('http://127.0.0.1:8000/settings');
+      const response = await fetch('/v1/settings');
       const settings = await response.json();
 
       if (!settings.llm.model) {

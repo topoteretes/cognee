@@ -1,10 +1,5 @@
-
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
-
-
-# from cognee.infrastructure.databases.vector import get_vector_engine
-
 
 async def chunk_remove_disconnected(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
     graph_engine = await get_graph_engine()

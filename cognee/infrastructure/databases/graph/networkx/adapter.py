@@ -228,11 +228,21 @@ class NetworkXAdapter(GraphDBInterface):
                 # Log that the file does not exist and an empty graph is initialized
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
                 self.graph = nx.MultiDiGraph()  # Use MultiDiGraph to keep it consistent with __init__
+
+                file_dir = os.path.dirname(file_path)
+                if not os.path.exists(file_dir):
+                    os.makedirs(file_dir, exist_ok = True)
+
                 await self.save_graph_to_file(file_path)
-        except Exception as error:
+        except Exception:
             logger.error("Failed to load graph from file: %s", file_path)
             # Initialize an empty graph in case of error
             self.graph = nx.MultiDiGraph()
+
+            file_dir = os.path.dirname(file_path)
+            if not os.path.exists(file_dir):
+                os.makedirs(file_dir, exist_ok = True)
+
             await self.save_graph_to_file(file_path)
 
     async def delete_graph(self, file_path: str = None):

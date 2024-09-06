@@ -2,6 +2,7 @@ import { v4 } from 'uuid';
 import classNames from 'classnames';
 import { useCallback, useState } from 'react';
 import { CTAButton, Stack, Text, DropdownSelect, TextArea, useBoolean } from 'ohmy-ui';
+import { fetch } from '@/utils';
 import styles from './SearchView.module.css';
 
 interface Message {
@@ -50,7 +51,7 @@ export default function SearchView() {
       },
     ]);
 
-    fetch('http://localhost:8000/search', {
+    fetch('/v1/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

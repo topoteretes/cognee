@@ -7,8 +7,9 @@ import {
   UploadInput,
   CloseIcon,
 } from "ohmy-ui";
-import styles from "./DataView.module.css";
+import { fetch } from '@/utils';
 import RawDataPreview from './RawDataPreview';
+import styles from "./DataView.module.css";
 
 export interface Data {
   id: string;
@@ -37,7 +38,7 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
   const showRawData = useCallback((dataItem: Data) => {
     setSelectedData(dataItem);
 
-    fetch(`http://127.0.0.1:8000/datasets/${datasetId}/data/${dataItem.id}/raw`)
+    fetch(`/v1/datasets/${datasetId}/data/${dataItem.id}/raw`)
       .then((response) => response.arrayBuffer())
       .then(setRawData);
 
