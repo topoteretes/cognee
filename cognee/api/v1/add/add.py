@@ -10,10 +10,10 @@ from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
 from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine, create_db_and_tables
-from cognee.modules.users.methods import create_default_user, get_default_user
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.modules.users.models import User
-from cognee.modules.data.methods.create_dataset import create_dataset
+from cognee.modules.data.methods import create_dataset
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset", user: User = None):
     await create_db_and_tables()
@@ -104,7 +104,6 @@ async def add_files(file_paths: List[str], dataset_name: str, user: User = None)
     )
 
     dataset_name = dataset_name.replace(" ", "_").replace(".", "_") if dataset_name is not None else "main_dataset"
-    dataset = await create_dataset(dataset_name, user.id)
 
     @dlt.resource(standalone = True, merge_key = "id")
     async def data_resources(file_paths: str, user: User):
@@ -122,6 +121,8 @@ async def add_files(file_paths: List[str], dataset_name: str, user: User = None)
                 db_engine = get_relational_engine()
 
                 async with db_engine.get_async_session() as session:
+                    dataset = await create_dataset(dataset_name, user.id, session)
+
                     data = (await session.execute(
                         select(Data).filter(Data.id == data_id)
                     )).scalar_one_or_none()
@@ -142,10 +143,8 @@ async def add_files(file_paths: List[str], dataset_name: str, user: User = None)
                             extension = file_metadata["extension"],
                             mime_type = file_metadata["mime_type"],
                         )
+
                         dataset.data.append(data)
-
-                        await session.merge(dataset)
-
                         await session.commit()
 
                 yield {
