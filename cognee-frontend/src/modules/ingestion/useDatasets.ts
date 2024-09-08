@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { v4 } from 'uuid';
 import { DataFile } from './useData';
+import { fetch } from '@/utils';
 
 export interface Dataset {
   id: string;
@@ -14,7 +15,14 @@ function useDatasets() {
   const statusTimeout = useRef<any>(null);
 
   const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
-    fetch(`http://127.0.0.1:8000/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`)
+    fetch(
+      `/v1/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`,
+      {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      },
+    )
       .then((response) => response.json())
       .then((statuses) => setDatasets(
         (datasets) => (
@@ -65,7 +73,11 @@ function useDatasets() {
   }, []);
 
   const fetchDatasets = useCallback(() => {
-    fetch('http://127.0.0.1:8000/datasets')
+    fetch('/v1/datasets', {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+      },
+    })
       .then((response) => response.json())
       .then((datasets) => {
         setDatasets(datasets);
@@ -75,6 +87,9 @@ function useDatasets() {
         } else {
           window.location.href = '/wizard';
         }
+      })
+      .catch((error) => {
+        console.error('Error fetching datasets:', error);
       });
   }, [checkDatasetStatuses]);
 

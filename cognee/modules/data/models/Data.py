@@ -21,7 +21,8 @@ class Data(Base):
 
     datasets: Mapped[List["Dataset"]] = relationship(
         secondary = DatasetData.__tablename__,
-        back_populates = "data"
+        back_populates = "data",
+        lazy = "noload",
     )
 
     def to_json(self) -> dict:

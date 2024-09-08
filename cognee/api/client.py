@@ -2,15 +2,17 @@
 import os
 import aiohttp
 import uvicorn
-import json
 import logging
 import sentry_sdk
 from typing import Dict, Any, List, Union, Optional, Literal
 from typing_extensions import Annotated
-from fastapi import FastAPI, HTTPException, Form, UploadFile, Query
+from fastapi import FastAPI, HTTPException, Form, UploadFile, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_authenticated_user
+
 
 from cognee.infrastructure.databases.relational import create_db_and_tables
 
@@ -42,7 +44,6 @@ origins = [
     "http://127.0.0.1:3000",
     "http://frontend:3000",
     "http://localhost:3000",
-    "http://localhost:3001",
 ]
 
 app.add_middleware(
@@ -58,39 +59,57 @@ from cognee.api.v1.users.routers import get_auth_router, get_register_router,\
 
 from cognee.api.v1.permissions.get_permissions_router import get_permissions_router
 
+
+from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    if request.url.path == "/api/v1/auth/login":
+        return JSONResponse(
+            status_code = 400,
+            content = {"detail": "LOGIN_BAD_CREDENTIALS"},
+        )
+
+    return JSONResponse(
+        status_code = 400,
+        content = jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
+    )
+
 app.include_router(
     get_auth_router(),
-    prefix = "/auth/jwt",
+    prefix = "/api/v1/auth",
     tags = ["auth"]
 )
 
 app.include_router(
     get_register_router(),
-    prefix = "/auth",
+    prefix = "/api/v1/auth",
     tags = ["auth"],
 )
 
 app.include_router(
     get_reset_password_router(),
-    prefix = "/auth",
+    prefix = "/api/v1/auth",
     tags = ["auth"],
 )
 
 app.include_router(
     get_verify_router(),
-    prefix = "/auth",
+    prefix = "/api/v1/auth",
     tags = ["auth"],
 )
 
 app.include_router(
     get_users_router(),
-    prefix = "/users",
+    prefix = "/api/v1/users",
     tags = ["users"],
 )
 
 app.include_router(
     get_permissions_router(),
-    prefix = "/permissions",
+    prefix = "/api/v1/permissions",
     tags = ["permissions"],
 )
 
@@ -108,31 +127,42 @@ def health_check():
     """
     return {"status": "OK"}
 
-@app.get("/datasets", response_model = list)
-async def get_datasets():
+@app.get("/api/v1/datasets", response_model = list)
+async def get_datasets(user: User = Depends(get_authenticated_user)):
     try:
-        from cognee.api.v1.datasets.datasets import datasets
-        datasets = await datasets.list_datasets()
+        from cognee.modules.data.methods import get_datasets
+        datasets = await get_datasets(user.id)
 
         return JSONResponse(
             status_code = 200,
             content = [dataset.to_json() for dataset in datasets],
         )
     except Exception as error:
-        raise HTTPException(status_code = 500, detail=f"Error retrieving datasets: {str(error)}") from error
+        raise HTTPException(status_code = 500, detail = f"Error retrieving datasets: {str(error)}") from error
 
-@app.delete("/datasets/{dataset_id}", response_model = dict)
-async def delete_dataset(dataset_id: str):
-    from cognee.api.v1.datasets.datasets import datasets
-    await datasets.delete_dataset(dataset_id)
+@app.delete("/api/v1/datasets/{dataset_id}", response_model = dict)
+async def delete_dataset(dataset_id: str, user: User = Depends(get_authenticated_user)):
+    from cognee.modules.data.methods import get_dataset, delete_dataset
+
+    dataset = get_dataset(user.id, dataset_id)
+
+    if dataset is None:
+        return JSONResponse(
+            status_code = 404,
+            content = {
+                "detail": f"Dataset ({dataset_id}) not found."
+            }
+        )
+
+    await delete_dataset(dataset)
 
     return JSONResponse(
         status_code = 200,
         content = "OK",
     )
 
-@app.get("/datasets/{dataset_id}/graph", response_model=list)
-async def get_dataset_graph(dataset_id: str):
+@app.get("/api/v1/datasets/{dataset_id}/graph", response_model=list)
+async def get_dataset_graph(dataset_id: str, user: User = Depends(get_authenticated_user)):
     from cognee.shared.utils import render_graph
     from cognee.infrastructure.databases.graph import get_graph_engine
 
@@ -150,21 +180,31 @@ async def get_dataset_graph(dataset_id: str):
             content = "Graphistry credentials are not set. Please set them in your .env file.",
         )
 
-@app.get("/datasets/{dataset_id}/data", response_model=list)
-async def get_dataset_data(dataset_id: str):
-    from cognee.api.v1.datasets.datasets import datasets
+@app.get("/api/v1/datasets/{dataset_id}/data", response_model=list)
+async def get_dataset_data(dataset_id: str, user: User = Depends(get_authenticated_user)):
+    from cognee.modules.data.methods import get_dataset_data, get_dataset
 
-    dataset_data = await datasets.list_data(dataset_id = dataset_id)
+    dataset = await get_dataset(user.id, dataset_id)
+
+    if dataset is None:
+        return JSONResponse(
+            status_code = 404,
+            content = {
+                "detail": f"Dataset ({dataset_id}) not found."
+            }
+        )
+
+    dataset_data = await get_dataset_data(dataset_id = dataset.id)
 
     if dataset_data is None:
-        raise HTTPException(status_code = 404, detail = f"Dataset ({dataset_id}) not found.")
+        raise HTTPException(status_code = 404, detail = f"Dataset ({dataset.id}) not found.")
 
     return [
         data.to_json() for data in dataset_data
     ]
 
-@app.get("/datasets/status", response_model=dict)
-async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset")] = None):
+@app.get("/api/v1/datasets/status", response_model=dict)
+async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset")] = None, user: User = Depends(get_authenticated_user)):
     from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
     try:
@@ -180,15 +220,35 @@ async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset
             content = {"error": str(error)}
         )
 
-@app.get("/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
-async def get_raw_data(dataset_id: str, data_id: str):
-    from cognee.api.v1.datasets.datasets import datasets
-    dataset_data = await datasets.list_data(dataset_id)
+@app.get("/api/v1/datasets/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
+async def get_raw_data(dataset_id: str, data_id: str, user: User = Depends(get_authenticated_user)):
+    from cognee.modules.data.methods import get_dataset, get_dataset_data
+
+    dataset = await get_dataset(user.id, dataset_id)
+
+    if dataset is None:
+        return JSONResponse(
+            status_code = 404,
+            content = {
+                "detail": f"Dataset ({dataset_id}) not found."
+            }
+        )
+
+    dataset_data = await get_dataset_data(dataset.id)
 
     if dataset_data is None:
         raise HTTPException(status_code = 404, detail = f"Dataset ({dataset_id}) not found.")
 
     data = [data for data in dataset_data if str(data.id) == data_id][0]
+
+    if data is None:
+        return JSONResponse(
+            status_code = 404,
+            content = {
+                "detail": f"Data ({data_id}) not found in dataset ({dataset_id})."
+            }
+        )
+
     return data.raw_data_location
 
 class AddPayload(BaseModel):
@@ -197,10 +257,11 @@ class AddPayload(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-@app.post("/add", response_model=dict)
+@app.post("/api/v1/add", response_model=dict)
 async def add(
     data: List[UploadFile],
     datasetId: str = Form(...),
+    user: User = Depends(get_authenticated_user),
 ):
     """ This endpoint is responsible for adding data to the graph."""
     from cognee.api.v1.add import add as cognee_add
@@ -230,6 +291,7 @@ async def add(
             await cognee_add(
                 data,
                 datasetId,
+                user = user,
             )
             return JSONResponse(
                 status_code = 200,
@@ -246,12 +308,12 @@ async def add(
 class CognifyPayload(BaseModel):
     datasets: List[str]
 
-@app.post("/cognify", response_model=dict)
-async def cognify(payload: CognifyPayload):
+@app.post("/api/v1/cognify", response_model=dict)
+async def cognify(payload: CognifyPayload, user: User = Depends(get_authenticated_user)):
     """ This endpoint is responsible for the cognitive processing of the content."""
     from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
     try:
-        await cognee_cognify(payload.datasets)
+        await cognee_cognify(payload.datasets, user)
         return JSONResponse(
             status_code = 200,
             content = {
@@ -267,8 +329,8 @@ async def cognify(payload: CognifyPayload):
 class SearchPayload(BaseModel):
     query_params: Dict[str, Any]
 
-@app.post("/search", response_model=dict)
-async def search(payload: SearchPayload):
+@app.post("/api/v1/search", response_model=dict)
+async def search(payload: SearchPayload, user: User = Depends(get_authenticated_user)):
     """ This endpoint is responsible for searching for nodes in the graph."""
     from cognee.api.v1.search import search as cognee_search
     try:
@@ -290,8 +352,8 @@ async def search(payload: SearchPayload):
             content = {"error": str(error)}
         )
 
-@app.get("/settings", response_model=dict)
-async def get_settings():
+@app.get("/api/v1/settings", response_model=dict)
+async def get_settings(user: User = Depends(get_authenticated_user)):
     from cognee.modules.settings import get_settings as get_cognee_settings
     return get_cognee_settings()
 
@@ -309,8 +371,8 @@ class SettingsPayload(BaseModel):
     llm: Optional[LLMConfig] = None
     vectorDB: Optional[VectorDBConfig] = None
 
-@app.post("/settings", response_model=dict)
-async def save_config(new_settings: SettingsPayload):
+@app.post("/api/v1/settings", response_model=dict)
+async def save_config(new_settings: SettingsPayload, user: User = Depends(get_authenticated_user)):
     from cognee.modules.settings import save_llm_config, save_vector_db_config
     if new_settings.llm is not None:
         await save_llm_config(new_settings.llm)

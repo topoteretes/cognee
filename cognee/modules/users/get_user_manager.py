@@ -2,15 +2,32 @@ import os
 import uuid
 from typing import Optional
 from fastapi import Depends, Request
-from fastapi_users import BaseUserManager, UUIDIDMixin
+from fastapi_users.exceptions import UserNotExists
+from fastapi_users import BaseUserManager, UUIDIDMixin, models
 from fastapi_users.db import SQLAlchemyUserDatabase
 
 from .get_user_db import get_user_db
 from .models import User
+from .methods import get_user
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = os.getenv("FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET", "super_secret")
     verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
+
+    async def get(self, id: models.ID) -> models.UP:
+        """
+        Get a user by id.
+
+        :param id: Id. of the user to retrieve.
+        :raises UserNotExists: The user does not exist.
+        :return: A user.
+        """
+        user = await get_user(id)
+
+        if user is None:
+            raise UserNotExists()
+
+        return user
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         print(f"User {user.id} has registered.")

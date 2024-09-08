@@ -3,11 +3,10 @@ import logging
 from typing import Union
 
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.data.models import Dataset, Data
-from cognee.modules.data.operations.get_dataset_data import get_dataset_data
-from cognee.modules.data.operations.retrieve_datasets import retrieve_datasets
+from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.pipelines import run_tasks, run_tasks_parallel
 from cognee.modules.users.models import User
@@ -35,16 +34,17 @@ class PermissionDeniedException(Exception):
         super().__init__(self.message)
 
 async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
-    db_engine = get_relational_engine()
-
-    if datasets is None or len(datasets) == 0:
-        return await cognify(await db_engine.get_datasets())
-
-    if type(datasets[0]) == str:
-        datasets = await retrieve_datasets(datasets)
-
     if user is None:
         user = await get_default_user()
+
+    existing_datasets = await get_datasets(user.id)
+
+    if datasets is None or len(datasets) == 0:
+        # If no datasets are provided, cognify all existing datasets.
+        datasets = existing_datasets
+
+    if type(datasets[0]) == str:
+        datasets = await get_datasets_by_name(datasets, user.id)
 
     async def run_cognify_pipeline(dataset: Dataset):
         data_documents: list[Data] = await get_dataset_data(dataset_id = dataset.id)
@@ -112,13 +112,16 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None):
             raise error
 
 
-    existing_datasets = [dataset.name for dataset in list(await db_engine.get_datasets())]
+    existing_datasets_map = {
+        generate_dataset_name(dataset.name): True for dataset in existing_datasets
+    }
+
     awaitables = []
 
     for dataset in datasets:
         dataset_name = generate_dataset_name(dataset.name)
 
-        if dataset_name in existing_datasets:
+        if dataset_name in existing_datasets_map:
             awaitables.append(run_cognify_pipeline(dataset))
 
     return await asyncio.gather(*awaitables)

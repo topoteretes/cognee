@@ -1,3 +1,5 @@
+import { fetch } from '@/utils';
+
 export default function addData(dataset: { id: string }, files: File[]) {
   const formData = new FormData();
   files.forEach((file) => {
@@ -5,7 +7,7 @@ export default function addData(dataset: { id: string }, files: File[]) {
   })
   formData.append('datasetId', dataset.id);
 
-  return fetch('http://127.0.0.1:8000/add', {
+  return fetch('/v1/add', {
     method: 'POST',
     body: formData,
   }).then((response) => response.json());
