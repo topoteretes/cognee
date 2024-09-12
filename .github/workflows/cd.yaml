@@ -3,7 +3,7 @@ name: publish dev | Docker image
 on:
   push:
     branches:
-      - dev
+      - main
       - feature/*
     paths-ignore:
       - '**.md'
