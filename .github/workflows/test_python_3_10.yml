@@ -93,15 +93,13 @@ jobs:
 
       - name: Run default basic pipeline
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENV: 'dev'
-          PGUSER: cognee
-          DESTINATION__POSTGRES__CREDENTIALS__HOST: localhost
-          DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
-          DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
-          DESTINATION__POSTGRES__CREDENTIALS__DATABASE: cognee_db
-          DESTINATION__POSTGRES__CREDENTIALS__PORT: 5432
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DB_HOST: localhost
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_DATABASE: cognee_db
+          DB_PORT: 5432
         run: poetry run python ./cognee/tests/test_library.py
 
       - name: Clean up disk space

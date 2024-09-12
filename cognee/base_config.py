@@ -9,8 +9,6 @@ class BaseConfig(BaseSettings):
     monitoring_tool: object = MonitoringTool.LANGFUSE
     graphistry_username: Optional[str] = None
     graphistry_password: Optional[str] = None
-    aws_access_key_id: Optional[str] = None
-    aws_secret_access_key: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 

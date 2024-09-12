@@ -80,18 +80,13 @@ jobs:
 
       - name: Run default Qdrant
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
           VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
-          ENV: 'dev'
-          POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: cognee
-          POSTGRES_DB: cognee_db
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          DESTINATION__POSTGRES__CREDENTIALS__HOST: 127.0.0.1
-          DESTINATION__POSTGRES__CREDENTIALS__USERNAME: cognee
-          DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: cognee
-          DESTINATION__POSTGRES__CREDENTIALS__DATABASE: cognee_db
+          DB_USER: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+          DB_HOST: localhost
+          DB_PORT: 5432
         run: poetry run python ./cognee/tests/test_qdrant.py
