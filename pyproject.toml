@@ -38,12 +38,10 @@ greenlet = "^3.0.3"
 ruff = "^0.2.2"
 filetype = "^1.2.0"
 nltk = "^3.8.1"
-dlt = {extras = ["postgres"], version = "^0.5.2"}
-duckdb = {version = "^0.10.0", extras = ["dlt"]}
+dlt = {extras = ["sqlalchemy"], version = "^1.0.0"}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
 qdrant-client = "^1.9.0"
-duckdb-engine = "0.13.0"
 graphistry = "^0.33.5"
 tenacity = "^8.2.3"
 weaviate-client = "4.6.7"
@@ -75,14 +73,12 @@ asyncpg = "^0.29.0"
 
 
 [tool.poetry.extras]
-duckdb = ["duckdb"]
 filesystem = ["s3fs", "botocore"]
-motherduck = ["duckdb"]
 cli = ["pipdeptree", "cron-descriptor"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
-neo4j = ["neo4j", "py2neo"]
-notebook = ["ipykernel","overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
+neo4j = ["neo4j"]
+notebook = ["ipykernel", "overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

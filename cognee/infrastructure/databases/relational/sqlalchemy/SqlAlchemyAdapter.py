@@ -1,39 +1,18 @@
-import os
-import asyncio
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
-from sqlalchemy import create_engine, text, select
-from sqlalchemy.orm import sessionmaker, joinedload
+from sqlalchemy import text, select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from cognee.infrastructure.files.storage import LocalStorage
-from cognee.infrastructure.databases.relational.FakeAsyncSession import FakeAsyncSession
+
 from ..ModelBase import Base
 
-def make_async_sessionmaker(sessionmaker):
-    @asynccontextmanager
-    async def async_session_maker():
-        await asyncio.sleep(0.1)
-        session = FakeAsyncSession(sessionmaker())
-        try:
-            yield session
-        finally:
-            await session.close()  # Ensure the session is closed
-
-    return async_session_maker
-
 class SQLAlchemyAdapter():
-    def __init__(self, db_type: str, db_path: str, db_name: str, db_user: str, db_password: str, db_host: str, db_port: str):
-        self.db_location = os.path.abspath(os.path.join(db_path, db_name))
-        self.db_name = db_name
+    def __init__(self, connection_string: str):
+        self.engine = create_async_engine(connection_string)
+        self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
-        if db_type == "duckdb":
-            LocalStorage.ensure_directory_exists(db_path)
-
-            self.engine = create_engine(f"duckdb:///{self.db_location}")
-            self.sessionmaker = make_async_sessionmaker(sessionmaker(bind=self.engine))
-        else:
-            self.engine = create_async_engine(f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}")
-            self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+        if self.engine.dialect.name == "sqlite":
+            self.db_path = connection_string.split("///")[1]
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -72,6 +51,7 @@ class SQLAlchemyAdapter():
             await connection.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE;"))
 
             await connection.close()
+
     async def insert_data(self, schema_name: str, table_name: str, data: list[dict]):
         columns = ", ".join(data[0].keys())
         values = ", ".join([f"({', '.join([f':{key}' for key in row.keys()])})" for row in data])
@@ -80,6 +60,7 @@ class SQLAlchemyAdapter():
         async with self.engine.begin() as connection:
             await connection.execute(insert_query, data)
             await connection.close()
+
     async def get_data(self, table_name: str, filters: dict = None):
         async with self.engine.begin() as connection:
             query = f"SELECT * FROM {table_name}"
@@ -113,11 +94,19 @@ class SQLAlchemyAdapter():
                 print(f"Error dropping database tables: {e}")
 
     async def delete_database(self):
-        async with self.engine.begin() as connection:
-            try:
-                for table in Base.metadata.sorted_tables:
-                    drop_table_query = text(f'DROP TABLE IF EXISTS {table.name} CASCADE')
-                    await connection.execute(drop_table_query)
-                print("Database deleted successfully.")
-            except Exception as e:
-                print(f"Error deleting database: {e}")
+        try:
+            if self.engine.dialect.name == "sqlite":
+                from cognee.infrastructure.files.storage import LocalStorage
+
+                LocalStorage.remove(self.db_path)
+                self.db_path = None
+            else:
+                async with self.engine.begin() as connection:
+                    for table in Base.metadata.sorted_tables:
+                        drop_table_query = text(f'DROP TABLE IF EXISTS {table.name} CASCADE')
+                        await connection.execute(drop_table_query)
+
+        except Exception as e:
+            print(f"Error deleting database: {e}")
+
+        print("Database deleted successfully.")

@@ -14,8 +14,6 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
 
-from cognee.infrastructure.databases.relational import create_db_and_tables
-
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -34,8 +32,12 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from cognee.infrastructure.databases.relational import create_db_and_tables
+    from cognee.modules.users.methods import create_default_user
+  
     # Not needed if you setup a migration system like Alembic
     await create_db_and_tables()
+    await create_default_user()
     yield
 
 app = FastAPI(debug = os.getenv("ENV") != "prod", lifespan = lifespan)
