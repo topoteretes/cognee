@@ -18,23 +18,11 @@ We build for developers who need a reliable, production-ready data layer for AI 
   </a>
 </p>
 
-cognee implements scalable, modular data pipelines that allow for creating the LLM-enriched data layer using graph and vector stores.
 
+## What is cognee? 
 
-
-
-
-
-<p>
-  <i> cognee aims to be dbt for LLMOps</i>
-</p>
-
-
-
+cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you ability to interconnect and retrieve past conversations, documents, audio transcriptions, while also reducing hallucinations, developer effort and cost.
 Try it in a Google collab  <a href="https://colab.research.google.com/drive/1jayZ5JRwDaUGFvCw9UZySBG-iB9gpYfu?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
-
-
-
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
@@ -58,7 +46,7 @@ poetry add cognee
 ```
 
 
-## 💻 Usage
+## 💻 Basic Usage
 
 ### Setup
 
@@ -75,24 +63,6 @@ cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 ```
 You can use different LLM providers, for more info check out our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
-In the next step make sure to launch a Postgres instance. Here is an example from our docker-compose:
-```
-  postgres:
-    image: postgres:latest
-    container_name: postgres
-    environment:
-      POSTGRES_USER: cognee
-      POSTGRES_PASSWORD: cognee
-      POSTGRES_DB: cognee_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - 5432:5432
-    networks:
-      - cognee-network
-```
-
-
 If you are using Networkx, create an account on Graphistry to visualize results:
 ```
    
@@ -106,12 +76,7 @@ docker-compose up cognee
 ```
 Then navigate to localhost:3000/wizard
 
-### Run the default example
-
-Make sure to launch the Postgres instance first. Navigate to the cognee folder and run:
-```
-docker compose up postgres
-```
+### Simple example
 
 Run the default cognee pipeline:
 
@@ -123,7 +88,7 @@ text = """Natural language processing (NLP) is an interdisciplinary
 
 await cognee.add([text], "example_dataset") # Add a new piece of information
 
-await cognee.cognify() # Use LLMs and cognee to create knowledge
+await cognee.cognify() # Use LLMs and cognee to create a semantic graph
 
 await search_results = cognee.search("SIMILARITY", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
 
@@ -132,19 +97,20 @@ print(search_results)
 ```
 
 
-### Create your pipelines
+### Create your own memory store
 
-cognee framework consists of tasks that can be grouped into pipelines. Each task can be an independent part of business logic, that can be tied to other tasks to form a pipeline.
+cognee framework consists of tasks that can be grouped into pipelines.
+Each task can be an independent part of business logic, that can be tied to other tasks to form a pipeline.
+These tasks persist data into your memory store enabling you to search for relevant context of past conversations, documents, or any other data you have stored.
+
+
+### Example: Classify your documents
+
 Here is an example of how it looks for a default cognify pipeline:
-
 
 1. To prepare the data for the pipeline run, first we need to add it to our metastore and normalize it:
 
-Start with: 
-```
-docker compose up postgres
-```
-And then run: 
+Start with:
 ```
 text = """Natural language processing (NLP) is an interdisciplinary
        subfield of computer science and information retrieval"""
@@ -158,90 +124,62 @@ Here we show an example of creating a naive LLM classifier that takes a Pydantic
 We provided just a snippet for reference, but feel free to check out the implementation in our repo. 
 
 ```
-async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
-    if len(data_chunks) == 0:
-        return data_chunks
-
+async def chunk_naive_llm_classifier(
+    data_chunks: list[DocumentChunk],
+    classification_model: Type[BaseModel]
+):
+    # Extract classifications asynchronously
     chunk_classifications = await asyncio.gather(
-        *[extract_categories(chunk.text, classification_model) for chunk in data_chunks],
+        *(extract_categories(chunk.text, classification_model) for chunk in data_chunks)
     )
 
-    classification_data_points = []
-
-    for chunk_index, chunk in enumerate(data_chunks):
-        chunk_classification = chunk_classifications[chunk_index]
-        classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
-        classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
-
-        for classification_subclass in chunk_classification.label.subclass:
-            classification_data_points.append(uuid5(NAMESPACE_OID, classification_subclass.value))
+    # Collect classification data points using a set to avoid duplicates
+    classification_data_points = {
+        uuid5(NAMESPACE_OID, cls.label.type)
+        for cls in chunk_classifications
+    } | {
+        uuid5(NAMESPACE_OID, subclass.value)
+        for cls in chunk_classifications
+        for subclass in cls.label.subclass
+    }
 
     vector_engine = get_vector_engine()
+    collection_name = "classification"
 
+    # Define the payload schema
     class Keyword(BaseModel):
         uuid: str
         text: str
         chunk_id: str
         document_id: str
 
-    collection_name = "classification"
-
-    if await vector_engine.has_collection(collection_name):
-        existing_data_points = await vector_engine.retrieve(
-            collection_name,
-            list(set(classification_data_points)),
-        ) if len(classification_data_points) > 0 else []
-
-        existing_points_map = {point.id: True for point in existing_data_points}
+    # Ensure the collection exists and retrieve existing data points
+    if not await vector_engine.has_collection(collection_name):
+        await vector_engine.create_collection(collection_name, payload_schema=Keyword)
+        existing_points_map = {}
     else:
         existing_points_map = {}
-        await vector_engine.create_collection(collection_name, payload_schema=Keyword)
-
-    data_points = []
-    nodes = []
-    edges = []
-
-    for (chunk_index, data_chunk) in enumerate(data_chunks):
-        chunk_classification = chunk_classifications[chunk_index]
-        classification_type_label = chunk_classification.label.type
-        classification_type_id = uuid5(NAMESPACE_OID, classification_type_label)
+    return data_chunks
 
 ...
 
 ```
 
-To see existing tasks, have a look at the cognee.tasks
+We have a large number of tasks that can be used in your pipelines, and you can also create your own tasks to fit your business logic.
 
 
 3. Once we have our tasks, it is time to group them into a pipeline.
-This snippet shows how a group of tasks can be added to a pipeline, and how they can pass the information forward from one to another. 
+This simplified snippet demonstrates how tasks can be added to a pipeline, and how they can pass the information forward from one to another. 
 
 ```
-            tasks = [
-                Task(document_to_ontology, root_node_id = root_node_id),
-                Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-                Task(chunk_to_graph_decomposition, topology_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Set the graph topology for the document chunk data
-                Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities"), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
-                Task(chunk_update_check, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
-                Task(
-                    save_chunks_to_store,
-                    collection_name = "chunks",
-                ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
-                run_tasks_parallel([
-                    Task(
-                        chunk_extract_summary,
-                        summarization_model = cognee_config.summarization_model,
-                        collection_name = "chunk_summaries",
-                    ), # Summarize the document chunks
-                    Task(
-                        chunk_naive_llm_classifier,
-                        classification_model = cognee_config.classification_model,
-                    ),
-                ]),
-                Task(chunk_remove_disconnected), # Remove the obsolete document chunks.
-            ]
+            
 
-            pipeline = run_tasks(tasks, documents)
+Task(
+    chunk_naive_llm_classifier,
+    classification_model = cognee_config.classification_model,
+)
+
+pipeline = run_tasks(tasks, documents)
 
 ```
 
@@ -277,3 +215,23 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
+
+## Get Started
+
+### Install Server
+
+Please see the [cognee Quick Start Guide](https://topoteretes.github.io/cognee/quickstart/) for important configuration information.
+
+```bash
+docker compose up
+```
+
+
+
+### Install SDK
+
+Please see the cognee [Develoment Guide](https://topoteretes.github.io/cognee/quickstart/) for important beta information and usage instructions.
+
+```bash
+pip install cognee
+```
