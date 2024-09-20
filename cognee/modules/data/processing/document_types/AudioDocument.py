@@ -6,18 +6,18 @@ from .Document import Document
 class AudioDocument(Document):
     type: str = "audio"
     title: str
-    file_path: str
-    chunking_strategy:str
+    raw_data_location: str
+    chunking_strategy: str
 
-    def __init__(self, id: UUID, title: str, file_path: str, chunking_strategy:str="paragraph"):
+    def __init__(self, id: UUID, title: str, raw_data_location: str, chunking_strategy:str="paragraph"):
         self.id = id or uuid5(NAMESPACE_OID, title)
         self.title = title
-        self.file_path = file_path
+        self.raw_data_location = raw_data_location
         self.chunking_strategy = chunking_strategy
 
     def read(self):
         # Transcribe the audio file
-        result = get_llm_client().create_transcript(self.file_path)
+        result = get_llm_client().create_transcript(self.raw_data_location)
         text = result.text
 
         chunker = TextChunker(self.id, get_text = lambda: text)
@@ -30,5 +30,5 @@ class AudioDocument(Document):
             id=str(self.id),
             type=self.type,
             title=self.title,
-            file_path=self.file_path,
+            raw_data_location=self.raw_data_location,
         )

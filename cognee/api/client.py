@@ -33,11 +33,11 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from cognee.infrastructure.databases.relational import create_db_and_tables
-    from cognee.modules.users.methods import create_default_user
+    from cognee.modules.users.methods import get_default_user
   
     # Not needed if you setup a migration system like Alembic
     await create_db_and_tables()
-    await create_default_user()
+    await get_default_user()
     yield
 
 app = FastAPI(debug = os.getenv("ENV") != "prod", lifespan = lifespan)
@@ -396,10 +396,10 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        import asyncio
-        from cognee.modules.data.deletion import prune_system, prune_data
-        asyncio.run(prune_data())
-        asyncio.run(prune_system(metadata = True))
+        # import asyncio
+        # from cognee.modules.data.deletion import prune_system, prune_data
+        # asyncio.run(prune_data())
+        # asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:
