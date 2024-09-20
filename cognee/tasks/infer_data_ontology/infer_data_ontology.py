@@ -89,7 +89,7 @@ class OntologyEngine:
             chunk_strategy = chunk_config.chunk_strategy
 
             for base_file in documents:
-                with open(base_file.file_path, "rb") as file:
+                with open(base_file.raw_data_location, "rb") as file:
                     try:
                         file_type = guess_file_type(file)
                         text = extract_text_from_file(file, file_type)
@@ -175,7 +175,7 @@ async def infer_data_ontology(documents, ontology_model = KnowledgeGraph, root_n
         ontology_engine = OntologyEngine()
         root_node_id = await ontology_engine.add_graph_ontology(documents = documents)
     else:
-        graph_engine = get_graph_engine()
+        graph_engine = await get_graph_engine()
         await add_model_class_to_graph(ontology_model, graph_engine)
 
     yield (documents, root_node_id)
