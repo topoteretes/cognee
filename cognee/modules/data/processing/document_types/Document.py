@@ -7,5 +7,5 @@ class Document(Protocol):
     title: str
     raw_data_location: str
 
-    def read(self) -> str:
+    def read(self, chunk_size: int) -> str:
         pass

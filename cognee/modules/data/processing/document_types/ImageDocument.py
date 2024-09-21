@@ -14,12 +14,12 @@ class ImageDocument(Document):
         self.title = title
         self.raw_data_location = raw_data_location
 
-    def read(self):
+    def read(self, chunk_size: int):
         # Transcribe the image file
         result = get_llm_client().transcribe_image(self.raw_data_location)
         text = result.choices[0].message.content
 
-        chunker = TextChunker(self.id, get_text = lambda: text)
+        chunker = TextChunker(self.id, chunk_size = chunk_size, get_text = lambda: text)
 
         yield from chunker.read()
 

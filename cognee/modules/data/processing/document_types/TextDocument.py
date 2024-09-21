@@ -12,7 +12,7 @@ class TextDocument(Document):
         self.title = title
         self.raw_data_location = raw_data_location
 
-    def read(self):
+    def read(self, chunk_size: int):
         def get_text():
             with open(self.raw_data_location, mode = "r", encoding = "utf-8") as file:
                 while True:
@@ -24,7 +24,7 @@ class TextDocument(Document):
                     yield text
 
 
-        chunker = TextChunker(self.id, get_text = get_text)
+        chunker = TextChunker(self.id,chunk_size = chunk_size, get_text = get_text)
 
         yield from chunker.read()
 
