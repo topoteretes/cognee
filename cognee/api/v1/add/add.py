@@ -2,7 +2,6 @@ from typing import List, Union, BinaryIO
 from os import path
 import asyncio
 import dlt
-import duckdb
 
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.files.storage import LocalStorage
@@ -81,22 +80,16 @@ async def add_files(file_paths: List[str], dataset_name: str, user: User = None)
 
     relational_config = get_relational_config()
 
-    if relational_config.db_provider == "duckdb":
-        db = duckdb.connect(relational_config.db_file_path)
-
-        destination = dlt.destinations.duckdb(
-          credentials = db,
-        )
-    else:
-        destination = dlt.destinations.postgres(
-            credentials = {
-                "host": relational_config.db_host,
-                "port": relational_config.db_port,
-                "user": relational_config.db_user,
-                "password": relational_config.db_password,
-                "database": relational_config.db_name,
-            },
-        )
+    destination = dlt.destinations.sqlalchemy(
+        credentials = {
+            "host": relational_config.db_host,
+            "port": relational_config.db_port,
+            "username": relational_config.db_username,
+            "password": relational_config.db_password,
+            "database": relational_config.db_name,
+            "drivername": relational_config.db_provider,
+        },
+    )
 
     pipeline = dlt.pipeline(
         pipeline_name = "file_load_from_filesystem",

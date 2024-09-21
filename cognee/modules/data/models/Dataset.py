@@ -2,14 +2,14 @@ from uuid import uuid4
 from typing import List
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, Text, DateTime, UUID
-from cognee.infrastructure.databases.relational import Base
+from sqlalchemy import Column, Text, DateTime
+from cognee.infrastructure.databases.relational import Base, UUID
 from .DatasetData import DatasetData
 
 class Dataset(Base):
     __tablename__ = "datasets"
 
-    id = Column(UUID(as_uuid = True), primary_key = True, default = uuid4)
+    id = Column(UUID, primary_key = True, default = uuid4)
 
     name = Column(Text)
 

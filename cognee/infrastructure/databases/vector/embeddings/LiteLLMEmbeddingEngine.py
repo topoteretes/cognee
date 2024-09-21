@@ -4,7 +4,7 @@ import litellm
 from litellm import aembedding
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 
-litellm.set_verbose = True
+litellm.set_verbose = False
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
     api_key: str

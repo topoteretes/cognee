@@ -1,14 +1,14 @@
 from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Column, UUID, DateTime, String, Text
+from sqlalchemy import Column, DateTime, String, Text
 from sqlalchemy.orm import relationship, Mapped
-from cognee.infrastructure.databases.relational import Base
+from cognee.infrastructure.databases.relational import Base, UUID
 from .PipelineTask import PipelineTask
 
 class Pipeline(Base):
     __tablename__ = "pipelines"
 
-    id = Column(UUID(as_uuid = True), primary_key = True, default = uuid4)
+    id = Column(UUID, primary_key = True, default = uuid4)
 
     name = Column(String)
     description = Column(Text, nullable = True)

@@ -1,12 +1,13 @@
 from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, String, ForeignKey, UUID
+from sqlalchemy import Column, String, ForeignKey
+from cognee.infrastructure.databases.relational import UUID
 from .Principal import Principal
 from .UserGroup import UserGroup
 
 class Group(Principal):
     __tablename__ = "groups"
 
-    id = Column(UUID(as_uuid = True), ForeignKey("principals.id"), primary_key = True)
+    id = Column(UUID, ForeignKey("principals.id"), primary_key = True)
 
     name = Column(String, unique = True, nullable = False, index = True)
 

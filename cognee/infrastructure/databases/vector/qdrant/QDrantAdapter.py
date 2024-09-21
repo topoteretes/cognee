@@ -106,11 +106,10 @@ class QDrantAdapter(VectorDBInterface):
         points = [convert_to_qdrant_point(point) for point in data_points]
 
         try:
-            result = await client.upload_points(
+            client.upload_points(
                 collection_name = collection_name,
                 points = points
             )
-            return result
         except Exception as error:
             logger.error("Error uploading data points to Qdrant: %s", str(error))
             raise error

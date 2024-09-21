@@ -5,16 +5,16 @@ from .Document import Document
 class TextDocument(Document):
     type: str = "text"
     title: str
-    file_path: str
+    raw_data_location: str
 
-    def __init__(self, id: UUID, title: str, file_path: str):
+    def __init__(self, id: UUID, title: str, raw_data_location: str):
         self.id = id or uuid5(NAMESPACE_OID, title)
         self.title = title
-        self.file_path = file_path
+        self.raw_data_location = raw_data_location
 
     def read(self):
         def get_text():
-            with open(self.file_path, mode = "r", encoding = "utf-8") as file:
+            with open(self.raw_data_location, mode = "r", encoding = "utf-8") as file:
                 while True:
                     text = file.read(1024)
 
@@ -34,5 +34,5 @@ class TextDocument(Document):
             id = str(self.id),
             type = self.type,
             title = self.title,
-            file_path = self.file_path,
+            raw_data_location = self.raw_data_location,
         )

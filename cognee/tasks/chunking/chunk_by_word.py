@@ -24,7 +24,7 @@ def chunk_by_word(data: str):
             while next_character is not None and (re.match(paragraph_endings, next_character) or next_character == " "):
                 j += 1
                 next_character = data[j] if j < len(data) else None
-            if next_character.isupper():
+            if next_character and next_character.isupper():
                 return True
 
             return False

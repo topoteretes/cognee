@@ -5,7 +5,7 @@ class Document(Protocol):
     id: UUID
     type: str
     title: str
-    file_path: str
+    raw_data_location: str
 
     def read(self) -> str:
         pass
