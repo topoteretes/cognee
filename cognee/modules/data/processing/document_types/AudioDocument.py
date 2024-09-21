@@ -15,12 +15,12 @@ class AudioDocument(Document):
         self.raw_data_location = raw_data_location
         self.chunking_strategy = chunking_strategy
 
-    def read(self):
+    def read(self, chunk_size: int):
         # Transcribe the audio file
         result = get_llm_client().create_transcript(self.raw_data_location)
         text = result.text
 
-        chunker = TextChunker(self.id, get_text = lambda: text)
+        chunker = TextChunker(self.id, chunk_size = chunk_size, get_text = lambda: text)
 
         yield from chunker.read()
 

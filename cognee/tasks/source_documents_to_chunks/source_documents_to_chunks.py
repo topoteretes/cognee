@@ -2,7 +2,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.processing.document_types.Document import Document
 
 
-async def source_documents_to_chunks(documents: list[Document], parent_node_id: str = None):
+async def source_documents_to_chunks(documents: list[Document], chunk_size: int = 1024, parent_node_id: str = None):
     graph_engine = await get_graph_engine()
 
     if parent_node_id is None:
@@ -40,5 +40,5 @@ async def source_documents_to_chunks(documents: list[Document], parent_node_id: 
         await graph_engine.add_edges(edges)
 
     for document in documents:
-        for document_chunk in document.read():
+        for document_chunk in document.read(chunk_size = chunk_size):
             yield document_chunk

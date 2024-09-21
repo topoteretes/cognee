@@ -13,7 +13,7 @@ class PdfDocument(Document):
         self.title = title
         self.raw_data_location = raw_data_location
 
-    def read(self) -> PdfReader:
+    def read(self, chunk_size: int) -> PdfReader:
         file = PdfReader(self.raw_data_location)
 
         def get_text():
@@ -21,7 +21,7 @@ class PdfDocument(Document):
                 page_text = page.extract_text()
                 yield page_text
 
-        chunker = TextChunker(self.id, get_text = get_text)
+        chunker = TextChunker(self.id, chunk_size = chunk_size, get_text = get_text)
 
         yield from chunker.read()
 
