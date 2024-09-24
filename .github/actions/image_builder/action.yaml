@@ -1,20 +1,20 @@
-name: 'Build Docker images for PromethAI'
-description: 'Build PromethAI-related Docker images and push to the Docker registry (AWS ECR)'
+name: 'Build Docker images for Cognee'
+description: 'Build cognee-related Docker images and push to the Docker registry (AWS ECR)'
 inputs:
   stage:
-    description: 'The stage of the pipeline, such as "dev" or "prd", for the PromethAI app'
+    description: 'The stage of the pipeline, such as "dev" or "prd", for the Cognee app'
     required: true
   aws_account_id:
-    description: 'The AWS account ID for the PromethAI app'
+    description: 'The AWS account ID for the Cognee app'
     required: true
   should_publish:
-    description: 'Whether to publish the PromethAI Docker image to AWS ECR; should be either "true" or "false"'
+    description: 'Whether to publish the Cognee Docker image to AWS ECR; should be either "true" or "false"'
     required: true
   ecr_image_repo_name:
-    description: 'The Docker image ECR repository name for the PromethAI app, such as "workflows"'
+    description: 'The Docker image ECR repository name for the Cognee app, such as "workflows"'
     required: true
   dockerfile_location:
-    description: 'The  directory location of the Dockerfile for the PromethAI app'
+    description: 'The  directory location of the Dockerfile for the Cognee app'
     required: true
 
 runs:

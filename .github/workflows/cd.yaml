@@ -15,13 +15,13 @@ env:
 jobs:
 
   publish_docker_to_ecr:
-    name: Publish Docker PromethAI image
+    name: Publish Cognee Docker image
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
     steps:
-      - name: Take code from repo
+      - name: Checkout code from repo
         uses: actions/checkout@v3
       - name: Set environment variable for stage
         id: set-env
@@ -40,23 +40,23 @@ jobs:
         with:
           role-to-assume: ${{ env.AWS_ROLE_DEV_CICD }}
           aws-region: eu-west-1
-      - name: Create Docker image and push to ECR
+      - name: Build Docker image and push to ECR
         uses: ./.github/actions/image_builder
-        id: generate-promethai-docker
+        id: build-cognee-docker-image
         with:
           stage: dev
           aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
           should_publish: true
-          ecr_image_repo_name: promethai-dev-backend-promethai-backend
+          ecr_image_repo_name: cognee-dev-backend-cognee-api/cognee-dev
           dockerfile_location: ./
-      - name: Export Docker image tag
-        id: export-promethai-docker-tag
+      - name: Export Cognee image tag
+        id: export-cognee-image-tag
         run: |
-          export DOCKER_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
-          echo "Docker tag is: $DOCKER_TAG"
-          echo "promethai_docker_tag_backend=$DOCKER_TAG" >> $GITHUB_OUTPUT
+          export IMAGE_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
+          echo "Docker tag is: $IMAGE_TAG"
+          echo "cognee_image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
     outputs:
-      promethai_docker_tag_backend: ${{ steps.export-promethai-docker-tag.outputs.promethai_docker_tag_backend }}
+      cognee_image_tag: ${{ steps.export-cognee-image-tag.outputs.cognee_image_tag }}
 
   apply_tf:
     name: Trigger terraform apply workflow
