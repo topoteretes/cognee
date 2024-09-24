@@ -9,7 +9,7 @@ on:
       - '**.md'
 
 env:
-  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/promethai-dev-base-role-github-ci-cd"
+  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/cognee-ci-cd"
   AWS_ACCOUNT_ID_DEV: "463722570299"
 
 jobs:
@@ -22,7 +22,8 @@ jobs:
       contents: read
     steps:
       - name: Checkout code from repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
       - name: Set environment variable for stage
         id: set-env
         run: |
@@ -33,13 +34,16 @@ jobs:
             echo "STAGE=dev" >> $GITHUB_ENV
             echo "::set-output name=stage::dev"
           fi
+
       - name: Use output
         run: echo "The stage is ${{ steps.set-env.outputs.stage }}"
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_DEV_CICD }}
           aws-region: eu-west-1
+
       - name: Build Docker image and push to ECR
         uses: ./.github/actions/image_builder
         id: build-cognee-docker-image
@@ -49,22 +53,24 @@ jobs:
           should_publish: true
           ecr_image_repo_name: cognee-dev-backend-cognee-api/cognee-dev
           dockerfile_location: ./
+
       - name: Export Cognee image tag
         id: export-cognee-image-tag
         run: |
           export IMAGE_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
           echo "Docker tag is: $IMAGE_TAG"
           echo "cognee_image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
     outputs:
       cognee_image_tag: ${{ steps.export-cognee-image-tag.outputs.cognee_image_tag }}
 
-  apply_tf:
-    name: Trigger terraform apply workflow
+  trigger_deployment:
+    name: Trigger deployment
     runs-on: ubuntu-latest
     needs: publish_docker_to_ecr
     steps:
-      - name: TF apply workflow triggers step
-        uses: actions/github-script@v6
+      - name: Trigger deployment in the infrastructure
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
           script: |
