@@ -9,7 +9,7 @@ on:
       - 'examples/**'
 
 env:
-  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/promethai-dev-base-role-github-ci-cd"
+  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/cognee-ci-cd"
   AWS_ACCOUNT_ID_DEV: "463722570299"
   ENVIRONMENT: prd
 
