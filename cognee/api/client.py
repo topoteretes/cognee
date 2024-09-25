@@ -390,10 +390,10 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        # import asyncio
-        # from cognee.modules.data.deletion import prune_system, prune_data
-        # asyncio.run(prune_data())
-        # asyncio.run(prune_system(metadata = True))
+        import asyncio
+        from cognee.modules.data.deletion import prune_system, prune_data
+        asyncio.run(prune_data())
+        asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:
