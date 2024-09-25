@@ -1,11 +1,8 @@
 name: Push GitHub Data to PostHog
 
 on:
-  pull_request:
-    branches:
-      - main
-#  schedule:
-#    - cron: '0 0 * * *'  # Runs every day at midnight
+  schedule:
+    - cron: '0 0 * * *'  # Runs every day at midnight
   workflow_dispatch:
 
 jobs:
