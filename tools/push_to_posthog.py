@@ -1,4 +1,5 @@
 # extract_and_push_github_data.py
+import uuid
 
 import requests
 import os
@@ -53,9 +54,11 @@ def main():
 
         print("Repository information: ", properties)
 
+        distinct_id = str(uuid.uuid4())
+
         # Send event to PostHog
         result = posthog.capture(
-            distinct_id='github_repo',  # You can customize this identifier
+            distinct_id=distinct_id,  # You can customize this identifier
             event='GitHub Repo Stats',
             properties=properties
         )
