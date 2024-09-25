@@ -49,6 +49,8 @@ def main():
             'topics': repo_info.get('topics')
         }
 
+        print("Repository information: ", properties)
+
         # Send event to PostHog
         posthog.capture(
             distinct_id='github_repo',  # You can customize this identifier
