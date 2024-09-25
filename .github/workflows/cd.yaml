@@ -51,7 +51,7 @@ jobs:
           stage: dev
           aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
           should_publish: true
-          ecr_image_repo_name: cognee-dev-backend-cognee/cognee-dev
+          ecr_image_repo_name: cognee-dev-backend-cognee
           dockerfile_location: ./
 
       - name: Export Cognee image tag
