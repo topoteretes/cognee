@@ -54,11 +54,13 @@ def main():
         print("Repository information: ", properties)
 
         # Send event to PostHog
-        posthog.capture(
+        result = posthog.capture(
             distinct_id='github_repo',  # You can customize this identifier
             event='GitHub Repo Stats',
             properties=properties
         )
+
+        print("PostHog response: ", result)
 
         print("Data sent to PostHog successfully.")
     else:
