@@ -21,6 +21,8 @@ posthog = Posthog(
     host=POSTHOG_HOST
 )
 
+posthog.debug = True
+
 def get_repo_info():
     url = f"https://api.github.com/repos/{REPO}"
     response = requests.get(url, headers=headers)
