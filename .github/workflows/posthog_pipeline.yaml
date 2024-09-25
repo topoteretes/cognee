@@ -26,11 +26,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests posthog
 
-      - name: Run data extraction and push script
+      - name: Print working directory, list folders, and run script
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
           POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          python tools/push_to_posthog.py
+          echo "Current working directory:"
+          pwd  # Print the current working directory
+          echo "List of folders in the current directory:"
+          ls -la  # List all files and folders in the current directory
+          echo "Changing to tools directory..."
+          cd tools  # Change to the 'tools' directory
+          echo "Current working directory after changing to tools:"
+          pwd  # Print the working directory again
+          echo "List of folders in the tools directory:"
+          ls -la  # List all files and folders in the 'tools' directory
+          python push_to_posthog.py  # Run the script
+
