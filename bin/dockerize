@@ -11,8 +11,10 @@ VERSION="$STAGE-$CUR_DATE-$SHA_SHORT"
 IMAGE_NAME=${image_name:-cognee-${STAGE}}
 
 REPO_NAME="${AWS_REPOSITORY}/${IMAGE_NAME}"
-FULL_IMAGE_NAME="${REPO_NAME}:${VERSION}"
+FULL_IMAGE_NAME="${REPO_NAME}"
 APP_DIR=${app_dir:-"."}
+
+# ECHO "$FULL_IMAGE_NAME:latest"
 
 PUBLISH=${publish:-false}
 
@@ -21,7 +23,7 @@ echo "Building docker image ${FULL_IMAGE_NAME} located in dir ${app_dir}"
 pushd "${APP_DIR}" &&
   docker buildx build --platform linux/amd64 \
     --build-arg STAGE=${STAGE} \
-    -t "${FULL_IMAGE_NAME}" . &&
+    -t "${FULL_IMAGE_NAME}:latest" -t "${FULL_IMAGE_NAME}:${VERSION}" . &&
   echo "${VERSION}" >/tmp/.DOCKER_IMAGE_VERSION &&
   echo "Successfully built docker image ${FULL_IMAGE_NAME}"
 

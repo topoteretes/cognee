@@ -49,7 +49,7 @@ jobs:
 #          aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
 #          should_publish: true
 #          ecr_image_repo_name: promethai-prd-backend-promethai-backend
-#          # ecr_image_repo_name: cognee-prd-backend-cognee
+#          # ecr_image_repo_name: cognee-prd-backend-cognee-ecr
 #          dockerfile_location: ./
 #      - name: Export Docker image tag
 #        id: export-promethai-docker-tag
