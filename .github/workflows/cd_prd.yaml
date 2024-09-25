@@ -9,7 +9,7 @@ on:
       - 'examples/**'
 
 env:
-  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/cognee-ci-cd"
+  AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/cognee-dev-base-role-github-ci-cd"
   AWS_ACCOUNT_ID_DEV: "463722570299"
   ENVIRONMENT: prd
 
@@ -49,6 +49,7 @@ jobs:
 #          aws_account_id: ${{ env.AWS_ACCOUNT_ID_DEV }}
 #          should_publish: true
 #          ecr_image_repo_name: promethai-prd-backend-promethai-backend
+#          # ecr_image_repo_name: cognee-dev-backend-cognee/cognee-dev
 #          dockerfile_location: ./
 #      - name: Export Docker image tag
 #        id: export-promethai-docker-tag
