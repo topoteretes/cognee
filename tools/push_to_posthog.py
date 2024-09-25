@@ -8,7 +8,7 @@ from posthog import Posthog
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO = os.getenv('GITHUB_REPOSITORY')
 POSTHOG_API_KEY = os.getenv('POSTHOG_API_KEY')  # Your PostHog Project API Key
-POSTHOG_HOST = os.getenv('POSTHOG_HOST', 'https://app.posthog.com')  # Default PostHog Cloud
+POSTHOG_HOST = os.getenv('POSTHOG_HOST', 'https://eu.i.posthog.com')  # Default PostHog Cloud
 
 headers = {
     "Authorization": f"token {GITHUB_TOKEN}",
