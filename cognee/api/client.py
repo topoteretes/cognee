@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-if os.getenv("ENV") == "prod":
+if os.getenv("ENV", "prod") == "prod":
     sentry_sdk.init(
         dsn = os.getenv("SENTRY_REPORTING_URL"),
         traces_sample_rate = 1.0,
@@ -40,20 +40,14 @@ async def lifespan(app: FastAPI):
     await get_default_user()
     yield
 
-app = FastAPI(debug = os.getenv("ENV") != "prod", lifespan = lifespan)
-
-origins = [
-    "http://127.0.0.1:3000",
-    "http://frontend:3000",
-    "http://localhost:3000",
-]
+app = FastAPI(debug = os.getenv("ENV", "prod") != "prod", lifespan = lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
-    allow_headers=["*"],
+    allow_origins = ["*"],
+    allow_credentials = True,
+    allow_methods = ["OPTIONS", "GET", "POST", "DELETE"],
+    allow_headers = ["*"],
 )
 
 from cognee.api.v1.users.routers import get_auth_router, get_register_router,\
