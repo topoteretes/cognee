@@ -1,5 +1,5 @@
-export default function StatusIcon({ status }: { status: 'DATASET_PROCESSING_FINISHED' | string }) {
-  const isSuccess = status === 'DATASET_PROCESSING_FINISHED';
+export default function StatusIcon({ status }: { status: 'DATASET_PROCESSING_COMPLETED' | string }) {
+  const isSuccess = status === 'DATASET_PROCESSING_COMPLETED';
 
   return (
     <div

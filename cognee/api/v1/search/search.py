@@ -42,10 +42,7 @@ class SearchParameters(BaseModel):
         return value
 
 
-async def search(search_type: str, params: Dict[str, Any], user: User = None) -> List:
-    if user is None:
-        user = await get_default_user()
-
+async def search(search_type: str, params: Dict[str, Any], user: User) -> List:
     if user is None:
         raise PermissionError("No user found in the system. Please create a user.")
 
@@ -78,16 +75,21 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
 
     search_tasks = []
 
+    if user is None:
+        user = await get_default_user()
+
+    send_telemetry("cognee.search EXECUTION STARTED", user.id)
+
     for search_param in query_params:
         search_func = search_functions.get(search_param.search_type)
         if search_func:
             # Schedule the coroutine for execution and store the task
-            task = search_func(**search_param.params)
+            task = search_func(**search_param.params, user = user)
             search_tasks.append(task)
 
     # Use asyncio.gather to run all scheduled tasks concurrently
     search_results = await asyncio.gather(*search_tasks)
 
-    send_telemetry("cognee.search")
+    send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
 
     return search_results[0] if len(search_results) == 1 else search_results
