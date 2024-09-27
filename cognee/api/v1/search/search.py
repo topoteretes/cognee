@@ -51,7 +51,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
 
     own_document_ids = await get_document_ids_for_user(user.id)
     search_params = SearchParameters(search_type = search_type, params = params)
-    search_results = await specific_search([search_params])
+    search_results = await specific_search([search_params], user)
 
     from uuid import UUID
 
@@ -67,7 +67,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
     return filtered_search_results
 
 
-async def specific_search(query_params: List[SearchParameters]) -> List:
+async def specific_search(query_params: List[SearchParameters], user) -> List:
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SUMMARY: search_summary,
@@ -77,9 +77,6 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
     }
 
     search_tasks = []
-
-    if user is None:
-        user = await get_default_user()
 
     send_telemetry("cognee.search EXECUTION STARTED", user.id)
 
