@@ -42,7 +42,10 @@ class SearchParameters(BaseModel):
         return value
 
 
-async def search(search_type: str, params: Dict[str, Any], user: User) -> List:
+async def search(search_type: str, params: Dict[str, Any], user: User = None) -> List:
+    if user is None:
+        user = await get_default_user()
+
     if user is None:
         raise PermissionError("No user found in the system. Please create a user.")
 
