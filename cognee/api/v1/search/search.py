@@ -84,7 +84,7 @@ async def specific_search(query_params: List[SearchParameters], user) -> List:
         search_func = search_functions.get(search_param.search_type)
         if search_func:
             # Schedule the coroutine for execution and store the task
-            task = search_func(**search_param.params, user = user)
+            task = search_func(**search_param.params)
             search_tasks.append(task)
 
     # Use asyncio.gather to run all scheduled tasks concurrently

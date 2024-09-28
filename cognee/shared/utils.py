@@ -17,7 +17,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         return
 
     env = os.getenv("ENV")
-    if env in ["local", "test", "dev"]:
+    if env in ["test", "dev"]:
         return
 
     posthog = Posthog(
