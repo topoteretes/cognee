@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Union
 
+from cognee.shared.utils import send_telemetry
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.data.models import Dataset, Data
@@ -69,6 +70,8 @@ async def run_cognify_pipeline(dataset: Dataset, user: User):
     dataset_id = dataset.id
     dataset_name = generate_dataset_name(dataset.name)
 
+    send_telemetry("cognee.cognify EXECUTION STARTED", user.id)
+
     async with update_status_lock:
         task_status = await get_pipeline_status([dataset_id])
 
@@ -110,17 +113,21 @@ async def run_cognify_pipeline(dataset: Dataset, user: User):
             Task(chunk_remove_disconnected), # Remove the obsolete document chunks.
         ]
 
-        pipeline = run_tasks(tasks, data_documents)
+        pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")
 
         async for result in pipeline:
             print(result)
 
-        await log_pipeline_status(dataset_id, "DATASET_PROCESSING_FINISHED", {
+        send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
+
+        await log_pipeline_status(dataset_id, "DATASET_PROCESSING_COMPLETED", {
             "dataset_name": dataset_name,
             "files": document_ids_str,
         })
     except Exception as error:
-        await log_pipeline_status(dataset_id, "DATASET_PROCESSING_ERROR", {
+        send_telemetry("cognee.cognify EXECUTION ERRORED", user.id)
+
+        await log_pipeline_status(dataset_id, "DATASET_PROCESSING_ERRORED", {
             "dataset_name": dataset_name,
             "files": document_ids_str,
         })

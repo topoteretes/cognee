@@ -65,7 +65,7 @@ export default function DatasetsView({
                 <StatusIcon status={dataset.status} />
                 <DropdownMenu>
                   <Stack gap="1" className={styles.datasetMenu} orientation="vertical">
-                    {dataset.status === 'DATASET_PROCESSING_FINISHED' ? (
+                    {dataset.status === 'DATASET_PROCESSING_COMPLETED' ? (
                       <CTAButton
                         onClick={(event: React.MouseEvent<HTMLButtonElement>) => handleExploreDataset(event, dataset)}
                       >

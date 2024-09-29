@@ -5,7 +5,7 @@ echo "Environment: $ENVIRONMENT"
 
 echo "Starting Gunicorn"
 
-if [ "$ENVIRONMENT" = "local" ]; then
+if [ "$ENVIRONMENT" = "dev" ]; then
   if [ "$DEBUG" = true ]; then
     echo "Waiting for the debugger to attach..."
 

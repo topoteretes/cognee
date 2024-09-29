@@ -152,12 +152,13 @@ async def add_files(file_paths: List[str], dataset_name: str, user: User = None)
                 await give_permission_on_document(user, data_id, "write")
 
 
+    send_telemetry("cognee.add EXECUTION STARTED", user_id = user.id)
     run_info = pipeline.run(
         data_resources(processed_file_paths, user),
         table_name = "file_metadata",
         dataset_name = dataset_name,
         write_disposition = "merge",
     )
-    send_telemetry("cognee.add")
+    send_telemetry("cognee.add EXECUTION COMPLETED", user_id = user.id)
 
     return run_info

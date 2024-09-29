@@ -1,7 +1,5 @@
 """ This module contains utility functions for the cognee. """
-import logging
 import os
-import uuid
 import datetime
 import graphistry
 import networkx as nx
@@ -14,25 +12,23 @@ from posthog import Posthog
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 
-def send_telemetry(event_name: str):
+def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     if os.getenv("TELEMETRY_DISABLED"):
-        print("Telemetry is disabled.")
-        logging.info("Telemetry is disabled.")
         return
 
     env = os.getenv("ENV")
-    if env in ["local", "test", "dev"]:
+    if env in ["test", "dev"]:
         return
 
     posthog = Posthog(
-        project_api_key = "phc_bbR86N876kwub62Lr3dhQ7zIeRyMMMm0fxXqxPqzLm3",
-        host="https://eu.i.posthog.com"
+        project_api_key = "phc_UB1YVere1KtJg1MFxAo6ABfpkwN3OxCvGNDkMTjvH0",
+        host = "https://eu.i.posthog.com"
     )
 
-    user_id = str(uuid.uuid4())
     current_time = datetime.datetime.now()
     properties = {
-        "time": current_time.strftime("%m/%d/%Y")
+        "time": current_time.strftime("%m/%d/%Y"),
+        **additional_properties,
     }
 
     try:

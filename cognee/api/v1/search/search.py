@@ -51,7 +51,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
 
     own_document_ids = await get_document_ids_for_user(user.id)
     search_params = SearchParameters(search_type = search_type, params = params)
-    search_results = await specific_search([search_params])
+    search_results = await specific_search([search_params], user)
 
     from uuid import UUID
 
@@ -67,7 +67,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
     return filtered_search_results
 
 
-async def specific_search(query_params: List[SearchParameters]) -> List:
+async def specific_search(query_params: List[SearchParameters], user) -> List:
     search_functions: Dict[SearchType, Callable] = {
         SearchType.ADJACENT: search_adjacent,
         SearchType.SUMMARY: search_summary,
@@ -77,6 +77,8 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
     }
 
     search_tasks = []
+
+    send_telemetry("cognee.search EXECUTION STARTED", user.id)
 
     for search_param in query_params:
         search_func = search_functions.get(search_param.search_type)
@@ -88,6 +90,6 @@ async def specific_search(query_params: List[SearchParameters]) -> List:
     # Use asyncio.gather to run all scheduled tasks concurrently
     search_results = await asyncio.gather(*search_tasks)
 
-    send_telemetry("cognee.search")
+    send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
 
     return search_results[0] if len(search_results) == 1 else search_results
