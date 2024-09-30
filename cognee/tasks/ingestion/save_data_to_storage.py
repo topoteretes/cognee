@@ -10,8 +10,8 @@ def save_data_to_storage(data: Union[BinaryIO, str], dataset_name) -> list[str]:
 
     for data_item in data:
         # data is a file object coming from upload.
-        if hasattr(data, "file"):
-            file_path = save_data_to_file(data.file, dataset_name, filename = data.filename)
+        if hasattr(data_item, "file"):
+            file_path = save_data_to_file(data_item.file, dataset_name, filename = data_item.filename)
             file_paths.append(file_path)
 
         if isinstance(data_item, str):
