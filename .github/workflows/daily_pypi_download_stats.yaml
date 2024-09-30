@@ -1,8 +1,8 @@
 name: analytics | Update Cognee Stats Daily
-on: pull_request
-#on:
-#  schedule:
-#    - cron: '0 1 * * *'  # Runs every day at 01:00 UTC
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # Runs every day at 01:00 UTC
 
 jobs:
   update_stats:
