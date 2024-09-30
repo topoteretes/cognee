@@ -1,7 +1,9 @@
 name: analytics | Historical Import of Cognee Stats
 
-on:
-  workflow_dispatch:
+on: pull_request
+
+#on:
+#  workflow_dispatch:
 
 jobs:
   import_stats:

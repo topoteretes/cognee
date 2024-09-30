@@ -1,9 +1,11 @@
 name: analytics | Send Twitter Followers to Segment
 
-on:
-  schedule:
-    - cron: '0 0 * * *'  # Runs daily at midnight UTC. Adjust as needed.
-  workflow_dispatch:     # Allows manual triggering of the workflow
+on: pull_request
+
+#on:
+#  schedule:
+#    - cron: '0 0 * * *'  # Runs daily at midnight UTC. Adjust as needed.
+#  workflow_dispatch:     # Allows manual triggering of the workflow
 
 jobs:
   send-followers:
