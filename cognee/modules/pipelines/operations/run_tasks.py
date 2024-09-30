@@ -129,7 +129,7 @@ async def run_tasks_base(tasks: [Task], data = None, user: User = None):
                 "task_name": running_task.executable.__name__,
             })
             raise error
-                
+
     elif inspect.isfunction(running_task.executable):
         logger.info("Function task started: `%s`", running_task.executable.__name__)
         send_telemetry("Function Task Started", user.id, {
