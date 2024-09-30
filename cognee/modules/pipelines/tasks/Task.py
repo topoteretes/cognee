@@ -26,7 +26,7 @@ class Task():
                 self.task_config["batch_size"] = 1
 
     def run(self, *args, **kwargs):
-        combined_args = self.default_params["args"] + args
+        combined_args = args + self.default_params["args"]
         combined_kwargs = { **self.default_params["kwargs"], **kwargs }
 
         return self.executable(*combined_args, **combined_kwargs)
