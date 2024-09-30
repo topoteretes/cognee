@@ -59,7 +59,7 @@ def main():
         # Send event to PostHog
         result = posthog.capture(
             distinct_id=distinct_id,  # You can customize this identifier
-            event='GitHub Repo Stats',
+            event='cognee_lib_github_repo_stats',
             properties=properties
         )
 
