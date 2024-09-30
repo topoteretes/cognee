@@ -1,4 +1,4 @@
-name: Send Twitter Followers to Segment
+name: analytics | Send Twitter Followers to Segment
 
 on:
   schedule:

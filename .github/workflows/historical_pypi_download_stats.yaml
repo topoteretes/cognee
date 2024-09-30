@@ -1,4 +1,4 @@
-name: Historical Import of Cognee Stats
+name: analytics | Historical Import of Cognee Stats
 
 on:
   workflow_dispatch:

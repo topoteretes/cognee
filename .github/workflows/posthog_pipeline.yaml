@@ -1,4 +1,4 @@
-name: Push GitHub Data to PostHog
+name: analytics | Push GitHub Data to PostHog
 
 on:
   schedule:

@@ -1,4 +1,4 @@
-name: Update Cognee Stats Daily
+name: analytics | Update Cognee Stats Daily
 
 on:
   schedule:
