@@ -49,6 +49,7 @@ downloads = None
 for entry in data['data']:
     if entry['date'] == date_str:
         downloads = entry['downloads']
+        category = entry.get('category')
         break
 
 if downloads is None:
@@ -61,16 +62,19 @@ message_id = f"cognee_downloads_{date_str}"
 distinct_id = str(uuid.uuid4())
 
 # Send an event to PostHog
-posthog.capture(
-    distinct_id=distinct_id,
-    event='cognee_downloads',
-    properties={
-        'date': date_str,
-        'downloads': downloads,
-    }
-)
+event_name = 'cognee_lib_downloads_with_mirrors' if category == 'with_mirrors' else 'cognee_lib_downloads_without_mirrors'
 
-print(f"Data for {date_str} updated in PostHog successfully.")
+if event_name == 'cognee_lib_downloads_without_mirrors':
+    posthog.capture(
+        distinct_id=str(uuid.uuid4()),
+        event=event_name,
+        properties={
+            'category': category,
+            'date': date_str,
+            'downloads': downloads,
+        }
+    )
+print(f"Data for {date_str} updated in PostHog successfully. Downloads is {downloads}")
 
 # Update the state file
 with open(state_file, 'w') as f:
