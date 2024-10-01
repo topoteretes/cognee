@@ -7,7 +7,7 @@ import sentry_sdk
 from typing import Dict, Any, List, Union, Optional, Literal
 from typing_extensions import Annotated
 from fastapi import FastAPI, HTTPException, Form, UploadFile, Query, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from cognee.modules.users.models import User
@@ -124,7 +124,7 @@ def health_check():
     """
     Health check endpoint that returns the server status.
     """
-    return {"status": "OK"}
+    return Response(status_code = 200)
 
 @app.get("/api/v1/datasets", response_model = list)
 async def get_datasets(user: User = Depends(get_authenticated_user)):
