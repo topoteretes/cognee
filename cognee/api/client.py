@@ -35,6 +35,12 @@ async def lifespan(app: FastAPI):
     from cognee.infrastructure.databases.relational import create_db_and_tables
   
     # Not needed if you setup a migration system like Alembic
+
+    import asyncio
+    from cognee.modules.data.deletion import prune_system, prune_data
+    asyncio.run(prune_data())
+    asyncio.run(prune_system(metadata = True))
+
     await create_db_and_tables()
     yield
 
@@ -387,11 +393,6 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
     try:
         logger.info("Starting server at %s:%s", host, port)
-
-        import asyncio
-        from cognee.modules.data.deletion import prune_system, prune_data
-        asyncio.run(prune_data())
-        asyncio.run(prune_system(metadata = True))
 
         uvicorn.run(app, host = host, port = port)
     except Exception as e:
