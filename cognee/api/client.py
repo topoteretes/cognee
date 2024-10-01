@@ -33,11 +33,9 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from cognee.infrastructure.databases.relational import create_db_and_tables
-    from cognee.modules.users.methods import get_default_user
   
     # Not needed if you setup a migration system like Alembic
     await create_db_and_tables()
-    await get_default_user()
     yield
 
 app = FastAPI(debug = os.getenv("ENV", "prod") != "prod", lifespan = lifespan)
