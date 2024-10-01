@@ -1,4 +1,4 @@
-name: Send Release to Discord
+name: automation | Send Release to Discord
 
 on:
   release:
