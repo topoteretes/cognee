@@ -98,12 +98,13 @@ class SQLAlchemyAdapter():
             if self.engine.dialect.name == "sqlite":
                 from cognee.infrastructure.files.storage import LocalStorage
 
+                print(f"DB_PATH: {self.db_path}")
                 LocalStorage.remove(self.db_path)
                 self.db_path = None
             else:
                 async with self.engine.begin() as connection:
                     for table in Base.metadata.sorted_tables:
-                        drop_table_query = text(f'DROP TABLE IF EXISTS {table.name} CASCADE')
+                        drop_table_query = text(f"DROP TABLE IF EXISTS {table.name} CASCADE")
                         await connection.execute(drop_table_query)
 
         except Exception as e:
