@@ -34,13 +34,12 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     from cognee.infrastructure.databases.relational import create_db_and_tables
   
-    # Not needed if you setup a migration system like Alembic
 
-    import asyncio
     from cognee.modules.data.deletion import prune_system, prune_data
-    asyncio.run(prune_data())
-    asyncio.run(prune_system(metadata = True))
+    await prune_data()
+    await prune_system(metadata = True)
 
+    # Not needed if you setup a migration system like Alembic
     await create_db_and_tables()
     yield
 
