@@ -69,6 +69,7 @@ pdfplumber = "^0.11.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = { version = "*", extras = ["sqlalchemy"] }
 asyncpg = "^0.29.0"
+alembic = "^1.13.3"
 
 
 

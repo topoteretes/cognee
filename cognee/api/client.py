@@ -28,22 +28,17 @@ if os.getenv("ENV", "prod") == "prod":
         profiles_sample_rate = 1.0,
     )
 
-from contextlib import asynccontextmanager
+# from contextlib import asynccontextmanager
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    from cognee.infrastructure.databases.relational import create_db_and_tables
-  
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     from cognee.modules.data.deletion import prune_system, prune_data
+#     await prune_data()
+#     await prune_system(metadata = True)
 
-    from cognee.modules.data.deletion import prune_system, prune_data
-    await prune_data()
-    await prune_system(metadata = True)
+#     yield
 
-    # Not needed if you setup a migration system like Alembic
-    await create_db_and_tables()
-    yield
-
-app = FastAPI(debug = os.getenv("ENV", "prod") != "prod", lifespan = lifespan)
+app = FastAPI(debug = os.getenv("ENV", "prod") != "prod")
 
 app.add_middleware(
     CORSMiddleware,
