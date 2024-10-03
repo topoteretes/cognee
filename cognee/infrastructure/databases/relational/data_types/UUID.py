@@ -38,6 +38,8 @@ class UUID(TypeDecorator):
         if value is None:
             return value
         if dialect.name == 'postgresql':
+            if isinstance(value, uuid.UUID):
+                return value
             return uuid.UUID(value)
         else:
             return uuid.UUID(bytes = value)
