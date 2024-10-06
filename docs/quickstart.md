@@ -14,7 +14,7 @@ Navigate to cognee folder and run
 docker compose up postgres
 ```
 
-Add your LLM API key to the enviroment variables
+Add your LLM API key to the environment variables
 
 ```
 import os
