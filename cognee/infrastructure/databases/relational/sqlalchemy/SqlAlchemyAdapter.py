@@ -1,3 +1,4 @@
+from os import path
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 from sqlalchemy import text, select
@@ -8,6 +9,9 @@ from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
     def __init__(self, connection_string: str):
+        self.db_path: str = None
+        self.db_uri: str = connection_string
+
         self.engine = create_async_engine(connection_string)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
@@ -93,12 +97,24 @@ class SQLAlchemyAdapter():
             except Exception as e:
                 print(f"Error dropping database tables: {e}")
 
+
+    async def create_database(self):
+        if self.engine.dialect.name == "sqlite":
+            from cognee.infrastructure.files.storage import LocalStorage
+
+            db_directory = path.dirname(self.db_path)
+            LocalStorage.ensure_directory_exists(db_directory)
+
+        async with self.engine.begin() as connection:
+            if len(Base.metadata.tables.keys()) > 0:
+                await connection.run_sync(Base.metadata.create_all)
+
+
     async def delete_database(self):
         try:
             if self.engine.dialect.name == "sqlite":
                 from cognee.infrastructure.files.storage import LocalStorage
 
-                print(f"DB_PATH: {self.db_path}")
                 LocalStorage.remove(self.db_path)
                 self.db_path = None
             else:

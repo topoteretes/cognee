@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
 from cognee.modules.data.extraction.extract_categories import extract_categories
-from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.modules.chunking import DocumentChunk
 
 
 async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):

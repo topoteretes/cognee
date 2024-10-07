@@ -1,6 +1,6 @@
 from uuid import UUID, uuid5, NAMESPACE_OID
 from pypdf import PdfReader
-from cognee.modules.data.chunking.TextChunker import TextChunker
+from cognee.modules.chunking.TextChunker import TextChunker
 from .Document import Document
 
 class PdfDocument(Document):

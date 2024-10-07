@@ -1,5 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.modules.chunking import DocumentChunk
 
 async def chunk_remove_disconnected(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
     graph_engine = await get_graph_engine()
@@ -9,13 +9,13 @@ async def chunk_remove_disconnected(data_chunks: list[DocumentChunk]) -> list[Do
     obsolete_chunk_ids = []
 
     for document_id in document_ids:
-        chunk_ids = await graph_engine.get_successor_ids(document_id, edge_label = "has_chunk")
+        chunks = await graph_engine.get_successors(document_id, edge_label = "has_chunk")
 
-        for chunk_id in chunk_ids:
-            previous_chunks = await graph_engine.get_predecessor_ids(chunk_id, edge_label = "next_chunk")
+        for chunk in chunks:
+            previous_chunks = await graph_engine.get_predecessors(chunk["uuid"], edge_label = "next_chunk")
 
             if len(previous_chunks) == 0:
-                obsolete_chunk_ids.append(chunk_id)
+                obsolete_chunk_ids.append(chunk["uuid"])
 
     if len(obsolete_chunk_ids) > 0:
         await graph_engine.delete_nodes(obsolete_chunk_ids)
