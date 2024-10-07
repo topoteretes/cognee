@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
+from networkx import predecessor
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 logger = logging.getLogger("Neo4jAdapter")
@@ -379,15 +380,33 @@ class Neo4jAdapter(GraphDBInterface):
         return predecessors + successors
 
     async def get_connections(self, node_id: str) -> list:
-        query = """
-        MATCH (node)-[relation]-(neighbour)
+        predecessors_query = """
+        MATCH (node)<-[relation]-(neighbour)
+        WHERE node.id = $node_id
+        RETURN neighbour, relation, node
+        """
+        successors_query = """
+        MATCH (node)-[relation]->(neighbour)
         WHERE node.id = $node_id
         RETURN node, relation, neighbour
         """
 
-        results = await self.query(query, dict(node_id = node_id))
+        predecessors, successors = await asyncio.gather(
+            self.query(predecessors_query, dict(node_id = node_id)),
+            self.query(successors_query, dict(node_id = node_id)),
+        )
 
-        return [(result["node"], result["relation"], result["neighbour"]) for result in results]
+        connections = []
+
+        for neighbour in predecessors:
+            neighbour = neighbour["relation"]
+            connections.append((neighbour[0], { "relationship_name": neighbour[1] }, neighbour[2]))
+
+        for neighbour in successors:
+            neighbour = neighbour["relation"]
+            connections.append((neighbour[0], { "relationship_name": neighbour[1] }, neighbour[2]))
+
+        return connections
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         query = f"""

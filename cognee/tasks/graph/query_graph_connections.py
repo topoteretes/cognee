@@ -48,6 +48,9 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
     unique_node_connections_map = {}
     unique_node_connections = []
     for node_connection in node_connections:
+        if "uuid" not in node_connection[0] or "uuid" not in node_connection[2]:
+            continue
+
         unique_id = f"{node_connection[0]['uuid']} {node_connection[1]['relationship_name']} {node_connection[2]['uuid']}"
 
         if unique_id not in unique_node_connections_map:
