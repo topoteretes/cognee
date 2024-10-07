@@ -8,7 +8,7 @@ To run cognee, you will need the following:
 
 1. OpenAI API key (Ollama or Anyscale could work as [well](local_models.md))
 
-Add your LLM API key to the enviroment variables
+Add your LLM API key to the environment variables
 
 ```
 import os
