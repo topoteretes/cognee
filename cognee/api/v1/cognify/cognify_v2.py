@@ -14,8 +14,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
-from cognee.tasks import chunk_extract_summary, \
-    chunk_naive_llm_classifier, \
+from cognee.tasks import chunk_naive_llm_classifier, \
     chunk_remove_disconnected, \
     infer_data_ontology, \
     save_chunks_to_store, \
