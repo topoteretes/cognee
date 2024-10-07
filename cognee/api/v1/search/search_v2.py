@@ -1,3 +1,4 @@
+from uuid import UUID
 from enum import Enum
 from typing import Callable, Dict
 from cognee.shared.utils import send_telemetry
@@ -22,8 +23,6 @@ async def search(search_type: SearchType, query: str, user: User = None) -> list
 
     own_document_ids = await get_document_ids_for_user(user.id)
     search_results = await specific_search(search_type, query, user)
-
-    from uuid import UUID
 
     filtered_search_results = []
 

@@ -373,7 +373,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             return [result["successor"] for result in results]
 
-    async def get_neighbours(self, node_id: str) -> list[str]:
+    async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
         predecessors, successors = await asyncio.gather(self.get_predecessors(node_id), self.get_successors(node_id))
 
         return predecessors + successors

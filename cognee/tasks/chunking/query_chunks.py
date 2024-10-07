@@ -1,12 +1,12 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def query_chunks(query: str) -> list[str]:
+async def query_chunks(query: str) -> list[dict]:
     """
     Parameters:
     - query (str): The query string to filter nodes by.
 
     Returns:
-    - list(chunk): A list of objects providing information about the chunks related to query.
+    - list(dict): A list of objects providing information about the chunks related to query.
     """
     vector_engine = get_vector_engine()
 

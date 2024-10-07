@@ -4,6 +4,9 @@ async def save_to_vector_storage(data_chunks: list, collection_name: str, embed_
     if len(data_chunks) == 0:
         return data_chunks
 
+    if not all(isinstance(chunk, type(data_chunks[0])) for chunk in data_chunks):
+        raise ValueError("All data chunks must be of the same type.")
+
     vector_engine = get_vector_engine()
 
     PayloadSchema = type(data_chunks[0])
@@ -24,7 +27,16 @@ async def save_to_vector_storage(data_chunks: list, collection_name: str, embed_
     return data_chunks
 
 def parse_data(chunk, chunk_index: int) -> dict:
-    return {
-        property_value: property_value for property_value in chunk
-        # if UUID return string(id)
+    from uuid import UUID
+
+    data = {
+        "chunk_index": chunk_index,
     }
+
+    for key, value in vars(chunk).items():
+        if isinstance(value, UUID):
+            data[key] = str(value)
+        else:
+            data[key] = value
+
+    return data

@@ -10,7 +10,7 @@ async def search_summary(query: str) -> list:
     """
     vector_engine = get_vector_engine()
 
-    summaries_results = await vector_engine.search("chunk_summaries", query, limit = 5)
+    summaries_results = await vector_engine.search("summaries", query, limit = 5)
 
     summaries = [summary.payload for summary in summaries_results]
 

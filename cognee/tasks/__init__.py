@@ -1,4 +1,4 @@
-from .chunk_extract_summary.chunk_extract_summary import chunk_extract_summary
+from .summarization.summarize_text import summarize_text
 from .chunk_naive_llm_classifier.chunk_naive_llm_classifier import chunk_naive_llm_classifier
 from .chunk_remove_disconnected.chunk_remove_disconnected import chunk_remove_disconnected
 from .chunk_update_check.chunk_update_check import chunk_update_check

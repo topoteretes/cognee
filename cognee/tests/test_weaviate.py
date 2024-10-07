@@ -38,19 +38,19 @@ async def main():
     random_node = (await vector_engine.search("entities", "AI"))[0]
     random_node_name = random_node.payload["name"]
 
-    search_results = await cognee.search(SearchType.INSIGHTS, params = { "query": random_node_name })
+    search_results = await cognee.search(SearchType.INSIGHTS, query = random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, params = { "query": random_node_name })
+    search_results = await cognee.search(SearchType.CHUNKS, query = random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.SUMMARIES, params = { "query": random_node_name })
+    search_results = await cognee.search(SearchType.SUMMARIES, query = random_node_name)
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\n\Extracted summaries are:\n")
     for result in search_results:

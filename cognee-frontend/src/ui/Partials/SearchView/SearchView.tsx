@@ -105,11 +105,8 @@ export default function SearchView() {
   } = useBoolean(false);
 
   const handleSubmitOnEnter = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter') {
-      const submitButtonElement = document.getElementById('submitButton');
-      if (submitButtonElement) {
-        submitButtonElement.click();
-      }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      handleSearchSubmit(event as unknown as React.FormEvent<HTMLFormElement>);
     }
   };
 
@@ -139,7 +136,7 @@ export default function SearchView() {
       <form onSubmit={handleSearchSubmit}>
         <Stack orientation="horizontal" align="end/" gap="2">
           <TextArea onKeyUp={handleSubmitOnEnter} style={{ transition: 'height 0.3s ease', height: isInputExpanded ? '128px' : '38px' }} onFocus={expandInput} onBlur={contractInput} value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
-          <CTAButton id="submitButton" hugContent type="submit">Search</CTAButton>
+          <CTAButton hugContent type="submit">Search</CTAButton>
         </Stack>
       </form>
     </Stack>
@@ -147,9 +144,18 @@ export default function SearchView() {
 }
 
 
-type InsightMessage = [{ name: string }, { relationship_name: string }, { name: string }];
+interface Node {
+  name: string;
+}
 
-function convertToSearchTypeOutput(systemMessages: [], searchType: string): string {
+interface Relationship {
+  relationship_name: string;
+}
+
+type InsightMessage = [Node, Relationship, Node];
+
+
+function convertToSearchTypeOutput(systemMessages: any[], searchType: string): string {
   switch (searchType) {
     case 'INSIGHTS':
       return systemMessages.map((message: InsightMessage) => {
@@ -160,9 +166,9 @@ function convertToSearchTypeOutput(systemMessages: [], searchType: string): stri
         return '';
       }).join('\n');
     case 'SUMMARIES':
-      return systemMessages.map((message: { text: string }) => message.text).join('\n');;
+      return systemMessages.map((message: { text: string }) => message.text).join('\n');
     case 'CHUNKS':
-      return systemMessages.map((message: { text: string }) => message.text).join('\n');;
+      return systemMessages.map((message: { text: string }) => message.text).join('\n');
     default:
       return '';
   }

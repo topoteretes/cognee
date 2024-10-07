@@ -1,3 +1,4 @@
+from os import path
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 from sqlalchemy import text, select
@@ -7,11 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
-    db_path: str = None
-    db_uri: str = None
-
     def __init__(self, connection_string: str):
-        self.db_uri = connection_string
+        self.db_path: str = None
+        self.db_uri: str = connection_string
 
         self.engine = create_async_engine(connection_string)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
@@ -103,7 +102,7 @@ class SQLAlchemyAdapter():
         if self.engine.dialect.name == "sqlite":
             from cognee.infrastructure.files.storage import LocalStorage
 
-            db_directory = "/".join(self.db_path.split("/")[0:-1])
+            db_directory = path.dirname(self.db_path)
             LocalStorage.ensure_directory_exists(db_directory)
 
         async with self.engine.begin() as connection:

@@ -190,7 +190,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         node = self.graph.nodes[node_id]
 
-        if not "uuid" in node:
+        if "uuid" not in node:
             return []
 
         predecessors, successors = await asyncio.gather(
