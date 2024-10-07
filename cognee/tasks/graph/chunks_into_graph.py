@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import DataPoint, get_vector_engine
 from cognee.modules.data.extraction.knowledge_graph.extract_content_graph import extract_content_graph
-from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.modules.chunking import DocumentChunk
 from cognee.modules.graph.utils import generate_node_id, generate_node_name
 
 
@@ -53,7 +53,7 @@ async def chunks_into_graph(data_chunks: list[DocumentChunk], graph_model: Type[
                 processed_nodes[entity_node_id] = True
 
         graph_node_edges = [
-            (edge.source_node_id, edge.target_node_id, edge.relationship_name) \
+            (edge.target_node_id, edge.source_node_id, edge.relationship_name) \
                         for edge in chunk_graph.edges
         ]
 

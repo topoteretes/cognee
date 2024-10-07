@@ -1,8 +1,6 @@
 from uuid import uuid5, NAMESPACE_OID
 from .chunk_by_sentence import chunk_by_sentence
-from cognee.tasks.chunking.chunking_registry import register_chunking_function
 
-@register_chunking_function("paragraph")
 def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs = True):
     paragraph = ""
     last_cut_type = None

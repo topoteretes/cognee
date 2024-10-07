@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Form, UploadFile, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from cognee.api.v1.search import SearchType
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
@@ -28,17 +29,26 @@ if os.getenv("ENV", "prod") == "prod":
         profiles_sample_rate = 1.0,
     )
 
-# from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     from cognee.modules.data.deletion import prune_system, prune_data
-#     await prune_data()
-#     await prune_system(metadata = True)
+app_environment = os.getenv("ENV", "prod")
 
-#     yield
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # from cognee.modules.data.deletion import prune_system, prune_data
+    # await prune_data()
+    # await prune_system(metadata = True)
+    if app_environment == "local" or app_environment == "dev":
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        db_engine = get_relational_engine()
+        await db_engine.create_database()
 
-app = FastAPI(debug = os.getenv("ENV", "prod") != "prod")
+        from cognee.modules.users.methods import get_default_user
+        await get_default_user()
+
+    yield
+
+app = FastAPI(debug = app_environment != "prod", lifespan = lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -321,20 +331,15 @@ async def cognify(payload: CognifyPayload, user: User = Depends(get_authenticate
         )
 
 class SearchPayload(BaseModel):
-    query_params: Dict[str, Any]
+    searchType: SearchType
+    query: str
 
-@app.post("/api/v1/search", response_model=dict)
+@app.post("/api/v1/search", response_model=list)
 async def search(payload: SearchPayload, user: User = Depends(get_authenticated_user)):
     """ This endpoint is responsible for searching for nodes in the graph."""
     from cognee.api.v1.search import search as cognee_search
     try:
-        search_type = payload.query_params["searchType"]
-
-        params = {
-            "query": payload.query_params["query"],
-        }
-
-        results = await cognee_search(search_type, params)
+        results = await cognee_search(payload.searchType, payload.query, user)
 
         return JSONResponse(
             status_code = 200,

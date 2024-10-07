@@ -307,12 +307,12 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query)
 
 
-    async def get_predecessor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
+    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
         if edge_label is not None:
             query = """
             MATCH (node)<-[r]-(predecessor)
             WHERE node.id = $node_id AND type(r) = $edge_label
-            RETURN predecessor.id AS predecessor_id
+            RETURN predecessor
             """
 
             results = await self.query(
@@ -323,12 +323,12 @@ class Neo4jAdapter(GraphDBInterface):
                 )
             )
 
-            return [result["predecessor_id"] for result in results]
+            return [result["predecessor"] for result in results]
         else:
             query = """
             MATCH (node)<-[r]-(predecessor)
             WHERE node.id = $node_id
-            RETURN predecessor.id AS predecessor_id
+            RETURN predecessor
             """
 
             results = await self.query(
@@ -338,14 +338,14 @@ class Neo4jAdapter(GraphDBInterface):
                 )
             )
 
-            return [result["predecessor_id"] for result in results]
+            return [result["predecessor"] for result in results]
 
-    async def get_successor_ids(self, node_id: str, edge_label: str = None) -> list[str]:
+    async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
         if edge_label is not None:
             query = """
             MATCH (node)-[r]->(successor)
             WHERE node.id = $node_id AND type(r) = $edge_label
-            RETURN successor.id AS successor_id
+            RETURN successor
             """
 
             results = await self.query(
@@ -356,12 +356,12 @@ class Neo4jAdapter(GraphDBInterface):
                 ),
             )
 
-            return [result["successor_id"] for result in results]
+            return [result["successor"] for result in results]
         else:
             query = """
             MATCH (node)-[r]->(successor)
             WHERE node.id = $node_id
-            RETURN successor.id AS successor_id
+            RETURN successor
             """
 
             results = await self.query(
@@ -371,12 +371,23 @@ class Neo4jAdapter(GraphDBInterface):
                 )
             )
 
-            return [result["successor_id"] for result in results]
+            return [result["successor"] for result in results]
 
     async def get_neighbours(self, node_id: str) -> list[str]:
-        predecessor_ids, successor_ids = await asyncio.gather(self.get_predecessor_ids(node_id), self.get_successor_ids(node_id))
+        predecessors, successors = await asyncio.gather(self.get_predecessors(node_id), self.get_successors(node_id))
 
-        return [*predecessor_ids, *successor_ids]
+        return predecessors + successors
+
+    async def get_connections(self, node_id: str) -> list:
+        query = """
+        MATCH (node)-[relation]-(neighbour)
+        WHERE node.id = $node_id
+        RETURN node, relation, neighbour
+        """
+
+        results = await self.query(query, dict(node_id = node_id))
+
+        return [(result["node"], result["relation"], result["neighbour"]) for result in results]
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         query = f"""

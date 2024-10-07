@@ -201,30 +201,43 @@ The base URL for all API requests is determined by the server's deployment envir
 - **Auth Required**: No
 - **Description**: Search for nodes in the graph based on the provided query parameters.
   
-  <!-- **Request Body**:
-  - `query_params`: A dictionary of query parameters. -->
-  
   **Request Body**:
   ```json
   {
-    "query_params": [{
-      "query": "QUERY_TO_MATCH_DATA",
-      "searchType": "SIMILARITY", // or TRAVERSE, ADJACENT, SUMMARY
-    }]
+    "searchType": "INSIGHTS", # Or "SUMMARIES" or "CHUNKS"
+    "query": "QUERY_TO_MATCH_DATA"
   }
   ```
+
   **Response**
+
+  For "INSIGHTS" search type:
   ```json
-  {
-    "results": [
-      {
-        "node_id": "node_id_1",
-        "attributes": {...},
-        ...
-      },
+  [[
+    { "name" "source_node_name" },
+    { "relationship_name" "between_nodes_relationship_name" },
+    { "name" "target_node_name" },
+  ]]
+  ```
+
+  For "SUMMARIES" search type:
+    ```json
+    [
+      { "text" "summary_text" },
+      { "text" "summary_text" },
+      { "text" "summary_text" },
       ...
     ]
-  }
+    ```
+
+  For "CHUNKS" search type:
+  ```json
+  [
+    { "text" "chunk_text" },
+    { "text" "chunk_text" },
+    { "text" "chunk_text" },
+    ...
+  ]
   ```
 
 ### 12. Get Settings

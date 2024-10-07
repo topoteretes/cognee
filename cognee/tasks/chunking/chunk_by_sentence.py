@@ -3,9 +3,7 @@
 
 from uuid import uuid4
 from .chunk_by_word import chunk_by_word
-from cognee.tasks.chunking.chunking_registry import register_chunking_function
 
-@register_chunking_function("sentence")
 def chunk_by_sentence(data: str):
     sentence = ""
     paragraph_id = uuid4()

@@ -1,6 +1,6 @@
 from uuid import UUID, uuid5, NAMESPACE_OID
 
-from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.modules.chunking import DocumentChunk
 from cognee.tasks.chunking import chunk_by_paragraph
 
 class TextChunker():

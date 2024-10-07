@@ -25,22 +25,39 @@ export default function SearchView() {
   }, []);
 
   const searchOptions = [{
-    value: 'SIMILARITY',
-    label: 'Look for similar graph nodes',
+    value: 'INSIGHTS',
+    label: 'Query insights from documents',
   }, {
-    value: 'SUMMARY',
-    label: 'Get a summary related to query',
+    value: 'SUMMARIES',
+    label: 'Query document summaries',
   }, {
-    value: 'ADJACENT',
-    label: 'Look for graph node\'s neighbors',
-  }, {
-    value: 'TRAVERSE',
-    label: 'Traverse through the graph and get knowledge',
+    value: 'CHUNKS',
+    label: 'Query document chunks',
   }];
   const [searchType, setSearchType] = useState(searchOptions[0]);
 
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      const messagesContainerElement = document.getElementById('messages');
+      if (messagesContainerElement) {
+        const messagesElements = messagesContainerElement.children[0];
+
+        if (messagesElements) {
+          messagesContainerElement.scrollTo({
+            top: messagesElements.scrollHeight,
+            behavior: 'smooth',
+          });
+        }
+      }
+    }, 300);
+  }, []);
+
   const handleSearchSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (inputValue.trim() === '') {
+      return;
+    }
 
     setMessages((currentMessages) => [
       ...currentMessages,
@@ -51,16 +68,18 @@ export default function SearchView() {
       },
     ]);
 
+    scrollToBottom();
+
+    const searchTypeValue = searchType.value;
+
     fetch('/v1/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        query_params: {
-          query: inputValue,
-          searchType: searchType.value,
-        },
+        query: inputValue,
+        searchType: searchTypeValue,
       }),
     })
       .then((response) => response.json())
@@ -70,18 +89,29 @@ export default function SearchView() {
           {
             id: v4(),
             user: 'system',
-            text: systemMessage,
+            text: convertToSearchTypeOutput(systemMessage, searchTypeValue),
           },
         ]);
         setInputValue('');
+
+        scrollToBottom();
       })
-  }, [inputValue, searchType]);
+  }, [inputValue, scrollToBottom, searchType.value]);
 
   const {
     value: isInputExpanded,
     setTrue: expandInput,
     setFalse: contractInput,
   } = useBoolean(false);
+
+  const handleSubmitOnEnter = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter') {
+      const submitButtonElement = document.getElementById('submitButton');
+      if (submitButtonElement) {
+        submitButtonElement.click();
+      }
+    }
+  };
 
   return (
     <Stack className={styles.searchViewContainer}>
@@ -90,7 +120,7 @@ export default function SearchView() {
         options={searchOptions}
         onChange={setSearchType}
       />
-      <div className={styles.messagesContainer}>
+      <div className={styles.messagesContainer} id="messages">
         <Stack gap="2" className={styles.messages} align="end">
           {messages.map((message) => (
             <Text
@@ -108,10 +138,32 @@ export default function SearchView() {
       </div>
       <form onSubmit={handleSearchSubmit}>
         <Stack orientation="horizontal" align="end/" gap="2">
-          <TextArea style={{ height: isInputExpanded ? '128px' : '38px' }} onFocus={expandInput} onBlur={contractInput} value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
-          <CTAButton hugContent type="submit">Search</CTAButton>
+          <TextArea onKeyUp={handleSubmitOnEnter} style={{ transition: 'height 0.3s ease', height: isInputExpanded ? '128px' : '38px' }} onFocus={expandInput} onBlur={contractInput} value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
+          <CTAButton id="submitButton" hugContent type="submit">Search</CTAButton>
         </Stack>
       </form>
     </Stack>
   );
+}
+
+
+type InsightMessage = [{ name: string }, { relationship_name: string }, { name: string }];
+
+function convertToSearchTypeOutput(systemMessages: [], searchType: string): string {
+  switch (searchType) {
+    case 'INSIGHTS':
+      return systemMessages.map((message: InsightMessage) => {
+        const [node1, relationship, node2] = message;
+        if (node1.name && node2.name) {
+          return `${node1.name} ${relationship.relationship_name} ${node2.name}.`;
+        }
+        return '';
+      }).join('\n');
+    case 'SUMMARIES':
+      return systemMessages.map((message: { text: string }) => message.text).join('\n');;
+    case 'CHUNKS':
+      return systemMessages.map((message: { text: string }) => message.text).join('\n');;
+    default:
+      return '';
+  }
 }

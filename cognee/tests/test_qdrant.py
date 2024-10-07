@@ -4,6 +4,7 @@ import os
 import logging
 import pathlib
 import cognee
+from cognee.api.v1.search import SearchType
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -39,27 +40,21 @@ async def main():
     random_node = (await vector_engine.search("entities", "AI"))[0]
     random_node_name = random_node.payload["name"]
 
-    search_results = await cognee.search("SIMILARITY", { "query": random_node_name })
+    search_results = await cognee.search(SearchType.INSIGHTS, params = { "query": random_node_name })
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search("TRAVERSE", { "query": random_node_name })
+    search_results = await cognee.search(SearchType.CHUNKS, params = { "query": random_node_name })
     assert len(search_results) != 0, "The search results list is empty."
-    print("\n\nExtracted sentences are:\n")
+    print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search("SUMMARY", { "query": random_node_name })
+    search_results = await cognee.search(SearchType.SUMMARIES, params = { "query": random_node_name })
     assert len(search_results) != 0, "Query related summaries don't exist."
-    print("\n\nQuery related summaries exist:\n")
-    for result in search_results:
-        print(f"{result}\n")
-
-    search_results = await cognee.search("ADJACENT", { "query": random_node_name })
-    assert len(search_results) != 0, "Large language model query found no neighbours."
-    print("\n\Large language model query found neighbours.\n")
+    print("\n\Extracted summaries are:\n")
     for result in search_results:
         print(f"{result}\n")
 

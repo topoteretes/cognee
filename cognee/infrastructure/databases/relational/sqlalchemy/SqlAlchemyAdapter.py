@@ -103,7 +103,8 @@ class SQLAlchemyAdapter():
         if self.engine.dialect.name == "sqlite":
             from cognee.infrastructure.files.storage import LocalStorage
 
-            LocalStorage.ensure_directory_exists(self.db_path)
+            db_directory = "/".join(self.db_path.split("/")[0:-1])
+            LocalStorage.ensure_directory_exists(db_directory)
 
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:
