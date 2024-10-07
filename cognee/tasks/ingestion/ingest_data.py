@@ -5,13 +5,11 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
 from cognee.modules.data.methods import create_dataset
-from cognee.shared.dlt_handler import dlt_destinations_sqlalchemy_handler
 from cognee.modules.users.permissions.methods import give_permission_on_document
+from .get_dlt_destination import get_dlt_destination
 
 async def ingest_data(file_paths: list[str], dataset_name: str, user: User):
-    relational_config = get_relational_config()
-
-    destination = dlt_destinations_sqlalchemy_handler()
+    destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
         pipeline_name = "file_load_from_filesystem",

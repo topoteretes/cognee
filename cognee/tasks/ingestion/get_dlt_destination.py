@@ -1,15 +1,12 @@
 import os
 import dlt
+from typing import Union
 
 from cognee.infrastructure.databases.relational import get_relational_config
 
-from typing import Union
-
-def dlt_destinations_sqlalchemy_handler() -> Union[type[dlt.destinations.sqlalchemy], None]:
+def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
     """
     Handles propagation of the cognee database configuration to the dlt library
-
-    Args:
 
     Returns:
         sqlachemy: sqlachemy destination used by the dlt library
