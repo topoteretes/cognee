@@ -8,8 +8,9 @@ from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
 from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine, create_db_and_tables
+from cognee.infrastructure.databases.relational import get_relational_engine, create_db_and_tables
 from cognee.modules.users.methods import get_default_user
+from cognee.tasks.ingestion import get_dlt_destination
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.modules.users.models import User
 from cognee.modules.data.methods import create_dataset
@@ -78,18 +79,7 @@ async def add_files(file_paths: List[str], dataset_name: str, user: User = None)
         else:
             processed_file_paths.append(file_path)
 
-    relational_config = get_relational_config()
-
-    destination = dlt.destinations.sqlalchemy(
-        credentials = {
-            "host": relational_config.db_host,
-            "port": relational_config.db_port,
-            "username": relational_config.db_username,
-            "password": relational_config.db_password,
-            "database": relational_config.db_name,
-            "drivername": relational_config.db_provider,
-        },
-    )
+    destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
         pipeline_name = "file_load_from_filesystem",
