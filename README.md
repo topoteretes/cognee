@@ -61,8 +61,8 @@ or
 import cognee
 cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 ```
-You can also set the variables by creating .env file, hree is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template </a>
-You can use different LLM providers, for more info check out our <a href="https://topoteretes.github.io/cognee">documentation</a>
+You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
+To use different LLM providers, for more info check out our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
 If you are using Networkx, create an account on Graphistry to visualize results:
 ```
