@@ -139,29 +139,35 @@ class NetworkXAdapter(GraphDBInterface):
     async def extract_nodes(self, node_ids: List[str]) -> List[dict]:
         return [self.graph.nodes[node_id] for node_id in node_ids if self.graph.has_node(node_id)]
 
-    async def get_predecessor_ids(self, node_id: str, edge_label: str = None) -> list:
+    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list:
         if self.graph.has_node(node_id):
             if edge_label is None:
-                return list(self.graph.predecessors(node_id))
+                return [
+                    self.graph.nodes[predecessor] for predecessor \
+                        in list(self.graph.predecessors(node_id))
+                ]
 
             nodes = []
 
             for predecessor_id in list(self.graph.predecessors(node_id)):
                 if self.graph.has_edge(predecessor_id, node_id, edge_label):
-                    nodes.append(predecessor_id)
+                    nodes.append(self.graph.nodes[predecessor_id])
 
             return nodes
 
-    async def get_successor_ids(self, node_id: str, edge_label: str = None) -> list:
+    async def get_successors(self, node_id: str, edge_label: str = None) -> list:
         if self.graph.has_node(node_id):
             if edge_label is None:
-                return list(self.graph.successors(node_id))
+                return [
+                    self.graph.nodes[successor] for successor \
+                        in list(self.graph.successors(node_id))
+                ]
 
             nodes = []
 
             for successor_id in list(self.graph.successors(node_id)):
                 if self.graph.has_edge(node_id, successor_id, edge_label):
-                    nodes.append(successor_id)
+                    nodes.append(self.graph.nodes[successor_id])
 
             return nodes
 
@@ -169,19 +175,44 @@ class NetworkXAdapter(GraphDBInterface):
         if not self.graph.has_node(node_id):
             return []
 
-        predecessor_ids, successor_ids = await asyncio.gather(
-            self.get_predecessor_ids(node_id),
-            self.get_successor_ids(node_id),
+        predecessors, successors = await asyncio.gather(
+            self.get_predecessors(node_id),
+            self.get_successors(node_id),
         )
 
-        neighbour_ids = predecessor_ids + successor_ids
+        neighbours = predecessors + successors
 
-        if len(neighbour_ids) == 0:
+        return neighbours
+
+    async def get_connections(self, node_id: str) -> list:
+        if not self.graph.has_node(node_id):
             return []
 
-        nodes = await self.extract_nodes(neighbour_ids)
+        node = self.graph.nodes[node_id]
 
-        return nodes
+        if "uuid" not in node:
+            return []
+
+        predecessors, successors = await asyncio.gather(
+            self.get_predecessors(node_id),
+            self.get_successors(node_id),
+        )
+
+        connections = []
+
+        for neighbor in predecessors:
+            if "uuid" in neighbor:
+                edge_data = self.graph.get_edge_data(neighbor["uuid"], node["uuid"])
+                for edge_properties in edge_data.values():
+                    connections.append((neighbor, edge_properties, node))
+
+        for neighbor in successors:
+            if "uuid" in neighbor:
+                edge_data = self.graph.get_edge_data(node["uuid"], neighbor["uuid"])
+                for edge_properties in edge_data.values():
+                    connections.append((node, edge_properties, neighbor))
+
+        return connections
 
     async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
         for node_id in node_ids:

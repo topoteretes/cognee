@@ -107,14 +107,11 @@ class config():
         vector_db_config.vector_db_url = db_url
 
     @staticmethod
-    def set_graphistry_username(graphistry_username: str):
+    def set_graphistry_config(graphistry_config: dict[str, str]):
         base_config = get_base_config()
-        base_config.graphistry_username = graphistry_username
 
-    @staticmethod
-    def set_graphistry_password(graphistry_password: str):
-        base_config = get_base_config()
-        base_config.graphistry_password = graphistry_password
+        if "username" not in graphistry_config or "password" not in graphistry_config:
+            raise ValueError("graphistry_config dictionary must contain 'username' and 'password' keys.")
 
-
-
+        base_config.graphistry_username = graphistry_config.username
+        base_config.graphistry_password = graphistry_config.password

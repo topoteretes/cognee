@@ -10,7 +10,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-notebooks/
 full_run.ipynb
 evals/
 

@@ -1,6 +1,6 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def search_summary(query: str) -> list:
+async def query_summaries(query: str) -> list:
     """
     Parameters:
     - query (str): The query string to filter summaries by.

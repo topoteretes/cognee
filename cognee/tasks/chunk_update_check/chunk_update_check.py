@@ -1,5 +1,5 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.data.processing.chunk_types.DocumentChunk import DocumentChunk
+from cognee.modules.chunking import DocumentChunk
 
 
 async def chunk_update_check(data_chunks: list[DocumentChunk], collection_name: str) -> list[DocumentChunk]:

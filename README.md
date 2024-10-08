@@ -65,16 +65,21 @@ You can use different LLM providers, for more info check out our <a href="https:
 
 If you are using Networkx, create an account on Graphistry to visualize results:
 ```
-   
-   cognee.config.set_graphistry_username = "YOUR_USERNAME"
-   cognee.config.set_graphistry_password = "YOUR_PASSWORD"
+    cognee.config.set_graphistry_config({
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD"
+    })
 ```
 
-(Optional) To run the UI, run:
+(Optional) To run the UI, go to cognee-frontend directory and run:
 ```
-docker-compose up cognee
+npm run dev
 ```
-Then navigate to localhost:3000/wizard
+or run everything in a docker container:
+```
+docker-compose up
+```
+Then navigate to localhost:3000
 
 ### Simple example
 
@@ -86,14 +91,14 @@ import cognee
 text = """Natural language processing (NLP) is an interdisciplinary
        subfield of computer science and information retrieval"""
 
-await cognee.add([text], "example_dataset") # Add a new piece of information
+await cognee.add(text) # Add a new piece of information
 
-await cognee.cognify() # Use LLMs and cognee to create a semantic graph
+await cognee.cognify() # Use LLMs and cognee to create a knowledge graph
 
-await search_results = cognee.search("SIMILARITY", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
+search_results = await cognee.search("INSIGHTS", {'query': 'NLP'}) # Query cognee for the insights
 
-print(search_results)
-
+for result in search_results:
+    do_something_with_result(result)
 ```
 
 
@@ -115,7 +120,7 @@ Start with:
 text = """Natural language processing (NLP) is an interdisciplinary
        subfield of computer science and information retrieval"""
 
-await cognee.add([text], "example_dataset") # Add a new piece of information
+await cognee.add(text) # Add a new piece of information
 ```
 
 2. In the next step we make a task. The task can be any business logic we need, but the important part is that it should be encapsulated in one function.

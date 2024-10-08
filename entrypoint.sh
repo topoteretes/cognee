@@ -15,4 +15,5 @@ if [ "$ENVIRONMENT" = "dev" ]; then
   fi
 else
   gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level error cognee.api.client:app
+  # python ./cognee/api/client.py
 fi

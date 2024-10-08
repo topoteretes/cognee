@@ -1,6 +1,6 @@
 from uuid import UUID, uuid5, NAMESPACE_OID
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.modules.data.chunking.TextChunker import TextChunker
+from cognee.modules.chunking.TextChunker import TextChunker
 from .Document import Document
 
 

@@ -6,15 +6,9 @@
 
 To run cognee, you will need the following:
 
-1. A running postgres instance
-2. OpenAI API key (Ollama or Anyscale could work as [well](local_models.md))
+1. OpenAI API key (Ollama or Anyscale could work as [well](local_models.md))
 
-Navigate to cognee folder and run
-```
-docker compose up postgres
-```
-
-Add your LLM API key to the enviroment variables
+Add your LLM API key to the environment variables
 
 ```
 import os
@@ -28,10 +22,28 @@ cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 ```
 If you are using Networkx, create an account on Graphistry to vizualize results:
 ```
-   
-   cognee.config.set_graphistry_username = "YOUR_USERNAME"
-   cognee.config.set_graphistry_password = "YOUR_PASSWORD"
+    cognee.config.set_graphistry_config({
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD"
+    })
 ```
+
+If you want to run Postgres instead of Sqlite, run postgres Docker container.
+Navigate to cognee folder and run:
+```
+docker compose up postgres
+```
+
+Add the following environment variables to .env file
+```
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_USERNAME=cognee # or any username you want
+DB_PASSWORD=cognee # or any password you want
+DB_NAME=cognee_db # or any db name you want
+DB_PROVIDER=postgres
+```
+
 ## Run
 
 cognee is asynchronous by design, meaning that operations like adding information, processing it, and querying it can run concurrently without blocking the execution of other tasks. 
@@ -43,13 +55,13 @@ import cognee
 text = """Natural language processing (NLP) is an interdisciplinary
        subfield of computer science and information retrieval"""
 
-cognee.add(text) # Add a new piece of information
+await cognee.add(text) # Add a new piece of information
 
-cognee.cognify() # Use LLMs and cognee to create knowledge
+await cognee.cognify() # Use LLMs and cognee to create knowledge
 
-search_results = cognee.search("SIMILARITY", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
+search_results = await cognee.search("INSIGHTS", {'query': 'Tell me about NLP'}) # Query cognee for the knowledge
 
-for result_text in search_results[0]:
+for result_text in search_results:
     print(result_text)
 ```
 

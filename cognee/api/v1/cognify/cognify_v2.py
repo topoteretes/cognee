@@ -14,8 +14,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
-from cognee.tasks import chunk_extract_summary, \
-    chunk_naive_llm_classifier, \
+from cognee.tasks import chunk_naive_llm_classifier, \
     chunk_remove_disconnected, \
     infer_data_ontology, \
     save_chunks_to_store, \
@@ -24,6 +23,7 @@ from cognee.tasks import chunk_extract_summary, \
     source_documents_to_chunks, \
     check_permissions_on_documents, \
     classify_documents
+from cognee.tasks.summarization import summarize_text
 
 logger = logging.getLogger("cognify.v2")
 
@@ -101,10 +101,10 @@ async def run_cognify_pipeline(dataset: Dataset, user: User):
             ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
             run_tasks_parallel([
                 Task(
-                    chunk_extract_summary,
+                    summarize_text,
                     summarization_model = cognee_config.summarization_model,
-                    collection_name = "chunk_summaries",
-                ), # Summarize the document chunks
+                    collection_name = "summaries",
+                ),
                 Task(
                     chunk_naive_llm_classifier,
                     classification_model = cognee_config.classification_model,
