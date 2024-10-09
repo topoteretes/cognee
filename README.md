@@ -236,7 +236,7 @@ docker compose up
 
 ### Install SDK
 
-Please see the cognee [Develoment Guide](https://topoteretes.github.io/cognee/quickstart/) for important beta information and usage instructions.
+Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/quickstart/) for important beta information and usage instructions.
 
 ```bash
 pip install cognee
