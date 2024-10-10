@@ -1,22 +1,13 @@
 # cognee
+[![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
+[![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+[![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
+[![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
+[![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
+[![GitHub license](https://badgen.net/github/license/topoteretes/cognee)](https://github.com/topoteretes/cognee/blob/master/LICENSE)
+
 
 We build for developers who need a reliable, production-ready data layer for AI applications
-
-
-<p>
-  <a href="https://github.com/topoteretes/cognee/fork">
-    <img src="https://img.shields.io/github/forks/topoteretes/cognee?style=for-the-badge" alt="cognee forks"/>
-  </a>
-  <a href="https://github.com/topoteretes/cognee/stargazers">
-    <img src="https://img.shields.io/github/stars/topoteretes/cognee?style=for-the-badge" alt="cognee stars"/>
-  </a>
-  <a href="https://github.com/topoteretes/cognee/pulls">
-    <img src="https://img.shields.io/github/issues-pr/topoteretes/cognee?style=for-the-badge" alt="cognee pull-requests"/>
-  </a>
-  <a href="https://github.com/topoteretes/cognee/releases">
-    <img src="https://img.shields.io/github/release/topoteretes/cognee?&label=Latest&style=for-the-badge" alt="cognee releases" />
-  </a>
-</p>
 
 
 ## What is cognee? 
