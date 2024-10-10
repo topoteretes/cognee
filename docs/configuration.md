@@ -4,7 +4,7 @@
 
 ## 🚀 Configure Vector and Graph Stores
 
-You can configure the vector and graph stores using the environment variables in your .env file or programatically.
+You can configure the vector and graph stores using the environment variables in your .env file or programmatically.
 We use [Pydantic Settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/#dotenv-env-support)
 
 We have a global configuration object (cognee.config) and individual configurations on pipeline and data store levels
