@@ -1,6 +1,6 @@
 from typing import Dict
 
-from .config import get_relational_config
+from ..relational.config import get_relational_config
 
 class VectorConfig(Dict):
     vector_db_url: str
@@ -30,7 +30,7 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                 embedding_engine = embedding_engine
             )
     elif config["vector_db_provider"] == "pgvector":
-        from .pgvector import PGVectorAdapter
+        from .pgvector.PGVectorAdapter import PGVectorAdapter
         
         # Get configuration for postgres database
         relational_config = get_relational_config()
@@ -43,7 +43,10 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
         db_name = config["vector_db_name"]
 
         connection_string = f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
-        return PGVectorAdapter(connection_string)
+        return PGVectorAdapter(connection_string, 
+                        config["vector_db_key"], 
+                        embedding_engine
+        )
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
