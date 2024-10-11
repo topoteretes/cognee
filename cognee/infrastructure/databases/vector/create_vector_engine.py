@@ -1,9 +1,12 @@
 from typing import Dict
 
+from .config import get_relational_config
+
 class VectorConfig(Dict):
     vector_db_url: str
     vector_db_key: str
     vector_db_provider: str
+    vector_db_name: str
 
 def create_vector_engine(config: VectorConfig, embedding_engine):
     if config["vector_db_provider"] == "weaviate":
@@ -27,7 +30,20 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                 embedding_engine = embedding_engine
             )
     elif config["vector_db_provider"] == "pgvector":
-        pass
+        from .pgvector import PGVectorAdapter
+        
+        # Get configuration for postgres database
+        relational_config = get_relational_config()
+        db_username = relational_config.db_username
+        db_password = relational_config.db_password
+        db_host = relational_config.db_host
+        db_port = relational_config.db_port
+
+        # Get name of vector database
+        db_name = config["vector_db_name"]
+
+        connection_string = f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+        return PGVectorAdapter(connection_string)
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
