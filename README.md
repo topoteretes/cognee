@@ -207,12 +207,6 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 [<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=BDFt4xVPmro "Learn about cognee: 55")
 
 
-
-## Star History
-
-
-[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
 ## Get Started
 
 ### Install Server
@@ -224,7 +218,6 @@ docker compose up
 ```
 
 
-
 ### Install SDK
 
 Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/quickstart/) for important beta information and usage instructions.
@@ -232,3 +225,16 @@ Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/q
 ```bash
 pip install cognee
 ```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
+
+
+## 💫 Contributors
+
+<a href="https://github.com/traceloop/openllmetry/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
+</a>
+
+
