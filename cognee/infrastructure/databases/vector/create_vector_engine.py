@@ -26,6 +26,8 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                 api_key = config["vector_db_key"],
                 embedding_engine = embedding_engine
             )
+    elif config["vector_db_provider"] == "pgvector":
+        pass
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 

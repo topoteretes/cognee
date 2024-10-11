@@ -362,7 +362,7 @@ class LLMConfig(BaseModel):
     apiKey: str
 
 class VectorDBConfig(BaseModel):
-    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
+    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
     url: str
     apiKey: str
 

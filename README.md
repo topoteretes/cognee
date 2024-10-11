@@ -190,11 +190,11 @@ Cognee supports a variety of tools and services for different operations:
 
 - **Local Setup**: By default, LanceDB runs locally with NetworkX and OpenAI.
 
-- **Vector Stores**: Cognee supports Qdrant and Weaviate for vector storage.
+- **Vector Stores**: Cognee supports LanceDB, Qdrant, PGVector and Weaviate for vector storage.
 
 - **Language Models (LLMs)**: You can use either Anyscale or Ollama as your LLM provider.
 
-- **Graph Stores**: In addition to LanceDB, Neo4j is also supported for graph storage.
+- **Graph Stores**: In addition to NetworkX, Neo4j is also supported for graph storage.
   
 - **User management**: Create individual user graphs and manage permissions
 

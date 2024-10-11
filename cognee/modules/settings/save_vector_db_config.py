@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.vector import get_vectordb_config
 class VectorDBConfig(BaseModel):
     url: str
     apiKey: str
-    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
+    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
 
 async def save_vector_db_config(vector_db_config: VectorDBConfig):
     vector_config = get_vectordb_config()
