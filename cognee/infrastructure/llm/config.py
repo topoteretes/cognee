@@ -18,10 +18,10 @@ class LLMConfig(BaseSettings):
             "provider": self.llm_provider,
             "model": self.llm_model,
             "endpoint": self.llm_endpoint,
-            "apiKey": self.llm_api_key,
+            "api_key": self.llm_api_key,
             "temperature": self.llm_temperature,
             "streaming": self.llm_stream,
-            "transcriptionModel": self.transcription_model
+            "transcription_model": self.transcription_model
         }
 
 @lru_cache

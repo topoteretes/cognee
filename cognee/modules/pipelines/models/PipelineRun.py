@@ -1,7 +1,13 @@
+from enum import Enum
 from uuid import uuid4
 from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, String, JSON
 from cognee.infrastructure.databases.relational import Base, UUID
+
+class PipelineRunStatus(Enum):
+    DATASET_PROCESSING_STARTED = "DATASET_PROCESSING_STARTED"
+    DATASET_PROCESSING_COMPLETED = "DATASET_PROCESSING_COMPLETED"
+    DATASET_PROCESSING_FAILED = "DATASET_PROCESSING_ERRORED"
 
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"

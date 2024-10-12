@@ -82,7 +82,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
       },
       body: JSON.stringify({
         llm: newLLMConfig,
-        vectorDB: newVectorConfig,
+        vectorDb: newVectorConfig,
       }),
     })
       .then(() => {
@@ -145,7 +145,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
         settings.llm.model = settings.llm.models[settings.llm.provider.value][0];
       }
       setLLMConfig(settings.llm);
-      setVectorDBConfig(settings.vectorDB);
+      setVectorDBConfig(settings.vectorDb);
     };
     fetchConfig();
   }, []);

@@ -57,10 +57,10 @@ To use different LLM providers, for more info check out our <a href="https://top
 
 If you are using Networkx, create an account on Graphistry to visualize results:
 ```
-    cognee.config.set_graphistry_config({
-        "username": "YOUR_USERNAME",
-        "password": "YOUR_PASSWORD"
-    })
+cognee.config.set_graphistry_config({
+    "username": "YOUR_USERNAME",
+    "password": "YOUR_PASSWORD"
+})
 ```
 
 (Optional) To run the UI, go to cognee-frontend directory and run:
