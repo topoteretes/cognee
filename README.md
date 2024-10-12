@@ -233,7 +233,7 @@ pip install cognee
 
 ## 💫 Contributors
 
-<a href="https://github.com/traceloop/openllmetry/graphs/contributors">
+<a href="https://github.com/topoteretes/cognee/graphs/contributors">
   <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
 </a>
 
