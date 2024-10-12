@@ -12,8 +12,8 @@ We build for developers who need a reliable, production-ready data layer for AI 
 
 ## What is cognee? 
 
-cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you ability to interconnect and retrieve past conversations, documents, audio transcriptions, while also reducing hallucinations, developer effort and cost.
-Try it in a Google collab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
+Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
+Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
