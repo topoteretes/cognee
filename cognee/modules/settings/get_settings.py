@@ -16,7 +16,7 @@ class LLMConfig(BaseModel):
     api_key: str
     model: ConfigChoice
     provider: ConfigChoice
-    models: dict[ModelName, list[ConfigChoice]]
+    models: dict[str, list[ConfigChoice]]
     providers: list[ConfigChoice]
 
 class VectorDBConfig(BaseModel):

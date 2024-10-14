@@ -165,7 +165,7 @@ async def get_datasets(user: User = Depends(get_authenticated_user)):
 async def delete_dataset(dataset_id: str, user: User = Depends(get_authenticated_user)):
     from cognee.modules.data.methods import get_dataset, delete_dataset
 
-    dataset = get_dataset(user.id, dataset_id)
+    dataset = await get_dataset(user.id, dataset_id)
 
     if dataset is None:
         raise HTTPException(
