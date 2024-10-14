@@ -168,9 +168,9 @@ async def delete_dataset(dataset_id: str, user: User = Depends(get_authenticated
     dataset = get_dataset(user.id, dataset_id)
 
     if dataset is None:
-        return JSONResponse(
+        raise HTTPException(
             status_code = 404,
-            content = ErrorResponseDTO(f"Dataset ({dataset_id}) not found."),
+            detail = f"Dataset ({dataset_id}) not found."
         )
 
     await delete_dataset(dataset)

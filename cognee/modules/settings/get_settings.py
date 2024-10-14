@@ -56,8 +56,6 @@ def get_settings() -> SettingsDict:
         "label": "Anthropic",
     }]
 
-    llm_config = get_llm_config()
-
     return SettingsDict.model_validate(dict(
         llm = {
             "provider": {

@@ -20,7 +20,7 @@ class LLMConfig(BaseSettings):
             "endpoint": self.llm_endpoint,
             "api_key": self.llm_api_key,
             "temperature": self.llm_temperature,
-            "streaming": self.llm_stream,
+            "streaming": self.llm_streaming,
             "transcription_model": self.transcription_model
         }
 
