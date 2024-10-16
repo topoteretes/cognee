@@ -32,7 +32,6 @@ async def create_user(
                         await session.refresh(user)
 
                     return user
-                    print(f"User created: {user.email}")
     except UserAlreadyExists as error:
         print(f"User {email} already exists")
         raise error
