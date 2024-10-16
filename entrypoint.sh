@@ -3,6 +3,9 @@
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
+# Run migrations
+poetry run alembic upgrade head
+
 echo "Starting Gunicorn"
 
 if [ "$ENVIRONMENT" = "dev" ]; then

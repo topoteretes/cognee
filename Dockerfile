@@ -13,7 +13,7 @@ COPY pyproject.toml poetry.lock /app/
 
 RUN pip install poetry
 
-# Create virtualenv
+# Don't create virtualenv since docker is already isolated
 RUN poetry config virtualenvs.create false
 
 # Install the dependencies
@@ -22,7 +22,11 @@ RUN poetry install --no-root --no-dev
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
 
-COPY cognee/ /app/cognee
+COPY cognee/ cognee/
+
+# Copy Alembic configuration
+COPY alembic.ini ./
+COPY alembic/ alembic/
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
