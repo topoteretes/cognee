@@ -4,17 +4,17 @@ echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
 
-# Run Alembic migrations
-echo "Running database migrations..."
-poetry run alembic upgrade head
+# # Run Alembic migrations
+# echo "Running database migrations..."
+# poetry run alembic upgrade head
 
-# Check if the migrations were successful
-if [ $? -eq 0 ]; then
-    echo "Migrations completed successfully."
-else
-    echo "Migration failed, exiting."
-    exit 1
-fi
+# # Check if the migrations were successful
+# if [ $? -eq 0 ]; then
+#     echo "Migrations completed successfully."
+# else
+#     echo "Migration failed, exiting."
+#     exit 1
+# fi
 
 
 echo "Starting Gunicorn"
