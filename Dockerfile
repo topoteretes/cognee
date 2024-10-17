@@ -22,11 +22,11 @@ RUN poetry install --no-root --no-dev
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
 
-COPY cognee/ cognee/
+COPY cognee/ /app/cognee
 
 # Copy Alembic configuration
-COPY alembic.ini ./
-COPY alembic/ alembic/
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
