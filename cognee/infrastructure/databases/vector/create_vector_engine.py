@@ -42,7 +42,8 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
         # Get name of vector database
         db_name = config["vector_db_name"]
 
-        connection_string = f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+        connection_string: str = f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+        
         return PGVectorAdapter(connection_string, 
                         config["vector_db_key"], 
                         embedding_engine

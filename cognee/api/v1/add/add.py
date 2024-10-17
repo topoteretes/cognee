@@ -14,9 +14,12 @@ from cognee.tasks.ingestion import get_dlt_destination
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.modules.users.models import User
 from cognee.modules.data.methods import create_dataset
+from cognee.infrastructure.databases.relational import create_db_and_tables as create_relational_db_and_tables
+from cognee.infrastructure.databases.vector import create_db_and_tables as create_vector_db_and_tables
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset", user: User = None):
-    await create_db_and_tables()
+    await create_relational_db_and_tables()
+    await create_vector_db_and_tables()
 
     if isinstance(data, str):
         if "data://" in data:
