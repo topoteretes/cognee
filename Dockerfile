@@ -8,8 +8,16 @@ ENV DEBUG=${DEBUG}
 ENV PIP_NO_CACHE_DIR=true
 ENV PATH="${PATH}:/root/.poetry/bin"
 
+RUN apt-get update && apt-get install
+
+RUN apt-get install -y \
+  gcc \
+  libpq-dev
+
+
 WORKDIR /app
 COPY pyproject.toml poetry.lock /app/
+
 
 RUN pip install poetry
 
@@ -18,7 +26,8 @@ RUN poetry config virtualenvs.create false
 
 # Install the dependencies
 RUN poetry install --no-root --no-dev
-        
+
+
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
 
