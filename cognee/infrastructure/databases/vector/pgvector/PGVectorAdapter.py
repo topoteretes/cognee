@@ -164,7 +164,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             try:
                 PGVectorDataPoint = Table(collection_name, Base.metadata, autoload_with=self.engine)
 
-                closest_items = await session.execute(select(PGVectorDataPoint, PGVectorDataPoint.c.vector.cosine_distance(query_vector).label('similarity')).order_by(PGVectorDataPoint.c.vector.cosine_distance(query_vector)).limit(limit))
+                closest_items = await session.execute(select(PGVectorDataPoint, PGVectorDataPoint.c.vector.cosine_distance(query_vector).label('similarity')).order_by('similarity').limit(limit))
 
                 vector_list = []
                 # Extract distances and find min/max for normalization
