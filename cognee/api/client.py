@@ -43,13 +43,13 @@ async def lifespan(app: FastAPI):
     # from cognee.modules.data.deletion import prune_system, prune_data
     # await prune_data()
     # await prune_system(metadata = True)
-    if app_environment == "local" or app_environment == "dev":
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        db_engine = get_relational_engine()
-        await db_engine.create_database()
+    # if app_environment == "local" or app_environment == "dev":
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    db_engine = get_relational_engine()
+    await db_engine.create_database()
 
-        from cognee.modules.users.methods import get_default_user
-        await get_default_user()
+    from cognee.modules.users.methods import get_default_user
+    await get_default_user()
 
     yield
 

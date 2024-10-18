@@ -16,7 +16,7 @@ from cognee.modules.users.methods import create_default_user, delete_user
 revision: str = '482cd6517ce4'
 down_revision: Union[str, None] = '8057ae7329c2'
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = "8057ae7329c2"
 
 
 def upgrade() -> None:

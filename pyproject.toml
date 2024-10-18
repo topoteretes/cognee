@@ -38,7 +38,7 @@ greenlet = "^3.0.3"
 ruff = "^0.2.2"
 filetype = "^1.2.0"
 nltk = "^3.8.1"
-dlt = {extras = ["sqlalchemy"], version = "^1.0.0"}
+dlt = {extras = ["sqlalchemy"], version = "^1.2.0"}
 overrides = "^7.7.0"
 aiofiles = "^23.2.1"
 qdrant-client = "^1.9.0"
@@ -70,7 +70,7 @@ sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = { version = "*", extras = ["sqlalchemy"] }
 asyncpg = "^0.29.0"
 alembic = "^1.13.3"
-
+psycopg2 = "^2.9.10"
 
 
 [tool.poetry.extras]
@@ -97,7 +97,6 @@ pytest-examples = "^0.0.10"
 mkdocs-jupyter = "^0.24.6"
 mkdocs-minify-plugin = "^0.8.0"
 mkdocs-redirects = "^1.2.1"
-
 
 [tool.poetry.group.test-docs.dependencies]
 fastapi = "^0.109.2"

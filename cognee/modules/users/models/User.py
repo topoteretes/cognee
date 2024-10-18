@@ -25,7 +25,8 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 from fastapi_users import schemas
 
 class UserRead(schemas.BaseUser[uuid_UUID]):
-    groups: list[uuid_UUID]  # Add groups attribute
+    # groups: list[uuid_UUID]  # Add groups attribute
+    pass
 
 class UserCreate(schemas.BaseUserCreate):
     pass
