@@ -38,8 +38,10 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
         db_host = relational_config.db_host
         db_port = relational_config.db_port
         db_name = relational_config.db_name
-        
-        connection_string: str = f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+        connection_string: str = (
+                            f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+                )
         
         return PGVectorAdapter(connection_string, 
                         config["vector_db_key"], 
