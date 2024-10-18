@@ -23,7 +23,10 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "message": "Hello, World, I am alive!"
+    "status": 200,
+    "body": {
+      "message": "Hello, World, I am alive!"
+    }
   }
   ```
 
@@ -37,7 +40,7 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "status": "OK"
+    "status": 200
   }
   ```
 
@@ -50,15 +53,18 @@ The base URL for all API requests is determined by the server's deployment envir
   
   **Response**:
   ```json
-  [
-    {
-      "id": "dataset_id_1",
-      "name": "Dataset Name 1",
-      "description": "Description of Dataset 1",
+  {
+    "status": 200,
+    "body": [
+      {
+        "id": "dataset_id_1",
+        "name": "Dataset Name 1",
+        "description": "Description of Dataset 1",
+        ...
+      },
       ...
-    },
-    ...
-  ]
+    ]
+  }
   ```
 
 ### 4. Delete Dataset
@@ -74,7 +80,7 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "status": "OK"
+    "status": 200
   }
   ```
 
@@ -105,14 +111,17 @@ The base URL for all API requests is determined by the server's deployment envir
   
   **Response**:
   ```json
-  [
-    {
-      "data_id": "data_id_1",
-      "content": "Data content here",
+  {
+    "status": 200,
+    "body": [
+      {
+        "data_id": "data_id_1",
+        "content": "Data content here",
+        ...
+      },
       ...
-    },
-    ...
-  ]
+    ]
+  }
   ```
 
 ### 7. Get Dataset Status
@@ -128,9 +137,12 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "dataset_id_1": "Status 1",
-    "dataset_id_2": "Status 2",
-    ...
+    "status": 200,
+    "body": {
+      "dataset_id_1": "Status 1",
+      "dataset_id_2": "Status 2",
+      ...
+    }
   }
   ```
 
@@ -169,7 +181,7 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "message": "OK"
+    "status": 200
   }
   ```
 
@@ -190,7 +202,7 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "message": "OK"
+    "status": 200
   }
   ```
 
@@ -204,7 +216,7 @@ The base URL for all API requests is determined by the server's deployment envir
   **Request Body**:
   ```json
   {
-    "searchType": "INSIGHTS", # Or "SUMMARIES" or "CHUNKS"
+    "searchType": "INSIGHTS", // Or "SUMMARIES" or "CHUNKS"
     "query": "QUERY_TO_MATCH_DATA"
   }
   ```
@@ -213,31 +225,40 @@ The base URL for all API requests is determined by the server's deployment envir
 
   For "INSIGHTS" search type:
   ```json
-  [[
-    { "name" "source_node_name" },
-    { "relationship_name" "between_nodes_relationship_name" },
-    { "name" "target_node_name" },
-  ]]
+  {
+    "status": 200,
+    "body": [[
+      { "name" "source_node_name" },
+      { "relationship_name" "between_nodes_relationship_name" },
+      { "name" "target_node_name" },
+    ]]
+  }
   ```
 
   For "SUMMARIES" search type:
     ```json
-    [
-      { "text" "summary_text" },
-      { "text" "summary_text" },
-      { "text" "summary_text" },
-      ...
-    ]
+    {
+      "status": 200,
+      "body": [
+        { "text" "summary_text" },
+        { "text" "summary_text" },
+        { "text" "summary_text" },
+        ...
+      ]
+    }
     ```
 
   For "CHUNKS" search type:
   ```json
-  [
-    { "text" "chunk_text" },
-    { "text" "chunk_text" },
-    { "text" "chunk_text" },
-    ...
-  ]
+  {
+    "status": 200,
+    "body": [
+      { "text" "chunk_text" },
+      { "text" "chunk_text" },
+      { "text" "chunk_text" },
+      ...
+    ]
+  }
   ```
 
 ### 12. Get Settings
@@ -250,9 +271,12 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "llm": {...},
-    "vectorDB": {...},
-    ...
+    "status": 200,
+    "body": {
+      "llm": {...},
+      "vectorDB": {...},
+      ...
+    }
   }
   ```
 
@@ -270,6 +294,6 @@ The base URL for all API requests is determined by the server's deployment envir
   **Response**:
   ```json
   {
-    "status": "OK"
+    "status": 200
   }
   ```

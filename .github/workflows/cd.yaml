@@ -7,6 +7,7 @@ on:
       - feature/*
     paths-ignore:
       - '**.md'
+      - 'examples/**'
 
 env:
   AWS_ROLE_DEV_CICD: "arn:aws:iam::463722570299:role/cognee-dev-base-role-github-ci-cd"
@@ -76,7 +77,7 @@ jobs:
           script: |
             await github.rest.actions.createWorkflowDispatch({
               owner: 'topoteretes',
-              repo: 'PromethAI-Infra',
+              repo: 'cognee-infra',
               workflow_id: 'terraform.apply.yml',
               ref: 'main'
             })

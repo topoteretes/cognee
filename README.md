@@ -12,8 +12,8 @@ We build for developers who need a reliable, production-ready data layer for AI 
 
 ## What is cognee? 
 
-cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you ability to interconnect and retrieve past conversations, documents, audio transcriptions, while also reducing hallucinations, developer effort and cost.
-Try it in a Google collab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
+Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
+Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
@@ -57,10 +57,10 @@ To use different LLM providers, for more info check out our <a href="https://top
 
 If you are using Networkx, create an account on Graphistry to visualize results:
 ```
-    cognee.config.set_graphistry_config({
-        "username": "YOUR_USERNAME",
-        "password": "YOUR_PASSWORD"
-    })
+cognee.config.set_graphistry_config({
+    "username": "YOUR_USERNAME",
+    "password": "YOUR_PASSWORD"
+})
 ```
 
 (Optional) To run the UI, go to cognee-frontend directory and run:
@@ -207,12 +207,6 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 [<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=BDFt4xVPmro "Learn about cognee: 55")
 
 
-
-## Star History
-
-
-[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
 ## Get Started
 
 ### Install Server
@@ -224,7 +218,6 @@ docker compose up
 ```
 
 
-
 ### Install SDK
 
 Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/quickstart/) for important beta information and usage instructions.
@@ -232,3 +225,16 @@ Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/q
 ```bash
 pip install cognee
 ```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
+
+
+## 💫 Contributors
+
+<a href="https://github.com/topoteretes/cognee/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
+</a>
+
+
