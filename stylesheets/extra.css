@@ -1,0 +1,51 @@
+
+[data-md-color-scheme = "cognee"] {
+  color-scheme: dark;
+
+  --md-default-bg-color: #0C0121;
+  --md-default-bg-color--light: #240067;
+  
+  --md-default-fg-color: #57DFD7;
+  --md-default-fg-color--light: #85ded8;
+  --md-default-fg-color--dark:  #4dc6be;
+
+  /* --md-primary-fg-color: #0C0121; */
+  --md-primary-fg-color: #7233BA;
+  --md-primary-fg-color--light: #8a49d4;
+  --md-primary-fg-color--dark: #522488;
+  /* --md-primary-bg-color:               hsla(0, 0%, 100%, 1);
+  --md-primary-bg-color--light: */
+
+  --md-accent-fg-color: #41a29b;
+
+  --md-typeset-color: white;
+  --md-typeset-a-color: #57DFD7;
+
+  --md-footer-bg-color: #0C0121;
+  --md-footer-bg-color--dark: #0C0121;
+}
+
+.md-header {
+  background-color: var(--md-default-bg-color);
+}
+
+/* Remove unnecessary title from the header */
+.md-header__title {
+  display: none;
+}
+/* Spread header elements evenly when there is no title */
+.md-header__inner {
+  justify-content: space-between;
+}
+
+.md-tabs {
+  background-color: var(--md-default-bg-color);
+}
+
+.md-button--primary:hover {
+  background-color: #8a49d4 !important;
+}
+
+.md-typeset .md-button {
+  border-radius: 32px;
+}
