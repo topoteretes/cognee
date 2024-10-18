@@ -374,7 +374,7 @@ class LLMConfigDTO(InDTO):
     api_key: str
 
 class VectorDBConfigDTO(InDTO):
-    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"]]
+    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
     url: str
     api_key: str
 

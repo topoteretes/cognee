@@ -1,5 +1,7 @@
 from typing import Dict
 
+from ..relational.config import get_relational_config
+
 class VectorConfig(Dict):
     vector_db_url: str
     vector_db_key: str
@@ -26,6 +28,25 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                 api_key = config["vector_db_key"],
                 embedding_engine = embedding_engine
             )
+    elif config["vector_db_provider"] == "pgvector":
+        from .pgvector.PGVectorAdapter import PGVectorAdapter
+        
+        # Get configuration for postgres database
+        relational_config = get_relational_config()
+        db_username = relational_config.db_username
+        db_password = relational_config.db_password
+        db_host = relational_config.db_host
+        db_port = relational_config.db_port
+        db_name = relational_config.db_name
+
+        connection_string: str = (
+                            f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+        )
+        
+        return PGVectorAdapter(connection_string, 
+                        config["vector_db_key"], 
+                        embedding_engine
+        )
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
