@@ -135,7 +135,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with an async engine.
         """
         async with self.engine.begin() as connection:
-            await connection.run_sync(Base.metadata.reflect)  # Reflect the metadata
+            # Load the schema information into the MetaData object
+            await connection.run_sync(Base.metadata.reflect)
             if collection_name in Base.metadata.tables:
                 return Base.metadata.tables[collection_name]
             else:

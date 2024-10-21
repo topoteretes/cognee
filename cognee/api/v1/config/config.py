@@ -40,6 +40,41 @@ class config():
         cognify_config.classification_model =  classification_model
 
     @staticmethod
+    def set_db_name(db_name: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_name = db_name
+
+    @staticmethod
+    def set_db_path(db_path: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_path = db_path
+
+    @staticmethod
+    def set_db_host(db_host: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_host = db_host
+
+    @staticmethod
+    def set_db_port(db_port: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_port = db_port
+
+    @staticmethod
+    def set_db_username(db_username: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_username = db_username
+
+    @staticmethod
+    def set_db_password(db_password: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_password = db_password
+
+    @staticmethod
+    def set_db_provider(db_provider: str):
+        cognify_config = get_relational_config()
+        cognify_config.db_provider = db_provider
+
+    @staticmethod
     def set_summarization_model(summarization_model: object):
         cognify_config = get_cognify_config()
         cognify_config.summarization_model=summarization_model
