@@ -112,7 +112,7 @@ class WeaviateAdapter(VectorDBInterface):
             data_point.payload = data_point.properties
             del data_point.properties
 
-        future.set_result(data_points)
+        future.set_result(data_points.objects)
 
         return await future
 
