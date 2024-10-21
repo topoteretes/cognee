@@ -71,6 +71,7 @@ fastapi-users = { version = "*", extras = ["sqlalchemy"] }
 asyncpg = "^0.29.0"
 alembic = "^1.13.3"
 pgvector = "^0.3.5"
+psycopg2 = "^2.9.10"
 
 
 
