@@ -70,6 +70,7 @@ sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = { version = "*", extras = ["sqlalchemy"] }
 asyncpg = "^0.29.0"
 alembic = "^1.13.3"
+pgvector = "^0.3.5"
 
 
 
