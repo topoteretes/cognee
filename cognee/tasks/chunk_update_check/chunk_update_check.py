@@ -14,7 +14,7 @@ async def chunk_update_check(data_chunks: list[DocumentChunk], collection_name: 
         [str(chunk.chunk_id) for chunk in data_chunks],
     )
 
-    existing_chunks_map = {chunk.id: chunk.payload for chunk in existing_chunks}
+    existing_chunks_map = {str(chunk.id): chunk.payload for chunk in existing_chunks}
 
     affected_data_chunks = []
 
