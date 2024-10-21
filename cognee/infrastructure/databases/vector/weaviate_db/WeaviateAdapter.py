@@ -108,7 +108,7 @@ class WeaviateAdapter(VectorDBInterface):
             filters = Filter.by_id().contains_any(data_point_ids)
         )
 
-        for data_point in data_points:
+        for data_point in data_points.objects:
             data_point.payload = data_point.properties
             del data_point.properties
 
