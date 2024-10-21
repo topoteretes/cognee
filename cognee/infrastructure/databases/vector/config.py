@@ -9,7 +9,7 @@ class VectorConfig(BaseSettings):
         "cognee.lancedb"
     )
     vector_db_key: str = ""
-    vector_engine_provider: str = "lancedb"
+    vector_db_provider: str = "lancedb"
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
@@ -17,7 +17,7 @@ class VectorConfig(BaseSettings):
         return {
             "vector_db_url": self.vector_db_url,
             "vector_db_key": self.vector_db_key,
-            "vector_db_provider": self.vector_engine_provider,
+            "vector_db_provider": self.vector_db_provider,
         }
 
 @lru_cache
