@@ -12,7 +12,7 @@ async def main():
     #TODO: Should this be set on pipeline side or in the test?
     cognee.config.set_vector_engine_provider("pgvector")
     cognee.config.set_db_provider("postgres")
-    cognee.config.set_db_name("postgres")
+    cognee.config.set_db_name("cognee_db")
     cognee.config.set_db_host("127.0.0.1")
     cognee.config.set_db_port("5432")
     cognee.config.set_db_username("cognee")

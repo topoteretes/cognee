@@ -32,6 +32,7 @@ jobs:
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
