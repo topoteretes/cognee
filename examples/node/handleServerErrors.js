@@ -1,7 +1,7 @@
 export default function handleServerErrors(response) {
   return new Promise((resolve, reject) => {
     if (response.status === 401) {
-      throw new Error('Unauthorized');
+      return reject(new Error('Unauthorized'));
     }
     if (!response.ok) {
       if (response.json) {
