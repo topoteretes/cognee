@@ -20,7 +20,7 @@ async function run() {
     // });
     // const user = await registerResponse.json();
 
-    const authCredentials = new global.FormData();
+    const authCredentials = new FormData();
     authCredentials.append('username', 'default_user@example.com');
     authCredentials.append('password', 'default_password');
     
