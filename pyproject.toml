@@ -71,7 +71,6 @@ fastapi-users = { version = "*", extras = ["sqlalchemy"] }
 asyncpg = "^0.29.0"
 alembic = "^1.13.3"
 pgvector = "^0.3.5"
-psycopg2 = "^2.9.10"
 
 
 
@@ -107,6 +106,11 @@ diskcache = "^5.6.3"
 pandas = "2.0.3"
 tabulate = "^0.9.0"
 
+[tool.poetry.group.postgres]
+optional = true
+
+[tool.poetry.group.postgres.dependencies]
+psycopg2 = "^2.9.10"
 
 [tool.ruff] # https://beta.ruff.rs/docs/
 line-length = 100
