@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.DEBUG)
 async def main():
     cognee.config.set_vector_db_config({ "vector_db_url": "",
             "vector_db_key": "",
-            "vector_engine_provider": "pgvector"
+            "vector_db_provider": "pgvector"
         }
     )
     cognee.config.set_relational_db_config({"db_path": "",
