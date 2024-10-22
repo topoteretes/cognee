@@ -58,7 +58,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --with postgres --no-interaction
+        run: poetry install -E postgres --no-interaction
 
       - name: Run default PGVector
         env:
