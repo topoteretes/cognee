@@ -41,6 +41,9 @@ def get_settings() -> SettingsDict:
     }, {
         "value": "lancedb",
         "label": "LanceDB",
+    }, {
+        "value": "pgvector",
+        "label": "PGVector",
     }]
 
     vector_config = get_vectordb_config()

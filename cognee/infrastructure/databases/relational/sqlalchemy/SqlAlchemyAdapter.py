@@ -119,6 +119,8 @@ class SQLAlchemyAdapter():
                 self.db_path = None
             else:
                 async with self.engine.begin() as connection:
+                    # Load the schema information into the MetaData object
+                    await connection.run_sync(Base.metadata.reflect)
                     for table in Base.metadata.sorted_tables:
                         drop_table_query = text(f"DROP TABLE IF EXISTS {table.name} CASCADE")
                         await connection.execute(drop_table_query)
