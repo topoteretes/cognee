@@ -71,6 +71,7 @@ fastapi-users = { version = "*", extras = ["sqlalchemy"] }
 asyncpg = "^0.29.0"
 alembic = "^1.13.3"
 pgvector = "^0.3.5"
+psycopg2 = {version = "^2.9.10", optional = true}
 
 [tool.poetry.extras]
 filesystem = ["s3fs", "botocore"]
@@ -78,6 +79,7 @@ cli = ["pipdeptree", "cron-descriptor"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
 neo4j = ["neo4j"]
+postgres = ["psycopg2"]
 notebook = ["ipykernel", "overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
 
 [tool.poetry.group.dev.dependencies]
@@ -102,12 +104,6 @@ fastapi = "^0.109.2"
 diskcache = "^5.6.3"
 pandas = "2.0.3"
 tabulate = "^0.9.0"
-
-[tool.poetry.group.postgres]
-optional = true
-
-[tool.poetry.group.postgres.dependencies]
-psycopg2 = "^2.9.10"
 
 [tool.ruff] # https://beta.ruff.rs/docs/
 line-length = 100
