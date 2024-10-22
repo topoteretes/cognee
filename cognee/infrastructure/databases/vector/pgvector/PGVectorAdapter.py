@@ -157,39 +157,34 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Use async session to connect to the database
         async with self.get_async_session() as session:
-            try:
-                # Get PGVectorDataPoint Table from database
-                PGVectorDataPoint = await self.get_table(collection_name)
+            # Get PGVectorDataPoint Table from database
+            PGVectorDataPoint = await self.get_table(collection_name)
 
-                # Find closest vectors to query_vector
-                closest_items = await session.execute(
-                    select(
-                        PGVectorDataPoint,
-                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                            "similarity"
-                        ),
-                    )
-                    .order_by("similarity")
-                    .limit(limit)
+            # Find closest vectors to query_vector
+            closest_items = await session.execute(
+                select(
+                    PGVectorDataPoint,
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
+                        "similarity"
+                    ),
                 )
+                .order_by("similarity")
+                .limit(limit)
+            )
 
-                vector_list = []
-                # Extract distances and find min/max for normalization
-                for vector in closest_items:
-                    # TODO: Add normalization of similarity score
-                    vector_list.append(vector)
+            vector_list = []
+            # Extract distances and find min/max for normalization
+            for vector in closest_items:
+                # TODO: Add normalization of similarity score
+                vector_list.append(vector)
 
-                # Create and return ScoredResult objects
-                return [
-                    ScoredResult(
-                        id=str(row.id), payload=row.payload, score=row.similarity
-                    )
-                    for row in vector_list
-                ]
-
-            except Exception as e:
-                print(f"Error during search: {e}")
-                return []
+            # Create and return ScoredResult objects
+            return [
+                ScoredResult(
+                    id=str(row.id), payload=row.payload, score=row.similarity
+                )
+                for row in vector_list
+            ]
 
     async def batch_search(
         self,
