@@ -1,5 +1,3 @@
-
-
 import os
 import logging
 import pathlib
@@ -8,32 +6,48 @@ from cognee.api.v1.search import SearchType
 
 logging.basicConfig(level=logging.DEBUG)
 
+
 async def main():
-    cognee.config.set_vector_db_config({ "vector_db_url": "",
-            "vector_db_key": "",
+    cognee.config.set_vector_db_config(
+        {
+            "vector_db_url": "",
+            "vector_db_key": "", 
             "vector_db_provider": "pgvector"
         }
     )
-    cognee.config.set_relational_db_config({"db_path": "",
+    cognee.config.set_relational_db_config(
+        {
+            "db_path": "",
             "db_name": "cognee_db",
             "db_host": "127.0.0.1",
             "db_port": "5432",
             "db_username": "cognee",
             "db_password": "cognee",
-            "db_provider": "postgres"}
+            "db_provider": "postgres",
+        }
     )
 
-    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_pgvector")).resolve())
+    data_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_pgvector")
+        ).resolve()
+    )
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_pgvector")).resolve())
+    cognee_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_pgvector")
+        ).resolve()
+    )
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata = True)
+    await cognee.prune.prune_system(metadata=True)
 
     dataset_name = "cs_explanations"
 
-    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+    explanation_file_path = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
+    )
     await cognee.add([explanation_file_path], dataset_name)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
@@ -49,23 +63,24 @@ async def main():
     await cognee.cognify([dataset_name])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
+
     vector_engine = get_vector_engine()
     random_node = (await vector_engine.search("entities", "AI"))[0]
     random_node_name = random_node.payload["name"]
 
-    search_results = await cognee.search(SearchType.INSIGHTS, query = random_node_name)
+    search_results = await cognee.search(SearchType.INSIGHTS, query=random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, query = random_node_name)
+    search_results = await cognee.search(SearchType.CHUNKS, query=random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.SUMMARIES, query = random_node_name)
+    search_results = await cognee.search(SearchType.SUMMARIES, query=random_node_name)
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\n\Extracted summaries are:\n")
     for result in search_results:
@@ -74,4 +89,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())
