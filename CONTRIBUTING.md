@@ -9,7 +9,7 @@ Thank you for investing time in contributing to our project! Here's a guide to g
 To start your journey, you'll need your very own copy of **cognee**. Think of it as your own innovation lab. 🧪
 
 1. Navigate to the [**cognee**](https://github.com/topoteretes/cognee) repository on GitHub.
-2. In the upper-right corner, `click the 'Fork'` button.
+2. In the upper-right corner, click the **'Fork'** button.
 
 ### 🚀 Clone the Repository
 
@@ -35,30 +35,26 @@ Now's your chance to shine! Dive in and make your contributions. 🌠
 
 ## 3. 🚀 Submitting Changes
 
-After making your changes, follow these steps 
+After making your changes, follow these steps:
 
-### ✅  Run the tests 
+### ✅ Run the Tests
 
- to ensure your changes do not break the existing codebase:
+Ensure your changes do not break the existing codebase:
 
 ```shell
 python cognee/cognee/tests/test_library.py
 ```
 
-
-### 🚢  Push your feature branch
+### 🚢 Push Your Feature Branch
 
 ```shell
 # Add your changes to the staging area:
- 
 git add . 
 
-# Commit changes with an adequate description 
+# Commit changes with an adequate description: 
 git commit -m "Describe your changes here" 
 
 # Push your feature branch to your forked repository:
-
-Copy code
 git push origin feature/your-feature-name
 ```
 
@@ -67,9 +63,9 @@ git push origin feature/your-feature-name
 You're on the verge of completion! It's time to showcase your hard work. 🌐
 
 1. Go to [**cognee**](https://github.com/topoteretes/cognee) on GitHub.
-2. Hit the `"Compare & Pull Request"` button.
-3. Select the base branch `(main)` and the compare branch (the one with your features).
-4. Craft a `compelling title` and provide a `detailed description` of your contributions. 🎩
+2. Hit the **"Compare & Pull Request"** button.
+3. Select the base branch (main) and the compare branch (the one with your features).
+4. Craft a **compelling title** and provide a **detailed description** of your contributions. 🎩
 
 ## 4. 🔍 Review and Approval
 
