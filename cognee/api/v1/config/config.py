@@ -131,6 +131,30 @@ class config():
         vector_db_config.vector_engine_provider = vector_engine_provider
 
     @staticmethod
+    def set_relational_db_config(config_dict: dict):
+        """
+            Updates the relational db config with values from config_dict.
+        """
+        relational_db_config = get_relational_config()
+        for key, value in config_dict.items():
+            if hasattr(relational_db_config, key):
+                object.__setattr__(relational_db_config, key, value)
+            else:
+                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+
+    @staticmethod
+    def set_vector_db_config(config_dict: dict):
+        """
+            Updates the vector db config with values from config_dict.
+        """
+        vector_db_config = get_vectordb_config()
+        for key, value in config_dict.items():
+            if hasattr(vector_db_config, key):
+                object.__setattr__(vector_db_config, key, value)
+            else:
+                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+
+    @staticmethod
     def set_vector_db_key(db_key: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_key = db_key

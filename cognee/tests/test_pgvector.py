@@ -9,14 +9,19 @@ from cognee.api.v1.search import SearchType
 logging.basicConfig(level=logging.DEBUG)
 
 async def main():
-    #TODO: Should this be set on pipeline side or in the test?
-    cognee.config.set_vector_engine_provider("pgvector")
-    cognee.config.set_db_provider("postgres")
-    cognee.config.set_db_name("cognee_db")
-    cognee.config.set_db_host("127.0.0.1")
-    cognee.config.set_db_port("5432")
-    cognee.config.set_db_username("cognee")
-    cognee.config.set_db_password("cognee")
+    cognee.config.set_vector_db_config({ "vector_db_url": "",
+            "vector_db_key": "",
+            "vector_engine_provider": "pgvector"
+        }
+    )
+    cognee.config.set_relational_db_config({"db_path": "",
+            "db_name": "cognee_db",
+            "db_host": "127.0.0.1",
+            "db_port": "5432",
+            "db_username": "cognee",
+            "db_password": "cognee",
+            "db_provider": "postgres"}
+    )
 
     data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_pgvector")).resolve())
     cognee.config.data_root_directory(data_directory_path)
