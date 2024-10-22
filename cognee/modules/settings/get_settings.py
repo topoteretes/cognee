@@ -103,8 +103,8 @@ def get_settings() -> SettingsDict:
         },
         vector_db = {
             "provider": {
-                "label": vector_config.vector_engine_provider,
-                "value": vector_config.vector_engine_provider.lower(),
+                "label": vector_config.vector_db_provider,
+                "value": vector_config.vector_db_provider.lower(),
             },
             "url": vector_config.vector_db_url,
             "api_key": vector_config.vector_db_key,

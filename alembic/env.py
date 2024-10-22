@@ -92,6 +92,8 @@ if db_engine.engine.dialect.name == "sqlite":
     db_config = get_relational_config()
     LocalStorage.ensure_directory_exists(db_config.db_path)
 
+print("Using database:", db_engine.db_uri)
+
 config.set_section_option(
     config.config_ini_section,
     "SQLALCHEMY_DATABASE_URI",

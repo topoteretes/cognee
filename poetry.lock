@@ -1350,13 +1350,13 @@ files = [
 
 [[package]]
 name = "dlt"
-version = "1.0.0"
+version = "1.2.0"
 description = "dlt is an open-source python-first scalable data loading library that does not require any backend to run."
 optional = false
 python-versions = "<3.13,>=3.8.1"
 files = [
-    {file = "dlt-1.0.0-py3-none-any.whl", hash = "sha256:730474cadcbc8151854d2c2999099225df3fe2b03fcfe716bc42e0b1a7707484"},
-    {file = "dlt-1.0.0.tar.gz", hash = "sha256:757ca3b1fe19d47720f22ad45d0642077ccafe2e64094ef30da478ca50a392c4"},
+    {file = "dlt-1.2.0-py3-none-any.whl", hash = "sha256:85256c0f87fe3cc1eedc390e6e3a31820250ac1f75bb9510bcf4085d069427ce"},
+    {file = "dlt-1.2.0.tar.gz", hash = "sha256:3e3c8604ea2fb213f0901cecab018909570824e5addbb45954c2c274f1439b2c"},
 ]
 
 [package.dependencies]
@@ -1397,12 +1397,12 @@ clickhouse = ["adlfs (>=2022.4.0)", "clickhouse-connect (>=0.7.7)", "clickhouse-
 databricks = ["databricks-sql-connector (>=2.9.3)"]
 deltalake = ["deltalake (>=0.19.0)", "pyarrow (>=12.0.0)"]
 dremio = ["pyarrow (>=12.0.0)"]
-duckdb = ["duckdb (>=0.6.1,<0.11)"]
+duckdb = ["duckdb (>=0.9)"]
 filesystem = ["botocore (>=1.28)", "s3fs (>=2022.4.0)"]
 gcp = ["gcsfs (>=2022.4.0)", "google-cloud-bigquery (>=2.26.0)", "grpcio (>=1.50.0)"]
 gs = ["gcsfs (>=2022.4.0)"]
 lancedb = ["lancedb (>=0.8.2)", "pyarrow (>=12.0.0)", "tantivy (>=0.22.0)"]
-motherduck = ["duckdb (>=0.6.1,<0.11)", "pyarrow (>=12.0.0)"]
+motherduck = ["duckdb (>=0.9)", "pyarrow (>=12.0.0)"]
 mssql = ["pyodbc (>=4.0.39)"]
 parquet = ["pyarrow (>=12.0.0)"]
 postgres = ["psycopg2-binary (>=2.9.1)", "psycopg2cffi (>=2.9.0)"]
@@ -7765,4 +7765,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-content-hash = "9ce846c0cdd6f980fac43d22ea1f046f485fb42270a5cfe04fed061ea74a4f8c"
+content-hash = "34f873038262904af283d31d4c3c68fd535ca7b36c6837fc97c0d1cc31cf89cb"

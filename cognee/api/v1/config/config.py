@@ -21,7 +21,7 @@ class config():
         graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
 
         vector_config = get_vectordb_config()
-        if vector_config.vector_engine_provider == "lancedb":
+        if vector_config.vector_db_provider == "lancedb":
             vector_config.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
     @staticmethod
@@ -126,9 +126,9 @@ class config():
 
 
     @staticmethod
-    def set_vector_engine_provider(vector_engine_provider: str):
+    def set_vector_db_provider(vector_db_provider: str):
         vector_db_config = get_vectordb_config()
-        vector_db_config.vector_engine_provider = vector_engine_provider
+        vector_db_config.vector_db_provider = vector_db_provider
 
     @staticmethod
     def set_relational_db_config(config_dict: dict):

@@ -108,11 +108,12 @@ class WeaviateAdapter(VectorDBInterface):
             filters = Filter.by_id().contains_any(data_point_ids)
         )
 
-        for data_point in data_points:
+        for data_point in data_points.objects:
             data_point.payload = data_point.properties
+            data_point.id = data_point.uuid
             del data_point.properties
 
-        future.set_result(data_points)
+        future.set_result(data_points.objects)
 
         return await future
 

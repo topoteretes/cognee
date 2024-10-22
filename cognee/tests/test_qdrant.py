@@ -9,7 +9,7 @@ from cognee.api.v1.search import SearchType
 logging.basicConfig(level=logging.DEBUG)
 
 async def main():
-    cognee.config.set_vector_engine_provider("qdrant")
+    cognee.config.set_vector_db_provider("qdrant")
     data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_qdrant")).resolve())
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_qdrant")).resolve())

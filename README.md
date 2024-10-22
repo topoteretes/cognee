@@ -55,7 +55,7 @@ cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
 You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers, for more info check out our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
-If you are using Networkx, create an account on Graphistry to visualize results:
+If you are using Network, create an account on Graphistry to visualize results:
 ```
 cognee.config.set_graphistry_config({
     "username": "YOUR_USERNAME",
@@ -162,7 +162,7 @@ async def chunk_naive_llm_classifier(
 
 ```
 
-We have a large number of tasks that can be used in your pipelines, and you can also create your own tasks to fit your business logic.
+We have many tasks that can be used in your pipelines, and you can also create your  tasks to fit your business logic.
 
 
 3. Once we have our tasks, it is time to group them into a pipeline.
