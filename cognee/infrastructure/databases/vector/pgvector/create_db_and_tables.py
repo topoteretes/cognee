@@ -7,9 +7,8 @@ async def create_db_and_tables():
     vector_engine = get_vector_engine()
 
     if vector_config.vector_db_provider == "pgvector":
+        vector_engine.create_database()
         async with vector_engine.engine.begin() as connection:
-            if len(Base.metadata.tables.keys()) > 0:
-                await connection.run_sync(Base.metadata.create_all)
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
          
             
