@@ -8,18 +8,18 @@ from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.ingestion import get_matched_datasets, save_data_to_file
 from cognee.shared.utils import send_telemetry
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.relational import get_relational_engine, create_db_and_tables
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.methods import get_default_user
 from cognee.tasks.ingestion import get_dlt_destination
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.modules.users.models import User
 from cognee.modules.data.methods import create_dataset
 from cognee.infrastructure.databases.relational import create_db_and_tables as create_relational_db_and_tables
-from cognee.infrastructure.databases.vector import create_db_and_tables as create_vector_db_and_tables
+from cognee.infrastructure.databases.vector.pgvector import create_db_and_tables as create_pgvector_db_and_tables
 
 async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_name: str = "main_dataset", user: User = None):
     await create_relational_db_and_tables()
-    await create_vector_db_and_tables()
+    await create_pgvector_db_and_tables()
 
     if isinstance(data, str):
         if "data://" in data:

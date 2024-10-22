@@ -1,5 +1,5 @@
-from ..relational.ModelBase import Base
-from .get_vector_engine import get_vector_engine, get_vectordb_config
+from ...relational.ModelBase import Base
+from ..get_vector_engine import get_vector_engine, get_vectordb_config
 from sqlalchemy import text
 
 async def create_db_and_tables():
