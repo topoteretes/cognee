@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import List, Type
 
-import aiofiles
 import openai
 import instructor
 from pydantic import BaseModel
@@ -13,9 +12,7 @@ from tenacity import retry, stop_after_attempt
 from cognee.base_config import get_base_config
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.shared.data_models import MonitoringTool
-import logging
-logging.basicConfig(level=logging.DEBUG)
+# from cognee.shared.data_models import MonitoringTool
 
 class OpenAIAdapter(LLMInterface):
     name = "OpenAI"

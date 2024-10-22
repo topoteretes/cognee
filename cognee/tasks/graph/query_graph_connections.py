@@ -23,7 +23,7 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
     exact_node = await graph_engine.extract_node(node_id)
 
     if exact_node is not None and "uuid" in exact_node:
-        node_connections = await graph_engine.get_connections(exact_node["uuid"])
+        node_connections = await graph_engine.get_connections(str(exact_node["uuid"]))
     else:
         vector_engine = get_vector_engine()
         results = await asyncio.gather(
@@ -37,7 +37,7 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
             return []
 
         node_connections_results = await asyncio.gather(
-            *[graph_engine.get_connections(result.payload["uuid"]) for result in relevant_results]
+            *[graph_engine.get_connections(str(result.payload["uuid"])) for result in relevant_results]
         )
 
         node_connections = []

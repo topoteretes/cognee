@@ -12,4 +12,4 @@ async def save_vector_db_config(vector_db_config: VectorDBConfig):
 
     vector_config.vector_db_url = vector_db_config.url
     vector_config.vector_db_key = vector_db_config.api_key
-    vector_config.vector_engine_provider = vector_db_config.provider
+    vector_config.vector_db_provider = vector_db_config.provider
