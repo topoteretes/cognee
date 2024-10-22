@@ -1,32 +1,16 @@
-from typing import List, Optional, get_type_hints
-from sqlalchemy import JSON, Column, Table, select, delete
-
-from ..models.ScoredResult import ScoredResult
 import asyncio
-
-from ..vector_db_interface import VectorDBInterface, DataPoint
-from sqlalchemy.orm import Mapped, mapped_column
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from pgvector.sqlalchemy import Vector
+from typing import List, Optional, get_type_hints
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, Column, Table, select, delete
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
+from .serialize_datetime import serialize_datetime
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface, DataPoint
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
-
-from datetime import datetime
-
-
-# TODO: Find better location for function
-def serialize_datetime(data):
-    """Recursively convert datetime objects in dictionaries/lists to ISO format."""
-    if isinstance(data, dict):
-        return {key: serialize_datetime(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [serialize_datetime(item) for item in data]
-    elif isinstance(data, datetime):
-        return data.isoformat()  # Convert datetime to ISO 8601 string
-    else:
-        return data
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
