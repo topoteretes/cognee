@@ -152,7 +152,7 @@ class LanceDBAdapter(VectorDBInterface):
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
-        return asyncio.gather(
+        return await asyncio.gather(
             *[self.search(
                 collection_name = collection_name,
                 query_vector = query_vector,
