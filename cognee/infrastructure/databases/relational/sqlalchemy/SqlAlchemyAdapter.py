@@ -135,8 +135,6 @@ class SQLAlchemyAdapter():
                             drop_table_query = text(f"DROP TABLE IF EXISTS {schema[0]}.{table.name} CASCADE")
                             await connection.execute(drop_table_query)
                         metadata.clear()
-                    print("All tables dropped successfully.")
-
         except Exception as e:
             print(f"Error deleting database: {e}")
 
