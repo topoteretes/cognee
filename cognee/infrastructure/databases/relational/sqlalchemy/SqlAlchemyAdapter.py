@@ -134,7 +134,7 @@ class SQLAlchemyAdapter():
                         for table in metadata.sorted_tables:
                             drop_table_query = text(f"DROP TABLE IF EXISTS {schema[0]}.{table.name} CASCADE")
                             await connection.execute(drop_table_query)
-                            metadata.clear()
+                        metadata.clear()
                     print("All tables dropped successfully.")
 
         except Exception as e:
