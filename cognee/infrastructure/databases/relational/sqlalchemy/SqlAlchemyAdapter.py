@@ -119,11 +119,20 @@ class SQLAlchemyAdapter():
                 self.db_path = None
             else:
                 async with self.engine.begin() as connection:
-                    # Load the schema information into the MetaData object
-                    await connection.run_sync(Base.metadata.reflect)
-                    for table in Base.metadata.sorted_tables:
-                        drop_table_query = text(f"DROP TABLE IF EXISTS {table.name} CASCADE")
-                        await connection.execute(drop_table_query)
+                    result = await connection.execute(
+                        text("""
+                            SELECT schema_name FROM information_schema.schemata
+                            WHERE schema_name NOT IN ('pg_catalog', 'pg_toast', 'information_schema');
+                            """)
+                    )
+                    # Drop all tables from all schemas
+                    for schema in result.fetchall():
+                        # Load the schema information into the MetaData object
+                        await connection.run_sync(Base.metadata.reflect, schema=schema[0])
+                        for table in Base.metadata.sorted_tables:
+                            drop_table_query = text(f"DROP TABLE IF EXISTS {schema[0]}.{table.name} CASCADE")
+                            await connection.execute(drop_table_query)
+                    print("All tables dropped successfully.")
 
         except Exception as e:
             print(f"Error deleting database: {e}")
