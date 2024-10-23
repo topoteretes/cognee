@@ -1,7 +1,7 @@
 from os import path
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
-from sqlalchemy import text, select
+from sqlalchemy import text, select, MetaData
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
@@ -125,13 +125,16 @@ class SQLAlchemyAdapter():
                             WHERE schema_name NOT IN ('pg_catalog', 'pg_toast', 'information_schema');
                             """)
                     )
+                    # Create a MetaData instance to load table information
+                    metadata = MetaData()
                     # Drop all tables from all schemas
                     for schema in result.fetchall():
                         # Load the schema information into the MetaData object
-                        await connection.run_sync(Base.metadata.reflect, schema=schema[0])
-                        for table in Base.metadata.sorted_tables:
+                        await connection.run_sync(metadata.reflect, schema=schema[0])
+                        for table in metadata.sorted_tables:
                             drop_table_query = text(f"DROP TABLE IF EXISTS {schema[0]}.{table.name} CASCADE")
                             await connection.execute(drop_table_query)
+                            metadata.clear()
                     print("All tables dropped successfully.")
 
         except Exception as e:
