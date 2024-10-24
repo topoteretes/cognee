@@ -6,15 +6,14 @@ import aiohttp
 import uvicorn
 import logging
 import sentry_sdk
-from typing import List, Union, Optional, Literal
+from typing import List, Optional
 from typing_extensions import Annotated
 from fastapi import FastAPI, HTTPException, Form, UploadFile, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from cognee.api.DTO import InDTO, OutDTO
-from cognee.api.v1.search import SearchType
+from cognee.api.DTO import OutDTO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -65,9 +64,9 @@ app.add_middleware(
 
 from cognee.api.v1.users.routers import get_auth_router, get_register_router,\
     get_reset_password_router, get_verify_router, get_users_router
-
 from cognee.api.v1.permissions.get_permissions_router import get_permissions_router
-
+from cognee.api.v1.settings.routers.get_settings_router import get_settings_router
+from cognee.api.v1.search.routers import get_search_router
 
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
@@ -330,68 +329,17 @@ async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authentic
             content = {"error": str(error)}
         )
 
+app.include_router(
+    get_search_router(),
+    prefix="/api/v1/search",
+    tags=["search"]
+)
 
-class SearchPayloadDTO(InDTO):
-    search_type: SearchType
-    query: str
-
-@app.post("/api/v1/search", response_model = list)
-async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
-    """ This endpoint is responsible for searching for nodes in the graph."""
-    from cognee.api.v1.search import search as cognee_search
-
-    try:
-        results = await cognee_search(payload.search_type, payload.query, user)
-
-        return results
-    except Exception as error:
-        return JSONResponse(
-            status_code = 409,
-            content = {"error": str(error)}
-        )
-
-from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
-
-class LLMConfigDTO(OutDTO, LLMConfig):
-    pass
-
-class VectorDBConfigDTO(OutDTO, VectorDBConfig):
-    pass
-
-class SettingsDTO(OutDTO):
-    llm: LLMConfigDTO
-    vector_db: VectorDBConfigDTO
-
-@app.get("/api/v1/settings", response_model = SettingsDTO)
-async def get_settings(user: User = Depends(get_authenticated_user)):
-    from cognee.modules.settings import get_settings as get_cognee_settings
-    return get_cognee_settings()
-
-
-class LLMConfigDTO(InDTO):
-    provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"]]
-    model: str
-    api_key: str
-
-class VectorDBConfigDTO(InDTO):
-    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
-    url: str
-    api_key: str
-
-class SettingsPayloadDTO(InDTO):
-    llm: Optional[LLMConfigDTO] = None
-    vector_db: Optional[VectorDBConfigDTO] = None
-
-@app.post("/api/v1/settings", response_model = None)
-async def save_settings(new_settings: SettingsPayloadDTO, user: User = Depends(get_authenticated_user)):
-    from cognee.modules.settings import save_llm_config, save_vector_db_config
-
-    if new_settings.llm is not None:
-        await save_llm_config(new_settings.llm)
-
-    if new_settings.vector_db is not None:
-        await save_vector_db_config(new_settings.vector_db)
-
+app.include_router(
+    get_settings_router(),
+    prefix="/api/v1/settings",
+    tags=["settings"]
+)
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
