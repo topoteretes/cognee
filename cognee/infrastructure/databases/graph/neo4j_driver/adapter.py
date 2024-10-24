@@ -8,7 +8,6 @@ from uuid import UUID
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 logger = logging.getLogger("Neo4jAdapter")
