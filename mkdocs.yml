@@ -63,6 +63,11 @@ theme:
     code: Roboto Mono
   custom_dir: docs/overrides
 
+extra:
+  analytics:
+    provider: segment
+    key: "cTpYjETeB2cSKzRbYBjQ4Pp0UOO7ld6P"
+
 extra_css:
   - stylesheets/extra.css
 
@@ -120,21 +125,13 @@ nav:
         - Add data: 'data_ingestion.md'
         - Create LLM enriched data store: 'templates.md'
         - Explore data: 'search.md'
-#    - SDK:
-#      - Overview: 'sdk_overview.md'
     - Configuration: 'configuration.md'
     - What is cognee:
       - Introduction: 'conceptual_overview.md'
     - API reference: 'api_reference.md'
-  - Blog:
-      - "blog/index.md"
 
 
 plugins:
-  - mkdocs-jupyter:
-      ignore_h1_titles: true
-      execute: false
-  - social
   - search:
       separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
   - minify:
@@ -146,13 +143,3 @@ plugins:
             members_order: alphabetical
             allow_inspection: true
             show_bases: true
-  - blog:
-      enabled: !ENV CI
-      blog_dir: "blog"
-      blog_toc: true
-      post_dir: blog/posts
-      post_date_format: yyyy/MM/dd
-      post_url_format: "{date}/{slug}"
-      authors_file: "{blog}/.authors.yml"
-
-
