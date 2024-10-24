@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
-from networkx import predecessor
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 logger = logging.getLogger("Neo4jAdapter")
