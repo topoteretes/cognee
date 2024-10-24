@@ -64,8 +64,9 @@ app.add_middleware(
 
 from cognee.api.v1.users.routers import get_auth_router, get_register_router,\
     get_reset_password_router, get_verify_router, get_users_router
-from cognee.api.v1.permissions.get_permissions_router import get_permissions_router
-from cognee.api.v1.settings.routers.get_settings_router import get_settings_router
+from cognee.api.v1.permissions.routers import get_permissions_router
+from cognee.api.v1.settings.routers import get_settings_router
+from cognee.api.v1.cognify.routers import get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
 
 from fastapi import Request
@@ -313,21 +314,11 @@ async def add(
             content = {"error": str(error)}
         )
 
-
-class CognifyPayloadDTO(BaseModel):
-    datasets: List[str]
-
-@app.post("/api/v1/cognify", response_model = None)
-async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
-    """ This endpoint is responsible for the cognitive processing of the content."""
-    from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
-    try:
-        await cognee_cognify(payload.datasets, user)
-    except Exception as error:
-        return JSONResponse(
-            status_code = 409,
-            content = {"error": str(error)}
-        )
+app.include_router(
+    get_cognify_router(),
+    prefix="/api/v1/cognify",
+    tags=["cognify"]
+)
 
 app.include_router(
     get_search_router(),
