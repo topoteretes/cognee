@@ -16,6 +16,15 @@ def get_settings_router():
     class VectorDBConfigDTO(OutDTO, VectorDBConfig):
         pass
 
+    class SettingsDTO(OutDTO):
+        llm: LLMConfigDTO
+        vector_db: VectorDBConfigDTO
+
+    @router.get("/", response_model=SettingsDTO)
+    async def get_settings(user: User = Depends(get_authenticated_user)):
+        from cognee.modules.settings import get_settings as get_cognee_settings
+        return get_cognee_settings()
+
     class LLMConfigDTO(InDTO):
         provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"]]
         model: str
@@ -25,15 +34,6 @@ def get_settings_router():
         provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
         url: str
         api_key: str
-
-    class SettingsDTO(OutDTO):
-        llm: LLMConfigDTO
-        vector_db: VectorDBConfigDTO
-
-    @router.get("/", response_model=SettingsDTO)
-    async def get_settings(user: User = Depends(get_authenticated_user)):
-        from cognee.modules.settings import get_settings as get_cognee_settings
-        return get_cognee_settings()
 
     class SettingsPayloadDTO(InDTO):
         llm: Optional[LLMConfigDTO] = None
