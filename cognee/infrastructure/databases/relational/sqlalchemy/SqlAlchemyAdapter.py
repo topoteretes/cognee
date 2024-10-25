@@ -1,4 +1,5 @@
 from os import path
+from typing import Optional
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 from sqlalchemy import text, select, MetaData
@@ -50,11 +51,14 @@ class SQLAlchemyAdapter():
             await connection.execute(text(f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"))
             await connection.close()
 
-    async def delete_table(self, table_name: str):
+    async def delete_table(self, table_name: str,  schema_name: Optional[str] = "public"):
         async with self.engine.begin() as connection:
-            await connection.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE;"))
-
-            await connection.close()
+            if self.engine.dialect.name == "sqlite":
+                # SQLite doesn’t support schema namespaces and the CASCADE keyword.
+                # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
+                await connection.execute(text(f"DROP TABLE IF EXISTS {table_name};"))
+            else:
+                await connection.execute(text(f"DROP TABLE IF EXISTS {schema_name}.{table_name} CASCADE;"))
 
     async def insert_data(self, schema_name: str, table_name: str, data: list[dict]):
         columns = ", ".join(data[0].keys())
