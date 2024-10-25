@@ -91,6 +91,8 @@ notebook = "^7.1.1"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs-material = "^9.5.42"
+mkdocs-minify-plugin = "^0.8.0"
+mkdocstrings = {extras = ["python"], version = "^0.26.2"}
 
 [tool.ruff] # https://beta.ruff.rs/docs/
 line-length = 100
