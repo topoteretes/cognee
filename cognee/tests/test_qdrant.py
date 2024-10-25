@@ -40,24 +40,27 @@ async def main():
     random_node = (await vector_engine.search("entities", "AI"))[0]
     random_node_name = random_node.payload["name"]
 
-    search_results = await cognee.search(SearchType.INSIGHTS, query = random_node_name)
+    search_results = await cognee.search(SearchType.INSIGHTS, query_text = random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, query = random_node_name)
+    search_results = await cognee.search(SearchType.CHUNKS, query_text = random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.SUMMARIES, query = random_node_name)
+    search_results = await cognee.search(SearchType.SUMMARIES, query_text = random_node_name)
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\n\Extracted summaries are:\n")
     for result in search_results:
         print(f"{result}\n")
 
+    history = await cognee.get_search_history()
+
+    assert len(history) == 6, "Search history is not correct."
 
 if __name__ == "__main__":
     import asyncio

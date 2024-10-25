@@ -1,9 +1,12 @@
+'use client';
+
 import { v4 } from 'uuid';
 import classNames from 'classnames';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CTAButton, Stack, Text, DropdownSelect, TextArea, useBoolean } from 'ohmy-ui';
 import { fetch } from '@/utils';
 import styles from './SearchView.module.css';
+import getHistory from '@/modules/chat/getHistory';
 
 interface Message {
   id: string;
@@ -52,6 +55,14 @@ export default function SearchView() {
     }, 300);
   }, []);
 
+  useEffect(() => {
+    getHistory()
+      .then((history) => {
+        setMessages(history);
+        scrollToBottom();
+      });
+  }, [scrollToBottom]);
+
   const handleSearchSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -78,7 +89,7 @@ export default function SearchView() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        query: inputValue,
+        query: inputValue.trim(),
         searchType: searchTypeValue,
       }),
     })

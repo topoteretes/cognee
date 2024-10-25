@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.search import SearchType
+from cognee.modules.search.operations import get_history
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -347,6 +348,24 @@ async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticat
     except Exception as error:
         return JSONResponse(
             status_code = 409,
+            content = {"error": str(error)}
+        )
+
+class SearchHistoryItem(OutDTO):
+    id: UUID
+    text: str
+    user: str
+    created_at: datetime
+
+@app.get("/api/v1/search", response_model = list[SearchHistoryItem])
+async def get_search_history(user: User = Depends(get_authenticated_user)):
+    try:
+        history = await get_history(user.id)
+
+        return history
+    except Exception as error:
+        return JSONResponse(
+            status_code = 500,
             content = {"error": str(error)}
         )
 
