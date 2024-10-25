@@ -66,7 +66,7 @@ theme:
 extra:
   analytics:
     provider: segment
-    key: "cTpYjETeB2cSKzRbYBjQ4Pp0UOO7ld6P"
+    key: !ENV DOCS_SEGMENT_KEY
 
 extra_css:
   - stylesheets/extra.css
