@@ -109,10 +109,14 @@ class SQLAlchemyAdapter():
             else:
                 # Create a MetaData instance to load table information
                 metadata = MetaData()
+                # Load table information from schema into MetaData
                 await connection.run_sync(metadata.reflect, schema=schema_name)
-                if table_name in metadata.tables:
-                    return metadata.tables[table_name]
-                raise ValueError(f"Table '{table_name}' not found.")
+                # Define the full table name
+                full_table_name = f"{schema_name}.{table_name}"
+                # Check if table is in list of tables for the given schema
+                if full_table_name in metadata.tables:
+                    return metadata.tables[full_table_name]
+                raise ValueError(f"Table '{full_table_name}' not found.")
 
 
     async def get_data(self, table_name: str, filters: dict = None):
