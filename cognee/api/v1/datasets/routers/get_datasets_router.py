@@ -52,6 +52,31 @@ def get_datasets_router():
 
         await delete_dataset(dataset)
 
+    @router.delete("/{dataset_id}/data/{data_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}})
+    async def delete_data(dataset_id: str, data_id: str, user: User = Depends(get_authenticated_user)):
+        from cognee.modules.data.methods import get_data, delete_data
+        from cognee.modules.data.methods import get_dataset
+
+        # Check if user has permission to access dataset and data by trying to get the dataset
+        dataset = await get_dataset(user.id, dataset_id)
+
+        #TODO: Handle situation differently if user doesn't have permission to access data?
+        if dataset is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Dataset ({dataset_id}) not found."
+            )
+
+        data = await get_data(user.id, data_id)
+
+        if data is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Dataset ({data_id}) not found."
+            )
+
+        await delete_data(data)
+
     @router.get("/{dataset_id}/graph", response_model=str)
     async def get_dataset_graph(dataset_id: str, user: User = Depends(get_authenticated_user)):
         from cognee.shared.utils import render_graph
