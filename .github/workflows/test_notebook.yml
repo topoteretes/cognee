@@ -49,8 +49,8 @@ jobs:
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: {{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: {{ secrets.GRAPHISTRY_PASSWORD }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: jupyter nbconvert \
              --to notebook \
              --execute notebooks/cognee_demo.ipynb \
