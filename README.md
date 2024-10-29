@@ -200,7 +200,7 @@ Cognee supports a variety of tools and services for different operations:
 
 ## Demo
 
-Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee%20-%20Get%20Started.ipynb)
+Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee_demo.ipynb)
 
 
 
