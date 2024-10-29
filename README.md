@@ -29,6 +29,10 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 pip install cognee
 ```
 
+### With pip with postgres support
+```bash
+pip install cognee[postgres]
+```
 
 ### With poetry
 
@@ -36,6 +40,11 @@ pip install cognee
 poetry add cognee
 ```
 
+### With poetry with postgres support
+
+```bash
+poetry add cognee -E postgres
+```
 
 ## 💻 Basic Usage
 
