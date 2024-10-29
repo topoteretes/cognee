@@ -57,5 +57,5 @@ jobs:
           poetry run jupyter nbconvert \
           --to notebook \
           --execute notebooks/cognee_demo.ipynb \
-          --output notebooks/executed_notebook.ipynb \
+          --output executed_notebook.ipynb \
           --ExecutePreprocessor.timeout=1200
