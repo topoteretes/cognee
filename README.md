@@ -29,7 +29,7 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 pip install cognee
 ```
 
-### With pip with postgres support
+### With pip with PostgreSQL support
 ```bash
 pip install cognee[postgres]
 ```
@@ -40,7 +40,7 @@ pip install cognee[postgres]
 poetry add cognee
 ```
 
-### With poetry with postgres support
+### With poetry with PostgreSQL support
 
 ```bash
 poetry add cognee -E postgres
@@ -81,6 +81,18 @@ or run everything in a docker container:
 docker-compose up
 ```
 Then navigate to localhost:3000
+
+If you want to use the UI with PostgreSQL through docker-compose make sure to set the following values in the .env file: 
+```
+DB_PROVIDER=postgres
+
+DB_HOST=postgres
+DB_PORT=5432
+
+DB_NAME=cognee_db
+DB_USERNAME=cognee
+DB_PASSWORD=cognee
+``` 
 
 ### Simple example
 
