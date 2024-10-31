@@ -14,9 +14,11 @@ Check available configuration options:
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.llm.config import get_llm_config
 print(get_vectordb_config().to_dict())
 print(get_graph_config().to_dict())
 print(get_relational_config().to_dict())
+print(get_llm_config().to_dict())
 
 ```
 
@@ -29,8 +31,7 @@ GRAPH_DATABASE_PROVIDER = 'lancedb'
 Otherwise, you can set the configuration yourself:
 
 ```python
-
-cognee.config.llm_provider = 'ollama'
+cognee.config.set_llm_provider('ollama')
 ```
 
 ## 🚀 Getting Started with Local Models
@@ -52,15 +53,14 @@ LLM_PROVIDER = 'ollama'
 Otherwise, you can set the configuration for the model:
 
 ```bash
-cognee.config.llm_provider = 'ollama'
+cognee.config.set_llm_provider('ollama')
 
 ```
 You can also set the HOST and model name:
 
 ```bash
-
-cognee.config.llm_endpoint = "http://localhost:11434/v1"
-cognee.config.llm_model = "mistral:instruct"
+cognee.config.set_llm_endpoint("http://localhost:11434/v1")
+cognee.config.set_llm_model("mistral:instruct")
 ```
 
 
@@ -73,7 +73,7 @@ LLM_PROVIDER = 'custom'
 Otherwise, you can set the configuration for the model:
 
 ```bash
-cognee.config.llm_provider = 'custom'
+cognee.config.set_llm_provider('custom')
 
 ```
 You can also set the HOST  and model name:
