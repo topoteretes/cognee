@@ -5,6 +5,7 @@ from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.infrastructure.files.storage import LocalStorage
 
@@ -55,19 +56,36 @@ class config():
         graph_config.graph_database_provider = graph_database_provider
 
     @staticmethod
-    def llm_provider(llm_provider: str):
-        graph_config = get_graph_config()
-        graph_config.llm_provider = llm_provider
+    def set_llm_provider(llm_provider: str):
+        llm_config = get_llm_config()
+        llm_config.llm_provider = llm_provider
 
     @staticmethod
-    def llm_endpoint(llm_endpoint: str):
-        graph_config = get_graph_config()
-        graph_config.llm_endpoint = llm_endpoint
+    def set_llm_endpoint(llm_endpoint: str):
+        llm_config = get_llm_config()
+        llm_config.llm_endpoint = llm_endpoint
 
     @staticmethod
-    def llm_model(llm_model: str):
-        graph_config = get_graph_config()
-        graph_config.llm_model = llm_model
+    def set_llm_model(llm_model: str):
+        llm_config = get_llm_config()
+        llm_config.llm_model = llm_model
+
+    @staticmethod
+    def set_llm_api_key(llm_api_key: str):
+        llm_config = get_llm_config()
+        llm_config.llm_api_key = llm_api_key
+
+    @staticmethod
+    def set_llm_config(config_dict: dict):
+        """
+            Updates the llm config with values from config_dict.
+        """
+        llm_config = get_llm_config()
+        for key, value in config_dict.items():
+            if hasattr(llm_config, key):
+                object.__setattr__(llm_config, key, value)
+            else:
+                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -137,5 +155,5 @@ class config():
         if "username" not in graphistry_config or "password" not in graphistry_config:
             raise ValueError("graphistry_config dictionary must contain 'username' and 'password' keys.")
 
-        base_config.graphistry_username = graphistry_config.username
-        base_config.graphistry_password = graphistry_config.password
+        base_config.graphistry_username = graphistry_config.get("username")
+        base_config.graphistry_password = graphistry_config.get("password")
