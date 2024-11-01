@@ -19,9 +19,11 @@ class Dataset(Base):
     owner_id = Column(UUID, index = True)
 
     data: Mapped[List["Data"]] = relationship(
+        "Data",
         secondary = DatasetData.__tablename__,
         back_populates = "datasets",
         lazy = "noload",
+        cascade="all, delete"
     )
 
     def to_json(self) -> dict:

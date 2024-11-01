@@ -7,5 +7,5 @@ class DatasetData(Base):
 
     created_at = Column(DateTime(timezone = True), default = lambda: datetime.now(timezone.utc))
 
-    dataset_id = Column(UUID, ForeignKey("datasets.id"), primary_key = True)
-    data_id = Column(UUID, ForeignKey("data.id"), primary_key = True)
+    dataset_id = Column(UUID, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key = True)
+    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"), primary_key = True)

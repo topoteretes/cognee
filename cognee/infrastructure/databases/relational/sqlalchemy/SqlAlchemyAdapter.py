@@ -89,10 +89,22 @@ class SQLAlchemyAdapter():
         """
         Delete data in given table based on id. Table must have an id Column.
         """
-        async with self.get_async_session() as session:
-            TableModel = await self.get_table(table_name, schema_name)
-            await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
-            await session.commit()
+        if self.engine.dialect.name == "sqlite":
+            async with self.get_async_session() as session:
+                TableModel = await self.get_table(table_name, schema_name)
+
+                # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
+                # so must be enabled for each database connection/session separately.
+                await session.execute(text("PRAGMA foreign_keys = ON;"))
+
+                await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
+                await session.commit()
+        else:
+            async with self.get_async_session() as session:
+                TableModel = await self.get_table(table_name, schema_name)
+                await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
+                await session.commit()
+
 
     async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
         """
