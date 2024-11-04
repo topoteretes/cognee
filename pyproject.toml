@@ -19,7 +19,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.9.0,<3.12"
-openai = "1.27.0"
+openai = "1.52.0"
 pydantic = "2.8.2"
 python-dotenv = "1.0.1"
 fastapi = "^0.109.2"
@@ -55,7 +55,7 @@ structlog = "^24.1.0"
 tiktoken = "0.7.0"
 posthog = "^3.5.0"
 lancedb = "0.8.0"
-litellm = "1.38.10"
+litellm = "1.51.3"
 groq = "0.8.0"
 tantivy = "^0.22.0"
 tokenizers ="0.15.2"
