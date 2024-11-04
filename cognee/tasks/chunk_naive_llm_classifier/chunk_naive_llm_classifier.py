@@ -59,7 +59,7 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
             data_points.append(
                 DataPoint[Keyword](
                     id=str(classification_type_id),
-                    payload=Keyword.parse_obj({
+                    payload=Keyword.model_validate({
                         "uuid": str(classification_type_id),
                         "text": classification_type_label,
                         "chunk_id": str(data_chunk.chunk_id),
@@ -98,7 +98,7 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
                 data_points.append(
                     DataPoint[Keyword](
                         id=str(classification_subtype_id),
-                        payload=Keyword.parse_obj({
+                        payload=Keyword.model_validate({
                             "uuid": str(classification_subtype_id),
                             "text": classification_subtype_label,
                             "chunk_id": str(data_chunk.chunk_id),
