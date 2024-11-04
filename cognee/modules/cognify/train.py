@@ -1,4 +1,3 @@
-import dsp
 import dspy
 from dspy.teleprompt import BootstrapFewShot
 from dspy.primitives.example import Example
