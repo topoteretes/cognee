@@ -5,12 +5,13 @@ from fastapi import Depends, APIRouter
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
 
-def get_search_router():
-    router = APIRouter()
 
-    class SearchPayloadDTO(InDTO):
-        search_type: SearchType
-        query: str
+class SearchPayloadDTO(InDTO):
+    search_type: SearchType
+    query: str
+
+def get_search_router() -> APIRouter:
+    router = APIRouter()
 
     @router.post("/", response_model = list)
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):

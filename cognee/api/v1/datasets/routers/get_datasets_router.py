@@ -13,19 +13,29 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunStatus
 
-def get_datasets_router():
-    logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+class ErrorResponseDTO(BaseModel):
+    message: str
+
+class DatasetDTO(OutDTO):
+    id: UUID
+    name: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+    owner_id: UUID
+
+class DataDTO(OutDTO):
+    id: UUID
+    name: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+    extension: str
+    mime_type: str
+    raw_data_location: str
+
+def get_datasets_router() -> APIRouter:
     router = APIRouter()
-
-    class ErrorResponseDTO(BaseModel):
-        message: str
-
-    class DatasetDTO(OutDTO):
-        id: UUID
-        name: str
-        created_at: datetime
-        updated_at: Optional[datetime]
-        owner_id: UUID
 
     @router.get("/", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):
@@ -96,15 +106,6 @@ def get_datasets_router():
                 content="Graphistry credentials are not set. Please set them in your .env file.",
             )
 
-    class DataDTO(OutDTO):
-        id: UUID
-        name: str
-        created_at: datetime
-        updated_at: Optional[datetime]
-        extension: str
-        mime_type: str
-        raw_data_location: str
-
     @router.get("/{dataset_id}/data", response_model=list[DataDTO],
              responses={404: {"model": ErrorResponseDTO}})
     async def get_dataset_data(dataset_id: str, user: User = Depends(get_authenticated_user)):
@@ -157,17 +158,20 @@ def get_datasets_router():
         dataset_data = await get_dataset_data(dataset.id)
 
         if dataset_data is None:
-            raise HTTPException(status_code=404, detail=f"Dataset ({dataset_id}) not found.")
+            raise HTTPException(status_code=404, detail=f"No data found in dataset ({dataset_id}).")
 
-        data = [data for data in dataset_data if str(data.id) == data_id][0]
+        matching_data = [data for data in dataset_data if str(data.id) == data_id]
 
-        if data is None:
+        # Check if matching_data contains an element
+        if len(matching_data) == 0:
             return JSONResponse(
                 status_code=404,
                 content={
                     "detail": f"Data ({data_id}) not found in dataset ({dataset_id})."
                 }
             )
+
+        data = matching_data[0]
 
         return data.raw_data_location
 

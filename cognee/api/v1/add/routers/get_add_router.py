@@ -3,12 +3,15 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 from typing import List
 import aiohttp
+import subprocess
+import logging
 import os
-
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-def get_add_router():
+logger = logging.getLogger(__name__)
+
+def get_add_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/", response_model=None)
@@ -24,7 +27,7 @@ def get_add_router():
                 if "github" in data:
                     # Perform git clone if the URL is from GitHub
                     repo_name = data.split("/")[-1].replace(".git", "")
-                    os.system(f"git clone {data} .data/{repo_name}")
+                    subprocess.run(["git", "clone", data, f".data/{repo_name}"], check=True)
                     await cognee_add(
                         "data://.data/",
                         f"{repo_name}",
@@ -35,7 +38,8 @@ def get_add_router():
                         async with session.get(data) as resp:
                             if resp.status == 200:
                                 file_data = await resp.read()
-                                with open(f".data/{data.split('/')[-1]}", "wb") as f:
+                                filename = os.path.basename(data)
+                                with open(f".data/{filename}", "wb") as f:
                                     f.write(file_data)
                                 await cognee_add(
                                     "data://.data/",

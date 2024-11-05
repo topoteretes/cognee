@@ -6,11 +6,11 @@ from fastapi.responses import JSONResponse
 from cognee.modules.users.methods import get_authenticated_user
 from fastapi import Depends
 
-def get_cognify_router():
-    router = APIRouter()
+class CognifyPayloadDTO(BaseModel):
+    datasets: List[str]
 
-    class CognifyPayloadDTO(BaseModel):
-        datasets: List[str]
+def get_cognify_router() -> APIRouter:
+    router = APIRouter()
 
     @router.post("/", response_model=None)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):

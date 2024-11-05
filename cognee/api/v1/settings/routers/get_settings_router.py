@@ -4,40 +4,39 @@ from typing import Union, Optional, Literal
 from cognee.modules.users.methods import get_authenticated_user
 from fastapi import Depends
 from cognee.modules.users.models import User
+from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
 
-def get_settings_router():
+class LLMConfigOutputDTO(OutDTO, LLMConfig):
+    pass
+
+class VectorDBConfigOutputDTO(OutDTO, VectorDBConfig):
+    pass
+
+class SettingsDTO(OutDTO):
+    llm: LLMConfigOutputDTO
+    vector_db: VectorDBConfigOutputDTO
+
+class LLMConfigInputDTO(InDTO):
+    provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"]]
+    model: str
+    api_key: str
+
+class VectorDBConfigInputDTO(InDTO):
+    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
+    url: str
+    api_key: str
+
+class SettingsPayloadDTO(InDTO):
+    llm: Optional[LLMConfigInputDTO] = None
+    vector_db: Optional[VectorDBConfigInputDTO] = None
+
+def get_settings_router() -> APIRouter:
     router = APIRouter()
-
-    from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
-
-    class LLMConfigDTO(OutDTO, LLMConfig):
-        pass
-
-    class VectorDBConfigDTO(OutDTO, VectorDBConfig):
-        pass
-
-    class SettingsDTO(OutDTO):
-        llm: LLMConfigDTO
-        vector_db: VectorDBConfigDTO
 
     @router.get("/", response_model=SettingsDTO)
     async def get_settings(user: User = Depends(get_authenticated_user)):
         from cognee.modules.settings import get_settings as get_cognee_settings
         return get_cognee_settings()
-
-    class LLMConfigDTO(InDTO):
-        provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"]]
-        model: str
-        api_key: str
-
-    class VectorDBConfigDTO(InDTO):
-        provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
-        url: str
-        api_key: str
-
-    class SettingsPayloadDTO(InDTO):
-        llm: Optional[LLMConfigDTO] = None
-        vector_db: Optional[VectorDBConfigDTO] = None
 
     @router.post("/", response_model=None)
     async def save_settings(new_settings: SettingsPayloadDTO, user: User = Depends(get_authenticated_user)):
