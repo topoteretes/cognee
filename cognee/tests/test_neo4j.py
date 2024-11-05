@@ -53,7 +53,7 @@ async def main():
 
     search_results = await cognee.search(SearchType.SUMMARIES, query = random_node_name)
     assert len(search_results) != 0, "Query related summaries don't exist."
-    print("\n\Extracted summaries are:\n")
+    print("\nExtracted summaries are:\n")
     for result in search_results:
         print(f"{result}\n")
 

@@ -12,7 +12,7 @@ class NodeModel(BaseModel):
     default_relationship: Optional[RelationshipModel] = None
     children: List[Union[Dict[str, Any], "NodeModel"]] = Field(default_factory=list)
 
-NodeModel.update_forward_refs()
+NodeModel.model_rebuild()
 
 
 class OntologyNode(BaseModel):

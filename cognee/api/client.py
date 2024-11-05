@@ -146,7 +146,7 @@ class DatasetDTO(OutDTO):
     id: UUID
     name: str
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
     owner_id: UUID
 
 @app.get("/api/v1/datasets", response_model = list[DatasetDTO])
@@ -200,7 +200,7 @@ class DataDTO(OutDTO):
     id: UUID
     name: str
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
     extension: str
     mime_type: str
     raw_data_location: str
