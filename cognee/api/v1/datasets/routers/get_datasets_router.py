@@ -77,7 +77,7 @@ def get_datasets_router() -> APIRouter:
                 detail=f"Dataset ({dataset_id}) not found."
             )
 
-        data = await get_data(user.id, data_id)
+        data = await get_data(data_id)
 
         if data is None:
             raise HTTPException(
