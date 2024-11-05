@@ -29,6 +29,10 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 pip install cognee
 ```
 
+### With pip with PostgreSQL support
+```bash
+pip install cognee[postgres]
+```
 
 ### With poetry
 
@@ -36,6 +40,11 @@ pip install cognee
 poetry add cognee
 ```
 
+### With poetry with PostgreSQL support
+
+```bash
+poetry add cognee -E postgres
+```
 
 ## 💻 Basic Usage
 
@@ -50,7 +59,7 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 or 
 ```
 import cognee
-cognee.config.llm_api_key = "YOUR_OPENAI_API_KEY"
+cognee.config.set_llm_api_key("YOUR_OPENAI_API_KEY")
 ```
 You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers, for more info check out our <a href="https://topoteretes.github.io/cognee">documentation</a>
@@ -73,26 +82,54 @@ docker-compose up
 ```
 Then navigate to localhost:3000
 
+If you want to use the UI with PostgreSQL through docker-compose make sure to set the following values in the .env file: 
+```
+DB_PROVIDER=postgres
+
+DB_HOST=postgres
+DB_PORT=5432
+
+DB_NAME=cognee_db
+DB_USERNAME=cognee
+DB_PASSWORD=cognee
+``` 
+
 ### Simple example
 
-Run the default cognee pipeline:
+First, copy `.env.template` to `.env` and add your OpenAI API key to the LLM_API_KEY field. 
 
-```
+Optionally, set `VECTOR_DB_PROVIDER="lancedb"` in `.env` to simplify setup.
+
+This script will run the default pipeline:
+
+```python
 import cognee
+import asyncio
+from cognee.api.v1.search import SearchType
 
-text = """Natural language processing (NLP) is an interdisciplinary
-       subfield of computer science and information retrieval"""
+async def main():
+    await cognee.prune.prune_data()  # Reset cognee data
+    await cognee.prune.prune_system(metadata=True)  # Reset cognee system state
 
-await cognee.add(text) # Add a new piece of information
+    text = """
+    Natural language processing (NLP) is an interdisciplinary
+    subfield of computer science and information retrieval.
+    """
 
-await cognee.cognify() # Use LLMs and cognee to create a knowledge graph
+    await cognee.add(text)  # Add text to cognee
+    await cognee.cognify()  # Use LLMs and cognee to create knowledge graph
 
-search_results = await cognee.search("INSIGHTS", {'query': 'NLP'}) # Query cognee for the insights
+    search_results = await cognee.search(  # Search cognee for insights
+        SearchType.INSIGHTS,
+        {'query': 'Tell me about NLP'}
+    )
 
-for result in search_results:
-    do_something_with_result(result)
+    for result_text in search_results:  # Display results
+        print(result_text)
+
+asyncio.run(main())
 ```
-
+A version of this example is here: `examples/pyton/simple_example.py`
 
 ### Create your own memory store
 

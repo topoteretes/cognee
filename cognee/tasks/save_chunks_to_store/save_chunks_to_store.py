@@ -11,7 +11,7 @@ async def save_chunks_to_store(data_chunks: list[DocumentChunk], collection_name
 
     # Remove and unlink existing chunks
     if await vector_engine.has_collection(collection_name):
-        existing_chunks = [DocumentChunk.parse_obj(chunk.payload) for chunk in (await vector_engine.retrieve(
+        existing_chunks = [DocumentChunk.model_validate(chunk.payload) for chunk in (await vector_engine.retrieve(
             collection_name,
             [str(chunk.chunk_id) for chunk in data_chunks],
         ))]

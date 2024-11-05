@@ -6,15 +6,15 @@ class BaseClass(BaseModel):
     name: str
     type: Literal["Class"] = "Class"
     description: str
-    constructor_parameters: Optional[List[str]]
+    constructor_parameters: Optional[List[str]] = None
 
 class Class(BaseModel):
     id: str
     name: str
     type: Literal["Class"] = "Class"
     description: str
-    constructor_parameters: Optional[List[str]]
-    from_class: Optional[BaseClass]
+    constructor_parameters: Optional[List[str]] = None
+    from_class: Optional[BaseClass] = None
 
 class ClassInstance(BaseModel):
     id: str
@@ -28,7 +28,7 @@ class Function(BaseModel):
     name: str
     type: Literal["Function"] = "Function"
     description: str
-    parameters: Optional[List[str]]
+    parameters: Optional[List[str]] = None
     return_type: str
     is_static: Optional[bool] = False
 
@@ -38,7 +38,7 @@ class Variable(BaseModel):
     type: Literal["Variable"] = "Variable"
     description: str
     is_static: Optional[bool] = False
-    default_value: Optional[str]
+    default_value: Optional[str] = None
 
 class Operator(BaseModel):
     id: str
