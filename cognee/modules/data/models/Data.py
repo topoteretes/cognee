@@ -20,9 +20,11 @@ class Data(Base):
     updated_at = Column(DateTime(timezone = True), onupdate = lambda: datetime.now(timezone.utc))
 
     datasets: Mapped[List["Dataset"]] = relationship(
+        "Dataset",
         secondary = DatasetData.__tablename__,
         back_populates = "data",
         lazy = "noload",
+        cascade="all, delete"
     )
 
     def to_json(self) -> dict:
