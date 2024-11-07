@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.infrastructure.engine import DataPoint
 
-from .serialize_datetime import serialize_datetime
+from .serialize_data import serialize_data
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -113,7 +113,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 PGVectorDataPoint(
                     id=data_point.id,
                     vector=data_vectors[data_index],
-                    payload=serialize_datetime(data_point.model_dump()),
+                    payload=serialize_data(data_point.model_dump()),
                 )
                 for (data_index, data_point) in enumerate(data_points)
             ]
