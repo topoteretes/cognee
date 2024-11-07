@@ -5,7 +5,7 @@ from .models.Task import Task
 
 class PipelineConfig(BaseModel):
     batch_count: int = 10
-    description: Optional[str]
+    description: Optional[str] = None
 
 class Pipeline():
     id: UUID = uuid4()

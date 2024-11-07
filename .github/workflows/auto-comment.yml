@@ -1,0 +1,81 @@
+name: Issue and PR Auto Comments
+on:
+  issues:
+    types:
+      - opened
+      - closed
+      - assigned
+  pull_request_target:
+    types:
+      - opened
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  auto-comment:
+    permissions:
+      issues: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      # configuration for auto-comment actions
+      - name: Configure Auto Comments
+        uses: wow-actions/auto-comment@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          issuesOpened: |
+            👋 @{{ author }}
+            
+            Thank you for raising an issue. We will investigate the matter and get back to you as soon as possible.
+            
+            To help us address your issue efficiently, please ensure you have provided:
+            - A clear description of the problem
+            - Steps to reproduce (if applicable)
+            - Expected vs actual behavior
+            - Any relevant screenshots or error messages
+            
+            Our team typically responds within 2-3 business days.
+
+          issuesClosed: |
+            ✅ @{{ author }}
+            
+            This issue has been closed. If you have any further questions or if the issue resurfaces, 
+            please feel free to:
+            - Add a comment to this thread
+            - Open a new issue with reference to this one
+            
+            Thank you for helping us improve!
+
+          pullRequestOpened: |
+            👍 @{{ author }}
+            
+            Thank you for your pull request and contributing to our community!
+            
+            Please ensure you have:
+            - [ ] Followed our contributing guidelines
+            - [ ] Added/updated tests (if applicable)
+            - [ ] Updated documentation (if applicable)
+            - [ ] Added a descriptive PR title
+            
+            Our team will review your contribution as soon as possible. Feel free to reach out if you need any assistance.
+
+      # Separate action for merged PRs
+      - name: Handle Merged Pull Requests
+        if: github.event.pull_request.merged == true
+        uses: actions-cool/pr-welcome@v1.2.1
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          comment: |
+            🎉 Fantastic work @${{ github.event.pull_request.user.login }}! 🎉
+            
+            Your pull request has been merged successfully. Thank you for your valuable contribution!
+            
+            We appreciate the time and effort you've put into improving our project.
+            Your changes will be included in our next release.
+            
+            Keep up the great work! 💪
+          emoji: 'rocket'
+          pr-emoji: '+1, heart, rocket'
+          

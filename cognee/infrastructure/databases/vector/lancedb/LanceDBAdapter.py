@@ -193,7 +193,10 @@ class LanceDBAdapter(VectorDBInterface):
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         connection = await self.get_connection()
         collection = await connection.open_table(collection_name)
-        results = await collection.delete(f"id IN {tuple(data_point_ids)}")
+        if len(data_point_ids) == 1:
+            results = await collection.delete(f"id = '{data_point_ids[0]}'")
+        else:
+            results = await collection.delete(f"id IN {tuple(data_point_ids)}")
         return results
 
     async def create_vector_index(self, index_name: str, index_property_name: str):

@@ -56,7 +56,7 @@ class OntologyEngine:
             for item in items:
                 flat_list.extend(await self.recursive_flatten(item, parent_id))
         elif isinstance(items, dict):
-            model = NodeModel.parse_obj(items)
+            model = NodeModel.model_validate(items)
             flat_list.append(await self.flatten_model(model, parent_id))
             for child in model.children:
                 flat_list.extend(await self.recursive_flatten(child, model.node_id))
