@@ -11,6 +11,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 logger = logging.getLogger("WeaviateAdapter")
 
 class IndexSchema(DataPoint):
+    uuid: str
     text: str
 
     _metadata: dict = {
@@ -88,10 +89,8 @@ class WeaviateAdapter(VectorDBInterface):
         def convert_to_weaviate_data_points(data_point: DataPoint):
             vector = data_vectors[data_points.index(data_point)]
             properties = data_point.model_dump()
-
-            if "id" in properties:
-                properties["uuid"] = str(data_point.id)
-                del properties["id"]
+            properties["uuid"] = properties["id"]
+            del properties["id"]
 
             return DataObject(
                 uuid = data_point.id,
@@ -131,8 +130,8 @@ class WeaviateAdapter(VectorDBInterface):
     async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
         await self.create_data_points(f"{index_name}_{index_property_name}", [
             IndexSchema(
-                id = data_point.id,
-                text = data_point.get_embeddable_data(),
+                uuid = str(data_point.id),
+                text = getattr(data_point, data_point._metadata["index_fields"][0]),
             ) for data_point in data_points
         ])
 
@@ -179,9 +178,9 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id = UUID(str(result.uuid)),
+                id = UUID(result.id),
                 payload = result.properties,
-                score = 1 - float(result.metadata.score)
+                score = float(result.metadata.score)
             ) for result in search_result.objects
         ]
 

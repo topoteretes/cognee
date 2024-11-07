@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.models import EntityType, Entity
-from cognee.modules.engine.utils import generate_edge_name, generate_node_id, generate_node_name
+from cognee.modules.engine.utils import generate_node_id, generate_node_name
 from cognee.tasks.storage import add_data_points
 
 async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]):
@@ -95,7 +95,7 @@ async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model:
         for edge in graph.edges:
             source_node_id = generate_node_id(edge.source_node_id)
             target_node_id = generate_node_id(edge.target_node_id)
-            relationship_name = generate_edge_name(edge.relationship_name)
+            relationship_name = generate_node_name(edge.relationship_name)
 
             edge_key = str(source_node_id) + str(target_node_id) + relationship_name
 
@@ -105,7 +105,7 @@ async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model:
                     target_node_id,
                     edge.relationship_name,
                     dict(
-                        relationship_name = generate_edge_name(edge.relationship_name),
+                        relationship_name = generate_node_name(edge.relationship_name),
                         source_node_id = source_node_id,
                         target_node_id = target_node_id,
                     ),

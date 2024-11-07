@@ -115,7 +115,7 @@ def prepare_edges(graph, source, target, edge_key):
         source: str(edge[0]),
         target: str(edge[1]),
         edge_key: str(edge[2]),
-    } for edge in graph.edges(keys = True, data = True)]
+    } for edge in graph.edges]
 
     return pd.DataFrame(edge_list)
 
