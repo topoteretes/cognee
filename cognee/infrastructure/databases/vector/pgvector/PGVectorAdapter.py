@@ -203,7 +203,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # Create and return ScoredResult objects
             return [
                 ScoredResult(
-                    id = UUID(row.id),
+                    id = UUID(str(row.id)),
                     payload = row.payload,
                     score = row.similarity
                 ) for row in vector_list
