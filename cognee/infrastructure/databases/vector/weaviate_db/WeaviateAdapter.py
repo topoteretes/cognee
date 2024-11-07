@@ -178,7 +178,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id = UUID(result.id),
+                id = UUID(result.uuid),
                 payload = result.properties,
                 score = float(result.metadata.score)
             ) for result in search_result.objects
