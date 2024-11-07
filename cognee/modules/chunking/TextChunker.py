@@ -29,7 +29,7 @@ class TextChunker():
                 else:
                     if len(self.paragraph_chunks) == 0:
                         yield DocumentChunk(
-                            id = chunk_data["chunk_id"],
+                            id = str(chunk_data["chunk_id"]),
                             text = chunk_data["text"],
                             word_count = chunk_data["word_count"],
                             is_part_of = self.document,
@@ -42,7 +42,7 @@ class TextChunker():
                         chunk_text = " ".join(chunk["text"] for chunk in self.paragraph_chunks)
                         try:
                             yield DocumentChunk(
-                                id = uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"),
+                                id = str(uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}")),
                                 text = chunk_text,
                                 word_count = self.chunk_size,
                                 is_part_of = self.document,
@@ -59,7 +59,7 @@ class TextChunker():
         if len(self.paragraph_chunks) > 0:
             try:
                 yield DocumentChunk(
-                    id = uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"),
+                    id = str(uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}")),
                     text = " ".join(chunk["text"] for chunk in self.paragraph_chunks),
                     word_count = self.chunk_size,
                     is_part_of = self.document,

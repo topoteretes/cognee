@@ -17,12 +17,12 @@ async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: 
 
     summaries = [
         TextSummary(
-            id = uuid5(chunk.id, "TextSummary"),
-            made_from = chunk,
+            id = uuid5(chunk.id, "summary"),
+            chunk = chunk,
             text = chunk_summaries[chunk_index].summary,
         ) for (chunk_index, chunk) in enumerate(data_chunks)
     ]
 
-    await add_data_points(summaries)
+    add_data_points(summaries)
 
     return data_chunks

@@ -30,10 +30,6 @@ class NetworkXAdapter(GraphDBInterface):
     def __init__(self, filename = "cognee_graph.pkl"):
         self.filename = filename
 
-    async def get_graph_data(self):
-        await self.load_graph_from_file()
-        return (list(self.graph.nodes(data = True)), list(self.graph.edges(data = True, keys = True)))
-
     async def query(self, query: str, params: dict):
         pass
 

@@ -4,8 +4,9 @@ from cognee.modules.data.processing.document_types import Document
 
 class TextSummary(DataPoint):
     text: str
-    made_from: DocumentChunk
+    chunk: DocumentChunk
 
     _metadata: dict = {
         "index_fields": ["text"],
     }
+

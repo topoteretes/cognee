@@ -27,8 +27,8 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
     else:
         vector_engine = get_vector_engine()
         results = await asyncio.gather(
-            vector_engine.search("Entity_name", query_text = query, limit = 5),
-            vector_engine.search("EntityType_name", query_text = query, limit = 5),
+            vector_engine.search("Entity_text", query_text = query, limit = 5),
+            vector_engine.search("EntityType_text", query_text = query, limit = 5),
         )
         results = [*results[0], *results[1]]
         relevant_results = [result for result in results if result.score < 0.5][:5]

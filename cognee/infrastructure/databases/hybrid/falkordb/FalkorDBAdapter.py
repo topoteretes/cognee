@@ -1,7 +1,6 @@
 import asyncio
 from textwrap import dedent
 from typing import Any
-from uuid import UUID
 from falkordb import FalkorDB
 
 from cognee.infrastructure.engine import DataPoint
@@ -161,35 +160,6 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
 
     async def extract_nodes(self, data_point_ids: list[str]):
         return await self.retrieve(data_point_ids)
-
-    async def get_connections(self, node_id: UUID) -> list:
-        predecessors_query = """
-        MATCH (node)<-[relation]-(neighbour)
-        WHERE node.id = $node_id
-        RETURN neighbour, relation, node
-        """
-        successors_query = """
-        MATCH (node)-[relation]->(neighbour)
-        WHERE node.id = $node_id
-        RETURN node, relation, neighbour
-        """
-
-        predecessors, successors = await asyncio.gather(
-            self.query(predecessors_query, dict(node_id = node_id)),
-            self.query(successors_query, dict(node_id = node_id)),
-        )
-
-        connections = []
-
-        for neighbour in predecessors:
-            neighbour = neighbour["relation"]
-            connections.append((neighbour[0], { "relationship_name": neighbour[1] }, neighbour[2]))
-
-        for neighbour in successors:
-            neighbour = neighbour["relation"]
-            connections.append((neighbour[0], { "relationship_name": neighbour[1] }, neighbour[2]))
-
-        return connections
 
     async def search(
         self,
