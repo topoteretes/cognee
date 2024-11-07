@@ -5,6 +5,7 @@ from typing import Union
 
 
 def get_data_from_llama_index(data_point: Union[Document, ImageDocument], dataset_name: str) -> str:
+    # Specific type checking is used to ensure it's not a child class from Document
     if type(data_point) == Document:
         file_path = data_point.metadata.get("file_path")
         if file_path is None:
