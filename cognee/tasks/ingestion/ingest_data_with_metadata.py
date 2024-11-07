@@ -1,7 +1,6 @@
 import dlt
 import cognee.modules.ingestion as ingestion
-from typing import Union, BinaryIO
-from uuid import UUID
+from typing import Any, Union, BinaryIO
 from llama_index.core import Document
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
@@ -12,7 +11,7 @@ from cognee.modules.data.methods import create_dataset
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from .get_dlt_destination import get_dlt_destination
 
-async def ingest_data_with_metadata(data: list, dataset_name: str, user: User):
+async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
@@ -20,38 +19,37 @@ async def ingest_data_with_metadata(data: list, dataset_name: str, user: User):
         destination = destination,
     )
 
+    def save_data_to_storage(data_item: Union[BinaryIO, Document, str], dataset_name: str) -> str:
+        # Check if data is of type Document or any of it's subclasses
+        if isinstance(data_item, Document):
+            file_path = get_data_from_llama_index(data_item, dataset_name)
+
+        # data is a file object coming from upload.
+        elif hasattr(data_item, "file"):
+            file_path = save_data_to_file(data_item.file, dataset_name, filename=data_item.filename)
+
+        elif isinstance(data_item, str):
+            # data is a file path
+            if data_item.startswith("file://") or data_item.startswith("/"):
+                file_path = data_item.replace("file://", "")
+            # data is text
+            else:
+                file_path = save_data_to_file(data_item, dataset_name)
+        else:
+            raise ValueError(f"Data type not supported: {type(data_item)}")
+
+        return file_path
+
     @dlt.resource(standalone = True, merge_key = "id")
-    async def data_resources(data: list, user: User):
+    async def data_resources(data: Any, user: User):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
             data = [data]
 
-        file_paths = []
-
         # Process data
         for data_item in data:
-            # data is a file object coming from upload.
-            if hasattr(data_item, "file"):
-                file_path = save_data_to_file(data_item.file, dataset_name, filename=data_item.filename)
-                file_paths.append(file_path)
 
-            # Check if data is of type Document or any of it's subclasses
-            elif isinstance(data_item, Document):
-                file_path = get_data_from_llama_index(data_item, dataset_name)
-                file_paths.append(file_path)
-
-            elif isinstance(data_item, str):
-                # data is a file path
-                if data_item.startswith("file://") or data_item.startswith("/"):
-                    file_path =data_item.replace("file://", "")
-                    file_paths.append(file_path)
-
-                # data is text
-                else:
-                    file_path = save_data_to_file(data_item, dataset_name)
-                    file_paths.append(file_path)
-            else:
-                raise ValueError(f"Data type not supported: {type(data_item)}")
+            file_path = save_data_to_storage(data_item, dataset_name)
 
             # Ingest data and add metadata
             with open(file_path.replace("file://", ""), mode = "rb") as file:
