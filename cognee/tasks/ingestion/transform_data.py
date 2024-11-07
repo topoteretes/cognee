@@ -4,7 +4,7 @@ from cognee.modules.ingestion import save_data_to_file
 from typing import Union
 
 
-def from_llama_index_format(data_point: Union[Document, ImageDocument], dataset_name: str) -> str:
+def get_data_from_llama_index(data_point: Union[Document, ImageDocument], dataset_name: str) -> str:
     if type(data_point) == Document:
         file_path = data_point.metadata.get("file_path")
         if file_path is None:

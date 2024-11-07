@@ -1,6 +1,6 @@
 from typing import Union, BinaryIO
 from cognee.modules.ingestion import save_data_to_file
-from .transform_data import from_llama_index_format
+from .transform_data import get_data_from_llama_index
 from llama_index.core import Document
 
 def save_data_to_storage(data: Union[BinaryIO, Document, str], dataset_name) -> list[str]:
@@ -18,7 +18,7 @@ def save_data_to_storage(data: Union[BinaryIO, Document, str], dataset_name) -> 
 
         # Check if data is of type Document or any of it's subclasses
         if isinstance(data_item, Document):
-            file_paths.append(from_llama_index_format(data_item))
+            file_paths.append(get_data_from_llama_index(data_item))
 
         if isinstance(data_item, str):
             # data is a file path

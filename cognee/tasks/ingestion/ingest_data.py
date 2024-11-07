@@ -7,7 +7,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
 from cognee.modules.ingestion import save_data_to_file
-from .transform_data import from_llama_index_format
+from .transform_data import get_data_from_llama_index
 from cognee.modules.data.methods import create_dataset
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from .get_dlt_destination import get_dlt_destination
@@ -37,7 +37,7 @@ async def ingest_data(data: list, dataset_name: str, user: User):
 
             # Check if data is of type Document or any of it's subclasses
             elif isinstance(data_item, Document):
-                file_path = from_llama_index_format(data_item, dataset_name)
+                file_path = get_data_from_llama_index(data_item, dataset_name)
                 file_paths.append(file_path)
 
             elif isinstance(data_item, str):
