@@ -14,7 +14,6 @@ async def add(data: Union[BinaryIO, list[BinaryIO], str, list[str]], dataset_nam
         user = await get_default_user()
 
     tasks = [
-        Task(save_data_to_storage, dataset_name),
         Task(ingest_data, dataset_name, user)
     ]
 
