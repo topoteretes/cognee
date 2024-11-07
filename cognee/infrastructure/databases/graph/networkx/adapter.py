@@ -247,27 +247,15 @@ class NetworkXAdapter(GraphDBInterface):
                 async with aiofiles.open(file_path, "r") as file:
                     graph_data = json.loads(await file.read())
                     for node in graph_data["nodes"]:
-                        try:
-                          node["id"] = UUID(node["id"])
-                        except:
-                          pass
-                        if "updated_at" in node:
-                            node["updated_at"] = datetime.strptime(node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+                        node["id"] = UUID(node["id"])
+                        node["updated_at"] = datetime.strptime(node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
                     for edge in graph_data["links"]:
-                        try:
-                          source_id = UUID(edge["source"])
-                          target_id = UUID(edge["target"])
-
-                          edge["source"] = source_id
-                          edge["target"] = target_id
-                          edge["source_node_id"] = source_id
-                          edge["target_node_id"] = target_id
-                        except:
-                          pass
-
-                        if "updated_at" in edge:
-                            edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+                        edge["source"] = UUID(edge["source"])
+                        edge["target"] = UUID(edge["target"])
+                        edge["source_node_id"] = UUID(edge["source_node_id"])
+                        edge["target_node_id"] = UUID(edge["target_node_id"])
+                        edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
             else:

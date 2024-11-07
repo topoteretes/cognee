@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from cognee.modules.data.extraction.extract_summary import extract_summary
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage.index_data_points import get_data_points_from_model
 from .models.TextSummary import TextSummary
 
 async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel]):
@@ -17,12 +18,12 @@ async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: 
 
     summaries = [
         TextSummary(
-            id = uuid5(chunk.id, "summary"),
-            chunk = chunk,
+            id = uuid5(chunk.id, "TextSummary"),
+            made_from = chunk,
             text = chunk_summaries[chunk_index].summary,
         ) for (chunk_index, chunk) in enumerate(data_chunks)
     ]
 
-    add_data_points(summaries)
+    await add_data_points(summaries)
 
     return data_chunks
