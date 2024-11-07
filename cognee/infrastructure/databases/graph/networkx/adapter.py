@@ -7,6 +7,7 @@ import asyncio
 import logging
 from re import A
 from typing import Dict, Any, List
+from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
@@ -130,7 +131,7 @@ class NetworkXAdapter(GraphDBInterface):
     async def extract_nodes(self, node_ids: List[str]) -> List[dict]:
         return [self.graph.nodes[node_id] for node_id in node_ids if self.graph.has_node(node_id)]
 
-    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list:
+    async def get_predecessors(self, node_id: UUID, edge_label: str = None) -> list:
         if self.graph.has_node(node_id):
             if edge_label is None:
                 return [
@@ -146,7 +147,7 @@ class NetworkXAdapter(GraphDBInterface):
 
             return nodes
 
-    async def get_successors(self, node_id: str, edge_label: str = None) -> list:
+    async def get_successors(self, node_id: UUID, edge_label: str = None) -> list:
         if self.graph.has_node(node_id):
             if edge_label is None:
                 return [
@@ -175,13 +176,13 @@ class NetworkXAdapter(GraphDBInterface):
 
         return neighbours
 
-    async def get_connections(self, node_id: str) -> list:
+    async def get_connections(self, node_id: UUID) -> list:
         if not self.graph.has_node(node_id):
             return []
 
         node = self.graph.nodes[node_id]
 
-        if "uuid" not in node:
+        if "id" not in node:
             return []
 
         predecessors, successors = await asyncio.gather(
@@ -192,14 +193,14 @@ class NetworkXAdapter(GraphDBInterface):
         connections = []
 
         for neighbor in predecessors:
-            if "uuid" in neighbor:
-                edge_data = self.graph.get_edge_data(neighbor["uuid"], node["uuid"])
+            if "id" in neighbor:
+                edge_data = self.graph.get_edge_data(neighbor["id"], node["id"])
                 for edge_properties in edge_data.values():
                     connections.append((neighbor, edge_properties, node))
 
         for neighbor in successors:
-            if "uuid" in neighbor:
-                edge_data = self.graph.get_edge_data(node["uuid"], neighbor["uuid"])
+            if "id" in neighbor:
+                edge_data = self.graph.get_edge_data(node["id"], neighbor["id"])
                 for edge_properties in edge_data.values():
                     connections.append((node, edge_properties, neighbor))
 
@@ -245,6 +246,17 @@ class NetworkXAdapter(GraphDBInterface):
             if os.path.exists(file_path):
                 async with aiofiles.open(file_path, "r") as file:
                     graph_data = json.loads(await file.read())
+                    for node in graph_data["nodes"]:
+                        node["id"] = UUID(node["id"])
+                        node["updated_at"] = datetime.strptime(node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+
+                    for edge in graph_data["links"]:
+                        edge["source"] = UUID(edge["source"])
+                        edge["target"] = UUID(edge["target"])
+                        edge["source_node_id"] = UUID(edge["source_node_id"])
+                        edge["target_node_id"] = UUID(edge["target_node_id"])
+                        edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
             else:
                 # Log that the file does not exist and an empty graph is initialized

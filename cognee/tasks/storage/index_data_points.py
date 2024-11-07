@@ -56,7 +56,8 @@ def get_data_points_from_model(data_point: DataPoint, added_data_points = {}) ->
                         added_data_points[str(new_point.id)] = True
                         data_points.append(new_point)
 
-    data_points.append(data_point)
+    if (str(data_point.id) not in added_data_points):
+        data_points.append(data_point)
 
     return data_points
 

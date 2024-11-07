@@ -338,7 +338,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return predecessors + successors
 
-    async def get_connections(self, node_id: str) -> list:
+    async def get_connections(self, node_id: UUID) -> list:
         predecessors_query = """
         MATCH (node)<-[relation]-(neighbour)
         WHERE node.id = $node_id

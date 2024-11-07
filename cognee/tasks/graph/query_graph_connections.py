@@ -22,13 +22,13 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
 
     exact_node = await graph_engine.extract_node(node_id)
 
-    if exact_node is not None and "uuid" in exact_node:
-        node_connections = await graph_engine.get_connections(str(exact_node["uuid"]))
+    if exact_node is not None and "id" in exact_node:
+        node_connections = await graph_engine.get_connections(str(exact_node["id"]))
     else:
         vector_engine = get_vector_engine()
         results = await asyncio.gather(
-            vector_engine.search("Entity_text", query_text = query, limit = 5),
-            vector_engine.search("EntityType_text", query_text = query, limit = 5),
+            vector_engine.search("Entity_name", query_text = query, limit = 5),
+            vector_engine.search("EntityType_name", query_text = query, limit = 5),
         )
         results = [*results[0], *results[1]]
         relevant_results = [result for result in results if result.score < 0.5][:5]
@@ -37,7 +37,7 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
             return []
 
         node_connections_results = await asyncio.gather(
-            *[graph_engine.get_connections(str(result.payload["uuid"])) for result in relevant_results]
+            *[graph_engine.get_connections(result.id) for result in relevant_results]
         )
 
         node_connections = []
@@ -48,10 +48,10 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
     unique_node_connections_map = {}
     unique_node_connections = []
     for node_connection in node_connections:
-        if "uuid" not in node_connection[0] or "uuid" not in node_connection[2]:
+        if "id" not in node_connection[0] or "id" not in node_connection[2]:
             continue
 
-        unique_id = f"{node_connection[0]['uuid']} {node_connection[1]['relationship_name']} {node_connection[2]['uuid']}"
+        unique_id = f"{node_connection[0]['id']} {node_connection[1]['relationship_name']} {node_connection[2]['id']}"
 
         if unique_id not in unique_node_connections_map:
             unique_node_connections_map[unique_id] = True
