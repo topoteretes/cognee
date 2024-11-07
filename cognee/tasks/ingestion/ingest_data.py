@@ -5,13 +5,13 @@ from llama_index.core import Document
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.ingestion import save_data_to_file
 from .transform_data import get_data_from_llama_index
 from cognee.modules.data.methods import create_dataset
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from .get_dlt_destination import get_dlt_destination
+from cognee.modules.ingestion import save_data_to_file
 
-async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
+async def ingest_data(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
