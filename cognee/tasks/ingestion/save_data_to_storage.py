@@ -18,7 +18,7 @@ def save_data_to_storage(data: Union[BinaryIO, Document, str], dataset_name) -> 
 
         # Check if data is of type Document or any of it's subclasses
         if isinstance(data_item, Document):
-            file_paths.append(get_data_from_llama_index(data_item))
+            file_paths.append(get_data_from_llama_index(data_item, dataset_name))
 
         if isinstance(data_item, str):
             # data is a file path
