@@ -1,11 +1,24 @@
+import inspect
 from typing import List, Optional, get_type_hints, Generic, TypeVar
 import asyncio
+from uuid import UUID
 import lancedb
+from pydantic import BaseModel
 from lancedb.pydantic import Vector, LanceModel
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import LocalStorage
+from cognee.modules.storage.utils import copy_model, get_own_properties
 from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface, DataPoint
+from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+
+class IndexSchema(DataPoint):
+    id: str
+    text: str
+
+    _metadata: dict = {
+        "index_fields": ["text"]
+    }
 
 class LanceDBAdapter(VectorDBInterface):
     name = "LanceDB"
@@ -38,9 +51,11 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
-    async def create_collection(self, collection_name: str, payload_schema = None):
-        data_point_types = get_type_hints(DataPoint)
+    async def create_collection(self, collection_name: str, payload_schema: BaseModel):
         vector_size = self.embedding_engine.get_vector_size()
+
+        payload_schema = self.get_data_point_schema(payload_schema)
+        data_point_types = get_type_hints(payload_schema)
 
         class LanceDataPoint(LanceModel):
             id: data_point_types["id"]
@@ -55,13 +70,16 @@ class LanceDBAdapter(VectorDBInterface):
                 exist_ok = True,
             )
 
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         connection = await self.get_connection()
+
+        payload_schema = type(data_points[0])
+        payload_schema = self.get_data_point_schema(payload_schema)
 
         if not await self.has_collection(collection_name):
             await self.create_collection(
                 collection_name,
-                payload_schema = type(data_points[0].payload),
+                payload_schema,
             )
 
         collection = await connection.open_table(collection_name)
@@ -79,15 +97,26 @@ class LanceDBAdapter(VectorDBInterface):
             vector: Vector(vector_size)
             payload: PayloadSchema
 
+        def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
+            properties = get_own_properties(data_point)
+            properties["id"] = str(properties["id"])
+
+            return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
+                id = str(data_point.id),
+                vector = vector,
+                payload = properties,
+            )
+
         lance_data_points = [
-            LanceDataPoint[type(data_point.id), type(data_point.payload)](
-                id = data_point.id,
-                vector = data_vectors[data_index],
-                payload = data_point.payload,
-            ) for (data_index, data_point) in enumerate(data_points)
+            create_lance_data_point(data_point, data_vectors[data_point_index])
+                for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        await collection.add(lance_data_points)
+        await collection.merge_insert("id") \
+            .when_matched_update_all() \
+            .when_not_matched_insert_all() \
+            .execute(lance_data_points)
+        
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         connection = await self.get_connection()
@@ -99,7 +128,7 @@ class LanceDBAdapter(VectorDBInterface):
             results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
 
         return [ScoredResult(
-            id = result["id"],
+            id = UUID(result["id"]),
             payload = result["payload"],
             score = 0,
         ) for result in results.to_dict("index").values()]
@@ -138,7 +167,7 @@ class LanceDBAdapter(VectorDBInterface):
         normalized_values = [(result["_distance"] - min_value) / (max_value - min_value) for result in result_values]
 
         return [ScoredResult(
-            id = str(result["id"]),
+            id = UUID(result["id"]),
             payload = result["payload"],
             score = normalized_values[value_index],
         ) for value_index, result in enumerate(result_values)]
@@ -167,7 +196,27 @@ class LanceDBAdapter(VectorDBInterface):
         results = await collection.delete(f"id IN {tuple(data_point_ids)}")
         return results
 
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        await self.create_collection(f"{index_name}_{index_property_name}", payload_schema = IndexSchema)
+
+    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
+        await self.create_data_points(f"{index_name}_{index_property_name}", [
+            IndexSchema(
+                id = str(data_point.id),
+                text = getattr(data_point, data_point._metadata["index_fields"][0]),
+            ) for data_point in data_points
+        ])
+
     async def prune(self):
         # Clean up the database if it was set up as temporary
         if self.url.startswith("/"):
             LocalStorage.remove_all(self.url) # Remove the temporary directory and files inside
+
+    def get_data_point_schema(self, model_type):
+        return copy_model(
+            model_type,
+            include_fields = {
+                "id": (str, ...),
+            },
+            exclude_fields = ["_metadata"],
+        )

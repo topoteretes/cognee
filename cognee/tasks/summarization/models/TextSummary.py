@@ -1,5 +1,12 @@
-from pydantic import BaseModel
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.processing.document_types import Document
 
-class TextSummary(BaseModel):
+class TextSummary(DataPoint):
     text: str
-    chunk_id: str
+    chunk: DocumentChunk
+
+    _metadata: dict = {
+        "index_fields": ["text"],
+    }
+

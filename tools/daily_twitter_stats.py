@@ -1,7 +1,7 @@
 import tweepy
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Twitter API credentials from GitHub Secrets
 API_KEY = '${{ secrets.TWITTER_API_KEY }}'
@@ -30,7 +30,7 @@ def get_follower_count(username):
 
 
 def send_data_to_segment(username, follower_count):
-    current_time = datetime.now().isoformat()
+    current_time = datetime.now(timezone.utc).isoformat()
 
     data = {
         'userId': username,
