@@ -64,8 +64,7 @@ for dataset in datasets:
     if dataset_name in existing_datasets_map:
         awaitables.append(run_cognify_pipeline(dataset, user))
 
-    return await asyncio.gather(*awaitables)
-```
+return await asyncio.gather(*awaitables)
 
 The `run_cognify_pipeline` function is defined within `cognify` and is responsible for processing a single dataset. This is where most of the heavy lifting occurs. The function processes multiple datasets concurrently using `asyncio.gather`.
 
