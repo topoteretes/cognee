@@ -1,9 +1,6 @@
 name: test | qdrant
 
 on:
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:

@@ -1,9 +1,6 @@
 name: test | neo4j
 
 on:
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:

@@ -1,9 +1,6 @@
 name: test | pgvector
 
 on:
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
