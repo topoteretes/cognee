@@ -12,7 +12,7 @@ async for result in pipeline:
 
 ## Main pipeline: [cognee.cognify](https://github.com/topoteretes/cognee/blob/168cb5d1bf1964b5b0c645b2f3d8638d84554fda/cognee/api/v1/cognify/cognify_v2.py#L38)
 
-This is the main pipeline currently implemented in cognee. It is designed to process data in a structured way and populate the graph and vector stores with the results.
+This is the main pipeline currently implemented in cognee. It is designed to process data in a structured way and populate the graph and vector stores.
 
 
 This function is the entry point for processing datasets. It handles dataset retrieval, user authorization, and manages the execution of a pipeline of tasks that process documents.
