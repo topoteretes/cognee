@@ -1,13 +1,14 @@
 name: test | python 3.9
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
-  workflow_dispatch:
+    types: [labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }} | ${{ github.event.label.name == 'run-checks' }}
   cancel-in-progress: true
 
 env:
