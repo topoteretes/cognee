@@ -64,7 +64,7 @@ jobs:
       # Separate action for merged PRs
       - name: Handle Merged Pull Requests
         if: github.event.pull_request.merged == true
-        uses: actions-cool/pr-welcome@v1.2.1
+        uses: actions-cool/pr-welcome@v1.4.0
         with:
           token: ${{ secrets.GH_TOKEN }}
           comment: |
