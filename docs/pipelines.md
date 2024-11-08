@@ -19,7 +19,7 @@ This function is the entry point for processing datasets. It handles dataset ret
 
 ### Parameters
 
-- `dataset: Union[str, list[str]] = None`: A string or list of dataset names to be processed.
+- `datasets: Union[str, list[str]] = None`: A string or list of dataset names to be processed.
 - `user: User = None`: The user requesting the processing. If not provided, the default user is retrieved.
 
 ### Steps in the Function
