@@ -32,7 +32,7 @@ pip install cognee
 ### With pip with PostgreSQL support
 
 ```bash
-pip install cognee[postgres]
+pip install 'cognee[postgres]'
 ```
 
 ### With poetry
