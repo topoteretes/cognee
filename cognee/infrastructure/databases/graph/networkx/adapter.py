@@ -30,6 +30,10 @@ class NetworkXAdapter(GraphDBInterface):
     def __init__(self, filename = "cognee_graph.pkl"):
         self.filename = filename
 
+    async def get_graph_data(self):
+        await self.load_graph_from_file()
+        return (list(self.graph.nodes(data = True)), list(self.graph.edges(data = True, keys = True)))
+
     async def query(self, query: str, params: dict):
         pass
 
@@ -247,15 +251,27 @@ class NetworkXAdapter(GraphDBInterface):
                 async with aiofiles.open(file_path, "r") as file:
                     graph_data = json.loads(await file.read())
                     for node in graph_data["nodes"]:
-                        node["id"] = UUID(node["id"])
-                        node["updated_at"] = datetime.strptime(node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+                        try:
+                          node["id"] = UUID(node["id"])
+                        except:
+                          pass
+                        if "updated_at" in node:
+                            node["updated_at"] = datetime.strptime(node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
                     for edge in graph_data["links"]:
-                        edge["source"] = UUID(edge["source"])
-                        edge["target"] = UUID(edge["target"])
-                        edge["source_node_id"] = UUID(edge["source_node_id"])
-                        edge["target_node_id"] = UUID(edge["target_node_id"])
-                        edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+                        try:
+                          source_id = UUID(edge["source"])
+                          target_id = UUID(edge["target"])
+
+                          edge["source"] = source_id
+                          edge["target"] = target_id
+                          edge["source_node_id"] = source_id
+                          edge["target_node_id"] = target_id
+                        except:
+                          pass
+
+                        if "updated_at" in node:
+                            edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
             else:

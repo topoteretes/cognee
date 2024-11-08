@@ -43,7 +43,7 @@ def get_graph_from_model(data_point: DataPoint, include_root = True, added_nodes
                     added_edges[str(edge_key)] = True
             continue
 
-        if isinstance(field_value, list) and isinstance(field_value[0], DataPoint):
+        if isinstance(field_value, list) and len(field_value) > 0 and isinstance(field_value[0], DataPoint):
             excluded_properties.add(field_name)
 
             for item in field_value:
