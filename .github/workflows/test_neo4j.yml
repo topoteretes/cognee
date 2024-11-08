@@ -2,6 +2,10 @@ name: test | neo4j
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    types: [labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -11,6 +15,8 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
 
 jobs:
+  if: ${{ github.event.label.name == 'run-checks' }}
+
   get_docs_changes:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
