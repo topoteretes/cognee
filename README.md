@@ -29,11 +29,6 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 pip install cognee
 ```
 
-### With pip with PostgreSQL support
-
-```bash
-pip install cognee[postgres]
-```
 
 ### With poetry
 
