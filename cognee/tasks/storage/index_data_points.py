@@ -47,7 +47,7 @@ def get_data_points_from_model(data_point: DataPoint, added_data_points = {}) ->
                     added_data_points[str(new_point.id)] = True
                     data_points.append(new_point)
 
-        if isinstance(field_value, list) and isinstance(field_value[0], DataPoint):
+        if isinstance(field_value, list) and len(field_value) > 0 and isinstance(field_value[0], DataPoint):
             for field_value_item in field_value:
                 new_data_points = get_data_points_from_model(field_value_item, added_data_points)
 

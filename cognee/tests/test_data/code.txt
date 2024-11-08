@@ -1,0 +1,70 @@
+// Class definition for a Person
+class Person {
+  constructor(name, age) {
+    this.name = name;
+    this.age = age;
+  }
+
+  // Method to return a greeting message
+  greet() {
+    return `Hello, my name is ${this.name} and I'm ${this.age} years old.`;
+  }
+
+  // Method to celebrate birthday
+  celebrateBirthday() {
+    this.age += 1;
+    return `Happy Birthday, ${this.name}! You are now ${this.age} years old.`;
+  }
+}
+
+// Class definition for a Student, extending from Person
+class Student extends Person {
+  constructor(name, age, grade) {
+    super(name, age);
+    this.grade = grade;
+  }
+
+  // Method to describe the student
+  describe() {
+    return `${this.name} is a ${this.grade} grade student and is ${this.age} years old.`;
+  }
+}
+
+// Function to enroll a new student
+function enrollStudent(name, age, grade) {
+  const student = new Student(name, age, grade);
+  console.log(student.greet());
+  console.log(student.describe());
+  return student;
+}
+
+// Function to promote a student to the next grade
+function promoteStudent(student) {
+  student.grade += 1;
+  console.log(`${student.name} has been promoted to grade ${student.grade}.`);
+  return student;
+}
+
+// Variable definition and assignment
+let schoolName = "Greenwood High School";
+let students = [];
+
+// Enrolling students
+students.push(enrollStudent("Alice", 14, 9));
+students.push(enrollStudent("Bob", 15, 10));
+
+// Looping through students to celebrate their birthdays
+students.forEach(student => {
+  console.log(student.celebrateBirthday());
+});
+
+// Promoting all students
+students = students.map(promoteStudent);
+
+// Displaying the final state of all students
+console.log("Final Students List:");
+students.forEach(student => console.log(student.describe()));
+
+// Updating the school name
+schoolName = "Greenwood International School";
+console.log(`School Name Updated to: ${schoolName}`);
