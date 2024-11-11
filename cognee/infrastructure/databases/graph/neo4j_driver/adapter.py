@@ -1,6 +1,7 @@
 """ Neo4j Adapter for Graph Database"""
 import logging
 import asyncio
+from textwrap import dedent
 from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 from uuid import UUID
@@ -18,13 +19,16 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_url: str,
         graph_database_username: str,
         graph_database_password: str,
-        driver: Optional[Any] = None
+        driver: Optional[Any] = None,
     ):
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth = (graph_database_username, graph_database_password),
             max_connection_lifetime = 120
         )
+
+    async def close(self) -> None:
+        await self.driver.close()
 
     @asynccontextmanager
     async def get_session(self) -> AsyncSession:
@@ -59,11 +63,10 @@ class Neo4jAdapter(GraphDBInterface):
     async def add_node(self, node: DataPoint):
         serialized_properties = self.serialize_properties(node.model_dump())
 
-        query = """MERGE (node {id: $node_id})
-                ON CREATE SET node += $properties
-                ON MATCH SET node += $properties
-                ON MATCH SET node.updated_at = timestamp()
-                RETURN ID(node) AS internal_id, node.id AS nodeId"""
+        query = dedent("""MERGE (node {id: $node_id})
+                ON CREATE SET node += $properties, node.updated_at = timestamp()
+                ON MATCH SET node += $properties, node.updated_at = timestamp()
+                RETURN ID(node) AS internal_id, node.id AS nodeId""")
 
         params = {
             "node_id": str(node.id),
@@ -76,9 +79,8 @@ class Neo4jAdapter(GraphDBInterface):
         query = """
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})
-        ON CREATE SET n += node.properties
-        ON MATCH SET n += node.properties
-        ON MATCH SET n.updated_at = timestamp()
+        ON CREATE SET n += node.properties, n.updated_at = timestamp()
+        ON MATCH SET n += node.properties, n.updated_at = timestamp()
         WITH n, node.node_id AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
@@ -133,12 +135,19 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def has_edge(self, from_node: UUID, to_node: UUID, edge_label: str) -> bool:
-        query = f"""
-            MATCH (from_node:`{str(from_node)}`)-[relationship:`{edge_label}`]->(to_node:`{str(to_node)}`)
+        query = """
+            MATCH (from_node)-[relationship]->(to_node)
+            WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id AND type(relationship) = $edge_label
             RETURN COUNT(relationship) > 0 AS edge_exists
         """
 
-        edge_exists = await self.query(query)
+        params = {
+            "from_node_id": str(from_node),
+            "to_node_id": str(to_node),
+            "edge_label": edge_label,
+        }
+
+        edge_exists = await self.query(query, params)
         return edge_exists
 
     async def has_edges(self, edges):
@@ -165,22 +174,21 @@ class Neo4jAdapter(GraphDBInterface):
             raise error
 
 
-    async def add_edge(self, from_node: str, to_node: str, relationship_name: str, edge_properties: Optional[Dict[str, Any]] = {}):
+    async def add_edge(self, from_node: UUID, to_node: UUID, relationship_name: str, edge_properties: Optional[Dict[str, Any]] = {}):
         serialized_properties = self.serialize_properties(edge_properties)
-        from_node = from_node.replace(":", "_")
-        to_node = to_node.replace(":", "_")
 
-        query = f"""MATCH (from_node:`{str(from_node)}`
-         {{id: $from_node}}), 
-         (to_node:`{str(to_node)}` {{id: $to_node}})
-         MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
-         ON CREATE SET r += $properties, r.updated_at = timestamp()
-         ON MATCH SET r += $properties, r.updated_at = timestamp()
-         RETURN r"""
+        query = dedent("""MATCH (from_node {id: $from_node}),
+            (to_node {id: $to_node})
+            MERGE (from_node)-[r]->(to_node)
+            ON CREATE SET r += $properties, r.updated_at = timestamp(), r.type = $relationship_name
+            ON MATCH SET r += $properties, r.updated_at = timestamp()
+            RETURN r
+        """)
 
         params = {
             "from_node": str(from_node),
             "to_node": str(to_node),
+            "relationship_name": relationship_name,
             "properties": serialized_properties
         }
 
@@ -347,8 +355,8 @@ class Neo4jAdapter(GraphDBInterface):
         """
 
         predecessors, successors = await asyncio.gather(
-            self.query(predecessors_query, dict(node_id = node_id)),
-            self.query(successors_query, dict(node_id = node_id)),
+            self.query(predecessors_query, dict(node_id = str(node_id))),
+            self.query(successors_query, dict(node_id = str(node_id))),
         )
 
         connections = []

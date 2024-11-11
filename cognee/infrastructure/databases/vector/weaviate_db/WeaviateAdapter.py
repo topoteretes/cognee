@@ -11,7 +11,6 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 logger = logging.getLogger("WeaviateAdapter")
 
 class IndexSchema(DataPoint):
-    uuid: str
     text: str
 
     _metadata: dict = {
@@ -58,18 +57,21 @@ class WeaviateAdapter(VectorDBInterface):
 
         future = asyncio.Future()
 
-        future.set_result(
-            self.client.collections.create(
-                name=collection_name,
-                properties=[
-                    wvcc.Property(
-                        name="text",
-                        data_type=wvcc.DataType.TEXT,
-                        skip_vectorization=True
-                    )
-                ]
+        if not self.client.collections.exists(collection_name):
+            future.set_result(
+                self.client.collections.create(
+                    name = collection_name,
+                    properties = [
+                        wvcc.Property(
+                            name = "text",
+                            data_type = wvcc.DataType.TEXT,
+                            skip_vectorization = True
+                        )
+                    ]
+                )
             )
-        )
+        else:
+            future.set_result(self.get_collection(collection_name))
 
         return await future
 
@@ -80,13 +82,16 @@ class WeaviateAdapter(VectorDBInterface):
         from weaviate.classes.data import DataObject
 
         data_vectors = await self.embed_data(
-            list(map(lambda data_point: data_point.get_embeddable_data(), data_points)))
+            [data_point.get_embeddable_data() for data_point in data_points]
+        )
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
             vector = data_vectors[data_points.index(data_point)]
             properties = data_point.model_dump()
-            properties["uuid"] = properties["id"]
-            del properties["id"]
+
+            if "id" in properties:
+                properties["uuid"] = str(data_point.id)
+                del properties["id"]
 
             return DataObject(
                 uuid = data_point.id,
@@ -94,22 +99,28 @@ class WeaviateAdapter(VectorDBInterface):
                 vector = vector
             )
 
-        data_points = list(map(convert_to_weaviate_data_points, data_points))
+        data_points = [convert_to_weaviate_data_points(data_point) for data_point in data_points]
 
         collection = self.get_collection(collection_name)
 
         try:
             if len(data_points) > 1:
-                return collection.data.insert_many(data_points)
+                with collection.batch.dynamic() as batch:
+                    for data_point in data_points:
+                        batch.add_object(
+                            uuid = data_point.uuid,
+                            vector = data_point.vector,
+                            properties = data_point.properties,
+                            references = data_point.references,
+                        )
             else:
-                return collection.data.insert(data_points[0])
-            # with collection.batch.dynamic() as batch:
-            #     for point in data_points:
-            #         batch.add_object(
-            #             uuid = point.uuid,
-            #             properties = point.properties,
-            #             vector = point.vector
-            #         )
+                data_point: DataObject = data_points[0]
+                return collection.data.update(
+                    uuid = data_point.uuid,
+                    vector = data_point.vector,
+                    properties = data_point.properties,
+                    references = data_point.references,
+                )
         except Exception as error:
             logger.error("Error creating data points: %s", str(error))
             raise error
@@ -120,8 +131,8 @@ class WeaviateAdapter(VectorDBInterface):
     async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
         await self.create_data_points(f"{index_name}_{index_property_name}", [
             IndexSchema(
-                uuid = str(data_point.id),
-                text = getattr(data_point, data_point._metadata["index_fields"][0]),
+                id = data_point.id,
+                text = data_point.get_embeddable_data(),
             ) for data_point in data_points
         ])
 
@@ -168,9 +179,9 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id = UUID(result.uuid),
+                id = UUID(str(result.uuid)),
                 payload = result.properties,
-                score = float(result.metadata.score)
+                score = 1 - float(result.metadata.score)
             ) for result in search_result.objects
         ]
 

@@ -37,7 +37,7 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
             return []
 
         node_connections_results = await asyncio.gather(
-            *[graph_engine.get_connections(str(result.id)) for result in relevant_results]
+            *[graph_engine.get_connections(result.id) for result in relevant_results]
         )
 
         node_connections = []
