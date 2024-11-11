@@ -351,8 +351,8 @@ class Neo4jAdapter(GraphDBInterface):
         """
 
         predecessors, successors = await asyncio.gather(
-            self.query(predecessors_query, dict(node_id = node_id)),
-            self.query(successors_query, dict(node_id = node_id)),
+            self.query(predecessors_query, dict(node_id = str(node_id))),
+            self.query(successors_query, dict(node_id = str(node_id))),
         )
 
         connections = []
