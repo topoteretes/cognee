@@ -1,14 +1,13 @@
-
 import asyncio
 from typing import Type
+from uuid import uuid5
 from pydantic import BaseModel
-from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
 from cognee.modules.data.extraction.extract_summary import extract_summary
-from cognee.modules.chunking import DocumentChunk
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.tasks.storage import add_data_points
 from .models.TextSummary import TextSummary
 
-
-async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel], collection_name: str = "summaries"):
+async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel]):
     if len(data_chunks) == 0:
         return data_chunks
 
@@ -16,23 +15,14 @@ async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: 
         *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
     )
 
-    vector_engine = get_vector_engine()
+    summaries = [
+        TextSummary(
+            id = uuid5(chunk.id, "TextSummary"),
+            made_from = chunk,
+            text = chunk_summaries[chunk_index].summary,
+        ) for (chunk_index, chunk) in enumerate(data_chunks)
+    ]
 
-    await vector_engine.create_collection(collection_name, payload_schema=TextSummary)
-
-    await vector_engine.create_data_points(
-        collection_name,
-        [
-            DataPoint[TextSummary](
-                id = str(chunk.chunk_id),
-                payload = dict(
-                    chunk_id = str(chunk.chunk_id),
-                    document_id = str(chunk.document_id),
-                    text = chunk_summaries[chunk_index].summary,
-                ),
-                embed_field = "text",
-            ) for (chunk_index, chunk) in enumerate(data_chunks)
-        ],
-    )
+    await add_data_points(summaries)
 
     return data_chunks

@@ -5,7 +5,7 @@ on:
   pull_request:
     branches:
       - main
-    types: [labeled]
+    types: [labeled, synchronize]
 
 
 concurrency:

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
 from cognee.modules.data.extraction.extract_categories import extract_categories
-from cognee.modules.chunking import DocumentChunk
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
 async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
@@ -65,7 +65,7 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
                         "chunk_id": str(data_chunk.chunk_id),
                         "document_id": str(data_chunk.document_id),
                     }),
-                    embed_field="text",
+                    index_fields=["text"],
                 )
             )
 
@@ -104,7 +104,7 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
                             "chunk_id": str(data_chunk.chunk_id),
                             "document_id": str(data_chunk.document_id),
                         }),
-                        embed_field="text",
+                        index_fields=["text"],
                     )
                 )
 

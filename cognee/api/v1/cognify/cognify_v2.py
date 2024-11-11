@@ -9,21 +9,15 @@ from cognee.modules.data.models import Dataset, Data
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.pipelines.tasks.Task import Task
-from cognee.modules.pipelines import run_tasks, run_tasks_parallel
+from cognee.modules.pipelines import run_tasks
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
-from cognee.tasks import chunk_naive_llm_classifier, \
-    chunk_remove_disconnected, \
-    infer_data_ontology, \
-    save_chunks_to_store, \
-    chunk_update_check, \
-    chunks_into_graph, \
-    source_documents_to_chunks, \
-    check_permissions_on_documents, \
-    classify_documents
+from cognee.tasks.documents import classify_documents, check_permissions_on_documents, extract_chunks_from_documents
+from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 
 logger = logging.getLogger("cognify.v2")
@@ -87,31 +81,17 @@ async def run_cognify_pipeline(dataset: Dataset, user: User):
     try:
         cognee_config = get_cognify_config()
 
-        root_node_id = None
-
         tasks = [
             Task(classify_documents),
             Task(check_permissions_on_documents, user = user, permissions = ["write"]),
-            Task(infer_data_ontology, root_node_id = root_node_id, ontology_model = KnowledgeGraph),
-            Task(source_documents_to_chunks, parent_node_id = root_node_id), # Classify documents and save them as a nodes in graph db, extract text chunks based on the document type
-            Task(chunks_into_graph, graph_model = KnowledgeGraph, collection_name = "entities", task_config = { "batch_size": 10 }), # Generate knowledge graphs from the document chunks and attach it to chunk nodes
-            Task(chunk_update_check, collection_name = "chunks"), # Find all affected chunks, so we don't process unchanged chunks
+            Task(extract_chunks_from_documents), # Extract text chunks based on the document type.
+            Task(add_data_points, task_config = { "batch_size": 10 }),
+            Task(extract_graph_from_data, graph_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Generate knowledge graphs from the document chunks.
             Task(
-                save_chunks_to_store,
-                collection_name = "chunks",
-            ), # Save the document chunks in vector db and as nodes in graph db (connected to the document node and between each other)
-            run_tasks_parallel([
-                Task(
-                    summarize_text,
-                    summarization_model = cognee_config.summarization_model,
-                    collection_name = "summaries",
-                ),
-                Task(
-                    chunk_naive_llm_classifier,
-                    classification_model = cognee_config.classification_model,
-                ),
-            ]),
-            Task(chunk_remove_disconnected), # Remove the obsolete document chunks.
+                summarize_text,
+                summarization_model = cognee_config.summarization_model,
+                task_config = { "batch_size": 10 }
+            ),
         ]
 
         pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")
