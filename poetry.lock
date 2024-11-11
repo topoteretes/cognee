@@ -7727,11 +7727,11 @@ cli = []
 filesystem = ["botocore"]
 neo4j = ["neo4j"]
 notebook = []
-postgres = []
+postgres = ["asyncpg", "pgvector", "psycopg2"]
 qdrant = ["qdrant-client"]
 weaviate = ["weaviate-client"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-content-hash = "7c305c381d9327bd55e658cc955a6335411d85fc3e11f2f3dcebfdc5e3b70da0"
+content-hash = "fb09733ff7a70fb91c5f72ff0c8a8137b857557930a7aa025aad3154de4d8ceb"
