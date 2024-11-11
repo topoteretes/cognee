@@ -67,10 +67,6 @@ anthropic = "^0.26.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = {version = "*", extras = ["sqlalchemy"]}
 alembic = "^1.13.3"
-asyncpg = "^0.29.0"
-pgvector = "^0.3.5"
-psycopg2 = {version = "^2.9.10", optional = true}
-falkordb = "^1.0.9"
 
 [tool.poetry.extras]
 filesystem = ["s3fs", "botocore"]
@@ -81,6 +77,10 @@ neo4j = ["neo4j"]
 postgres = ["psycopg2", "pgvector", "asyncpg"]
 notebook = ["ipykernel", "overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
 
+[tool.poetry.group.postgres.dependencies]
+asyncpg = "^0.29.0"
+pgvector = "^0.3.5"
+psycopg2 = "^2.9.10"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
