@@ -18,16 +18,13 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_url: str,
         graph_database_username: str,
         graph_database_password: str,
-        driver: Optional[Any] = None,
+        driver: Optional[Any] = None
     ):
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth = (graph_database_username, graph_database_password),
             max_connection_lifetime = 120
         )
-
-    async def close(self) -> None:
-        await self.driver.close()
 
     @asynccontextmanager
     async def get_session(self) -> AsyncSession:
@@ -43,7 +40,6 @@ class Neo4jAdapter(GraphDBInterface):
             async with self.get_session() as session:
                 result = await session.run(query, parameters = params)
                 data = await result.data()
-                await self.close()
                 return data
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info = True)
