@@ -179,6 +179,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
+        closest_items = []
+
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             # Find closest vectors to query_vector
@@ -195,14 +197,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         vector_list = []
 
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(
-                    id = UUID(str(row.id)),
-                    payload = row.payload,
-                    score = row.similarity
-                ) for row in vector_list
-            ]
+        # Extract distances and find min/max for normalization
+        for vector in closest_items:
+            # TODO: Add normalization of similarity score
+            vector_list.append(vector)
+
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(
+                id = UUID(str(row.id)),
+                payload = row.payload,
+                score = row.similarity
+            ) for row in vector_list
+        ]
 
     async def batch_search(
         self,
