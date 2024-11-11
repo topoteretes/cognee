@@ -105,10 +105,17 @@ class WeaviateAdapter(VectorDBInterface):
 
         try:
             if len(data_points) > 1:
-                return collection.data.insert_many(data_points)
+                with collection.batch.dynamic() as batch:
+                    for data_point in data_points:
+                        batch.add_object(
+                            uuid = data_point.uuid,
+                            vector = data_point.vector,
+                            properties = data_point.properties,
+                            references = data_point.references,
+                        )
             else:
                 data_point: DataObject = data_points[0]
-                return collection.data.insert(
+                return collection.data.update(
                     uuid = data_point.uuid,
                     vector = data_point.vector,
                     properties = data_point.properties,
