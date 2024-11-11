@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import List, Dict, Optional
 from qdrant_client import AsyncQdrantClient, models
 
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
