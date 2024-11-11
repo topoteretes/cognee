@@ -270,7 +270,7 @@ class NetworkXAdapter(GraphDBInterface):
                         except:
                           pass
 
-                        if "updated_at" in node:
+                        if "updated_at" in edge:
                             edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
