@@ -1,6 +1,6 @@
 import asyncio
 from beartype import beartype
-from typing import Type
+from beartype.typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.extraction.knowledge_graph import extract_content_graph

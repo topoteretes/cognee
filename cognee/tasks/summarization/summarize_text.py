@@ -1,6 +1,6 @@
 import asyncio
 from beartype import beartype
-from typing import Type
+from beartype.typing import Type
 from uuid import uuid5
 from pydantic import BaseModel
 from cognee.modules.data.extraction.extract_summary import extract_summary

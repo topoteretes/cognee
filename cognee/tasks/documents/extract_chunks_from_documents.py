@@ -1,4 +1,4 @@
-from typing import AsyncGenerator
+from beartype.typing import AsyncGenerator
 from beartype import beartype
 
 from cognee.modules.data.processing.document_types.Document import Document
