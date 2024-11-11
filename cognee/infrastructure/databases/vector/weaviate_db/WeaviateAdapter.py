@@ -115,7 +115,7 @@ class WeaviateAdapter(VectorDBInterface):
                         )
             else:
                 data_point: DataObject = data_points[0]
-                return collection.data.insert(
+                return collection.data.update(
                     uuid = data_point.uuid,
                     vector = data_point.vector,
                     properties = data_point.properties,
