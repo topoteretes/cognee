@@ -4,6 +4,7 @@
 .prod.env
 cognee/.data/
 
+*.lance/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
