@@ -22,7 +22,7 @@ def get_anonymous_id():
 
     if not os.path.isdir(home_dir):
         os.makedirs(home_dir, exist_ok=True)
-    anonymous_id_file = os.path.join(home_dir, ".anonymous_id")
+    anonymous_id_file = os.path.join(home_dir, ".anon_id")
     if not os.path.isfile(anonymous_id_file):
         anonymous_id = str(uuid4())
         with open(anonymous_id_file, "w", encoding="utf-8") as f:
@@ -52,6 +52,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         **additional_properties,
     }
 
+    # Needed to forward properties to PostHog along with id
     posthog.identify(get_anonymous_id(), properties)
 
     try:
