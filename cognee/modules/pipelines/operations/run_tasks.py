@@ -7,7 +7,7 @@ from ..tasks.Task import Task
 
 logger = logging.getLogger("run_tasks(tasks: [Task], data)")
 
-async def run_tasks_base(tasks: [Task], data = None, user: User = None):
+async def run_tasks_base(tasks: list[Task], data = None, user: User = None):
     if len(tasks) == 0:
         yield data
         return
@@ -16,7 +16,7 @@ async def run_tasks_base(tasks: [Task], data = None, user: User = None):
 
     running_task = tasks[0]
     leftover_tasks = tasks[1:]
-    next_task = leftover_tasks[0] if len(leftover_tasks) > 1 else None
+    next_task = leftover_tasks[0] if len(leftover_tasks) > 0 else None
     next_task_batch_size = next_task.task_config["batch_size"] if next_task else 1
 
     if inspect.isasyncgenfunction(running_task.executable):

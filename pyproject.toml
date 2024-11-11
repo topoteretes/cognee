@@ -58,14 +58,14 @@ langchain_text_splitters = "0.3.2"
 langsmith = "0.1.139"
 langdetect = "1.0.9"
 posthog = "^3.5.0"
-lancedb = "0.8.0"
+lancedb = "0.15.0"
 litellm = "1.49.1"
 groq = "0.8.0"
 langfuse = "^2.32.0"
 pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
-fastapi-users = { version = "*", extras = ["sqlalchemy"] }
+fastapi-users = {version = "*", extras = ["sqlalchemy"]}
 asyncpg = "^0.29.0"
 alembic = "^1.13.3"
 pgvector = "^0.3.5"

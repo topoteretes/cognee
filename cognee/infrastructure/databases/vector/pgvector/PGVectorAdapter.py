@@ -1,17 +1,26 @@
 import asyncio
+from uuid import UUID
 from pgvector.sqlalchemy import Vector
 from typing import List, Optional, get_type_hints
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from .serialize_datetime import serialize_datetime
+from cognee.infrastructure.engine import DataPoint
+
+from .serialize_data import serialize_data
 from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface, DataPoint
+from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
 
+class IndexSchema(DataPoint):
+    text: str
+
+    _metadata: dict = {
+        "index_fields": ["text"]
+    }
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
@@ -75,7 +84,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if not await self.has_collection(collection_name):
                 await self.create_collection(
                     collection_name=collection_name,
-                    payload_schema=type(data_points[0].payload),
+                    payload_schema=type(data_points[0]),
                 )
 
             data_vectors = await self.embed_data(
@@ -104,13 +113,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 PGVectorDataPoint(
                     id=data_point.id,
                     vector=data_vectors[data_index],
-                    payload=serialize_datetime(data_point.payload.dict()),
+                    payload=serialize_data(data_point.model_dump()),
                 )
                 for (data_index, data_point) in enumerate(data_points)
             ]
 
             session.add_all(pgvector_data_points)
             await session.commit()
+
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        await self.create_collection(f"{index_name}_{index_property_name}")
+
+    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
+        await self.create_data_points(f"{index_name}_{index_property_name}", [
+            IndexSchema(
+                id = data_point.id,
+                text = getattr(data_point, data_point._metadata["index_fields"][0]),
+            ) for data_point in data_points
+        ])
 
     async def get_table(self, collection_name: str) -> Table:
         """
@@ -136,8 +156,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             results = results.all()
 
             return [
-                ScoredResult(id=result.id, payload=result.payload, score=0)
-                for result in results
+                ScoredResult(
+                    id = UUID(result.id),
+                    payload = result.payload,
+                    score = 0
+                ) for result in results
             ]
 
     async def search(
@@ -180,9 +203,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # Create and return ScoredResult objects
             return [
                 ScoredResult(
-                    id=str(row.id), payload=row.payload, score=row.similarity
-                )
-                for row in vector_list
+                    id = UUID(str(row.id)),
+                    payload = row.payload,
+                    score = row.similarity
+                ) for row in vector_list
             ]
 
     async def batch_search(

@@ -1,9 +1,14 @@
-from pydantic import BaseModel
+from typing import Optional
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.data.processing.document_types import Document
 
-class DocumentChunk(BaseModel):
+class DocumentChunk(DataPoint):
     text: str
     word_count: int
-    document_id: str
-    chunk_id: str
     chunk_index: int
     cut_type: str
+    is_part_of: Document
+
+    _metadata: Optional[dict] = {
+        "index_fields": ["text"],
+    }

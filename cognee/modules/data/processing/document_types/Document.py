@@ -1,10 +1,8 @@
-from uuid import UUID
-from typing import Protocol
+from cognee.infrastructure.engine import DataPoint
 
-class Document(Protocol):
-    id: UUID
+class Document(DataPoint):
     type: str
-    title: str
+    name: str
     raw_data_location: str
 
     def read(self, chunk_size: int) -> str:

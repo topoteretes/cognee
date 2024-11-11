@@ -1,13 +1,13 @@
 """ Neo4j Adapter for Graph Database"""
-import json
 import logging
 import asyncio
 from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
+from uuid import UUID
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
-from networkx import predecessor
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 logger = logging.getLogger("Neo4jAdapter")
@@ -41,16 +41,13 @@ class Neo4jAdapter(GraphDBInterface):
     ) -> List[Dict[str, Any]]:
         try:
             async with self.get_session() as session:
-                result = await session.run(query, parameters=params)
+                result = await session.run(query, parameters = params)
                 data = await result.data()
                 await self.close()
                 return data
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info = True)
             raise error
-
-    async def graph(self):
-        return await self.get_session()
 
     async def has_node(self, node_id: str) -> bool:
         results = self.query(
@@ -63,73 +60,42 @@ class Neo4jAdapter(GraphDBInterface):
         )
         return results[0]["node_exists"] if len(results) > 0 else False
 
-    async def add_node(self, node_id: str, node_properties: Dict[str, Any] = None):
-        node_id = node_id.replace(":", "_")
+    async def add_node(self, node: DataPoint):
+        serialized_properties = self.serialize_properties(node.model_dump())
 
-        serialized_properties = self.serialize_properties(node_properties)
-
-        if "name" not in serialized_properties:
-            serialized_properties["name"] = node_id
-
-        query = f"""MERGE (node:`{node_id}` {{id: $node_id}})
+        query = """MERGE (node {id: $node_id})
                 ON CREATE SET node += $properties
+                ON MATCH SET node += $properties
+                ON MATCH SET node.updated_at = timestamp()
                 RETURN ID(node) AS internal_id, node.id AS nodeId"""
 
         params = {
-            "node_id": node_id,
+            "node_id": str(node.id),
             "properties": serialized_properties,
         }
 
         return await self.query(query, params)
 
-    async def add_nodes(self, nodes: list[tuple[str, dict[str, Any]]]) -> None:
+    async def add_nodes(self, nodes: list[DataPoint]) -> None:
         query = """
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})
         ON CREATE SET n += node.properties
+        ON MATCH SET n += node.properties
+        ON MATCH SET n.updated_at = timestamp()
         WITH n, node.node_id AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
         """
 
         nodes = [{
-            "node_id": node_id,
-            "properties": self.serialize_properties(node_properties),
-        } for (node_id, node_properties) in nodes]
+            "node_id": str(node.id),
+            "properties": self.serialize_properties(node.model_dump()),
+        } for node in nodes]
 
         results = await self.query(query, dict(nodes = nodes))
         return results
 
-    async def extract_node_description(self, node_id: str):
-        query = """MATCH (n)-[r]->(m)
-                    WHERE n.id = $node_id
-                    AND NOT m.id CONTAINS 'DefaultGraphModel'
-                    RETURN m
-                    """
-
-        result = await self.query(query, dict(node_id = node_id))
-
-        descriptions = []
-
-        for node in result:
-            # Assuming 'm' is a consistent key in your data structure
-            attributes = node.get("m", {})
-
-            # Ensure all required attributes are present
-            if all(key in attributes for key in ["id", "layer_id", "description"]):
-                descriptions.append({
-                    "id": attributes["id"],
-                    "layer_id": attributes["layer_id"],
-                    "description": attributes["description"],
-                })
-
-        return descriptions
-
-    async def get_layer_nodes(self):
-        query = """MATCH (node) WHERE node.layer_id IS NOT NULL
-        RETURN node"""
-
-        return [result["node"] for result in (await self.query(query))]
 
     async def extract_node(self, node_id: str):
         results = await self.extract_nodes([node_id])
@@ -170,9 +136,9 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
+    async def has_edge(self, from_node: UUID, to_node: UUID, edge_label: str) -> bool:
         query = f"""
-            MATCH (from_node:`{from_node}`)-[relationship:`{edge_label}`]->(to_node:`{to_node}`)
+            MATCH (from_node:`{str(from_node)}`)-[relationship:`{edge_label}`]->(to_node:`{str(to_node)}`)
             RETURN COUNT(relationship) > 0 AS edge_exists
         """
 
@@ -190,8 +156,8 @@ class Neo4jAdapter(GraphDBInterface):
         try:
             params = {
                 "edges": [{
-                    "from_node": edge[0],
-                    "to_node": edge[1],
+                    "from_node": str(edge[0]),
+                    "to_node": str(edge[1]),
                     "relationship_name": edge[2],
                 } for edge in edges],
             }
@@ -208,16 +174,17 @@ class Neo4jAdapter(GraphDBInterface):
         from_node = from_node.replace(":", "_")
         to_node = to_node.replace(":", "_")
 
-        query = f"""MATCH (from_node:`{from_node}`
+        query = f"""MATCH (from_node:`{str(from_node)}`
          {{id: $from_node}}), 
-         (to_node:`{to_node}` {{id: $to_node}})
+         (to_node:`{str(to_node)}` {{id: $to_node}})
          MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
-         SET r += $properties
+         ON CREATE SET r += $properties, r.updated_at = timestamp()
+         ON MATCH SET r += $properties, r.updated_at = timestamp()
          RETURN r"""
 
         params = {
-            "from_node": from_node,
-            "to_node": to_node,
+            "from_node": str(from_node),
+            "to_node": str(to_node),
             "properties": serialized_properties
         }
 
@@ -234,13 +201,13 @@ class Neo4jAdapter(GraphDBInterface):
         """
 
         edges = [{
-          "from_node": edge[0],
-          "to_node": edge[1],
+          "from_node": str(edge[0]),
+          "to_node": str(edge[1]),
           "relationship_name": edge[2],
           "properties": {
               **(edge[3] if edge[3] else {}),
-              "source_node_id": edge[0],
-              "target_node_id": edge[1],
+              "source_node_id": str(edge[0]),
+              "target_node_id": str(edge[1]),
           },
         } for edge in edges]
 
@@ -298,14 +265,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         results = await self.query(query)
         return results[0]["ids"] if len(results) > 0 else []
-
-
-    async def filter_nodes(self, search_criteria):
-        query = f"""MATCH (node)
-                WHERE node.id CONTAINS '{search_criteria}'
-                RETURN node"""
-
-        return await self.query(query)
 
 
     async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
@@ -379,7 +338,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return predecessors + successors
 
-    async def get_connections(self, node_id: str) -> list:
+    async def get_connections(self, node_id: UUID) -> list:
         predecessors_query = """
         MATCH (node)<-[relation]-(neighbour)
         WHERE node.id = $node_id
@@ -438,15 +397,22 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query)
 
     def serialize_properties(self, properties = dict()):
-        return {
-            property_key: json.dumps(property_value)
-            if isinstance(property_value, (dict, list))
-            else property_value for property_key, property_value in properties.items()
-        }
+        serialized_properties = {}
+
+        for property_key, property_value in properties.items():
+            if isinstance(property_value, UUID):
+                serialized_properties[property_key] = str(property_value)
+                continue
+
+            serialized_properties[property_key] = property_value
+
+        return serialized_properties
 
     async def get_graph_data(self):
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+
         result = await self.query(query)
+
         nodes = [(
             record["properties"]["id"],
             record["properties"],

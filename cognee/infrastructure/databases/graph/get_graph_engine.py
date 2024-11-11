@@ -2,7 +2,6 @@
 
 from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
-from .networkx.adapter import NetworkXAdapter
 
 
 async def get_graph_engine() -> GraphDBInterface :
@@ -21,19 +20,19 @@ async def get_graph_engine() -> GraphDBInterface :
         except:
             pass
 
-    elif config.graph_database_provider == "falkorb":
-        try:
-            from .falkordb.adapter import FalcorDBAdapter
+    elif config.graph_database_provider == "falkordb":
+        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+        from cognee.infrastructure.databases.hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
 
-            return FalcorDBAdapter(
-                graph_database_url = config.graph_database_url,
-                graph_database_username = config.graph_database_username,
-                graph_database_password = config.graph_database_password,
-                graph_database_port = config.graph_database_port
-            )
-        except:
-            pass
+        embedding_engine = get_embedding_engine()
 
+        return FalkorDBAdapter(
+            database_url = config.graph_database_url,
+            database_port = config.graph_database_port,
+            embedding_engine = embedding_engine,
+        )
+
+    from .networkx.adapter import NetworkXAdapter
     graph_client = NetworkXAdapter(filename = config.graph_file_path)
 
     if graph_client.graph is None:

@@ -1,12 +1,22 @@
 import asyncio
 import logging
 from typing import List, Optional
+from uuid import UUID
+
+from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
-from ..models.DataPoint import DataPoint
 from ..models.ScoredResult import ScoredResult
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
 logger = logging.getLogger("WeaviateAdapter")
+
+class IndexSchema(DataPoint):
+    uuid: str
+    text: str
+
+    _metadata: dict = {
+        "index_fields": ["text"]
+    }
 
 class WeaviateAdapter(VectorDBInterface):
     name = "Weaviate"
@@ -74,9 +84,13 @@ class WeaviateAdapter(VectorDBInterface):
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
             vector = data_vectors[data_points.index(data_point)]
+            properties = data_point.model_dump()
+            properties["uuid"] = properties["id"]
+            del properties["id"]
+
             return DataObject(
                 uuid = data_point.id,
-                properties = data_point.payload.dict(),
+                properties = properties,
                 vector = vector
             )
 
@@ -99,6 +113,17 @@ class WeaviateAdapter(VectorDBInterface):
         except Exception as error:
             logger.error("Error creating data points: %s", str(error))
             raise error
+
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        await self.create_collection(f"{index_name}_{index_property_name}")
+
+    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
+        await self.create_data_points(f"{index_name}_{index_property_name}", [
+            IndexSchema(
+                uuid = str(data_point.id),
+                text = getattr(data_point, data_point._metadata["index_fields"][0]),
+            ) for data_point in data_points
+        ])
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         from weaviate.classes.query import Filter
@@ -143,9 +168,9 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=str(result.uuid),
-                payload=result.properties,
-                score=float(result.metadata.score)
+                id = UUID(result.uuid),
+                payload = result.properties,
+                score = float(result.metadata.score)
             ) for result in search_result.objects
         ]
 
