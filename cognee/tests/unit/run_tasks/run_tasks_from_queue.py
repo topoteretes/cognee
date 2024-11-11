@@ -23,7 +23,7 @@ async def pipeline(data_queue):
         Task(multiply_by_two),
     ])
 
-    results = [2, 4, 6, 8, 10, 12, 14, 16, 18]
+    results = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
     index = 0
     async for result in tasks_run:
         print(result)
