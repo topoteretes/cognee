@@ -54,7 +54,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
-
             class PGVectorDataPoint(Base):
                 __tablename__ = collection_name
                 __table_args__ = {"extend_existing": True}
@@ -180,6 +179,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
+        closest_items = []
+
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             # Find closest vectors to query_vector
@@ -194,20 +195,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 .limit(limit)
             )
 
-            vector_list = []
-            # Extract distances and find min/max for normalization
-            for vector in closest_items:
-                # TODO: Add normalization of similarity score
-                vector_list.append(vector)
+        vector_list = []
 
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(
-                    id = UUID(str(row.id)),
-                    payload = row.payload,
-                    score = row.similarity
-                ) for row in vector_list
-            ]
+        # Extract distances and find min/max for normalization
+        for vector in closest_items:
+            # TODO: Add normalization of similarity score
+            vector_list.append(vector)
+
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(
+                id = UUID(str(row.id)),
+                payload = row.payload,
+                score = row.similarity
+            ) for row in vector_list
+        ]
 
     async def batch_search(
         self,
