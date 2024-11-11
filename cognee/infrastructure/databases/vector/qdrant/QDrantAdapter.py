@@ -1,7 +1,9 @@
 import logging
+from uuid import UUID
 from typing import List, Dict, Optional
 from qdrant_client import AsyncQdrantClient, models
 
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -153,7 +155,7 @@ class QDrantAdapter(VectorDBInterface):
 
         client = self.get_qdrant_client()
 
-        result = await client.search(
+        results = await client.search(
             collection_name = collection_name,
             query_vector = models.NamedVector(
                 name = "text",
@@ -165,7 +167,16 @@ class QDrantAdapter(VectorDBInterface):
 
         await client.close()
 
-        return result
+        return [
+            ScoredResult(
+                id = UUID(result.id),
+                payload = {
+                    **result.payload,
+                    "id": UUID(result.id),
+                },
+                score = 1 - result.score,
+            ) for result in results
+        ]
 
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int = None, with_vectors: bool = False):
