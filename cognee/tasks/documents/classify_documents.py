@@ -1,6 +1,9 @@
+from beartype import beartype
+
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types import Document, PdfDocument, AudioDocument, ImageDocument, TextDocument
 
+@beartype
 def classify_documents(data_documents: list[Data]) -> list[Document]:
     documents = [
         PdfDocument(id = data_item.id, name=f"{data_item.name}.{data_item.extension}", raw_data_location=data_item.raw_data_location) if data_item.extension == "pdf" else

@@ -1,4 +1,5 @@
 import asyncio
+from beartype import beartype
 from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -8,7 +9,8 @@ from cognee.modules.engine.models import EntityType, Entity
 from cognee.modules.engine.utils import generate_edge_name, generate_node_id, generate_node_name
 from cognee.tasks.storage import add_data_points
 
-async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]):
+@beartype
+async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]) -> list[DocumentChunk]:
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )

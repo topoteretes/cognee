@@ -1,10 +1,12 @@
+from beartype import beartype
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils import get_graph_from_model
 from .index_data_points import index_data_points
 
-
-async def add_data_points(data_points: list[DataPoint]):
+@beartype
+async def add_data_points(data_points: list[DataPoint]) -> list[DataPoint]:
     nodes = []
     edges = []
 
