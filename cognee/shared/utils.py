@@ -10,7 +10,6 @@ import tiktoken
 import nltk
 from posthog import Posthog
 
-import cognee
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 
