@@ -41,7 +41,7 @@ async def main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.prune.prune_system(metadata = True)
 
     dataset_name = "cs_explanations"
 
@@ -65,7 +65,7 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("Entity_name", "AI"))[0]
+    random_node = (await vector_engine.search("Entity_name", "Quantum computer"))[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(SearchType.INSIGHTS, query=random_node_name)

@@ -42,7 +42,7 @@ aiosqlite = "^0.20.0"
 pandas = "2.0.3"
 filetype = "^1.2.0"
 nltk = "^3.8.1"
-dlt = {extras = ["sqlalchemy"], version = "^1.2.0"}
+dlt = {extras = ["sqlalchemy"], version = "^1.3.0"}
 aiofiles = "^23.2.1"
 qdrant-client = "^1.9.0"
 graphistry = "^0.33.5"
@@ -66,10 +66,7 @@ pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = {version = "*", extras = ["sqlalchemy"]}
-asyncpg = "^0.29.0"
 alembic = "^1.13.3"
-pgvector = "^0.3.5"
-psycopg2 = {version = "^2.9.10", optional = true}
 
 [tool.poetry.extras]
 filesystem = ["s3fs", "botocore"]
@@ -77,8 +74,13 @@ cli = ["pipdeptree", "cron-descriptor"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
 neo4j = ["neo4j"]
-postgres = ["psycopg2"]
+postgres = ["psycopg2", "pgvector", "asyncpg"]
 notebook = ["ipykernel", "overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
+
+[tool.poetry.group.postgres.dependencies]
+asyncpg = "^0.29.0"
+pgvector = "^0.3.5"
+psycopg2 = "^2.9.10"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
