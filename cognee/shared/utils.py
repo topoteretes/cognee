@@ -9,8 +9,28 @@ import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 from posthog import Posthog
+
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
+
+from uuid import uuid4
+import pathlib
+
+def get_anonymous_id():
+    """Creates or reads a anonymous user id"""
+    home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
+
+    if not os.path.isdir(home_dir):
+        os.makedirs(home_dir, exist_ok=True)
+    anonymous_id_file = os.path.join(home_dir, ".anon_id")
+    if not os.path.isfile(anonymous_id_file):
+        anonymous_id = str(uuid4())
+        with open(anonymous_id_file, "w", encoding="utf-8") as f:
+            f.write(anonymous_id)
+    else:
+        with open(anonymous_id_file, "r", encoding="utf-8") as f:
+            anonymous_id = f.read()
+    return anonymous_id
 
 def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     if os.getenv("TELEMETRY_DISABLED"):
@@ -28,11 +48,15 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     current_time = datetime.datetime.now()
     properties = {
         "time": current_time.strftime("%m/%d/%Y"),
+        "user_id": user_id,
         **additional_properties,
     }
 
+    # Needed to forward properties to PostHog along with id
+    posthog.identify(get_anonymous_id(), properties)
+
     try:
-        posthog.capture(user_id, event_name, properties)
+        posthog.capture(get_anonymous_id(), event_name, properties)
     except Exception as e:
         print("ERROR sending telemetric data to Posthog. See exception: %s", e)
 
