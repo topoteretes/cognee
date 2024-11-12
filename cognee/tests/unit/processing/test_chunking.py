@@ -22,7 +22,7 @@ INPUT_TEXT = {
     Third paragraph is cut and is missing the dot at the end"""
 }
 
-def test_chunking(test_text, ground_truth):
+def run_chunking_test(test_text, ground_truth):
     chunks = []
     for chunk_data in chunk_by_paragraph(test_text, 12, batch_paragraphs = False):
         chunks.append(chunk_data)
@@ -34,7 +34,8 @@ def test_chunking(test_text, ground_truth):
             assert chunk[key] == ground_truth_item[key], f'{key = }: {chunk[key] = } != {ground_truth_item[key] = }'
 
 
+def test_chunking_whole_text():
+    run_chunking_test(INPUT_TEXT["whole_text"], GROUND_TRUTH["whole_text"])
 
-if __name__ == "__main__":
-    test_chunking(INPUT_TEXT["whole_text"], GROUND_TRUTH["whole_text"])
-    test_chunking(INPUT_TEXT["cut_text"], GROUND_TRUTH["cut_text"])
+def test_chunking_cut_text():
+    run_chunking_test(INPUT_TEXT["cut_text"], GROUND_TRUTH["cut_text"])

@@ -3,7 +3,7 @@ from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
 
 
-async def main():
+async def run_and_check_tasks():
     def number_generator(num):
         for i in range(num):
             yield i + 1
@@ -32,5 +32,5 @@ async def main():
         assert result == results[index]
         index += 1
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def test_run_tasks():
+    asyncio.run(run_and_check_tasks())

@@ -30,7 +30,7 @@ async def pipeline(data_queue):
         assert result == results[index]
         index += 1
 
-async def main():
+async def run_queue():
     data_queue = Queue()
     data_queue.is_closed = False
 
@@ -42,5 +42,5 @@ async def main():
 
     await asyncio.gather(pipeline(data_queue), queue_producer())
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def test_run_tasks_from_queue():
+    asyncio.run(run_queue())
