@@ -5,7 +5,6 @@ EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,
     "audio": AudioDocument,
     "image": ImageDocument,
-    "pdf": TextDocument,
     "txt": TextDocument
 }
 
