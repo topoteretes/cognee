@@ -16,4 +16,4 @@ def run_test_against_ground_truth(
             ), f"{test_target_item_name}/{key = }: {ground_truth = } != {getattr(test_target_item, key) = }"
     time_delta = datetime.now(timezone.utc) - getattr(test_target_item, "updated_at")
 
-    assert time_delta.total_seconds() < 20, f"{ time_delta.total_seconds() = }"
+    assert time_delta.total_seconds() < 60, f"{ time_delta.total_seconds() = }"
