@@ -1,5 +1,4 @@
-from cognee.tests.unit.interfaces.graph.util import \
-    run_test_against_ground_truth
+from cognee.tests.unit.interfaces.graph.util import run_test_against_ground_truth
 
 PARSED_PERSON_GROUND_TRUTH = {
     "id": "boris",

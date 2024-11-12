@@ -5,40 +5,10 @@ from typing import Optional
 import pytest
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils import (get_graph_from_model,
-                                        get_model_instance_from_graph)
-
-EDGE_GROUND_TRUTH = (
-    "boris",
-    "car1",
-    "owns_car",
-    {
-        "source_node_id": "boris",
-        "target_node_id": "car1",
-        "relationship_name": "owns_car",
-        "metadata": {"type": "list"},
-    },
+from cognee.modules.graph.utils import (
+    get_graph_from_model,
+    get_model_instance_from_graph,
 )
-
-CAR_GROUND_TRUTH = {
-    "id": "car1",
-    "brand": "Toyota",
-    "model": "Camry",
-    "year": 2020,
-    "color": "Blue",
-}
-
-PERSON_GROUND_TRUTH = {
-    "id": "boris",
-    "name": "Boris",
-    "age": 30,
-    "driving_license": {
-        "issued_by": "PU Vrsac",
-        "issued_on": "2025-11-06",
-        "number": "1234567890",
-        "expires_on": "2025-11-06",
-    },
-}
 
 
 class CarTypeName(Enum):

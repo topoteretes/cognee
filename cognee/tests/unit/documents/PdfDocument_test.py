@@ -1,8 +1,7 @@
 import os
 import uuid
 
-from cognee.modules.data.processing.document_types.PdfDocument import \
-    PdfDocument
+from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
 
 GROUND_TRUTH = [
     {"word_count": 879, "len_text": 5622, "cut_type": "sentence_end"},

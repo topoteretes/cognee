@@ -1,8 +1,9 @@
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils import (get_graph_from_model,
-                                        get_model_instance_from_graph)
-from cognee.tests.unit.interfaces.graph.util import \
-    run_test_against_ground_truth
+from cognee.modules.graph.utils import (
+    get_graph_from_model,
+    get_model_instance_from_graph,
+)
+from cognee.tests.unit.interfaces.graph.util import run_test_against_ground_truth
 
 EDGE_GROUND_TRUTH = (
     "boris",
