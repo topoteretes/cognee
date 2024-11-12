@@ -3,6 +3,7 @@ from queue import Queue
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
 
+
 async def pipeline(data_queue):
     async def queue_consumer():
         while not data_queue.is_closed:
@@ -17,11 +18,13 @@ async def pipeline(data_queue):
     async def multiply_by_two(num):
         yield num * 2
 
-    tasks_run = run_tasks([
-        Task(queue_consumer),
-        Task(add_one),
-        Task(multiply_by_two),
-    ])
+    tasks_run = run_tasks(
+        [
+            Task(queue_consumer),
+            Task(add_one),
+            Task(multiply_by_two),
+        ]
+    )
 
     results = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
     index = 0
@@ -29,6 +32,7 @@ async def pipeline(data_queue):
         print(result)
         assert result == results[index]
         index += 1
+
 
 async def run_queue():
     data_queue = Queue()
@@ -41,6 +45,7 @@ async def run_queue():
         data_queue.is_closed = True
 
     await asyncio.gather(pipeline(data_queue), queue_producer())
+
 
 def test_run_tasks_from_queue():
     asyncio.run(run_queue())
