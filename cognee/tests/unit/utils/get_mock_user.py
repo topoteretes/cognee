@@ -1,6 +1,8 @@
+import warnings
+from typing import List, Optional
 from unittest.mock import Mock, create_autospec
 from uuid import UUID, uuid4
-from typing import Optional, List
+
 from cognee.modules.users.models import User
 
 
@@ -20,6 +22,8 @@ def get_mock_user(
     Returns:
         Mock: A configured mock User instance.
     """
+    warnings.warn("\n\n\n---------------USING MOCK USER--------------------\n\n\n")
+
     # Generate a random UUID if none provided
     user_id = user_id or uuid4()
 

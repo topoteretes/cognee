@@ -1,13 +1,12 @@
-import pytest
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
-from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils import (
-    get_graph_from_model,
-    get_model_instance_from_graph,
-)
 
+import pytest
+
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.utils import (get_graph_from_model,
+                                        get_model_instance_from_graph)
 
 EDGE_GROUND_TRUTH = (
     "boris",
