@@ -160,8 +160,8 @@ if __name__ == "__main__":
     # run_cognify_base_rag_and_search()
     # # Data preprocessing before setting the dataset test cases
     swe_dataset = load_swebench_dataset('princeton-nlp/SWE-bench_bm25_13K', split='test')
-    test_dataset = convert_swe_to_deepeval_testcases(dataset.test_cases)
+    test_dataset = convert_swe_to_deepeval_testcases(swe_dataset)
     from deepeval.metrics import HallucinationMetric
     metric = HallucinationMetric()
-    evalresult = dataset.evaluate([metric])
+    evalresult = test_dataset.evaluate([metric])
     pass
