@@ -1,6 +1,7 @@
 from unittest.mock import Mock, create_autospec
 from uuid import UUID, uuid4
 from typing import Optional, List
+from cognee.modules.users.models import User
 
 
 def get_mock_user(

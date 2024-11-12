@@ -2,8 +2,6 @@ import asyncio
 from queue import Queue
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
-from unittest.mock import patch
-from cognee.tests.unit.utils.get_mock_user import get_mock_user
 
 
 async def pipeline(data_queue):
@@ -51,8 +49,4 @@ async def run_queue():
 
 
 def test_run_tasks_from_queue():
-    @patch("from cognee.modules.users.methods import get_default_user")
-    def get_mock_user_wrapper():
-        return get_mock_user(None, None)
-
     asyncio.run(run_queue())
