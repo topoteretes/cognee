@@ -51,7 +51,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run tests
-        run: poetry run pytest tests/
+        run: poetry run pytest cognee/tests/unit/
 
       - name: Run default basic pipeline
         env:
