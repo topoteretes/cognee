@@ -79,15 +79,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def create_data_points(
         self, collection_name: str, data_points: List[DataPoint]
     ):
-        async with self.get_async_session() as session:
-            if not await self.has_collection(collection_name):
-                await self.create_collection(
-                    collection_name=collection_name,
-                    payload_schema=type(data_points[0]),
-                )
-
-            data_vectors = await self.embed_data(
-                [data_point.get_embeddable_data() for data_point in data_points]
+        if not await self.has_collection(collection_name):
+            await self.create_collection(
+                collection_name = collection_name,
+                payload_schema = type(data_points[0]),
             )
 
         data_vectors = await self.embed_data(
@@ -107,14 +102,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             payload = Column(JSON)
             vector = Column(Vector(vector_size))
 
-            pgvector_data_points = [
-                PGVectorDataPoint(
-                    id=data_point.id,
-                    vector=data_vectors[data_index],
-                    payload=serialize_data(data_point.model_dump()),
-                )
-                for (data_index, data_point) in enumerate(data_points)
-            ]
+            def __init__(self, id, payload, vector):
+                self.id = id
+                self.payload = payload
+                self.vector = vector
 
         pgvector_data_points = [
             PGVectorDataPoint(
@@ -136,7 +127,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.create_data_points(f"{index_name}_{index_property_name}", [
             IndexSchema(
                 id = data_point.id,
-                text = getattr(data_point, data_point._metadata["index_fields"][0]),
+                text = data_point.get_embeddable_data(),
             ) for data_point in data_points
         ])
 
@@ -206,14 +197,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         vector_list = []
 
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(
-                    id = UUID(str(row.id)),
-                    payload = row.payload,
-                    score = row.similarity
-                ) for row in vector_list
-            ]
+        # Extract distances and find min/max for normalization
+        for vector in closest_items:
+            # TODO: Add normalization of similarity score
+            vector_list.append(vector)
+
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(
+                id = UUID(str(row.id)),
+                payload = row.payload,
+                score = row.similarity
+            ) for row in vector_list
+        ]
 
     async def batch_search(
         self,
