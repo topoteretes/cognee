@@ -285,4 +285,3 @@ pip install cognee
   <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
 </a>
 
-
