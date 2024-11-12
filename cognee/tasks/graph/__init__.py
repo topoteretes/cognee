@@ -1,2 +1,3 @@
-from .chunks_into_graph import chunks_into_graph
+from .extract_graph_from_data import extract_graph_from_data
+from .extract_graph_from_code import extract_graph_from_code
 from .query_graph_connections import query_graph_connections

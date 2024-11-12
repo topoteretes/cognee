@@ -8,6 +8,7 @@ class VectorConfig(BaseSettings):
         os.path.join(get_absolute_path(".cognee_system"), "databases"),
         "cognee.lancedb"
     )
+    vector_db_port: int = 1234
     vector_db_key: str = ""
     vector_db_provider: str = "lancedb"
 
@@ -16,6 +17,7 @@ class VectorConfig(BaseSettings):
     def to_dict(self) -> dict:
         return {
             "vector_db_url": self.vector_db_url,
+            "vector_db_port": self.vector_db_port,
             "vector_db_key": self.vector_db_key,
             "vector_db_provider": self.vector_db_provider,
         }

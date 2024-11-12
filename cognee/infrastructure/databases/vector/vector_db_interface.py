@@ -1,6 +1,6 @@
 from typing import List, Protocol, Optional
 from abc import abstractmethod
-from .models.DataPoint import DataPoint
+from cognee.infrastructure.engine import DataPoint
 from .models.PayloadSchema import PayloadSchema
 
 class VectorDBInterface(Protocol):

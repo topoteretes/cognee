@@ -5,7 +5,7 @@ on:
   pull_request:
     branches:
       - main
-    types: [labeled]
+    types: [labeled, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -22,7 +22,7 @@ jobs:
   run_neo4j_integration_test:
     name: test
     needs: get_docs_changes
-    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' | ${{ github.event.label.name == 'run-checks' }}
+    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
 
     defaults:
