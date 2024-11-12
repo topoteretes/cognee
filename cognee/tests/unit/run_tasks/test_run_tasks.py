@@ -18,12 +18,15 @@ async def run_and_check_tasks():
     async def add_one_single(num):
         yield num + 1
 
-    pipeline = run_tasks([
-        Task(number_generator),
-        Task(add_one, task_config = {"batch_size": 5}),
-        Task(multiply_by_two, task_config = {"batch_size": 1}),
-        Task(add_one_single),
-    ], 10)
+    pipeline = run_tasks(
+        [
+            Task(number_generator),
+            Task(add_one, task_config={"batch_size": 5}),
+            Task(multiply_by_two, task_config={"batch_size": 1}),
+            Task(add_one_single),
+        ],
+        10,
+    )
 
     results = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
     index = 0
@@ -31,6 +34,7 @@ async def run_and_check_tasks():
         print(result)
         assert result == results[index]
         index += 1
+
 
 def test_run_tasks():
     asyncio.run(run_and_check_tasks())

@@ -3,14 +3,22 @@ from enum import Enum
 from datetime import datetime, timezone
 from typing import Optional
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils import get_graph_from_model, get_model_instance_from_graph
+from cognee.modules.graph.utils import (
+    get_graph_from_model,
+    get_model_instance_from_graph,
+)
 
 
 EDGE_GROUND_TRUTH = (
     "boris",
     "car1",
     "owns_car",
-    {'source_node_id': 'boris', 'target_node_id': 'car1', 'relationship_name': 'owns_car', 'metadata': {'type': 'list'}}
+    {
+        "source_node_id": "boris",
+        "target_node_id": "car1",
+        "relationship_name": "owns_car",
+        "metadata": {"type": "list"},
+    },
 )
 
 CAR_GROUND_TRUTH = {
@@ -18,21 +26,31 @@ CAR_GROUND_TRUTH = {
     "brand": "Toyota",
     "model": "Camry",
     "year": 2020,
-    "color": "Blue"
+    "color": "Blue",
 }
 
 PERSON_GROUND_TRUTH = {
     "id": "boris",
     "name": "Boris",
     "age": 30,
-    "driving_license": {'issued_by': "PU Vrsac", 'issued_on': '2025-11-06', 'number': '1234567890', 'expires_on': '2025-11-06'}
+    "driving_license": {
+        "issued_by": "PU Vrsac",
+        "issued_on": "2025-11-06",
+        "number": "1234567890",
+        "expires_on": "2025-11-06",
+    },
 }
 
 PARSED_PERSON_GROUND_TRUTH = {
     "id": "boris",
     "name": "Boris",
     "age": 30,
-    "driving_license": {'issued_by': 'PU Vrsac', 'issued_on': '2025-11-06', 'number': '1234567890', 'expires_on': '2025-11-06'},
+    "driving_license": {
+        "issued_by": "PU Vrsac",
+        "issued_on": "2025-11-06",
+        "number": "1234567890",
+        "expires_on": "2025-11-06",
+    },
 }
 
 
@@ -47,10 +65,12 @@ class CarTypeName(Enum):
     Minivan = "Minivan"
     Van = "Van"
 
+
 class CarType(DataPoint):
     id: str
     name: CarTypeName
-    _metadata: dict = dict(index_fields = ["name"])
+    _metadata: dict = dict(index_fields=["name"])
+
 
 class Car(DataPoint):
     id: str
@@ -60,22 +80,29 @@ class Car(DataPoint):
     color: str
     is_type: CarType
 
+
 class Person(DataPoint):
     id: str
     name: str
     age: int
     owns_car: list[Car]
     driving_license: Optional[dict]
-    _metadata: dict = dict(index_fields = ["name"])
+    _metadata: dict = dict(index_fields=["name"])
 
 
-def run_test_agains_ground_truth(test_target_item_name, test_target_item, ground_truth_dict):
+def run_test_agains_ground_truth(
+    test_target_item_name, test_target_item, ground_truth_dict
+):
     for key, ground_truth in ground_truth_dict.items():
         if isinstance(ground_truth, dict):
             for key2, ground_truth2 in ground_truth.items():
-                assert ground_truth2 == getattr(test_target_item, key)[key2], f'{test_target_item_name}/{key = }/{key2 = }: {ground_truth2 = } != {getattr(test_target_item, key)[key2] = }'
+                assert (
+                    ground_truth2 == getattr(test_target_item, key)[key2]
+                ), f"{test_target_item_name}/{key = }/{key2 = }: {ground_truth2 = } != {getattr(test_target_item, key)[key2] = }"
         else:
-            assert ground_truth == getattr(test_target_item, key), f'{test_target_item_name}/{key = }: {ground_truth = } != {getattr(test_target_item, key) = }'
+            assert ground_truth == getattr(
+                test_target_item, key
+            ), f"{test_target_item_name}/{key = }: {ground_truth = } != {getattr(test_target_item, key) = }"
     time_delta = datetime.now(timezone.utc) - getattr(test_target_item, "updated_at")
 
     assert time_delta.total_seconds() < 20, f"{ time_delta.total_seconds() = }"
@@ -84,18 +111,20 @@ def run_test_agains_ground_truth(test_target_item_name, test_target_item, ground
 @pytest.fixture(scope="session")
 def graph_outputs():
     boris = Person(
-        id = "boris",
-        name = "Boris",
-        age = 30,
-        owns_car = [Car(
-            id = "car1",
-            brand = "Toyota",
-            model = "Camry",
-            year = 2020,
-            color = "Blue",
-            is_type = CarType(id = "sedan", name = CarTypeName.Sedan),
-        )],
-        driving_license = {
+        id="boris",
+        name="Boris",
+        age=30,
+        owns_car=[
+            Car(
+                id="car1",
+                brand="Toyota",
+                model="Camry",
+                year=2020,
+                color="Blue",
+                is_type=CarType(id="sedan", name=CarTypeName.Sedan),
+            )
+        ],
+        driving_license={
             "issued_by": "PU Vrsac",
             "issued_on": "2025-11-06",
             "number": "1234567890",
@@ -110,9 +139,10 @@ def graph_outputs():
     except:
         print(f"{nodes = }\n{edges = }")
 
-    parsed_person = get_model_instance_from_graph(nodes, edges, 'boris')
+    parsed_person = get_model_instance_from_graph(nodes, edges, "boris")
 
-    return(car, person, edge, parsed_person)
+    return (car, person, edge, parsed_person)
+
 
 def test_extracted_person(graph_outputs):
     (_, person, _, _) = graph_outputs
@@ -128,11 +158,16 @@ def test_extracted_car(graph_outputs):
 def test_extracted_edge(graph_outputs):
     (_, _, edge, _) = graph_outputs
 
-    assert EDGE_GROUND_TRUTH[:3] == edge[:3], f'{EDGE_GROUND_TRUTH[:3] = } != {edge[:3] = }'
+    assert (
+        EDGE_GROUND_TRUTH[:3] == edge[:3]
+    ), f"{EDGE_GROUND_TRUTH[:3] = } != {edge[:3] = }"
     for key, ground_truth in EDGE_GROUND_TRUTH[3].items():
-        assert ground_truth == edge[3][key], f'{ground_truth = } != {edge[3][key] = }'
+        assert ground_truth == edge[3][key], f"{ground_truth = } != {edge[3][key] = }"
+
 
 def test_parsed_person(graph_outputs):
     (_, _, _, parsed_person) = graph_outputs
-    run_test_agains_ground_truth("parsed_person", parsed_person, PARSED_PERSON_GROUND_TRUTH)
+    run_test_agains_ground_truth(
+        "parsed_person", parsed_person, PARSED_PERSON_GROUND_TRUTH
+    )
     run_test_agains_ground_truth("car", parsed_person.owns_car[0], CAR_GROUND_TRUTH)
