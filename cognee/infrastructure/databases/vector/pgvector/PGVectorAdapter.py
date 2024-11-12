@@ -1,17 +1,26 @@
 import asyncio
+from uuid import UUID
 from pgvector.sqlalchemy import Vector
 from typing import List, Optional, get_type_hints
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from .serialize_datetime import serialize_datetime
+from cognee.infrastructure.engine import DataPoint
+
+from .serialize_data import serialize_data
 from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface, DataPoint
+from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
 
+class IndexSchema(DataPoint):
+    text: str
+
+    _metadata: dict = {
+        "index_fields": ["text"]
+    }
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
@@ -45,7 +54,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
-
             class PGVectorDataPoint(Base):
                 __tablename__ = collection_name
                 __table_args__ = {"extend_existing": True}
@@ -71,46 +79,57 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def create_data_points(
         self, collection_name: str, data_points: List[DataPoint]
     ):
-        async with self.get_async_session() as session:
-            if not await self.has_collection(collection_name):
-                await self.create_collection(
-                    collection_name=collection_name,
-                    payload_schema=type(data_points[0].payload),
-                )
-
-            data_vectors = await self.embed_data(
-                [data_point.get_embeddable_data() for data_point in data_points]
+        if not await self.has_collection(collection_name):
+            await self.create_collection(
+                collection_name = collection_name,
+                payload_schema = type(data_points[0]),
             )
 
-            vector_size = self.embedding_engine.get_vector_size()
+        data_vectors = await self.embed_data(
+            [data_point.get_embeddable_data() for data_point in data_points]
+        )
 
-            class PGVectorDataPoint(Base):
-                __tablename__ = collection_name
-                __table_args__ = {"extend_existing": True}
-                # PGVector requires one column to be the primary key
-                primary_key: Mapped[int] = mapped_column(
-                    primary_key=True, autoincrement=True
-                )
-                id: Mapped[type(data_points[0].id)]
-                payload = Column(JSON)
-                vector = Column(Vector(vector_size))
+        vector_size = self.embedding_engine.get_vector_size()
 
-                def __init__(self, id, payload, vector):
-                    self.id = id
-                    self.payload = payload
-                    self.vector = vector
+        class PGVectorDataPoint(Base):
+            __tablename__ = collection_name
+            __table_args__ = {"extend_existing": True}
+            # PGVector requires one column to be the primary key
+            primary_key: Mapped[int] = mapped_column(
+                primary_key=True, autoincrement=True
+            )
+            id: Mapped[type(data_points[0].id)]
+            payload = Column(JSON)
+            vector = Column(Vector(vector_size))
 
-            pgvector_data_points = [
-                PGVectorDataPoint(
-                    id=data_point.id,
-                    vector=data_vectors[data_index],
-                    payload=serialize_datetime(data_point.payload.dict()),
-                )
-                for (data_index, data_point) in enumerate(data_points)
-            ]
+            def __init__(self, id, payload, vector):
+                self.id = id
+                self.payload = payload
+                self.vector = vector
 
+        pgvector_data_points = [
+            PGVectorDataPoint(
+                id = data_point.id,
+                vector = data_vectors[data_index],
+                payload = serialize_data(data_point.model_dump()),
+            )
+            for (data_index, data_point) in enumerate(data_points)
+        ]
+
+        async with self.get_async_session() as session:
             session.add_all(pgvector_data_points)
             await session.commit()
+
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        await self.create_collection(f"{index_name}_{index_property_name}")
+
+    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
+        await self.create_data_points(f"{index_name}_{index_property_name}", [
+            IndexSchema(
+                id = data_point.id,
+                text = data_point.get_embeddable_data(),
+            ) for data_point in data_points
+        ])
 
     async def get_table(self, collection_name: str) -> Table:
         """
@@ -126,18 +145,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 raise ValueError(f"Table '{collection_name}' not found.")
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
-        async with self.get_async_session() as session:
-            # Get PGVectorDataPoint Table from database
-            PGVectorDataPoint = await self.get_table(collection_name)
+        # Get PGVectorDataPoint Table from database
+        PGVectorDataPoint = await self.get_table(collection_name)
 
+        async with self.get_async_session() as session:
             results = await session.execute(
                 select(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
             )
             results = results.all()
 
             return [
-                ScoredResult(id=result.id, payload=result.payload, score=0)
-                for result in results
+                ScoredResult(
+                    id = UUID(result.id),
+                    payload = result.payload,
+                    score = 0
+                ) for result in results
             ]
 
     async def search(
@@ -154,11 +176,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
+        # Get PGVectorDataPoint Table from database
+        PGVectorDataPoint = await self.get_table(collection_name)
+
+        closest_items = []
+
         # Use async session to connect to the database
         async with self.get_async_session() as session:
-            # Get PGVectorDataPoint Table from database
-            PGVectorDataPoint = await self.get_table(collection_name)
-
             # Find closest vectors to query_vector
             closest_items = await session.execute(
                 select(
@@ -171,19 +195,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 .limit(limit)
             )
 
-            vector_list = []
-            # Extract distances and find min/max for normalization
-            for vector in closest_items:
-                # TODO: Add normalization of similarity score
-                vector_list.append(vector)
+        vector_list = []
 
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(
-                    id=str(row.id), payload=row.payload, score=row.similarity
-                )
-                for row in vector_list
-            ]
+        # Extract distances and find min/max for normalization
+        for vector in closest_items:
+            # TODO: Add normalization of similarity score
+            vector_list.append(vector)
+
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(
+                id = UUID(str(row.id)),
+                payload = row.payload,
+                score = row.similarity
+            ) for row in vector_list
+        ]
 
     async def batch_search(
         self,
