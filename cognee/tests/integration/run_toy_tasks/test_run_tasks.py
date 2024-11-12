@@ -1,10 +1,7 @@
 import asyncio
-import warnings
-from unittest.mock import patch
 
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
-from cognee.modules.users.methods.get_default_user import get_default_user
 
 
 async def run_and_check_tasks():
