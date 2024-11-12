@@ -4,14 +4,8 @@
 .prod.env
 cognee/.data/
 
-<<<<<<< HEAD
 *.lance/
 .DS_Store
-=======
-
-.DS_Store
-
->>>>>>> dd11da9 (Rebase onto main)
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
