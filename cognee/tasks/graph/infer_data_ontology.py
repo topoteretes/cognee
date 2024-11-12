@@ -18,7 +18,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
 from cognee.modules.data.extraction.knowledge_graph.add_model_class_to_graph import add_model_class_to_graph
-from cognee.tasks.infer_data_ontology.models.models import NodeModel, GraphOntology
+from cognee.tasks.graph.models import NodeModel, GraphOntology
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.engine.utils import generate_node_id, generate_node_name
 
