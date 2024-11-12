@@ -5,10 +5,8 @@ from typing import Optional
 import pytest
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils import (
-    get_graph_from_model,
-    get_model_instance_from_graph,
-)
+from cognee.modules.graph.utils import (get_graph_from_model,
+                                        get_model_instance_from_graph)
 
 EDGE_GROUND_TRUTH = (
     "boris",
@@ -31,18 +29,6 @@ CAR_GROUND_TRUTH = {
 }
 
 PERSON_GROUND_TRUTH = {
-    "id": "boris",
-    "name": "Boris",
-    "age": 30,
-    "driving_license": {
-        "issued_by": "PU Vrsac",
-        "issued_on": "2025-11-06",
-        "number": "1234567890",
-        "expires_on": "2025-11-06",
-    },
-}
-
-PARSED_PERSON_GROUND_TRUTH = {
     "id": "boris",
     "name": "Boris",
     "age": 30,
@@ -91,24 +77,6 @@ class Person(DataPoint):
     _metadata: dict = dict(index_fields=["name"])
 
 
-def run_test_against_ground_truth(
-    test_target_item_name, test_target_item, ground_truth_dict
-):
-    for key, ground_truth in ground_truth_dict.items():
-        if isinstance(ground_truth, dict):
-            for key2, ground_truth2 in ground_truth.items():
-                assert (
-                    ground_truth2 == getattr(test_target_item, key)[key2]
-                ), f"{test_target_item_name}/{key = }/{key2 = }: {ground_truth2 = } != {getattr(test_target_item, key)[key2] = }"
-        else:
-            assert ground_truth == getattr(
-                test_target_item, key
-            ), f"{test_target_item_name}/{key = }: {ground_truth = } != {getattr(test_target_item, key) = }"
-    time_delta = datetime.now(timezone.utc) - getattr(test_target_item, "updated_at")
-
-    assert time_delta.total_seconds() < 20, f"{ time_delta.total_seconds() = }"
-
-
 @pytest.fixture(scope="session")
 def graph_outputs():
     boris = Person(
@@ -140,32 +108,3 @@ def graph_outputs():
     parsed_person = get_model_instance_from_graph(nodes, edges, "boris")
 
     return (car, person, edge, parsed_person)
-
-
-def test_extracted_person(graph_outputs):
-    (_, person, _, _) = graph_outputs
-
-    run_test_against_ground_truth("person", person, PERSON_GROUND_TRUTH)
-
-
-def test_extracted_car(graph_outputs):
-    (car, _, _, _) = graph_outputs
-    run_test_against_ground_truth("car", car, CAR_GROUND_TRUTH)
-
-
-def test_extracted_edge(graph_outputs):
-    (_, _, edge, _) = graph_outputs
-
-    assert (
-        EDGE_GROUND_TRUTH[:3] == edge[:3]
-    ), f"{EDGE_GROUND_TRUTH[:3] = } != {edge[:3] = }"
-    for key, ground_truth in EDGE_GROUND_TRUTH[3].items():
-        assert ground_truth == edge[3][key], f"{ground_truth = } != {edge[3][key] = }"
-
-
-def test_parsed_person(graph_outputs):
-    (_, _, _, parsed_person) = graph_outputs
-    run_test_against_ground_truth(
-        "parsed_person", parsed_person, PARSED_PERSON_GROUND_TRUTH
-    )
-    run_test_against_ground_truth("car", parsed_person.owns_car[0], CAR_GROUND_TRUTH)
