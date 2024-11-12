@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from cognee.modules.data.extraction.extract_summary import extract_summary
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.tasks.storage import add_data_points
-from .models.TextSummary import TextSummary
+from .models import TextSummary
 
 async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel]):
     if len(data_chunks) == 0:
