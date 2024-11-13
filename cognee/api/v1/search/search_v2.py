@@ -3,6 +3,7 @@ from uuid import UUID
 from enum import Enum
 from typing import Callable, Dict
 from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
@@ -37,7 +38,7 @@ async def search(query_type: SearchType, query_text: str, user: User = None) -> 
         if document_id is None or document_id in own_document_ids:
             filtered_search_results.append(search_result)
 
-    await log_result(query.id, json.dumps(filtered_search_results), user.id)
+    await log_result(query.id, json.dumps(filtered_search_results, cls = JSONEncoder), user.id)
 
     return filtered_search_results
 
