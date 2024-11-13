@@ -9,7 +9,7 @@ GROUND_TRUTH = [
 ]
 
 
-if __name__ == "__main__":
+def test_PdfDocument():
     test_file_path = os.path.join(
         os.sep,
         *(os.path.dirname(__file__).split(os.sep)[:-2]),

@@ -1,12 +1,9 @@
 from datetime import datetime, timezone
+from typing import Any, Dict
 
-
-from typing import Dict, Any
 
 def run_test_against_ground_truth(
-    test_target_item_name: str,
-    test_target_item: Any,
-    ground_truth_dict: Dict[str, Any]
+    test_target_item_name: str, test_target_item: Any, ground_truth_dict: Dict[str, Any]
 ):
     """Validates test target item attributes against ground truth values.
 
