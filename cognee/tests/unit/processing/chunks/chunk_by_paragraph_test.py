@@ -47,18 +47,18 @@ INPUT_TEXT = {
 }
 
 
-def run_chunking_test(test_text, ground_truth):
+def run_chunking_test(test_text, expected_chunks):
     chunks = []
     for chunk_data in chunk_by_paragraph(test_text, 12, batch_paragraphs=False):
         chunks.append(chunk_data)
 
     assert len(chunks) == 3
 
-    for ground_truth_item, chunk in zip(ground_truth, chunks):
+    for expected_chunks_item, chunk in zip(expected_chunks, chunks):
         for key in ["text", "word_count", "cut_type"]:
             assert (
-                chunk[key] == ground_truth_item[key]
-            ), f"{key = }: {chunk[key] = } != {ground_truth_item[key] = }"
+                chunk[key] == expected_chunks_item[key]
+            ), f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
 
 
 def test_chunking_whole_text():
