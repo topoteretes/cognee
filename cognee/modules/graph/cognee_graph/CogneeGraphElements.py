@@ -17,6 +17,8 @@ class Node:
     status: np.ndarray
 
     def __init__(self, node_id: str, attributes: Optional[Dict[str, Any]] = None, dimension: int = 1):
+        if dimension <= 0:
+            raise ValueError("Dimension must be a positive integer")
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
         self.skeleton_neighbours = []
@@ -104,6 +106,8 @@ class Edge:
             return hash(frozenset({self.node1, self.node2}))
 
     def __eq__(self, other: "Edge") -> bool:
+        if not isinstance(other, Edge):
+            return False
         if self.directed:
             return self.node1 == other.node1 and self.node2 == other.node2
         else:

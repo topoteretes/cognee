@@ -54,6 +54,10 @@ class CogneeGraph(CogneeAbstractGraph):
                                     directed = True,
                                     node_dimension = 1,
                                     edge_dimension = 1) -> None:
+
+        if node_dimension < 1 or edge_dimension < 1:
+            raise ValueError("Dimensions must be positive integers")
+
         try:
             nodes_data, edges_data = await adapter.get_graph_data()
 
