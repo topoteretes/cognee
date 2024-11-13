@@ -1,69 +1,78 @@
 from uuid import uuid5, NAMESPACE_OID
+from typing import Dict, Any, Iterator
 from .chunk_by_sentence import chunk_by_sentence
 
-def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs = True):
-    paragraph = ""
-    last_cut_type = None
+def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs: bool = True) -> Iterator[Dict[str, Any]]:
+    """
+    Chunks text by paragraph while preserving exact text reconstruction capability.
+    When chunks are joined with empty string "", they reproduce the original text exactly.
+    """
+    current_chunk = ""
+    current_word_count = 0
+    chunk_index = 0
     last_paragraph_id = None
-    paragraph_word_count = 0
-    paragraph_chunk_index = 0
-
-    for (paragraph_id, __, sentence, word_count, end_type) in chunk_by_sentence(data):
-        if paragraph_word_count > 0 and paragraph_word_count + word_count > paragraph_length:
-            if batch_paragraphs is True:
-                chunk_id = uuid5(NAMESPACE_OID, paragraph)
-                yield dict(
-                    text = paragraph.strip(),
-                    word_count = paragraph_word_count,
-                    id = chunk_id, # When batching paragraphs, the paragraph_id is the same as chunk_id.
-                                   # paragraph_id doens't mean anything since multiple paragraphs are merged.
-                    chunk_id = chunk_id,
-                    chunk_index = paragraph_chunk_index,
-                    cut_type = last_cut_type,
-                )
+    last_cut_type = None
+    
+    for paragraph_id, _, sentence, word_count, end_type in chunk_by_sentence(data):
+        # Check if this sentence would exceed length limit
+        if current_word_count > 0 and current_word_count + word_count > paragraph_length:
+            # Yield current chunk
+            chunk_dict = {
+                "text": current_chunk,
+                "word_count": current_word_count,
+                "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
+                "chunk_index": chunk_index,
+                "cut_type": last_cut_type
+            }
+            
+            if batch_paragraphs:
+                chunk_dict["id"] = chunk_dict["chunk_id"]
             else:
-                yield dict(
-                    text = paragraph.strip(),
-                    word_count = paragraph_word_count,
-                    id = last_paragraph_id,
-                    chunk_id = uuid5(NAMESPACE_OID, paragraph),
-                    chunk_index = paragraph_chunk_index,
-                    cut_type = last_cut_type,
-                )
-
-            paragraph_chunk_index += 1
-            paragraph_word_count = 0
-            paragraph = ""
-
-        paragraph += (" " if len(paragraph) > 0 else "") + sentence
-        paragraph_word_count += word_count
-
-        if end_type == "paragraph_end" or end_type == "sentence_cut":
-            if batch_paragraphs is True:
-                paragraph += "\n\n" if end_type == "paragraph_end" else ""
-            else:
-                yield dict(
-                    text = paragraph.strip(),
-                    word_count = paragraph_word_count,
-                    paragraph_id = paragraph_id,
-                    chunk_id = uuid5(NAMESPACE_OID, paragraph),
-                    chunk_index = paragraph_chunk_index,
-                    cut_type = end_type,
-                )
-
-                paragraph_chunk_index = 0
-                paragraph_word_count = 0
-                paragraph = ""
-
+                chunk_dict["id"] = last_paragraph_id
+                
+            yield chunk_dict
+            
+            # Start new chunk with current sentence
+            current_chunk = sentence
+            current_word_count = word_count
+            chunk_index += 1
+        else:
+            # Just concatenate directly - no space handling
+            current_chunk += sentence
+            current_word_count += word_count
+        
+        # Handle end of paragraph
+        if end_type in ("paragraph_end", "sentence_cut") and not batch_paragraphs:
+            # For non-batch mode, yield each paragraph separately
+            chunk_dict = {
+                "text": current_chunk,
+                "word_count": current_word_count,
+                "id": paragraph_id,
+                "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
+                "chunk_index": chunk_index,
+                "cut_type": end_type
+            }
+            yield chunk_dict
+            current_chunk = ""
+            current_word_count = 0
+            chunk_index = 0
+        
         last_cut_type = end_type
         last_paragraph_id = paragraph_id
-
-    if len(paragraph) > 0:
-        yield dict(
-            chunk_id = uuid5(NAMESPACE_OID, paragraph),
-            text = paragraph,
-            word_count = paragraph_word_count,
-            paragraph_id = last_paragraph_id,
-            chunk_index = paragraph_chunk_index,
-            cut_type = last_cut_type,
-        )
+    
+    # Yield any remaining text
+    if current_chunk:
+        chunk_dict = {
+            "text": current_chunk,
+            "word_count": current_word_count,
+            "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
+            "chunk_index": chunk_index,
+            "cut_type": last_cut_type
+        }
+        
+        if batch_paragraphs:
+            chunk_dict["id"] = chunk_dict["chunk_id"]
+        else:
+            chunk_dict["id"] = last_paragraph_id
+            
+        yield chunk_dict
