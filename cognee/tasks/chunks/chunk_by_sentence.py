@@ -11,7 +11,7 @@ def chunk_by_sentence(data: str):
     word_count = 0
 
     for (word, word_type) in chunk_by_word(data):
-        sentence += (" " if len(sentence) > 0 else "") + word
+        sentence += word
         word_count += 1
 
         if word_type == "paragraph_end" or word_type == "sentence_end":
