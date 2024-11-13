@@ -1,8 +1,8 @@
 from uuid import uuid4
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, DateTime
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, DateTime, UUID
+from cognee.infrastructure.databases.relational import Base
 from .ACLResources import ACLResources
 
 class Resource(Base):

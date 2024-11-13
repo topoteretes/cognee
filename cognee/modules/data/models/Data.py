@@ -2,8 +2,8 @@ from uuid import uuid4
 from typing import List
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, String, DateTime
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, String, DateTime, UUID
+from cognee.infrastructure.databases.relational import Base
 from .DatasetData import DatasetData
 
 class Data(Base):

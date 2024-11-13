@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, ForeignKey
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, DateTime, ForeignKey, UUID
+from cognee.infrastructure.databases.relational import Base
 
 class PipelineTask(Base):
     __tablename__ = "pipeline_task"
