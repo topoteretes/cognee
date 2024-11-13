@@ -14,7 +14,6 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
     last_cut_type = None
     
     for paragraph_id, _, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
-        assert word_count <= paragraph_length, f"{paragraph_length = } is smaller than {word_count = }"
         # Check if this sentence would exceed length limit
         if current_word_count > 0 and current_word_count + word_count > paragraph_length:
             # Yield current chunk

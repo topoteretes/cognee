@@ -3,6 +3,18 @@ import re
 SENTENCE_ENDINGS = r"[.;!?…]"
 PARAGRAPH_ENDINGS = r"[\n\r]"
 
+def is_real_paragraph_end(last_processed_character, i, data):
+    if re.match(SENTENCE_ENDINGS, last_processed_character):
+        return True
+    j = i + 1
+    next_character = data[j] if j < len(data) else None
+    while next_character is not None and (re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "):
+        j += 1
+        next_character = data[j] if j < len(data) else None
+    if next_character and next_character.isupper():
+        return True
+    return False
+
 def chunk_by_word(data: str):
     """
     Chunks text into words and endings while preserving whitespace.
@@ -24,23 +36,11 @@ def chunk_by_word(data: str):
     while i < len(data):
         character = data[i]
             
-        def is_real_paragraph_end():
-            if re.match(SENTENCE_ENDINGS, last_processed_character):
-                return True
-            j = i + 1
-            next_character = data[j] if j < len(data) else None
-            while next_character is not None and (re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "):
-                j += 1
-                next_character = data[j] if j < len(data) else None
-            if next_character and next_character.isupper():
-                return True
-            return False
-            
         if re.match(PARAGRAPH_ENDINGS, character):
             if current_chunk:
                 yield (current_chunk, "word")
                 current_chunk = ""
-            yield (character, "paragraph_end" if is_real_paragraph_end() else "word")
+            yield (character, "paragraph_end" if is_real_paragraph_end(last_processed_character, i, data) else "word")
             i += 1
             continue
             
