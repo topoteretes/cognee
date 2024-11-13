@@ -1,9 +1,23 @@
 from datetime import datetime, timezone
 
 
+from typing import Dict, Any
+
 def run_test_against_ground_truth(
-    test_target_item_name, test_target_item, ground_truth_dict
+    test_target_item_name: str,
+    test_target_item: Any,
+    ground_truth_dict: Dict[str, Any]
 ):
+    """Validates test target item attributes against ground truth values.
+
+    Args:
+        test_target_item_name: Name of the item being tested (for error messages)
+        test_target_item: Object whose attributes are being validated
+        ground_truth_dict: Dictionary containing expected values
+
+    Raises:
+        AssertionError: If any attribute doesn't match ground truth or if update timestamp is too old
+    """
     for key, ground_truth in ground_truth_dict.items():
         if isinstance(ground_truth, dict):
             for key2, ground_truth2 in ground_truth.items():
