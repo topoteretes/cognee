@@ -33,7 +33,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
-        self.engine = create_async_engine(self.db_uri, connect_args={"timeout": 100})
+        self.engine = create_async_engine(self.db_uri)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
