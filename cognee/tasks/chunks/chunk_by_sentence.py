@@ -2,9 +2,10 @@
 
 
 from uuid import uuid4
+from typing import Optional
 from .chunk_by_word import chunk_by_word
 
-def chunk_by_sentence(data: str):
+def chunk_by_sentence(data: str, maximum_length: Optional[int]):
     sentence = ""
     paragraph_id = uuid4()
     chunk_index = 0
@@ -14,7 +15,7 @@ def chunk_by_sentence(data: str):
         sentence += word
         word_count += 1
 
-        if word_type == "paragraph_end" or word_type == "sentence_end":
+        if word_type == "paragraph_end" or word_type == "sentence_end" or ((word_count is not None) and (word_count == maximum_length)):
             yield (paragraph_id, chunk_index, sentence, word_count, word_type)
             sentence = ""
             word_count = 0
