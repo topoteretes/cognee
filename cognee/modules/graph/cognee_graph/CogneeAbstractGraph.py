@@ -1,28 +1,19 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Union
 from CogneeGraphElements import Node, Edge
-from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
-from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 class CogneeAbstractGraph(ABC):
     """
     Abstract base class for representing a graph structure.
 
-    Attributes:
-        nodes (Dict[str, Node]): A dictionary of nodes in the graph, keyed by their ID.
-        edges (List[Edge]): A list of edges in the graph.
     """
-
-    def __init__(self):
-        self.nodes: Dict[str, Node] = {}
-        self.edges: List[Edge] = [] # :TODO do we need it in hashtable? Do we want to index?
 
     @abstractmethod
     def add_node(self, node: Node) -> None:
         """Add a node to the graph."""
         pass
 
-    # :TODO Add dimension
     @abstractmethod
     def add_edge(self, edge: Edge) -> None:
         """Add an edge to the graph."""
@@ -39,6 +30,6 @@ class CogneeAbstractGraph(ABC):
         pass
 
     @abstractmethod
-    async def project_graph_from_db(self, adapter: Union[Neo4jAdapter, NetworkXAdapter]) -> None:
+    async def project_graph_from_db(self, adapter: GraphDBInterface, directed: bool, dimension: int) -> None:
         """Project the graph structure from a database using the provided adapter."""
         pass

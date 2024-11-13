@@ -14,12 +14,14 @@ class Node:
     attributes: Dict[str, Any]
     skeleton_neighbours: List["Node"]
     skeleton_edges: List["Edge"]
+    status: np.ndarray
 
-    def __init__(self, node_id: str, attributes: Optional[Dict[str, Any]] = None):
+    def __init__(self, node_id: str, attributes: Optional[Dict[str, Any]] = None, dimension: int = 1):
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
-        self.skeleton_neighbours = [] # :TODO do we need it in hashtable? Do we want to index?
-        self.skeleton_edges = [] # :TODO do we need it in hashtable? Do we want to index?
+        self.skeleton_neighbours = []
+        self.skeleton_edges = []
+        self.status = np.ones(dimension, dtype=int)
 
     def add_skeleton_neighbor(self, neighbor: "Node") -> None:
         if neighbor not in self.skeleton_neighbours:
@@ -46,6 +48,11 @@ class Node:
             if all(e.node1 != neighbor and e.node2 != neighbor for e in self.skeleton_edges):
                 self.remove_skeleton_neighbor(neighbor)
 
+    def is_node_alive_in_dimension(self, dimension: int) -> bool:
+        if dimension < 0 or dimension >= len(self.status):
+            raise ValueError(f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
+        return self.status[dimension] == 1
+
     def __repr__(self) -> str:
         return f"Node({self.id}, attributes={self.attributes})"
 
@@ -65,16 +72,23 @@ class Edge:
             attributes (Dict[str, Any]): A dictionary of attributes associated with the edge.
             directed (bool): A flag indicating whether the edge is directed or undirected.
     """
-    def __init__(self, node1: "Node", node2: "Node", attributes: Optional[Dict[str, Any]] = None, directed: bool = False, dimensions: int = 1):
-        if dimensions <= 0:
+
+    node1: "Node"
+    node2: "Node"
+    attributes: Dict[str, Any]
+    directed: bool
+    status: np.ndarray
+
+    def __init__(self, node1: "Node", node2: "Node", attributes: Optional[Dict[str, Any]] = None, directed: bool = True, dimension: int = 1):
+        if dimension <= 0:
             raise ValueError("Dimensions must be a positive integer.")
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
         self.directed = directed
-        self.status = np.ones(dimensions, dtype=int)
+        self.status = np.ones(dimension, dtype=int)
 
-    def is_alive_in_higher_dimension(self, dimension: int) -> bool:
+    def is_edge_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
             raise ValueError(f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
         return self.status[dimension] == 1
