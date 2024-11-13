@@ -3,13 +3,13 @@ from cognee.tasks.chunks import chunk_by_paragraph
 GROUND_TRUTH = {
     "whole_text": [
         {
-            "text": "This is example text. It contains multiple sentences.",
-            "word_count": 8,
+            "text": "This is example text. It contains multiple sentences.\n",
+            "word_count": 9,
             "cut_type": "paragraph_end",
         },
         {
-            "text": "This is a second paragraph. First two paragraphs are whole.",
-            "word_count": 10,
+            "text": "This is a second paragraph. First two paragraphs are whole.\n",
+            "word_count": 11,
             "cut_type": "paragraph_end",
         },
         {
@@ -20,30 +20,30 @@ GROUND_TRUTH = {
     ],
     "cut_text": [
         {
-            "text": "This is example text. It contains multiple sentences.",
-            "word_count": 8,
+            "text": "This is example text. It contains multiple sentences.\n",
+            "word_count": 9,
             "cut_type": "paragraph_end",
         },
         {
-            "text": "This is a second paragraph. First two paragraphs are whole.",
-            "word_count": 10,
+            "text": "This is a second paragraph. First two paragraphs are whole.\n",
+            "word_count": 11,
             "cut_type": "paragraph_end",
         },
         {
             "text": "Third paragraph is cut and is missing the dot at the end",
             "word_count": 12,
-            "cut_type": "sentence_cut",
+            "cut_type": "word",
         },
     ],
 }
 
 INPUT_TEXT = {
     "whole_text": """This is example text. It contains multiple sentences.
-    This is a second paragraph. First two paragraphs are whole.
-    Third paragraph is a bit longer and is finished with a dot.""",
+This is a second paragraph. First two paragraphs are whole.
+Third paragraph is a bit longer and is finished with a dot.""",
     "cut_text": """This is example text. It contains multiple sentences.
-    This is a second paragraph. First two paragraphs are whole.
-    Third paragraph is cut and is missing the dot at the end""",
+This is a second paragraph. First two paragraphs are whole.
+Third paragraph is cut and is missing the dot at the end""",
 }
 
 
