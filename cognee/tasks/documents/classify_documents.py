@@ -13,5 +13,4 @@ def classify_documents(data_documents: list[Data]) -> list[Document]:
         EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](id = data_item.id, title=f"{data_item.name}.{data_item.extension}", raw_data_location=data_item.raw_data_location, name=data_item.name)
         for data_item in data_documents
     ]
-
     return documents
