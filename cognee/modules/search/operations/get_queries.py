@@ -7,11 +7,11 @@ async def get_queries(user_id: UUID, limit: int) -> list[Query]:
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        datasets = (await session.scalars(
+        queries = (await session.scalars(
             select(Query)
                 .filter(Query.user_id == user_id)
                 .order_by(Query.created_at.desc())
                 .limit(limit)
         )).all()
 
-        return datasets
+        return queries
