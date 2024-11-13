@@ -272,4 +272,12 @@ Vows made in pain, as violent and void.
 For never can true reconcilement grow
 Where wounds of deadly hate have peirc'd so deep:
 Which would but lead me to a worse relapse [ 100 ]""",
+    "empty": "",
+    "single_char": "x",
+    "whitespace": "   \n\t   \r\n   ",
+    "unicode_special": "Hello 👋 مرحبا שָׁלוֹם",
+    "mixed_endings": "line1\r\nline2\nline3\r\nline4",
+    "many_newlines": "\n\n\n\ntext\n\n\n\n",
+    "html_mixed": "<p>Hello</p>\nPlain text\n<div>World</div>",
+    "urls_emails": "Visit https://example.com or email user@example.com",
 }

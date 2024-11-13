@@ -1,26 +1,17 @@
+from itertools import product
+
 import numpy as np
 import pytest
 
 from cognee.tasks.chunks import chunk_by_sentence, chunk_by_word
 from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS
 
+maximum_length_vals = [None, 8, 64]
+
 
 @pytest.mark.parametrize(
     "input_text,maximum_length",
-    [
-        (INPUT_TEXTS["english_text"], None),
-        (INPUT_TEXTS["english_text"], 8),
-        (INPUT_TEXTS["english_text"], 64),
-        (INPUT_TEXTS["english_lists"], None),
-        (INPUT_TEXTS["english_lists"], 8),
-        (INPUT_TEXTS["english_lists"], 64),
-        (INPUT_TEXTS["python_code"], None),
-        (INPUT_TEXTS["python_code"], 8),
-        (INPUT_TEXTS["python_code"], 64),
-        (INPUT_TEXTS["chinese_text"], None),
-        (INPUT_TEXTS["chinese_text"], 8),
-        (INPUT_TEXTS["chinese_text"], 64),
-    ],
+    list(product(list(INPUT_TEXTS.values()), maximum_length_vals)),
 )
 def test_chunk_by_sentence_isomorphism(input_text, maximum_length):
     chunks = chunk_by_sentence(input_text, maximum_length)
@@ -32,16 +23,12 @@ def test_chunk_by_sentence_isomorphism(input_text, maximum_length):
 
 @pytest.mark.parametrize(
     "input_text,maximum_length",
-    [
-        (INPUT_TEXTS["english_text"], 8),
-        (INPUT_TEXTS["english_text"], 64),
-        (INPUT_TEXTS["english_lists"], 8),
-        (INPUT_TEXTS["english_lists"], 64),
-        (INPUT_TEXTS["python_code"], 8),
-        (INPUT_TEXTS["python_code"], 64),
-        (INPUT_TEXTS["chinese_text"], 8),
-        (INPUT_TEXTS["chinese_text"], 64),
-    ],
+    list(
+        product(
+            list(INPUT_TEXTS.values()),
+            [val for val in maximum_length_vals if val is not None],
+        )
+    ),
 )
 def test_paragraph_chunk_length(input_text, maximum_length):
     chunks = list(chunk_by_sentence(input_text, maximum_length))

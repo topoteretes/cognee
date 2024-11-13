@@ -15,7 +15,7 @@ def chunk_by_sentence(data: str, maximum_length: Optional[int] = None):
         sentence += word
         word_count += 1
 
-        if word_type == "paragraph_end" or word_type == "sentence_end" or ((maximum_length is not None) and (word_count == maximum_length)):
+        if word_type == "paragraph_end" or word_type == "sentence_end" or (maximum_length and (word_count == maximum_length)):
             yield (paragraph_id, chunk_index, sentence, word_count, word_type)
             sentence = ""
             word_count = 0
