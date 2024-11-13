@@ -1,6 +1,6 @@
 """ This module contains utility functions for the cognee. """
 import os
-import datetime
+from datetime import datetime, timezone
 import graphistry
 import networkx as nx
 import numpy as np
@@ -9,8 +9,28 @@ import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 from posthog import Posthog
+
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
+
+from uuid import uuid4
+import pathlib
+
+def get_anonymous_id():
+    """Creates or reads a anonymous user id"""
+    home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
+
+    if not os.path.isdir(home_dir):
+        os.makedirs(home_dir, exist_ok=True)
+    anonymous_id_file = os.path.join(home_dir, ".anon_id")
+    if not os.path.isfile(anonymous_id_file):
+        anonymous_id = str(uuid4())
+        with open(anonymous_id_file, "w", encoding="utf-8") as f:
+            f.write(anonymous_id)
+    else:
+        with open(anonymous_id_file, "r", encoding="utf-8") as f:
+            anonymous_id = f.read()
+    return anonymous_id
 
 def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     if os.getenv("TELEMETRY_DISABLED"):
@@ -25,14 +45,18 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         host = "https://eu.i.posthog.com"
     )
 
-    current_time = datetime.datetime.now()
+    current_time = datetime.now(timezone.utc)
     properties = {
         "time": current_time.strftime("%m/%d/%Y"),
+        "user_id": user_id,
         **additional_properties,
     }
 
+    # Needed to forward properties to PostHog along with id
+    posthog.identify(get_anonymous_id(), properties)
+
     try:
-        posthog.capture(user_id, event_name, properties)
+        posthog.capture(get_anonymous_id(), event_name, properties)
     except Exception as e:
         print("ERROR sending telemetric data to Posthog. See exception: %s", e)
 
@@ -86,30 +110,36 @@ async def register_graphistry():
     graphistry.register(api = 3, username = config.graphistry_username, password = config.graphistry_password)
 
 
-def prepare_edges(graph):
-    return nx.to_pandas_edgelist(graph)
+def prepare_edges(graph, source, target, edge_key):
+    edge_list = [{
+        source: str(edge[0]),
+        target: str(edge[1]),
+        edge_key: str(edge[2]),
+    } for edge in graph.edges(keys = True, data = True)]
+
+    return pd.DataFrame(edge_list)
 
 
 def prepare_nodes(graph, include_size=False):
     nodes_data = []
     for node in graph.nodes:
         node_info = graph.nodes[node]
-        description = node_info.get("layer_description", {}).get("layer", "Default Layer") if isinstance(
-            node_info.get("layer_description"), dict) else node_info.get("layer_description", "Default Layer")
-        # description = node_info['layer_description']['layer'] if isinstance(node_info.get('layer_description'), dict) and 'layer' in node_info['layer_description'] else node_info.get('layer_description', node)
-        # if isinstance(node_info.get('layer_description'), dict) and 'layer' in node_info.get('layer_description'):
-        #     description = node_info['layer_description']['layer']
-        # # Use 'layer_description' directly if it's not a dictionary, otherwise default to node ID
-        # else:
-        #     description = node_info.get('layer_description', node)
 
-        node_data = {"id": node, "layer_description": description}
+        if not node_info:
+            continue
+
+        node_data = {
+            "id": str(node),
+            "name": node_info["name"] if "name" in node_info else str(node),
+        }
+
         if include_size:
             default_size = 10  # Default node size
             larger_size = 20  # Size for nodes with specific keywords in their ID
-            keywords = ["DOCUMENT", "User", "LAYER"]
+            keywords = ["DOCUMENT", "User"]
             node_size = larger_size if any(keyword in str(node) for keyword in keywords) else default_size
             node_data["size"] = node_size
+
         nodes_data.append(node_data)
 
     return pd.DataFrame(nodes_data)
@@ -129,28 +159,28 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
 
         graph = networkx_graph
 
-    edges = prepare_edges(graph)
-    plotter = graphistry.edges(edges, "source", "target")
+    edges = prepare_edges(graph, "source_node", "target_node", "relationship_name")
+    plotter = graphistry.edges(edges, "source_node", "target_node")
+    plotter = plotter.bind(edge_label = "relationship_name")
 
     if include_nodes:
-        nodes = prepare_nodes(graph, include_size=include_size)
+        nodes = prepare_nodes(graph, include_size = include_size)
         plotter = plotter.nodes(nodes, "id")
 
-
         if include_size:
-            plotter = plotter.bind(point_size="size")
+            plotter = plotter.bind(point_size = "size")
 
 
         if include_color:
-            unique_layers = nodes["layer_description"].unique()
-            color_palette = generate_color_palette(unique_layers)
-            plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
-                                                 default_mapping="silver")
+            pass
+            # unique_layers = nodes["layer_description"].unique()
+            # color_palette = generate_color_palette(unique_layers)
+            # plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
+            #                                      default_mapping="silver")
 
 
         if include_labels:
-            plotter = plotter.bind(point_label = "layer_description")
-
+            plotter = plotter.bind(point_label = "name")
 
 
     # Visualization

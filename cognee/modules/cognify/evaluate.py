@@ -1,4 +1,3 @@
-import dsp
 import dspy
 from dspy.evaluate.evaluate import Evaluate
 from dspy.primitives.example import Example

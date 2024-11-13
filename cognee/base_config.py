@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,8 +8,8 @@ from cognee.shared.data_models import MonitoringTool
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     monitoring_tool: object = MonitoringTool.LANGFUSE
-    graphistry_username: Optional[str] = None
-    graphistry_password: Optional[str] = None
+    graphistry_username: Optional[str] = os.getenv("GRAPHISTRY_USERNAME")
+    graphistry_password: Optional[str] = os.getenv("GRAPHISTRY_PASSWORD")
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 

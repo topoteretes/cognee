@@ -7,7 +7,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
-from cognee.tasks.chunking import query_chunks
+from cognee.tasks.chunks import query_chunks
 from cognee.tasks.graph import query_graph_connections
 from cognee.tasks.summarization import query_summaries
 

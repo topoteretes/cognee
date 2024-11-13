@@ -17,22 +17,21 @@ permissions:
   contents: write
 
 jobs:
-
-
-#  get_docs_changes:
-#    name: run docs changes
-#    uses: ./.github/workflows/get_docs_changes.yml
+  get_docs_changes:
+    name: run docs changes
+    uses: ./.github/workflows/get_docs_changes.yml
   deploy:
     runs-on: ubuntu-latest
-#    needs: get_docs_changes
+    needs: get_docs_changes
+    if: needs.get_docs_changes.outputs.changes_outside_docs == 'false'
 
     steps:
-
       - name: Checkout code
         uses: actions/checkout@master
 
       - name: Install Poetry
         uses: snok/install-poetry@v1.3.1
+
       - name: Use output
         run: echo "The stage is finished"
 
@@ -41,7 +40,6 @@ jobs:
         with:
           python-version: '3.11.x'
 
-
       - name: Install APT packages
         run: |
           sudo apt-get update &&
@@ -49,9 +47,10 @@ jobs:
 
       - name: Install via Poetry
         run: poetry install --with dev,docs
-
         env:
           GH_TOKEN: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}
 
       - name: Build and deploy MkDocs
         run: poetry run mkdocs gh-deploy --force
+        env:
+          DOCS_SEGMENT_KEY: ${{ secrets.DOCS_SEGMENT_KEY }}

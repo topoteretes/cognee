@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
 from cognee.modules.data.extraction.extract_categories import extract_categories
-from cognee.modules.chunking import DocumentChunk
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
 async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]):
@@ -20,7 +20,6 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
 
     for chunk_index, chunk in enumerate(data_chunks):
         chunk_classification = chunk_classifications[chunk_index]
-        classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
         classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
 
         for classification_subclass in chunk_classification.label.subclass:
@@ -39,7 +38,7 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
     if await vector_engine.has_collection(collection_name):
         existing_data_points = await vector_engine.retrieve(
             collection_name,
-            list(set(classification_data_points)),
+            [str(classification_data) for classification_data in list(set(classification_data_points))],
         ) if len(classification_data_points) > 0 else []
 
         existing_points_map = {point.id: True for point in existing_data_points}
@@ -60,13 +59,13 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
             data_points.append(
                 DataPoint[Keyword](
                     id=str(classification_type_id),
-                    payload=Keyword.parse_obj({
+                    payload=Keyword.model_validate({
                         "uuid": str(classification_type_id),
                         "text": classification_type_label,
                         "chunk_id": str(data_chunk.chunk_id),
                         "document_id": str(data_chunk.document_id),
                     }),
-                    embed_field="text",
+                    index_fields=["text"],
                 )
             )
 
@@ -99,13 +98,13 @@ async def chunk_naive_llm_classifier(data_chunks: list[DocumentChunk], classific
                 data_points.append(
                     DataPoint[Keyword](
                         id=str(classification_subtype_id),
-                        payload=Keyword.parse_obj({
+                        payload=Keyword.model_validate({
                             "uuid": str(classification_subtype_id),
                             "text": classification_subtype_label,
                             "chunk_id": str(data_chunk.chunk_id),
                             "document_id": str(data_chunk.document_id),
                         }),
-                        embed_field="text",
+                        index_fields=["text"],
                     )
                 )
 

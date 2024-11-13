@@ -1,84 +1,95 @@
-from typing import List, Union, Literal, Optional
-from pydantic import BaseModel
+from typing import Any, List, Union, Literal, Optional
+from cognee.infrastructure.engine import DataPoint
 
-class BaseClass(BaseModel):
-    id: str
-    name: str
-    type: Literal["Class"] = "Class"
-    description: str
-    constructor_parameters: Optional[List[str]]
-
-class Class(BaseModel):
-    id: str
-    name: str
-    type: Literal["Class"] = "Class"
-    description: str
-    constructor_parameters: Optional[List[str]]
-    from_class: Optional[BaseClass]
-
-class ClassInstance(BaseModel):
-    id: str
-    name: str
-    type: Literal["ClassInstance"] = "ClassInstance"
-    description: str
-    from_class: Class
-
-class Function(BaseModel):
-    id: str
-    name: str
-    type: Literal["Function"] = "Function"
-    description: str
-    parameters: Optional[List[str]]
-    return_type: str
-    is_static: Optional[bool] = False
-
-class Variable(BaseModel):
+class Variable(DataPoint):
     id: str
     name: str
     type: Literal["Variable"] = "Variable"
     description: str
     is_static: Optional[bool] = False
-    default_value: Optional[str]
+    default_value: Optional[str] = None
+    data_type: str
 
-class Operator(BaseModel):
+    _metadata = {
+        "index_fields": ["name"]
+    }
+
+class Operator(DataPoint):
     id: str
     name: str
     type: Literal["Operator"] = "Operator"
     description: str
     return_type: str
 
-class ExpressionPart(BaseModel):
+class Class(DataPoint):
+    id: str
+    name: str
+    type: Literal["Class"] = "Class"
+    description: str
+    constructor_parameters: List[Variable]
+    extended_from_class: Optional["Class"] = None
+    has_methods: list["Function"]
+
+    _metadata = {
+        "index_fields": ["name"]
+    }
+
+class ClassInstance(DataPoint):
+    id: str
+    name: str
+    type: Literal["ClassInstance"] = "ClassInstance"
+    description: str
+    from_class: Class
+    instantiated_by: Union["Function"]
+    instantiation_arguments: List[Variable]
+
+    _metadata = {
+        "index_fields": ["name"]
+    }
+
+class Function(DataPoint):
+    id: str
+    name: str
+    type: Literal["Function"] = "Function"
+    description: str
+    parameters: List[Variable]
+    return_type: str
+    is_static: Optional[bool] = False
+
+    _metadata = {
+        "index_fields": ["name"]
+    }
+
+class FunctionCall(DataPoint):
+    id: str
+    type: Literal["FunctionCall"] = "FunctionCall"
+    called_by: Union[Function, Literal["main"]]
+    function_called: Function
+    function_arguments: List[Any]
+
+class Expression(DataPoint):
     id: str
     name: str
     type: Literal["Expression"] = "Expression"
     description: str
     expression: str
-    members: List[Union[Variable, Function, Operator]]
+    members: List[Union[Variable, Function, Operator, "Expression"]]
 
-class Expression(BaseModel):
-    id: str
-    name: str
-    type: Literal["Expression"] = "Expression"
-    description: str
-    expression: str
-    members: List[Union[Variable, Function, Operator, ExpressionPart]]
-
-class Edge(BaseModel):
-    source_node_id: str
-    target_node_id: str
-    relationship_name: Literal["called in", "stored in", "defined in", "returned by", "instantiated in", "uses", "updates"]
-
-class SourceCodeGraph(BaseModel):
+class SourceCodeGraph(DataPoint):
     id: str
     name: str
     description: str
     language: str
     nodes: List[Union[
         Class,
+        ClassInstance,
         Function,
+        FunctionCall,
         Variable,
         Operator,
         Expression,
-        ClassInstance,
     ]]
-    edges: List[Edge]
+
+Class.model_rebuild()
+ClassInstance.model_rebuild()
+Expression.model_rebuild()
