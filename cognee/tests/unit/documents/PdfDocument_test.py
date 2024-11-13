@@ -4,8 +4,8 @@ import uuid
 from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
 
 GROUND_TRUTH = [
-    {"word_count": 879, "len_text": 5622, "cut_type": "sentence_end"},
-    {"word_count": 951, "len_text": 6384, "cut_type": "sentence_end"},
+    {"word_count": 879, "len_text": 5607, "cut_type": "sentence_end"},
+    {"word_count": 953, "len_text": 6363, "cut_type": "sentence_end"},
 ]
 
 

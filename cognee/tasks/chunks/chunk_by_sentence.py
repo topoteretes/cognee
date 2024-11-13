@@ -5,7 +5,7 @@ from uuid import uuid4
 from typing import Optional
 from .chunk_by_word import chunk_by_word
 
-def chunk_by_sentence(data: str, maximum_length: Optional[int]):
+def chunk_by_sentence(data: str, maximum_length: Optional[int] = None):
     sentence = ""
     paragraph_id = uuid4()
     chunk_index = 0
