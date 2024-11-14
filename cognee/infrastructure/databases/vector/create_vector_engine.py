@@ -1,9 +1,8 @@
 from typing import Dict
 
-from ..relational.config import get_relational_config
-
 class VectorConfig(Dict):
     vector_db_url: str
+    vector_db_port: str
     vector_db_key: str
     vector_db_provider: str
 
@@ -29,6 +28,7 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                 embedding_engine = embedding_engine
             )
     elif config["vector_db_provider"] == "pgvector":
+        from cognee.infrastructure.databases.relational import get_relational_config
         from .pgvector.PGVectorAdapter import PGVectorAdapter
         
         # Get configuration for postgres database
@@ -43,9 +43,18 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
                             f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
         )
         
-        return PGVectorAdapter(connection_string, 
-                        config["vector_db_key"], 
-                        embedding_engine
+        return PGVectorAdapter(
+            connection_string, 
+            config["vector_db_key"], 
+            embedding_engine,
+        )
+    elif config["vector_db_provider"] == "falkordb":
+        from ..hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
+
+        return FalkorDBAdapter(
+            database_url = config["vector_db_url"],
+            database_port = config["vector_db_port"],
+            embedding_engine = embedding_engine,
         )
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter

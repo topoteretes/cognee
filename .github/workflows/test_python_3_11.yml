@@ -1,10 +1,11 @@
 name: test | python 3.11
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
-  workflow_dispatch:
+    types: [labeled, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,7 +22,7 @@ jobs:
   run_common:
     name: test
     needs: get_docs_changes
-    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true'
+    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,8 +50,11 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
-      - name: Run tests
-        run: poetry run pytest tests/
+      - name: Run unit tests
+        run: poetry run pytest cognee/tests/unit/
+
+      - name: Run integration tests
+        run: poetry run pytest cognee/tests/integration/
 
       - name: Run default basic pipeline
         env:

@@ -1,11 +1,21 @@
 import logging
+from uuid import UUID
 from typing import List, Dict, Optional
 from qdrant_client import AsyncQdrantClient, models
+
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
-from ..models.DataPoint import DataPoint
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
 logger = logging.getLogger("QDrantAdapter")
+
+class IndexSchema(DataPoint):
+    text: str
+
+    _metadata: dict = {
+        "index_fields": ["text"]
+    }
 
 # class CollectionConfig(BaseModel, extra = "forbid"):
 #     vector_config: Dict[str, models.VectorParams] = Field(..., description="Vectors configuration" )
@@ -75,19 +85,18 @@ class QDrantAdapter(VectorDBInterface):
     ):
         client = self.get_qdrant_client()
 
-        result = await client.create_collection(
-            collection_name = collection_name,
-            vectors_config = {
-                "text": models.VectorParams(
-                    size = self.embedding_engine.get_vector_size(),
-                    distance = "Cosine"
-                )
-            }
-        )
+        if not await client.collection_exists(collection_name):
+            await client.create_collection(
+                collection_name = collection_name,
+                vectors_config = {
+                    "text": models.VectorParams(
+                        size = self.embedding_engine.get_vector_size(),
+                        distance = "Cosine"
+                    )
+                }
+            )
 
         await client.close()
-
-        return result
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         client = self.get_qdrant_client()
@@ -96,8 +105,8 @@ class QDrantAdapter(VectorDBInterface):
 
         def convert_to_qdrant_point(data_point: DataPoint):
             return models.PointStruct(
-                id = data_point.id,
-                payload = data_point.payload.dict(),
+                id = str(data_point.id),
+                payload = data_point.model_dump(),
                 vector = {
                     "text": data_vectors[data_points.index(data_point)]
                 }
@@ -115,6 +124,17 @@ class QDrantAdapter(VectorDBInterface):
             raise error
         finally:
             await client.close()
+
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        await self.create_collection(f"{index_name}_{index_property_name}")
+
+    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
+        await self.create_data_points(f"{index_name}_{index_property_name}", [
+            IndexSchema(
+                id = data_point.id,
+                text = getattr(data_point, data_point._metadata["index_fields"][0]),
+            ) for data_point in data_points
+        ])
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         client = self.get_qdrant_client()
@@ -135,7 +155,7 @@ class QDrantAdapter(VectorDBInterface):
 
         client = self.get_qdrant_client()
 
-        result = await client.search(
+        results = await client.search(
             collection_name = collection_name,
             query_vector = models.NamedVector(
                 name = "text",
@@ -147,7 +167,16 @@ class QDrantAdapter(VectorDBInterface):
 
         await client.close()
 
-        return result
+        return [
+            ScoredResult(
+                id = UUID(result.id),
+                payload = {
+                    **result.payload,
+                    "id": UUID(result.id),
+                },
+                score = 1 - result.score,
+            ) for result in results
+        ]
 
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int = None, with_vectors: bool = False):

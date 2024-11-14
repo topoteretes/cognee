@@ -30,8 +30,9 @@ pip install cognee
 ```
 
 ### With pip with PostgreSQL support
+
 ```bash
-pip install cognee[postgres]
+pip install 'cognee[postgres]'
 ```
 
 ### With poetry
@@ -108,24 +109,34 @@ import asyncio
 from cognee.api.v1.search import SearchType
 
 async def main():
-    await cognee.prune.prune_data()  # Reset cognee data
-    await cognee.prune.prune_system(metadata=True)  # Reset cognee system state
+    # Reset cognee data
+    await cognee.prune.prune_data()
+    # Reset cognee system state
+    await cognee.prune.prune_system(metadata=True)
 
     text = """
     Natural language processing (NLP) is an interdisciplinary
     subfield of computer science and information retrieval.
     """
 
-    await cognee.add(text)  # Add text to cognee
-    await cognee.cognify()  # Use LLMs and cognee to create knowledge graph
+    # Add text to cognee
+    await cognee.add(text)
 
-    search_results = await cognee.search(  # Search cognee for insights
+    # Use LLMs and cognee to create knowledge graph
+    await cognee.cognify()
+
+    # Search cognee for insights
+    search_results = await cognee.search(
         SearchType.INSIGHTS,
-        {'query': 'Tell me about NLP'}
+        "Tell me about NLP",
     )
 
-    for result_text in search_results:  # Display results
+    # Display results
+    for result_text in search_results:
         print(result_text)
+        # natural_language_processing is_a field
+        # natural_language_processing is_subfield_of computer_science
+        # natural_language_processing is_subfield_of information_retrieval
 
 asyncio.run(main())
 ```
