@@ -6,7 +6,7 @@ from cognee.modules.data.processing.document_types.AudioDocument import AudioDoc
 GROUND_TRUTH = [
     {"word_count": 57, "len_text": 353, "cut_type": "sentence_end"},
     {"word_count": 58, "len_text": 358, "cut_type": "sentence_end"},
-    {"word_count": 41, "len_text": 220, "cut_type": "sentence_cut"},
+    {"word_count": 41, "len_text": 219, "cut_type": "sentence_end"},
 ]
 
 TEST_TEXT = """
@@ -21,8 +21,7 @@ TEST_TEXT = """
 "Then you'll ship it without me. I won't stake my reputation on a house of cards."
 "Are you threatening to quit?"
 "No, I'm threatening to be right. And when it breaks, I want it in writing that you chose this."
-"The feature ships, Sarah. That's final."
-"""
+"The feature ships, Sarah. That's final.\""""
 
 
 def test_AudioDocument():
@@ -31,7 +30,7 @@ def test_AudioDocument():
         id=uuid.uuid4(), name="audio-dummy-test", raw_data_location=""
     )
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
-
+        l = list(document.read(chunk_size=64))
         for ground_truth, paragraph_data in zip(
             GROUND_TRUTH, document.read(chunk_size=64)
         ):

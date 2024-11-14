@@ -58,7 +58,6 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
             chunk_index += 1
         
         last_cut_type = end_type
-        last_paragraph_id = paragraph_id
     
     # Yield any remaining text
     if current_chunk:

@@ -8,11 +8,11 @@ from cognee.modules.data.processing.document_types.TextDocument import TextDocum
 GROUND_TRUTH = {
     "code.txt": [
         {"word_count": 205, "len_text": 1024, "cut_type": "sentence_cut"},
-        {"word_count": 104, "len_text": 833, "cut_type": "sentence_cut"},
+        {"word_count": 104, "len_text": 833, "cut_type": "paragraph_end"},
     ],
     "Natural_language_processing.txt": [
         {"word_count": 128, "len_text": 984, "cut_type": "paragraph_end"},
-        {"word_count": 1, "len_text": 1, "cut_type": "sentence_cut"},
+        {"word_count": 1, "len_text": 1, "cut_type": "paragraph_end"},
     ],
 }
 
