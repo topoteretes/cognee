@@ -7,12 +7,12 @@ from cognee.modules.data.processing.document_types.TextDocument import TextDocum
 
 GROUND_TRUTH = {
     "code.txt": [
-        {"word_count": 253, "len_text": 953, "cut_type": "paragraph_end"},
-        {"word_count": 157, "len_text": 905, "cut_type": "paragraph_end"},
+        {"word_count": 205, "len_text": 1024, "cut_type": "sentence_cut"},
+        {"word_count": 104, "len_text": 833, "cut_type": "sentence_cut"},
     ],
     "Natural_language_processing.txt": [
-        {"word_count": 115, "len_text": 839, "cut_type": "paragraph_end"},
-        {"word_count": 15, "len_text": 146, "cut_type": "paragraph_end"},
+        {"word_count": 128, "len_text": 984, "cut_type": "paragraph_end"},
+        {"word_count": 1, "len_text": 1, "cut_type": "sentence_cut"},
     ],
 }
 

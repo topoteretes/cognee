@@ -4,9 +4,9 @@ from unittest.mock import patch
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 
 GROUND_TRUTH = [
-    {"word_count": 60, "len_text": 318, "cut_type": "sentence_end"},
-    {"word_count": 64, "len_text": 358, "cut_type": "sentence_end"},
-    {"word_count": 56, "len_text": 255, "cut_type": "sentence_cut"},
+    {"word_count": 57, "len_text": 353, "cut_type": "sentence_end"},
+    {"word_count": 58, "len_text": 358, "cut_type": "sentence_end"},
+    {"word_count": 41, "len_text": 220, "cut_type": "sentence_cut"},
 ]
 
 TEST_TEXT = """

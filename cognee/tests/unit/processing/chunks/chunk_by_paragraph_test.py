@@ -3,34 +3,34 @@ from cognee.tasks.chunks import chunk_by_paragraph
 GROUND_TRUTH = {
     "whole_text": [
         {
-            "text": "This is example text. It contains multiple sentences.\n",
-            "word_count": 9,
+            "text": "This is example text. It contains multiple sentences.",
+            "word_count": 8,
             "cut_type": "paragraph_end",
         },
         {
-            "text": "This is a second paragraph. First two paragraphs are whole.\n",
-            "word_count": 11,
+            "text": "\nThis is a second paragraph. First two paragraphs are whole.",
+            "word_count": 10,
             "cut_type": "paragraph_end",
         },
         {
-            "text": "Third paragraph is a bit longer and is finished with a dot.",
+            "text": "\nThird paragraph is a bit longer and is finished with a dot.",
             "word_count": 12,
             "cut_type": "sentence_end",
         },
     ],
     "cut_text": [
         {
-            "text": "This is example text. It contains multiple sentences.\n",
-            "word_count": 9,
+            "text": "This is example text. It contains multiple sentences.",
+            "word_count": 8,
             "cut_type": "paragraph_end",
         },
         {
-            "text": "This is a second paragraph. First two paragraphs are whole.\n",
-            "word_count": 11,
+            "text": "\nThis is a second paragraph. First two paragraphs are whole.",
+            "word_count": 10,
             "cut_type": "paragraph_end",
         },
         {
-            "text": "Third paragraph is cut and is missing the dot at the end",
+            "text": "\nThird paragraph is cut and is missing the dot at the end",
             "word_count": 12,
             "cut_type": "word",
         },

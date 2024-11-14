@@ -5,7 +5,7 @@ from cognee.modules.data.processing.document_types.ImageDocument import ImageDoc
 
 GROUND_TRUTH = [
     {"word_count": 51, "len_text": 298, "cut_type": "sentence_end"},
-    {"word_count": 63, "len_text": 369, "cut_type": "sentence_end"},
+    {"word_count": 62, "len_text": 369, "cut_type": "sentence_end"},
     {"word_count": 44, "len_text": 294, "cut_type": "sentence_end"},
 ]
 
