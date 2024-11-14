@@ -67,7 +67,7 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
             "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
             "paragraph_ids": paragraph_ids,
             "chunk_index": chunk_index,
-            "cut_type": last_cut_type
+            "cut_type": "sentence_cut" if last_cut_type == "word" else last_cut_type
         }
         
             

@@ -32,7 +32,7 @@ GROUND_TRUTH = {
         {
             "text": "\nThird paragraph is cut and is missing the dot at the end",
             "word_count": 12,
-            "cut_type": "word",
+            "cut_type": "sentence_cut",
         },
     ],
 }
