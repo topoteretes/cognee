@@ -53,9 +53,9 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
                 "cut_type": end_type
             }
             yield chunk_dict
+            chunk_index += 1
             current_chunk = ""
             current_word_count = 0
-            chunk_index = 0
         
         last_cut_type = end_type
         last_paragraph_id = paragraph_id
