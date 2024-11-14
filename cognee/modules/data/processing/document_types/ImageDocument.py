@@ -14,6 +14,6 @@ class ImageDocument(Document):
         # Transcribe the image file
         text = self.transcribe_image()
 
-        chunker = TextChunker(self, chunk_size = chunk_size, get_text = lambda: text)
+        chunker = TextChunker(self, chunk_size = chunk_size, get_text = lambda: [text])
 
         yield from chunker.read()
