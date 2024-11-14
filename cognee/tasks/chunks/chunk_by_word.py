@@ -25,14 +25,6 @@ def chunk_by_word(data: str):
     current_chunk = ""
     i = 0
     
-    # Handle leading whitespace if any
-    while i < len(data) and (re.match(PARAGRAPH_ENDINGS, data[i]) or data[i] == " "):
-        current_chunk += data[i]
-        i += 1
-    if current_chunk:
-        yield (current_chunk, "word")
-        current_chunk = ""
-    
     while i < len(data):
         character = data[i]
             
@@ -53,12 +45,7 @@ def chunk_by_word(data: str):
             i += 1
             continue
         
-        if re.match(SENTENCE_ENDINGS, character):
-            # Check for ellipses
-            if i + 2 < len(data) and data[i:i+3] == "...":
-                current_chunk += ".."
-                i += 2
-                
+        if re.match(SENTENCE_ENDINGS, character):                
             # Look ahead for whitespace
             next_i = i + 1
             while next_i < len(data) and data[next_i] == " ":
