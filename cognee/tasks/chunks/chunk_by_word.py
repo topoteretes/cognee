@@ -38,23 +38,13 @@ def chunk_by_word(data: str):
     Whitespace is included with the preceding word.
     Outputs can be joined with "" to recreate the original input.
     """
-    last_processed_character = ""
     current_chunk = ""
     i = 0
     
     while i < len(data):
         character = data[i]
             
-        if re.match(PARAGRAPH_ENDINGS, character):
-            if current_chunk:
-                yield (current_chunk, "word")
-                current_chunk = ""
-            yield (character, "paragraph_end" if is_real_paragraph_end(last_processed_character, i, data) else "word")
-            i += 1
-            continue
-            
         current_chunk += character
-        last_processed_character = character
         
         if character == " ":
             yield (current_chunk, "word")
