@@ -10,29 +10,28 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
     current_chunk = ""
     current_word_count = 0
     chunk_index = 0
-    last_paragraph_id = None
+    paragraph_ids = []
     last_cut_type = None
     
     for paragraph_id, _, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
         # Check if this sentence would exceed length limit
+        paragraph_ids.append(paragraph_id)
+
         if current_word_count > 0 and current_word_count + word_count > paragraph_length:
             # Yield current chunk
             chunk_dict = {
                 "text": current_chunk,
                 "word_count": current_word_count,
                 "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
+                "paragraph_ids": paragraph_ids,
                 "chunk_index": chunk_index,
-                "cut_type": last_cut_type
+                "cut_type": last_cut_type,
             }
-            
-            if batch_paragraphs:
-                chunk_dict["id"] = chunk_dict["chunk_id"]
-            else:
-                chunk_dict["id"] = last_paragraph_id
                 
             yield chunk_dict
             
             # Start new chunk with current sentence
+            paragraph_ids = []
             current_chunk = sentence
             current_word_count = word_count
             chunk_index += 1
@@ -47,15 +46,16 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
             chunk_dict = {
                 "text": current_chunk,
                 "word_count": current_word_count,
-                "id": paragraph_id,
+                "paragraph_ids": paragraph_ids,
                 "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
                 "chunk_index": chunk_index,
                 "cut_type": end_type
             }
             yield chunk_dict
-            chunk_index += 1
+            paragraph_ids = []
             current_chunk = ""
             current_word_count = 0
+            chunk_index += 1
         
         last_cut_type = end_type
         last_paragraph_id = paragraph_id
@@ -66,13 +66,10 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
             "text": current_chunk,
             "word_count": current_word_count,
             "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
+            "paragrapg_ids": paragraph_ids,
             "chunk_index": chunk_index,
             "cut_type": last_cut_type
         }
         
-        if batch_paragraphs:
-            chunk_dict["id"] = chunk_dict["chunk_id"]
-        else:
-            chunk_dict["id"] = last_paragraph_id
             
         yield chunk_dict
