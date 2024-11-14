@@ -49,7 +49,7 @@ Third paragraph is cut and is missing the dot at the end""",
 
 def run_chunking_test(test_text, expected_chunks):
     chunks = []
-    for chunk_data in chunk_by_paragraph(test_text, 12, batch_paragraphs=True):
+    for chunk_data in chunk_by_paragraph(test_text, 12, batch_paragraphs=False):
         chunks.append(chunk_data)
 
     assert len(chunks) == 3
