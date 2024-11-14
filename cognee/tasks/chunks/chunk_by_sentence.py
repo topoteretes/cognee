@@ -8,7 +8,6 @@ from .chunk_by_word import chunk_by_word
 def chunk_by_sentence(data: str, maximum_length: Optional[int] = None):
     sentence = ""
     paragraph_id = uuid4()
-    chunk_index = 0
     word_count = 0
     section_end = False
 
@@ -28,16 +27,14 @@ def chunk_by_sentence(data: str, maximum_length: Optional[int] = None):
                     break
 
         if word_type in ["paragraph_end", "sentence_end"] or (maximum_length and (word_count == maximum_length)):
-            yield (paragraph_id, chunk_index, sentence, word_count, word_type)
+            yield (paragraph_id, sentence, word_count, word_type)
             sentence = ""
             word_count = 0
             paragraph_id = uuid4() if word_type == "paragraph_end" else paragraph_id
-            chunk_index = 0 if word_type == "paragraph_end" else chunk_index + 1
 
     if len(sentence) > 0:
         yield (
             paragraph_id,
-            chunk_index,
             sentence,
             word_count,
             section_end,
