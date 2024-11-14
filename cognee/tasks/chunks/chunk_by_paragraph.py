@@ -13,10 +13,8 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
     paragraph_ids = []
     last_cut_type = None
     
-    for paragraph_id, _, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
+    for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
         # Check if this sentence would exceed length limit
-        paragraph_ids.append(paragraph_id)
-
         if current_word_count > 0 and current_word_count + word_count > paragraph_length:
             # Yield current chunk
             chunk_dict = {
@@ -32,13 +30,13 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
             
             # Start new chunk with current sentence
             paragraph_ids = []
-            current_chunk = sentence
-            current_word_count = word_count
+            current_chunk = ""
+            current_word_count = 0
             chunk_index += 1
-        else:
-            # Just concatenate directly - no space handling
-            current_chunk += sentence
-            current_word_count += word_count
+
+        paragraph_ids.append(paragraph_id)
+        current_chunk += sentence
+        current_word_count += word_count
         
         # Handle end of paragraph
         if end_type in ("paragraph_end", "sentence_cut") and not batch_paragraphs:
