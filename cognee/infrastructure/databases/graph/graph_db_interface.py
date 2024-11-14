@@ -62,3 +62,8 @@ class GraphDBInterface(Protocol):
     async def delete_graph(
         self,
     ): raise NotImplementedError
+
+    @abstractmethod
+    async def get_graph_data(
+        self
+    ): raise NotImplementedError
