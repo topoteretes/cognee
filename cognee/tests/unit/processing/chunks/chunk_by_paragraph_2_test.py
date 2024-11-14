@@ -37,3 +37,17 @@ def test_paragraph_chunk_length(input_text, paragraph_length, batch_paragraphs):
     assert np.all(
         chunk_lengths <= paragraph_length
     ), f"{paragraph_length = }: {larger_chunks} are too large"
+
+
+@pytest.mark.parametrize(
+    "input_text,paragraph_length,batch_paragraphs",
+    list(product(list(INPUT_TEXTS.values()), paragraph_lengths, batch_paragraphs_vals)),
+)
+def test_chunk_by_paragraph_chunk_numbering(
+    input_text, paragraph_length, batch_paragraphs
+):
+    chunks = chunk_by_paragraph(input_text, paragraph_length, batch_paragraphs)
+    chunk_indices = np.array([chunk["chunk_index"] for chunk in chunks])
+    assert np.all(
+        chunk_indices == np.arange(len(chunk_indices))
+    ), f"{chunk_indices = } are not monotonically increasing"
