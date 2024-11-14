@@ -27,9 +27,6 @@ class Neo4jAdapter(GraphDBInterface):
             max_connection_lifetime = 120
         )
 
-    async def close(self) -> None:
-        await self.driver.close()
-
     @asynccontextmanager
     async def get_session(self) -> AsyncSession:
         async with self.driver.session() as session:
