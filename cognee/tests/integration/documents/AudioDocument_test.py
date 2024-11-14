@@ -30,7 +30,6 @@ def test_AudioDocument():
         id=uuid.uuid4(), name="audio-dummy-test", raw_data_location=""
     )
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
-        l = list(document.read(chunk_size=64))
         for ground_truth, paragraph_data in zip(
             GROUND_TRUTH, document.read(chunk_size=64)
         ):
