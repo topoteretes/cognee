@@ -3,15 +3,32 @@ import re
 SENTENCE_ENDINGS = r"[.;!?…]"
 PARAGRAPH_ENDINGS = r"[\n\r]"
 
-def is_real_paragraph_end(last_processed_character, i, data):
-    if re.match(SENTENCE_ENDINGS, last_processed_character):
+def is_real_paragraph_end(last_char: str, current_pos: int, text: str) -> bool:
+    """
+    Determines if the current position represents a real paragraph ending.
+    
+    Args:
+        last_char: The last processed character
+        current_pos: Current position in the text
+        text: The input text
+    
+    Returns:
+        bool: True if this is a real paragraph end, False otherwise
+    """
+    if re.match(SENTENCE_ENDINGS, last_char):
         return True
-    j = i + 1
-    next_character = data[j] if j < len(data) else None
-    while next_character is not None and (re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "):
+    j = current_pos + 1
+    if j >= len(text):
+        return False
+        
+    next_character = text[j]
+    while j < len(text) and (re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "):
         j += 1
-        next_character = data[j] if j < len(data) else None
-    if next_character and next_character.isupper():
+        if j >= len(text):
+            return False
+        next_character = text[j]
+        
+    if next_character.isupper():
         return True
     return False
 
