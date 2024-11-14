@@ -1,10 +1,9 @@
 from typing import List, Dict, Union
+
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
-from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
-import os
 
 class CogneeGraph(CogneeAbstractGraph):
     """
@@ -48,7 +47,7 @@ class CogneeGraph(CogneeAbstractGraph):
             raise ValueError(f"Node with id {node_id} does not exist.")
 
     async def project_graph_from_db(self,
-                                    adapter: Union[NetworkXAdapter, Neo4jAdapter],
+                                    adapter: Union[GraphDBInterface],
                                     node_properties_to_project: List[str],
                                     edge_properties_to_project: List[str],
                                     directed = True,
@@ -90,30 +89,3 @@ class CogneeGraph(CogneeAbstractGraph):
             print(f"Error projecting graph: {e}")
         except Exception as ex:
             print(f"Unexpected error: {ex}")
-
-
-"""
-The following code only used for test purposes and will be deleted later
-"""
-import asyncio
-
-async def main():
-    # Choose the adapter (Neo4j or NetworkX)
-    adapter = await get_graph_engine()
-
-    # Create an instance of CogneeGraph
-    graph = CogneeGraph()
-
-    # Project the graph from the database
-    await graph.project_graph_from_db(adapter,
-                                      ["description", "name", "type", "text"],
-                                      ["relationship_name"],
-                                      directed=True,
-                                      node_dimension=1,
-                                      edge_dimension=10000)
-
-    # Access nodes and edges
-    print(f"Graph has {len(graph.nodes)} nodes and {len(graph.edges)} edges.")
-
-# Run the main function
-asyncio.run(main())
