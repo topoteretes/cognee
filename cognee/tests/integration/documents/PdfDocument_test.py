@@ -16,12 +16,12 @@ def test_PdfDocument():
         "test_data",
         "artificial-intelligence.pdf",
     )
-    pdf_doc = PdfDocument(
+    document = PdfDocument(
         id=uuid.uuid4(), name="Test document.pdf", raw_data_location=test_file_path
     )
 
     for ground_truth, paragraph_data in zip(
-        GROUND_TRUTH, pdf_doc.read(chunk_size=1024)
+        GROUND_TRUTH, document.read(chunk_size=1024)
     ):
         assert (
             ground_truth["word_count"] == paragraph_data.word_count
