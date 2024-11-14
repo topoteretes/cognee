@@ -65,7 +65,7 @@ def chunk_by_paragraph(data: str, paragraph_length: int = 1024, batch_paragraphs
             "text": current_chunk,
             "word_count": current_word_count,
             "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
-            "paragrapg_ids": paragraph_ids,
+            "paragraph_ids": paragraph_ids,
             "chunk_index": chunk_index,
             "cut_type": last_cut_type
         }
