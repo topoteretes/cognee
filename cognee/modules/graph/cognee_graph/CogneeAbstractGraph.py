@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Union
-from CogneeGraphElements import Node, Edge
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 class CogneeAbstractGraph(ABC):
