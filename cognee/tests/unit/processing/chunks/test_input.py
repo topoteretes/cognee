@@ -280,4 +280,5 @@ Which would but lead me to a worse relapse [ 100 ]""",
     "many_newlines": "\n\n\n\ntext\n\n\n\n",
     "html_mixed": "<p>Hello</p>\nPlain text\n<div>World</div>",
     "urls_emails": "Visit https://example.com or email user@example.com",
+    "elipses": "Hello...How are you…",
 }
