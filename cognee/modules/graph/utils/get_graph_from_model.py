@@ -2,7 +2,13 @@ from datetime import datetime, timezone
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import copy_model
 
-def get_graph_from_model(data_point: DataPoint, include_root = True, added_nodes = {}, added_edges = {}):
+def get_graph_from_model(data_point: DataPoint, include_root = True, added_nodes = None, added_edges = None):
+
+    if not added_nodes:
+        added_nodes = {}
+    if not added_edges:
+        added_edges = {}
+
     nodes = []
     edges = []
 
