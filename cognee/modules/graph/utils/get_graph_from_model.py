@@ -63,7 +63,7 @@ def add_nodes_and_edges(
 ):
 
     property_nodes, property_edges = get_graph_from_model(
-        field_value, added_nodes, added_edges
+        field_value, dict(added_nodes), dict(added_edges)
     )
 
     for node in property_nodes:
