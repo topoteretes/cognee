@@ -1,11 +1,10 @@
 from datetime import datetime, timezone
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import copy_model
 
 
-def get_graph_from_model(
-    data_point: DataPoint, added_nodes=None, added_edges=None
-):
+def get_graph_from_model(data_point: DataPoint, added_nodes=None, added_edges=None):
 
     if not added_nodes:
         added_nodes = {}
@@ -24,7 +23,13 @@ def get_graph_from_model(
         elif isinstance(field_value, DataPoint):
             excluded_properties.add(field_name)
             nodes, edges, added_nodes, added_edges = add_nodes_and_edges(
-                data_point, field_name, field_value, nodes, edges, added_nodes, added_edges
+                data_point,
+                field_name,
+                field_value,
+                nodes,
+                edges,
+                added_nodes,
+                added_edges,
             )
 
         elif (
@@ -35,12 +40,13 @@ def get_graph_from_model(
             excluded_properties.add(field_name)
 
             for item in field_value:
+                n_edges_before = len(edges)
                 nodes, edges, added_nodes, added_edges = add_nodes_and_edges(
                     data_point, field_name, item, nodes, edges, added_nodes, added_edges
                 )
-                edges = [
+                edges = edges[:n_edges_before] + [
                     (*edge[:3], {**edge[3], "metadata": {"type": "list"}})
-                    for edge in edges
+                    for edge in edges[n_edges_before:]
                 ]
         else:
             data_point_properties[field_name] = field_value

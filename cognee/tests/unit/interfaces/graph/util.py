@@ -132,7 +132,6 @@ def count_society(obj):
 
 
 def show_first_difference(str1, str2, str1_name, str2_name, context=30):
-    """Shows where two strings first diverge, with surrounding context."""
     for i, (c1, c2) in enumerate(zip(str1, str2)):
         if c1 != c2:
             start = max(0, i - context)
