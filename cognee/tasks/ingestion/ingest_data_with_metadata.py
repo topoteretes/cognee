@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from .get_dlt_destination import get_dlt_destination
-from .save_data_item_to_storage import save_data_item_to_storage
+from .save_data_item_with_metadata_to_storage import save_data_item_with_metadata_to_storage
 
 async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
@@ -26,7 +26,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
         # Process data
         for data_item in data:
 
-            file_path = save_data_item_to_storage(data_item, dataset_name)
+            file_path = save_data_item_with_metadata_to_storage(data_item, dataset_name)
 
             # Ingest data and add metadata
             with open(file_path.replace("file://", ""), mode = "rb") as file:
