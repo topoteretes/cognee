@@ -54,8 +54,12 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
         code_entity["module_path"] = getattr(results[0], "module_path", None)
 
 def _extract_dependencies(script_path: str) -> List[str]:
-    with open(script_path, "r") as file:
-        source_code = file.read()
+    try:
+        with open(script_path, "r") as file:
+            source_code = file.read()
+    except IOError as e:
+        print(f"Error opening {script_path}: {e}")
+        return []
 
     script = jedi.Script(code=source_code, path=script_path)
 
