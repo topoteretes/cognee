@@ -17,6 +17,7 @@ class TextChunker():
         self.get_text = get_text
 
     def read(self):
+        self.paragraph_chunks = []
         for content_text in self.get_text():
             for chunk_data in chunk_by_paragraph(
                 content_text,
