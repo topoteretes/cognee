@@ -36,8 +36,8 @@ class Car(DataPoint):
 class Person(DataPoint):
     id: str
     name: str
-    age: Optional[int]
-    owns_car: Optional[list[Car]]
+    age: int
+    owns_car: list[Car]
     driving_license: Optional[dict]
     _metadata: dict = dict(index_fields=["name"])
 
