@@ -1,5 +1,7 @@
 from contextlib import contextmanager
 from typing import List, Dict, Optional
+import asyncio
+import aiofiles
 import jedi
 import parso
 import sys
@@ -52,10 +54,10 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
         code_entity["module_name"] = getattr(results[0], "module_name", None)
         code_entity["module_path"] = getattr(results[0], "module_path", None)
 
-def _extract_dependencies(script_path: str) -> List[str]:
+async def _extract_dependencies(script_path: str) -> List[str]:
     try:
-        with open(script_path, "r") as file:
-            source_code = file.read()
+        async with aiofiles.open(script_path, "r") as file:
+            source_code = await file.read()
     except IOError as e:
         print(f"Error opening {script_path}: {e}")
         return []
@@ -76,17 +78,17 @@ def _extract_dependencies(script_path: str) -> List[str]:
 
     return sorted(str(path) for path in module_paths)
 
-def get_local_script_dependencies(script_path: str, repo_path: Optional[str] = None) -> List[str]:
+async def get_local_script_dependencies(script_path: str, repo_path: Optional[str] = None) -> List[str]:
     """
     Extract and return a list of unique module paths that the script depends on.
     """
     if repo_path:
         repo_path_resolved = str(Path(repo_path).resolve())
         with add_sys_path(repo_path_resolved):
-            dependencies = _extract_dependencies(script_path)
+            dependencies = await _extract_dependencies(script_path)
         dependencies = [path for path in dependencies if path.startswith(repo_path_resolved)]
     else:
-        dependencies = _extract_dependencies(script_path)
+        dependencies = await _extract_dependencies(script_path)
     return dependencies
 
 if __name__ == "__main__":
@@ -94,7 +96,8 @@ if __name__ == "__main__":
     script_path = ".../cognee/examples/python/simple_example.py"
     repo_path = ".../cognee"
 
-    dependencies = get_local_script_dependencies(script_path, repo_path)
+    dependencies = asyncio.run(get_local_script_dependencies(script_path, repo_path))
+
     print("Dependencies:")
     for dependency in dependencies:
         print(dependency)
