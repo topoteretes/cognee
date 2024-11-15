@@ -52,6 +52,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
+            "user_id": str(user_id),
             **additional_properties
         },
     }
