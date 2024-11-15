@@ -28,7 +28,7 @@ class Class(DataPoint):
     description: str
     constructor_parameters: List[Variable]
     extended_from_class: Optional["Class"] = None
-    has_methods: list["Function"]
+    has_methods: List["Function"]
 
     _metadata = {
         "index_fields": ["name"]
@@ -89,7 +89,8 @@ class SourceCodeGraph(DataPoint):
         Operator,
         Expression,
     ]]
-
 Class.model_rebuild()
 ClassInstance.model_rebuild()
 Expression.model_rebuild()
+FunctionCall.model_rebuild()
+SourceCodeGraph.model_rebuild()
