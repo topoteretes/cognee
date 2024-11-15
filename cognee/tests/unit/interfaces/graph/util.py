@@ -130,3 +130,22 @@ def count_society(obj):
             return (1, 0)
     else:
         raise Exception("Not allowed")
+
+
+def show_first_difference(str1, str2, str1_name, str2_name, context=30):
+    """Shows where two strings first diverge, with surrounding context."""
+    for i, (c1, c2) in enumerate(zip(str1, str2)):
+        if c1 != c2:
+            start = max(0, i - context)
+            end1 = min(len(str1), i + context + 1)
+            end2 = min(len(str2), i + context + 1)
+            if i > 0:
+                return f"identical: '{str1[start:i-1]}' | {str1_name}: '{str1[i-1:end1]}'... != {str2_name}: '{str2[i-1:end2]}'..."
+            else:
+                return f"{str1_name} and {str2_name} have no overlap in characters"
+    if len(str1) > len(str2):
+        return f"{str2_name} is identical up to the {i}th character, missing afterwards '{str1[i:i+context]}'..."
+    if len(str2) > len(str1):
+        return f"{str1_name} is identical up to the {i}th character, missing afterwards '{str2[i:i+context]}'..."
+    else:
+        return f"{str1_name} and {str2_name} are identical."

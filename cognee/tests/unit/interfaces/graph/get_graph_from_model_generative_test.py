@@ -9,7 +9,7 @@ from cognee.tests.unit.interfaces.graph.util import (
 
 
 @pytest.mark.parametrize("recursive_depth", [1, 2, 3])
-def test_extracted_car_type(recursive_depth):
+def test_society_nodes_and_edges(recursive_depth):
     society = create_organization_recursive(
         "society", "Society", PERSON_NAMES, recursive_depth
     )
