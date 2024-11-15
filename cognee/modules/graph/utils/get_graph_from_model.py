@@ -4,7 +4,7 @@ from cognee.modules.storage.utils import copy_model
 
 
 def get_graph_from_model(
-    data_point: DataPoint, include_root=True, added_nodes=None, added_edges=None
+    data_point: DataPoint, added_nodes=None, added_edges=None
 ):
 
     if not added_nodes:
@@ -53,8 +53,7 @@ def get_graph_from_model(
         exclude_fields=excluded_properties,
     )
 
-    if include_root:
-        nodes.append(SimpleDataPointModel(**data_point_properties))
+    nodes.append(SimpleDataPointModel(**data_point_properties))
 
     return nodes, edges
 
@@ -64,7 +63,7 @@ def add_nodes_and_edges(
 ):
 
     property_nodes, property_edges = get_graph_from_model(
-        field_value, True, added_nodes, added_edges
+        field_value, added_nodes, added_edges
     )
 
     for node in property_nodes:
