@@ -20,7 +20,7 @@ async def cognee_and_llm(dataset, search_type = SearchType.CHUNKS):
     dataset_name = "SWE_test_data"
     code_text = dataset[0]["text"][:100000]
     await cognee.add([code_text], dataset_name)
-    await cognee.cognify([dataset_name])
+    await code_graph_pipeline([dataset_name])
     graph_engine = await get_graph_engine()
     with open(graph_engine.filename, "r") as f:
         graph_str  = f.read()
@@ -63,7 +63,7 @@ async def llm_on_preprocessed_data(dataset):
                         )
     return answer_prediction
 
-async def get_preds(dataset, with_cognee):
+async def get_preds(dataset, with_cognee=True):
     if with_cognee:
         text_output = await cognee_and_llm(dataset)
         model_name = "with_cognee"
