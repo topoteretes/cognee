@@ -26,7 +26,6 @@ def _get_code_entities(node: parso.tree.NodeOrLeaf) -> List[Dict[str, any]]:
     if not hasattr(node, 'children'):
         return code_entity_list
 
-    # Process nodes of type 'name', which correspond to code entities
     name_nodes = (child for child in node.children if child.type == 'name')
     for name_node in name_nodes:
         code_entity = {
