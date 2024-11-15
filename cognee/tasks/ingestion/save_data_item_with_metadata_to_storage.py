@@ -1,9 +1,12 @@
-from llama_index.core import Document
-from typing import Union, BinaryIO
+from typing import Union, BinaryIO, Any
 from cognee.modules.ingestion import save_data_to_file
-from .transform_data import get_data_from_llama_index
 
-def save_data_item_with_metadata_to_storage(data_item: Union[BinaryIO, Document, str], dataset_name: str) -> str:
+def save_data_item_with_metadata_to_storage(data_item: Union[BinaryIO, str, Any], dataset_name: str) -> str:
+    # Dynamic import is used because the llama_index module is optional. 
+    # For the same reason Any is accepted as a data item
+    from llama_index.core import Document
+    from .transform_data import get_data_from_llama_index
+
     # Check if data is of type Document or any of it's subclasses
     if isinstance(data_item, Document):
         file_path = get_data_from_llama_index(data_item, dataset_name)
