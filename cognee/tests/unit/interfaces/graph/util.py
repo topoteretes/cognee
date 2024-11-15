@@ -21,6 +21,8 @@ def run_test_against_ground_truth(
                 assert (
                     ground_truth2 == getattr(test_target_item, key)[key2]
                 ), f"{test_target_item_name}/{key = }/{key2 = }: {ground_truth2 = } != {getattr(test_target_item, key)[key2] = }"
+        elif isinstance(ground_truth, list):
+            raise NotImplementedError("Currently not implemented for 'list'")
         else:
             assert ground_truth == getattr(
                 test_target_item, key
