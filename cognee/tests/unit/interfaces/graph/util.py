@@ -47,9 +47,8 @@ class SocietyPerson(DataPoint):
     name: str
     memberships: Optional[list[Organization]]
 
-
-Organization.model_rebuild()
 SocietyPerson.model_rebuild()
+Organization.model_rebuild()
 
 
 ORGANIZATION_NAMES = [
