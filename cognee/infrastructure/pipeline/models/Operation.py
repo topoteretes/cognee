@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, MappedColumn
 from sqlalchemy import Column, DateTime, ForeignKey, Enum, JSON
 from cognee.infrastructure.databases.relational import Base, UUID
@@ -24,4 +24,4 @@ class Operation(Base):
     data_id = Column(UUID, ForeignKey("data.id"))
     meta_data: Mapped[dict] = MappedColumn(type_ = JSON)
 
-    created_at = Column(DateTime, default = datetime.utcnow)
+    created_at = Column(DateTime, default = datetime.now(timezone.utc))

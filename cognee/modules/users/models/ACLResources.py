@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, ForeignKey, DateTime
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, ForeignKey, DateTime, UUID
+from cognee.infrastructure.databases.relational import Base
 
 class ACLResources(Base):
     __tablename__ = "acl_resources"
