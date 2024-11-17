@@ -1,8 +1,8 @@
 import enum
 from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, JSON, Enum
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, DateTime, JSON, Enum, UUID
+from cognee.infrastructure.databases.relational import Base
 
 class PipelineRunStatus(enum.Enum):
     DATASET_PROCESSING_STARTED = "DATASET_PROCESSING_STARTED"

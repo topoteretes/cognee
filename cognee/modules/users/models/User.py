@@ -1,10 +1,10 @@
 from uuid import UUID as uuid_UUID
-from sqlalchemy import ForeignKey, Column
+from sqlalchemy import ForeignKey, Column, UUID
 from sqlalchemy.orm import relationship, Mapped
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from cognee.infrastructure.databases.relational import UUID
 from .Principal import Principal
 from .UserGroup import UserGroup
+from .Group import Group
 
 class User(SQLAlchemyBaseUserTableUUID, Principal):
     __tablename__ = "users"
@@ -25,7 +25,6 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 from fastapi_users import schemas
 
 class UserRead(schemas.BaseUser[uuid_UUID]):
-    # groups: list[uuid_UUID]  # Add groups attribute
     pass
 
 class UserCreate(schemas.BaseUserCreate):

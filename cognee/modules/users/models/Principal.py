@@ -1,7 +1,7 @@
 from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, String, DateTime, UUID
+from cognee.infrastructure.databases.relational import Base
 
 class Principal(Base):
     __tablename__ = "principals"
