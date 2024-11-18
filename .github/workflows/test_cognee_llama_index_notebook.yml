@@ -46,7 +46,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          poetry install --no-interaction
+          poetry install --no-interaction --all-extras 
           poetry add jupyter --no-interaction
 
       - name: Execute Jupyter Notebook
