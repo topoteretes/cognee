@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class LLMConfig(BaseSettings):
     llm_provider: str = "openai"
-    llm_model: str = "gpt-4o"
+    llm_model: str = "gpt-4o-mini"
     llm_endpoint: str = ""
     llm_api_key: Optional[str] = None
     llm_temperature: float = 0.0
