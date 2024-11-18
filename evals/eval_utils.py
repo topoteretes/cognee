@@ -1,12 +1,8 @@
-import json
-import logging
 import os
-import traceback
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import unidiff
 from datasets import Dataset
 from swebench.inference.make_datasets.create_instance import make_code_text
 from swebench.inference.make_datasets.utils import (AutoContextManager,
