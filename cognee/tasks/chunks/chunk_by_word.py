@@ -1,60 +1,71 @@
 import re
 
+SENTENCE_ENDINGS = r"[.;!?…]"
+PARAGRAPH_ENDINGS = r"[\n\r]"
+
+def is_real_paragraph_end(last_char: str, current_pos: int, text: str) -> bool:
+    """
+    Determines if the current position represents a real paragraph ending.
+    
+    Args:
+        last_char: The last processed character
+        current_pos: Current position in the text
+        text: The input text
+    
+    Returns:
+        bool: True if this is a real paragraph end, False otherwise
+    """
+    if re.match(SENTENCE_ENDINGS, last_char):
+        return True
+    j = current_pos + 1
+    if j >= len(text):
+        return False
+        
+    next_character = text[j]
+    while j < len(text) and (re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "):
+        j += 1
+        if j >= len(text):
+            return False
+        next_character = text[j]
+        
+    if next_character.isupper():
+        return True
+    return False
+
 def chunk_by_word(data: str):
-    sentence_endings = r"[.;!?…]"
-    paragraph_endings = r"[\n\r]"
-    last_processed_character = ""
-
-    word = ""
+    """
+    Chunks text into words and endings while preserving whitespace.
+    Whitespace is included with the preceding word.
+    Outputs can be joined with "" to recreate the original input.
+    """
+    current_chunk = ""
     i = 0
-
+    
     while i < len(data):
         character = data[i]
-
-        if word == "" and (re.match(paragraph_endings, character) or character == " "):
-            i = i + 1
-            continue
-
-        def is_real_paragraph_end():
-            if re.match(sentence_endings, last_processed_character):
-                return True
-
-            j = i + 1
-            next_character = data[j] if j < len(data) else None
-            while next_character is not None and (re.match(paragraph_endings, next_character) or next_character == " "):
-                j += 1
-                next_character = data[j] if j < len(data) else None
-            if next_character and next_character.isupper():
-                return True
-
-            return False
-
-        if re.match(paragraph_endings, character):
-            yield (word, "paragraph_end" if is_real_paragraph_end() else "word")
-            word = ""
-            i = i + 1
-            continue
-
+            
+        current_chunk += character
+        
         if character == " ":
-            yield [word, "word"]
-            word = ""
-            i = i + 1
+            yield (current_chunk, "word")
+            current_chunk = ""
+            i += 1
             continue
-
-        word += character
-        last_processed_character = character
-
-        if re.match(sentence_endings, character):
-            # Check for ellipses.
-            if i + 2 <= len(data) and data[i] == "." and data[i + 1] == "." and data[i + 2] == ".":
-                word += ".."
-                i = i + 2
-
-            is_paragraph_end = i + 1 < len(data) and re.match(paragraph_endings, data[i + 1])
-            yield (word, "paragraph_end" if is_paragraph_end else "sentence_end")
-            word = ""
-
+        
+        if re.match(SENTENCE_ENDINGS, character):                
+            # Look ahead for whitespace
+            next_i = i + 1
+            while next_i < len(data) and data[next_i] == " ":
+                current_chunk += data[next_i]
+                next_i += 1
+                
+            is_paragraph_end = next_i < len(data) and re.match(PARAGRAPH_ENDINGS, data[next_i])
+            yield (current_chunk, "paragraph_end" if is_paragraph_end else "sentence_end")
+            current_chunk = ""
+            i = next_i
+            continue
+            
         i += 1
-
-    if len(word) > 0:
-        yield (word, "word")
+        
+    if current_chunk:
+        yield (current_chunk, "word")
