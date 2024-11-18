@@ -33,4 +33,4 @@ async def check_permission_on_documents(user: User, permission_type: str, docume
         has_permissions = all(document_id in resource_ids for document_id in document_ids)
 
         if not has_permissions:
-            raise PermissionDeniedException(f"User {user.username} does not have {permission_type} permission on documents")
+            raise PermissionDeniedException(f"User {user.email} does not have {permission_type} permission on documents")

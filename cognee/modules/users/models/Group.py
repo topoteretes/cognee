@@ -1,6 +1,5 @@
 from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, String, ForeignKey
-from cognee.infrastructure.databases.relational import UUID
+from sqlalchemy import Column, String, ForeignKey, UUID
 from .Principal import Principal
 from .UserGroup import UserGroup
 
