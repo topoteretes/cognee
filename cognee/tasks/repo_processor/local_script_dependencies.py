@@ -49,11 +49,16 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
     """
     Update a code_entity with (full_name, module_name, module_path) using Jedi
     """
-    results = script.goto(code_entity["line"], code_entity["column"], follow_imports=True)
-    if results:
-        code_entity["full_name"] = getattr(results[0], "full_name", None)
-        code_entity["module_name"] = getattr(results[0], "module_name", None)
-        code_entity["module_path"] = getattr(results[0], "module_path", None)
+    try:
+        results = script.goto(code_entity["line"], code_entity["column"], follow_imports=True)
+        if results:
+            result = results[0]
+            code_entity["full_name"] = getattr(result, "full_name", None)
+            code_entity["module_name"] = getattr(result, "module_name", None)
+            code_entity["module_path"] = getattr(result, "module_path", None)
+    except Exception as e:
+        # logging.warning(f"Failed to analyze code entity {code_entity['name']}: {e}")
+        print(f"Failed to analyze code entity {code_entity['name']}: {e}")
 
 async def _extract_dependencies(script_path: str) -> List[str]:
     try:
@@ -63,6 +68,7 @@ async def _extract_dependencies(script_path: str) -> List[str]:
         print(f"Error opening {script_path}: {e}")
         return []
 
+    jedi.set_debug_function(lambda color, str_out: None)
     script = jedi.Script(code=source_code, path=script_path)
 
     tree = parso.parse(source_code)
