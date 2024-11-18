@@ -1,13 +1,14 @@
-from contextlib import contextmanager
-from typing import List, Dict, Optional
+import argparse
 import asyncio
+import sys
+from contextlib import contextmanager
+from pathlib import Path
+from typing import List, Dict, Optional
+
 import aiofiles
 import jedi
 import parso
-import sys
-from pathlib import Path
 from parso.tree import BaseNode
-
 
 @contextmanager
 def add_sys_path(path):
@@ -91,10 +92,20 @@ async def get_local_script_dependencies(script_path: str, repo_path: Optional[st
         dependencies = await _extract_dependencies(script_path)
     return dependencies
 
+
 if __name__ == "__main__":
-    # Simple execution example, use absolute paths
-    script_path = ".../cognee/examples/python/simple_example.py"
-    repo_path = ".../cognee"
+    parser = argparse.ArgumentParser(description="Get local script dependencies.")
+
+    # Suggested path: .../cognee/examples/python/simple_example.py
+    parser.add_argument("script_path", type=str, help="Absolute path to the Python script file")
+
+    # Suggested path: .../cognee
+    parser.add_argument("repo_path", type=str, help="Absolute path to the repository root")
+
+    args = parser.parse_args()
+
+    script_path = args.script_path
+    repo_path = args.repo_path
 
     dependencies = asyncio.run(get_local_script_dependencies(script_path, repo_path))
 
