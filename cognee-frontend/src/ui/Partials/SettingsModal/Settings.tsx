@@ -30,8 +30,8 @@ const defaultProvider = {
 };
 
 const defaultModel = {
-  label: 'gpt-4o',
-  value: 'gpt-4o',
+  label: 'gpt-4o-mini',
+  value: 'gpt-4o-mini',
 };
 
 export default function Settings({ onDone = () => {}, submitButtonText = 'Save' }) {

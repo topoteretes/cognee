@@ -73,6 +73,9 @@ def get_settings() -> SettingsDict:
             "providers": llm_providers,
             "models": {
                 "openai": [{
+                    "value": "gpt-4o-mini",
+                    "label": "gpt-4o-mini",
+                }, {
                     "value": "gpt-4o",
                     "label": "gpt-4o",
                 }, {
