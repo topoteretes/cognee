@@ -10,15 +10,12 @@
 We build for developers who need a reliable, production-ready data layer for AI applications
 
 
-## What is cognee? 
+## What is cognee?
 
 Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
 Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://topoteretes.github.io/cognee">documentation</a>
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
-
-
-
 
 
 ## 📦 Installation
@@ -46,6 +43,7 @@ poetry add cognee
 ```bash
 poetry add cognee -E postgres
 ```
+
 
 ## 💻 Basic Usage
 
@@ -83,7 +81,7 @@ docker-compose up
 ```
 Then navigate to localhost:3000
 
-If you want to use the UI with PostgreSQL through docker-compose make sure to set the following values in the .env file: 
+If you want to use Cognee with PostgreSQL, make sure to set the following values in the .env file:
 ```
 DB_PROVIDER=postgres
 
@@ -97,9 +95,7 @@ DB_PASSWORD=cognee
 
 ### Simple example
 
-First, copy `.env.template` to `.env` and add your OpenAI API key to the LLM_API_KEY field. 
-
-Optionally, set `VECTOR_DB_PROVIDER="lancedb"` in `.env` to simplify setup.
+First, copy `.env.template` to `.env` and add your OpenAI API key to the LLM_API_KEY field.
 
 This script will run the default pipeline:
 
@@ -140,7 +136,7 @@ async def main():
 
 asyncio.run(main())
 ```
-A version of this example is here: `examples/pyton/simple_example.py`
+A version of this example is here: `examples/python/simple_example.py`
 
 ### Create your own memory store
 
@@ -251,7 +247,6 @@ Cognee supports a variety of tools and services for different operations:
 Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee_demo.ipynb)
 
 
-
 [<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=BDFt4xVPmro "Learn about cognee: 55")
 
 
@@ -274,11 +269,6 @@ Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/q
 pip install cognee
 ```
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
-
 ## 💫 Contributors
 
 <a href="https://github.com/topoteretes/cognee/graphs/contributors">
@@ -286,3 +276,25 @@ pip install cognee
 </a>
 
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
+
+
+## Vector & Graph Databases Implementation State
+
+<style>
+  table {
+    width: 100%;
+  }
+</style>
+
+| Name             | Type               | Current state     | Known Issues                          |
+|------------------|--------------------|-------------------|---------------------------------------|
+| Qdrant           | Vector             | Stable &#x2705;   |                                       |
+| Weaviate         | Vector             | Stable &#x2705;   |                                       |
+| LanceDB          | Vector             | Stable &#x2705;   |                                       |
+| Neo4j            | Graph              | Stable &#x2705;   |                                       |
+| NetworkX         | Graph              | Stable &#x2705;   |                                       |
+| FalkorDB         | Vector/Graph       | Unstable &#x274C; |                                       |
+| PGVector         | Vector             | Unstable &#x274C; | Postgres DB returns the Timeout error |
