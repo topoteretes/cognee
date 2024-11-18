@@ -1,8 +1,8 @@
 from uuid import uuid4
 from datetime import datetime, timezone
 # from sqlalchemy.orm import relationship
-from sqlalchemy import Column, DateTime, String
-from cognee.infrastructure.databases.relational import Base, UUID
+from sqlalchemy import Column, DateTime, String, UUID
+from cognee.infrastructure.databases.relational import Base
 
 class Permission(Base):
     __tablename__ = "permissions"

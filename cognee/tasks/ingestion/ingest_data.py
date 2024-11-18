@@ -3,7 +3,7 @@ import cognee.modules.ingestion as ingestion
 
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
-from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from .get_dlt_destination import get_dlt_destination
