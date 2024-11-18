@@ -59,7 +59,7 @@ await cognee.add(text) # Add a new piece of information
 
 await cognee.cognify() # Use LLMs and cognee to create knowledge
 
-search_results = await cognee.search("INSIGHTS", {'query_text': 'Tell me about NLP'}) # Query cognee for the knowledge
+search_results = await cognee.search(SearchType.INSIGHTS, query_text='Tell me about NLP')  # Query cognee for the knowledge
 
 for result_text in search_results:
     print(result_text)
