@@ -4,7 +4,7 @@
 [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
 [![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
 [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
-[![GitHub license](https://badgen.net/github/license/topoteretes/cognee)](https://github.com/topoteretes/cognee/blob/master/LICENSE)
+
 
 
 We build for developers who need a reliable, production-ready data layer for AI applications
