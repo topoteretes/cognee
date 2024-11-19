@@ -26,7 +26,7 @@ async def main():
 
     # Query cognee for insights on the added text
     search_results = await cognee.search(
-        SearchType.INSIGHTS, query='Tell me about NLP'
+        SearchType.INSIGHTS, query_text='Tell me about NLP'
     )
 
     # Display search results
