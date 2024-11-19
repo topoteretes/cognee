@@ -26,7 +26,7 @@ async def  main():
 
     await render_graph(None, include_nodes = True, include_labels = True)
 
-    search_results = await cognee.search(SearchType.CHUNKS, query = "Student")
+    search_results = await cognee.search(SearchType.CHUNKS, query_text = "Student")
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
