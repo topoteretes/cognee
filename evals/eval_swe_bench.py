@@ -1,7 +1,9 @@
+import argparse
 import json
 import subprocess
 from pathlib import Path
 
+from datasets import Dataset
 from swebench.harness.utils import load_swebench_dataset
 from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 
@@ -13,19 +15,20 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from evals.eval_utils import download_instances
 
 
-async def cognee_and_llm(dataset, search_type=SearchType.CHUNKS):
+async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
     dataset_name = "SWE_test_data"
-    code_text = dataset[0]["text"]
+    code_text = instance["text"]
     await cognee.add([code_text], dataset_name)
     await code_graph_pipeline([dataset_name])
     graph_engine = await get_graph_engine()
     with open(graph_engine.filename, "r") as f:
         graph_str = f.read()
 
-    problem_statement = dataset[0]['problem_statement']
+    problem_statement = instance['problem_statement']
     instructions = (
         "I need you to solve this issue by looking at the provided knowledge graph and by "
         + "generating a single patch file that I can apply directly to this repository "
@@ -51,9 +54,9 @@ async def cognee_and_llm(dataset, search_type=SearchType.CHUNKS):
     return answer_prediction
 
 
-async def llm_on_preprocessed_data(dataset):
-    problem_statement = dataset[0]['problem_statement']
-    prompt = dataset[0]["text"]
+async def generate_patch_without_cognee(instance):
+    problem_statement = instance['problem_statement']
+    prompt = instance["text"]
 
     llm_client = get_llm_client()
     answer_prediction = llm_client.create_structured_output(
@@ -66,46 +69,54 @@ async def llm_on_preprocessed_data(dataset):
 
 async def get_preds(dataset, with_cognee=True):
     if with_cognee:
-        text_output = await cognee_and_llm(dataset)
         model_name = "with_cognee"
+        pred_func = generate_patch_with_cognee
     else:
-        text_output = await llm_on_preprocessed_data(dataset)
         model_name = "without_cognee"
+        pred_func = generate_patch_without_cognee
 
-    preds = [{"instance_id": dataset[0]["instance_id"],
-              "model_patch": text_output,
-              "model_name_or_path": model_name}]
+    preds = [{"instance_id": instance["instance_id"],
+              "model_patch": await pred_func(instance),
+              "model_name_or_path": model_name} for instance in dataset]
 
     return preds
 
 
 async def main():
-    swe_dataset = load_swebench_dataset(
-        'princeton-nlp/SWE-bench', split='test')
-    swe_dataset_preprocessed = load_swebench_dataset(
-        'princeton-nlp/SWE-bench_bm25_13K', split='test')
-    test_data = swe_dataset[:1]
-    test_data_preprocessed = swe_dataset_preprocessed[:1]
-    assert test_data[0]["instance_id"] == test_data_preprocessed[0]["instance_id"]
-    filepath = Path("SWE-bench_testsample")
-    if filepath.exists():
-        from datasets import Dataset
-        dataset = Dataset.load_from_disk(filepath)
-    else:
-        dataset = download_instances(test_data, filepath)
+    parser = argparse.ArgumentParser(
+        description="Run LLM predictions on SWE-bench dataset")
+    parser.add_argument('--cognee_off', action='store_true')
+    args = parser.parse_args()
 
-    cognee_preds = await get_preds(dataset, with_cognee=True)
-    # nocognee_preds = await get_preds(dataset, with_cognee=False)
-    with open("withcognee.json", "w") as file:
-        json.dump(cognee_preds, file)
+    if args.cognee_off:
+        dataset_name = 'princeton-nlp/SWE-bench_Lite_bm25_13K'
+        dataset = load_swebench_dataset(dataset_name, split='test')
+        predictions_path = "preds_nocognee.json"
+        if Path(predictions_path).exists():
+            with open(predictions_path, "r") as file:
+                preds = json.load(file)
+        else:
+            preds = await get_preds(dataset, with_cognee=False)
+            with open(predictions_path, "w") as file:
+                json.dump(preds, file)
+    else:
+        dataset_name = 'princeton-nlp/SWE-bench_Lite'
+        swe_dataset = load_swebench_dataset(
+            dataset_name, split='test')[:1]
+        filepath = Path("SWE-bench_testsample")
+        if filepath.exists():
+            dataset = Dataset.load_from_disk(filepath)
+        else:
+            dataset = download_instances(swe_dataset, filepath)
+        predictions_path = "preds.json"
+        preds = await get_preds(dataset, with_cognee=not args.cognee_off)
 
     subprocess.run(["python", "-m", "swebench.harness.run_evaluation",
-                    "--dataset_name", 'princeton-nlp/SWE-bench',
+                    "--dataset_name", dataset_name,
                     "--split", "test",
-                    "--predictions_path",  "withcognee.json",
+                    "--predictions_path",  predictions_path,
                     "--max_workers", "1",
-                    "--instance_ids", test_data[0]["instance_id"],
-                    "--run_id", "with_cognee"])
+                    "--run_id", "test_run"])
 
 if __name__ == "__main__":
     import asyncio

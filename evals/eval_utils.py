@@ -53,7 +53,7 @@ def extract_fields(instance):
     text_inputs = "\n".join([readmes_text, code_text])
     text_inputs = text_inputs.strip() + "\n\n"
     # text_inputs = code_text
-    patch = "\n".join([f"<patch>", instance["patch"], "</patch>"])
+    patch = "\n".join(["<patch>", instance["patch"], "</patch>"])
     return {**instance, "text": text_inputs, "patch": patch}
 
 
