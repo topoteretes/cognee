@@ -84,7 +84,7 @@ async def _extract_dependencies(script_path: str) -> List[str]:
     module_paths = {
         entity.get("module_path")
         for entity in code_entities
-        if entity.get("module_path")
+        if entity.get("module_path") is not None
     }
 
     return sorted(str(path) for path in module_paths)
