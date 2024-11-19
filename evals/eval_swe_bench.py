@@ -12,6 +12,7 @@ from cognee.api.v1.cognify.code_graph_pipeline import code_graph_pipeline
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from evals.eval_utils import download_instances
 
 
@@ -29,12 +30,7 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
         graph_str = f.read()
 
     problem_statement = instance['problem_statement']
-    instructions = (
-        "I need you to solve this issue by looking at the provided knowledge graph and by "
-        + "generating a single patch file that I can apply directly to this repository "
-        + "using git apply. Please respond with a single patch "
-        + "file in the following format."
-    )
+    instructions = read_query_prompt("patch_gen_instructions.txt")
 
     prompt = "\n".join([
         instructions,
