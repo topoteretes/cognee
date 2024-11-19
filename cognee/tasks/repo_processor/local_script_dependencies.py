@@ -101,14 +101,29 @@ async def get_local_script_dependencies(script_path: str, repo_path: Optional[st
     """
     Extract and return a list of unique module paths that the script depends on.
     """
-    if repo_path:
-        repo_path_resolved = str(Path(repo_path).resolve())
-        with add_sys_path(repo_path_resolved):
-            dependencies = await _extract_dependencies(script_path)
-        dependencies = [path for path in dependencies if path.startswith(repo_path_resolved)]
-    else:
+    try:
+        script_path = Path(script_path).resolve(strict=True)
+    except (FileNotFoundError, PermissionError) as e:
+        logger.error(f"Error resolving script path: {e}")
+        return []
+
+    if not repo_path:
+        return await _extract_dependencies(script_path)
+
+    try:
+        repo_path = Path(repo_path).resolve(strict=True)
+    except (FileNotFoundError, PermissionError) as e:
+        logger.warning(f"Error resolving repo path: {e}. Proceeding without repo_path.")
+        return await _extract_dependencies(script_path)
+
+    if not script_path.is_relative_to(repo_path):
+        logger.warning(f"Script {script_path} not in repo {repo_path}. Proceeding without repo_path.")
+        return await _extract_dependencies(script_path)
+
+    with add_sys_path(str(repo_path)):
         dependencies = await _extract_dependencies(script_path)
-    return dependencies
+
+    return [path for path in dependencies if path.startswith(str(repo_path))]
 
 
 if __name__ == "__main__":
