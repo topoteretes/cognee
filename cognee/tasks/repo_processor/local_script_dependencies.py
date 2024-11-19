@@ -87,7 +87,15 @@ async def _extract_dependencies(script_path: str) -> List[str]:
         if entity.get("module_path") is not None
     }
 
-    return sorted(str(path) for path in module_paths)
+    str_paths = []
+    for module_path in module_paths:
+        try:
+            str_paths.append(str(module_path))
+        except Exception as e:
+            logger.error(f"Error converting path to string: {e}")
+
+    return sorted(str_paths)
+
 
 async def get_local_script_dependencies(script_path: str, repo_path: Optional[str] = None) -> List[str]:
     """
