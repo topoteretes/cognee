@@ -10,6 +10,9 @@ import jedi
 import parso
 from parso.tree import BaseNode
 
+from cognee.tasks.repo_processor import logger
+
+
 @contextmanager
 def add_sys_path(path):
     original_sys_path = sys.path.copy()
@@ -58,14 +61,15 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
             code_entity["module_path"] = getattr(result, "module_path", None)
     except Exception as e:
         # logging.warning(f"Failed to analyze code entity {code_entity['name']}: {e}")
-        print(f"Failed to analyze code entity {code_entity['name']}: {e}")
+        logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
+
 
 async def _extract_dependencies(script_path: str) -> List[str]:
     try:
         async with aiofiles.open(script_path, "r") as file:
             source_code = await file.read()
     except IOError as e:
-        print(f"Error opening {script_path}: {e}")
+        logger.error(f"Error opening {script_path}: {e}")
         return []
 
     jedi.set_debug_function(lambda color, str_out: None)
