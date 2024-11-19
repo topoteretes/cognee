@@ -66,7 +66,7 @@ anthropic = "^0.26.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = {version = "*", extras = ["sqlalchemy"]}
 alembic = "^1.13.3"
-asyncpg = "^0.29.0"
+asyncpg = "0.30.0"
 pgvector = "^0.3.5"
 psycopg2 = {version = "^2.9.10", optional = true}
 llama-index-core = {version = "^0.11.22", optional = true}
