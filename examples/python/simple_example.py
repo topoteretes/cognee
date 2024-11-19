@@ -1,11 +1,13 @@
-import cognee
 import asyncio
+
+import cognee
 from cognee.api.v1.search import SearchType
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
 # 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
 #    LLM_API_KEY = "your_key_here"
+
 
 async def main():
     # Create a clean slate for cognee -- reset data and system state
@@ -26,7 +28,7 @@ async def main():
 
     # Query cognee for insights on the added text
     search_results = await cognee.search(
-        SearchType.INSIGHTS, query='Tell me about NLP'
+        SearchType.INSIGHTS, query_text='Tell me about NLP'
     )
 
     # Display search results
