@@ -10,6 +10,7 @@ from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
+from ..utils import normalize_distances
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 
 class IndexSchema(DataPoint):
@@ -141,6 +142,34 @@ class LanceDBAdapter(VectorDBInterface):
             score = 0,
         ) for result in results.to_dict("index").values()]
 
+    async def get_distances_of_collection(
+            self,
+            collection_name: str,
+            query_text: str = None,
+            query_vector: List[float] = None,
+            with_vector: bool = False
+    ):
+        if query_text is None and query_vector is None:
+            raise ValueError("One of query_text or query_vector must be provided!")
+
+        if query_text and not query_vector:
+            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+
+        connection = await self.get_connection()
+        collection = await connection.open_table(collection_name)
+
+        results = await collection.vector_search(query_vector).to_pandas()
+
+        result_values = list(results.to_dict("index").values())
+
+        normalized_values = normalize_distances(result_values)
+
+        return [ScoredResult(
+            id=UUID(result["id"]),
+            payload=result["payload"],
+            score=normalized_values[value_index],
+        ) for value_index, result in enumerate(result_values)]
+
     async def search(
         self,
         collection_name: str,
@@ -148,6 +177,7 @@ class LanceDBAdapter(VectorDBInterface):
         query_vector: List[float] = None,
         limit: int = 5,
         with_vector: bool = False,
+        normalized: bool = True
     ):
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
@@ -162,26 +192,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         result_values = list(results.to_dict("index").values())
 
-        min_value = 100
-        max_value = 0
-
-        for result in result_values:
-            value = float(result["_distance"])
-            if value > max_value:
-                max_value = value
-            if value < min_value:
-                min_value = value
-
-        normalized_values = []
-        min_value = min(result["_distance"] for result in result_values)
-        max_value = max(result["_distance"] for result in result_values)
-
-        if max_value == min_value:
-            # Avoid division by zero: Assign all normalized values to 0 (or any constant value like 1)
-            normalized_values = [0 for _ in result_values]
-        else:
-            normalized_values = [(result["_distance"] - min_value) / (max_value - min_value) for result in
-                                result_values]
+        normalized_values = normalize_distances(result_values)
 
         return [ScoredResult(
             id = UUID(result["id"]),

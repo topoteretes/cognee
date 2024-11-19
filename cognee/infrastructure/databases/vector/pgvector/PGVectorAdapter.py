@@ -11,6 +11,7 @@ from cognee.infrastructure.engine import DataPoint
 from .serialize_data import serialize_data
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
+from ..utils import normalize_distances
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
@@ -22,6 +23,19 @@ class IndexSchema(DataPoint):
         "index_fields": ["text"]
     }
 
+def singleton(class_):
+    # Note: Using this singleton as a decorator to a class removes
+    # the option to use class methods for that class
+    instances = {}
+
+    def getinstance(*args, **kwargs):
+        if class_ not in instances:
+            instances[class_] = class_(*args, **kwargs)
+        return instances[class_]
+
+    return getinstance
+
+@singleton
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     def __init__(
@@ -161,6 +175,53 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     score = 0
                 ) for result in results
             ]
+
+    async def get_distances_of_collection(
+            self,
+            collection_name: str,
+            query_text: str = None,
+            query_vector: List[float] = None,
+            with_vector: bool = False
+    )-> List[ScoredResult]:
+        if query_text is None and query_vector is None:
+            raise ValueError("One of query_text or query_vector must be provided!")
+
+        if query_text and not query_vector:
+            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+
+        # Get PGVectorDataPoint Table from database
+        PGVectorDataPoint = await self.get_table(collection_name)
+
+        closest_items = []
+
+        # Use async session to connect to the database
+        async with self.get_async_session() as session:
+            # Find closest vectors to query_vector
+            closest_items = await session.execute(
+                select(
+                    PGVectorDataPoint,
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
+                        "similarity"
+                    ),
+                )
+                .order_by("similarity")
+            )
+
+        vector_list = []
+
+        # Extract distances and find min/max for normalization
+        for vector in closest_items:
+            # TODO: Add normalization of similarity score
+            vector_list.append(vector)
+
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(
+                id = UUID(str(row.id)),
+                payload = row.payload,
+                score = row.similarity
+            ) for row in vector_list
+        ]
 
     async def search(
         self,
