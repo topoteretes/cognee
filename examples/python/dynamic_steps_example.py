@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-from cognee.api.v1.search import SearchType
+from cognee.pipelines.retriever.two_steps_retriever import two_step_retriever
 
 job_position = """0:Senior Data Scientist (Machine Learning)
 
@@ -206,9 +206,8 @@ async def main(enable_steps):
         print("Knowledge graph created.")
 
     # Step 4: Query insights
-    if enable_steps.get("search_insights"):
-        search_results = await cognee.search(
-            SearchType.INSIGHTS,
+    if enable_steps.get("retriever"):
+        search_results = await two_step_retriever(
             {'query': 'Which applicant has the most relevant experience in data science?'}
         )
         print("Search results:")
@@ -219,11 +218,11 @@ async def main(enable_steps):
 if __name__ == '__main__':
     # Flags to enable/disable steps
     steps_to_enable = {
-        "prune_data": True,
-        "prune_system": True,
-        "add_text": True,
-        "cognify": True,
-        "search_insights": True
+        "prune_data": False,
+        "prune_system": False,
+        "add_text": False,
+        "cognify": False,
+        "retriever": True
     }
 
     asyncio.run(main(steps_to_enable))
