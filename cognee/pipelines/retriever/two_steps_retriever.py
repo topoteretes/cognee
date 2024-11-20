@@ -13,6 +13,46 @@ from openai import organization
 from sympy.codegen.fnodes import dimension
 
 
+def format_triplets(edges):
+    def filter_attributes(obj, attributes):
+        """Helper function to filter out non-None properties, including nested dicts."""
+        print("\n\n\n")
+        result = {}
+        for attr in attributes:
+            value = getattr(obj, attr, None)
+            if value is not None:
+                # If the value is a dict, extract relevant keys from it
+                if isinstance(value, dict):
+                    nested_values = {k: v for k, v in value.items() if k in attributes and v is not None}
+                    result[attr] = nested_values
+                else:
+                    result[attr] = value
+        return result
+
+    triplets = []
+    for edge in edges:
+        node1 = edge.node1
+        node2 = edge.node2
+        edge_attributes = edge.attributes
+        node1_attributes = node1.attributes
+        node2_attributes = node2.attributes
+
+        # Filter only non-None properties
+        node1_info = {key: value for key, value in node1_attributes.items() if value is not None}
+        node2_info = {key: value for key, value in node2_attributes.items() if value is not None}
+        edge_info = {key: value for key, value in edge_attributes.items() if value is not None}
+
+        # Create the formatted triplet
+        triplet = (
+            f"Node1: {node1_info}\n"
+            f"Edge: {edge_info}\n"
+            f"Node2: {node2_info}\n\n\n"  # Add three blank lines for separation
+        )
+        triplets.append(triplet)
+
+    return "".join(triplets)
+
+
 async def two_step_retriever(query: Dict[str, str], user: User = None) -> list:
     if user is None:
         user = await get_default_user()
@@ -24,7 +64,6 @@ async def two_step_retriever(query: Dict[str, str], user: User = None) -> list:
     retrieved_results = await run_two_step_retriever(query, user)
 
     filtered_search_results = []
-
 
     return retrieved_results
 
@@ -55,7 +94,7 @@ async def run_two_step_retriever(query: str, user, community_filter = []) -> lis
     )
 
     ############################################# This part is a quick fix til we don't fix the vector db inconsistency
-    results_dict = delete_duplicated_vector_db_elements(collections, results)# :TODO: Change when vector db is fixed
+    node_distances = delete_duplicated_vector_db_elements(collections, results)# :TODO: Change when vector db is fixed
     # results_dict = {collection: result for collection, result in zip(collections, results)}
     ##############################################
 
@@ -63,15 +102,19 @@ async def run_two_step_retriever(query: str, user, community_filter = []) -> lis
 
     await memory_fragment.project_graph_from_db(graph_engine,
                                           node_properties_to_project=['id',
-                                                                      'community'],
+                                                                      'description',
+                                                                      'name',
+                                                                      'type',
+                                                                      'text'],
                                           edge_properties_to_project=['id',
-                                                                      'relationship_name'],
-                                          directed=True,
-                                          node_dimension=1,
-                                          edge_dimension=1,
-                                          memory_fragment_filter=[])
+                                                                      'relationship_name'])
 
-    print()
+    await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
+
+    await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)# :TODO: This should be coming from vector db
+
+    results = await memory_fragment.calculate_top_triplet_importances(k=5)
 
 
-    raise(NotImplementedError)
+    print(format_triplets(results))
+    print(f'Query was the following:{query}' )
