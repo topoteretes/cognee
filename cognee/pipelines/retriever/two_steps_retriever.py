@@ -9,14 +9,12 @@ from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
-from openai import organization
-from sympy.codegen.fnodes import dimension
 
 
 def format_triplets(edges):
+    print("\n\n\n")
     def filter_attributes(obj, attributes):
         """Helper function to filter out non-None properties, including nested dicts."""
-        print("\n\n\n")
         result = {}
         for attr in attributes:
             value = getattr(obj, attr, None)
@@ -115,6 +113,7 @@ async def run_two_step_retriever(query: str, user, community_filter = []) -> lis
 
     results = await memory_fragment.calculate_top_triplet_importances(k=5)
 
-
     print(format_triplets(results))
     print(f'Query was the following:{query}' )
+
+    return results

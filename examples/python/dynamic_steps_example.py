@@ -187,7 +187,7 @@ async def main(enable_steps):
 if __name__ == '__main__':
     # Flags to enable/disable steps
 
-    rebuild_kg = False
+    rebuild_kg = True
     retrieve = True
     steps_to_enable = {
         "prune_data": rebuild_kg,
