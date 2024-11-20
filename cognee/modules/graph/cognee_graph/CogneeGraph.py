@@ -52,13 +52,17 @@ class CogneeGraph(CogneeAbstractGraph):
                                     edge_properties_to_project: List[str],
                                     directed = True,
                                     node_dimension = 1,
-                                    edge_dimension = 1) -> None:
+                                    edge_dimension = 1,
+                                    memory_fragment_filter = List[Dict[str, List[Union[str, int]]]]) -> None:
 
         if node_dimension < 1 or edge_dimension < 1:
             raise ValueError("Dimensions must be positive integers")
 
         try:
-            nodes_data, edges_data = await adapter.get_graph_data()
+            if len(memory_fragment_filter) == 0:
+                nodes_data, edges_data = await adapter.get_graph_data()
+            else:
+                nodes_data, edges_data = await adapter.get_filtered_graph_data(attribute_filters = memory_fragment_filter)
 
             if not nodes_data:
                 raise ValueError("No node data retrieved from the database.")
