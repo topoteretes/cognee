@@ -42,7 +42,7 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
     ])
 
     llm_client = get_llm_client()
-    answer_prediction = llm_client.create_structured_output(
+    answer_prediction = await llm_client.acreate_structured_output(
         text_input=problem_statement,
         system_prompt=prompt,
         response_model=str,
@@ -55,7 +55,7 @@ async def generate_patch_without_cognee(instance):
     prompt = instance["text"]
 
     llm_client = get_llm_client()
-    answer_prediction = llm_client.create_structured_output(
+    answer_prediction = await llm_client.acreate_structured_output(
         text_input=problem_statement,
         system_prompt=prompt,
         response_model=str,
@@ -88,10 +88,7 @@ async def main():
         dataset_name = 'princeton-nlp/SWE-bench_Lite_bm25_13K'
         dataset = load_swebench_dataset(dataset_name, split='test')
         predictions_path = "preds_nocognee.json"
-        if Path(predictions_path).exists():
-            with open(predictions_path, "r") as file:
-                preds = json.load(file)
-        else:
+        if not Path(predictions_path).exists():
             preds = await get_preds(dataset, with_cognee=False)
             with open(predictions_path, "w") as file:
                 json.dump(preds, file)
@@ -106,6 +103,8 @@ async def main():
             dataset = download_instances(swe_dataset, filepath)
         predictions_path = "preds.json"
         preds = await get_preds(dataset, with_cognee=not args.cognee_off)
+        with open(predictions_path, "w") as file:
+            json.dump(preds, file)
 
     subprocess.run(["python", "-m", "swebench.harness.run_evaluation",
                     "--dataset_name", dataset_name,
