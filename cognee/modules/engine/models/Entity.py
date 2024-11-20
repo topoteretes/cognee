@@ -3,6 +3,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from .EntityType import EntityType
 
 class Entity(DataPoint):
+    __tablename__ = "entity"
     name: str
     is_a: EntityType
     description: str

@@ -16,10 +16,10 @@ async def index_data_points(data_points: list[DataPoint]):
         data_point_type = type(data_point)
 
         for field_name in data_point._metadata["index_fields"]:
-            index_name = f"{data_point_type.__name__}.{field_name}"
+            index_name = f"{data_point_type.__tablename__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
+                await vector_engine.create_vector_index(data_point_type.__tablename__, field_name)
                 created_indexes[index_name] = True
 
             if index_name not in index_points:

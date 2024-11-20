@@ -8,6 +8,7 @@ class MetaData(TypedDict):
     index_fields: list[str]
 
 class DataPoint(BaseModel):
+    __tablename__ = "data_point"
     id: UUID = Field(default_factory = uuid4)
     updated_at: Optional[datetime] = datetime.now(timezone.utc)
     _metadata: Optional[MetaData] = {
