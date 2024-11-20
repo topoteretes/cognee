@@ -87,8 +87,12 @@ async def main():
         print(f"{result}\n")
 
     history = await cognee.get_search_history()
-
     assert len(history) == 6, "Search history is not correct."
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    tables_in_database = await vector_engine.get_table_names()
+    assert len(tables_in_database) == 0, "The database is not empty"
 
 if __name__ == "__main__":
     import asyncio
