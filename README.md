@@ -105,37 +105,47 @@ import asyncio
 from cognee.api.v1.search import SearchType
 
 async def main():
-    # Reset cognee data
+    # Create a clean slate for cognee -- reset data and system state
+    print("Resetting cognee data...")
     await cognee.prune.prune_data()
-    # Reset cognee system state
     await cognee.prune.prune_system(metadata=True)
+    print("Data reset complete.\n")
 
+    # cognee knowledge graph will be created based on this text
     text = """
     Natural language processing (NLP) is an interdisciplinary
     subfield of computer science and information retrieval.
     """
-
-    # Add text to cognee
+    print("Adding text to cognee:")
+    print(text.strip())
     await cognee.add(text)
+    print("Text added successfully.\n")
 
     # Use LLMs and cognee to create knowledge graph
+    print("Running cognify to create knowledge graph...")
     await cognee.cognify()
+    print("Cognify process complete.\n")
 
-    # Search cognee for insights
+    # Query cognee for insights on the added text
+    query_text = 'Tell me about NLP'
+    print(f"Searching cognee for insights with query: '{query_text}'")
     search_results = await cognee.search(
         SearchType.INSIGHTS,
-        "Tell me about NLP",
+        query_text=query_text,
     )
 
-    # Display results
+    # Display search results
+    print("Search results:")
     for result_text in search_results:
         print(result_text)
+        # Expected output:
         # natural_language_processing is_a field
         # natural_language_processing is_subfield_of computer_science
         # natural_language_processing is_subfield_of information_retrieval
 
 asyncio.run(main())
 ```
+When you run this script, you will see step-by-step messages in the console that help you trace the execution flow and understand what the script is doing at each stage.
 A version of this example is here: `examples/python/simple_example.py`
 
 ### Create your own memory store
