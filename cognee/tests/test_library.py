@@ -57,6 +57,16 @@ async def  main():
 
     assert len(history) == 6, "Search history is not correct."
 
+    await cognee.prune.prune_data()
+    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+
+    await cognee.prune.prune_system(metadata=True)
+    connection = await vector_engine.get_connection()
+    collection_names = await connection.table_names()
+    assert len(collection_names) == 0, "The vector database is not empty"
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    assert not os.path.exists(get_relational_engine().db_path), "The relational database is not empty"
+
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main(), debug=True)
