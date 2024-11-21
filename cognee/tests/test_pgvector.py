@@ -90,7 +90,7 @@ async def main():
     assert len(history) == 6, "Search history is not correct."
 
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local files are not deleted"
+    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
