@@ -32,7 +32,7 @@ async def  main():
 
     from cognee.infrastructure.databases.vector import get_vector_engine
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("Entity_name", "AI"))[0]
+    random_node = (await vector_engine.search("entity_name", "AI"))[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(SearchType.INSIGHTS, query_text = random_node_name)
