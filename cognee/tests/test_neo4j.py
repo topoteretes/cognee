@@ -61,6 +61,15 @@ async def main():
 
     assert len(history) == 6, "Search history is not correct."
 
+    await cognee.prune.prune_data()
+    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+
+    await cognee.prune.prune_system(metadata=True)
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_graph_data()
+    assert len(nodes) == 0 and len(edges) == 0, "Neo4j graph database is not empty"
+
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
