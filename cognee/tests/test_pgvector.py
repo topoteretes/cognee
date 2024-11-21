@@ -94,7 +94,7 @@ async def main():
 
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
-    assert len(tables_in_database) == 0, "The database is not empty"
+    assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
 
 if __name__ == "__main__":
     import asyncio
