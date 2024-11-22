@@ -20,21 +20,33 @@ def get_llm_client():
             raise ValueError("LLM API key is not set.")
 
         from .openai.adapter import OpenAIAdapter
-        return OpenAIAdapter(api_key=llm_config.llm_api_key, model=llm_config.llm_model, transcription_model=llm_config.transcription_model, streaming=llm_config.llm_streaming)
+
+        return OpenAIAdapter(
+            api_key = llm_config.llm_api_key,
+            endpoint = llm_config.llm_endpoint,
+            api_version = llm_config.llm_api_version,
+            model = llm_config.llm_model,
+            transcription_model = llm_config.transcription_model,
+            streaming = llm_config.llm_streaming,
+        )
+
     elif provider == LLMProvider.OLLAMA:
         if llm_config.llm_api_key is None:
             raise ValueError("LLM API key is not set.")
 
         from .generic_llm_api.adapter import GenericAPIAdapter
         return GenericAPIAdapter(llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Ollama")
+
     elif provider == LLMProvider.ANTHROPIC:
         from .anthropic.adapter import AnthropicAdapter
         return AnthropicAdapter(llm_config.llm_model)
+
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
             raise ValueError("LLM API key is not set.")
 
         from .generic_llm_api.adapter import GenericAPIAdapter
         return GenericAPIAdapter(llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Custom")
+
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
