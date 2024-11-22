@@ -59,8 +59,15 @@ async def main():
         print(f"{result}\n")
 
     history = await cognee.get_search_history()
-
     assert len(history) == 6, "Search history is not correct."
+
+    await cognee.prune.prune_data()
+    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+
+    await cognee.prune.prune_system(metadata=True)
+    qdrant_client = get_vector_engine().get_qdrant_client()
+    collections_response = await qdrant_client.get_collections()
+    assert len(collections_response.collections) == 0, "QDrant vector database is not empty"
 
 if __name__ == "__main__":
     import asyncio
