@@ -1,3 +1,7 @@
+from cognee.modules.graph.utils import (
+    get_graph_from_model,
+    get_model_instance_from_graph,
+)
 from cognee.tests.unit.interfaces.graph.util import run_test_against_ground_truth
 
 PARSED_PERSON_GROUND_TRUTH = {
@@ -21,8 +25,10 @@ CAR_GROUND_TRUTH = {
 }
 
 
-def test_parsed_person(graph_outputs):
-    (_, _, _, parsed_person) = graph_outputs
+def test_parsed_person(boris):
+    nodes, edges = get_graph_from_model(boris)
+    parsed_person = get_model_instance_from_graph(nodes, edges, "boris")
+
     run_test_against_ground_truth(
         "parsed_person", parsed_person, PARSED_PERSON_GROUND_TRUTH
     )

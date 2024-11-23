@@ -209,7 +209,7 @@ async def main(enable_steps):
     if enable_steps.get("search_insights"):
         search_results = await cognee.search(
             SearchType.INSIGHTS,
-            {'query': 'Which applicant has the most relevant experience in data science?'}
+            query_text='Which applicant has the most relevant experience in data science?'
         )
         print("Search results:")
         for result_text in search_results:

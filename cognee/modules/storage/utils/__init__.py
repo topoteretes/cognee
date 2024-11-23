@@ -29,7 +29,9 @@ def copy_model(model: DataPoint, include_fields: dict = {}, exclude_fields: list
         **include_fields
     }
 
-    return create_model(model.__name__, **final_fields)
+    model = create_model(model.__name__, **final_fields)
+    model.model_rebuild()
+    return model
 
 def get_own_properties(data_point: DataPoint):
     properties = {}
