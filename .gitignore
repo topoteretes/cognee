@@ -4,6 +4,8 @@
 .prod.env
 cognee/.data/
 
+code_pipeline_output*/
+
 *.lance/
 .DS_Store
 # Byte-compiled / optimized / DLL files

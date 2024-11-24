@@ -55,7 +55,7 @@ async def get_repo_dependency_graph(repo_path: str) -> nx.DiGraph:
         if source_code is None:
             continue
 
-        dependencies = await get_local_script_dependencies(file_path, repo_path)
+        dependencies = await get_local_script_dependencies(os.path.join(repo_path, file_path), repo_path)
         dependency_edges = [get_edge(file_path, dependency, repo_path) for dependency in dependencies]
         dependency_graph.add_edges_from(dependency_edges)
     return dependency_graph
