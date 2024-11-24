@@ -1,35 +1,28 @@
+import argparse
 import asyncio
 import os
-from uuid import UUID, uuid4
-
-import numpy as np
 
 from cognee.modules.pipelines import Task, run_tasks
-from cognee.shared.CodeGraphEntities import CodeFile, CodeRelationship, Repository
+from cognee.shared.CodeGraphEntities import CodeRelationship, Repository
 from cognee.shared.data_models import SummarizedContent
 from cognee.tasks.code.get_local_dependencies_checker import (
     get_local_script_dependencies,
 )
 from cognee.tasks.graph.convert_graph_from_code_graph import (
+    create_code_file,
     convert_graph_from_code_graph,
 )
-
-from cognee.tasks.summarization import summarize_code
-from cognee.tests.tasks.graph.code_graph_test_data_generation import (
-    code_graph_test_data_generation,
+from cognee.tasks.repo_processor import (
+    enrich_dependency_graph,
+    expand_dependency_graph,
+    get_repo_dependency_graph,
 )
+from cognee.tasks.summarization import summarize_code
+
 
 async def print_results(pipeline):
     async for result in pipeline:
         print(result)
-
-
-def create_code_file(path, type):
-    abspath = os.path.abspath(path)
-    with open(abspath, "r") as f:
-        source_code = f.read()
-    code_file = CodeFile(extracted_id=abspath, type=type, source_code=source_code)
-    return (code_file, abspath)
 
 
 async def get_local_script_dependencies_wrapper(script_path, repo_path):
@@ -72,11 +65,17 @@ async def scan_repo(path, condition):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process a file path")
+    parser.add_argument("path", help="Path to the file")
+
+    args = parser.parse_args()
+    abspath = os.path.abspath(args.path or ".")
     tasks = [
-        Task(scan_repo),
+        Task(get_repo_dependency_graph),
+        Task(enrich_dependency_graph),
+        Task(expand_dependency_graph),
         Task(convert_graph_from_code_graph),
-        Task(summarize_code, summarization_model=SummarizedContent),
+        Task(summarize_code, summarization_model = SummarizedContent),
     ]
-    data = ("cognee", lambda file: file.endswith(".py"))
-    pipeline = run_tasks(tasks, data, "cognify_pipeline")
+    pipeline = run_tasks(tasks, abspath, "cognify_code_pipeline")
     asyncio.run(print_results(pipeline))

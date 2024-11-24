@@ -1,16 +1,13 @@
-from typing import Any, List, Literal, Optional, Union
-
 from cognee.infrastructure.engine import DataPoint
-
 
 class Repository(DataPoint):
     path: str
-
 
 class CodeFile(DataPoint):
     extracted_id: str  # actually file path
     type: str
     source_code: str
+    part_of: Repository
 
     _metadata: dict = {
         "index_fields": ["source_code"]

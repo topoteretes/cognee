@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, Union
+from typing import Type
 from uuid import uuid5
 
 from pydantic import BaseModel
@@ -23,9 +23,9 @@ async def summarize_code(
 
     summaries = [
         CodeSummary(
-            id=uuid5(file.id, "CodeSummary"),
-            made_from=file,
-            text=file_summaries[file_index].summary,
+            id = uuid5(file.id, "CodeSummary"),
+            made_from = file,
+            text = file_summaries[file_index].summary,
         )
         for (file_index, file) in enumerate(code_files)
     ]

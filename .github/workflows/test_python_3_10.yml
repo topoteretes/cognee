@@ -56,8 +56,8 @@ jobs:
       - name: Run integration tests
         run: poetry run pytest cognee/tests/integration/
 
-      - name: Run summarize_code test
-        run: poetry run pytest cognee/tests/tasks/summarization/summarize_code_test.py
+      - name: Run convert_graph_from_code_graph test
+        run: poetry run pytest cognee/tests/tasks/graph/convert_graph_from_code_graph_test.py
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}

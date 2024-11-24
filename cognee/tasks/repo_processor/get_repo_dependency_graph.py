@@ -1,8 +1,6 @@
 import os
 import aiofiles
-
 import networkx as nx
-from typing import Dict, List
 
 from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
 
@@ -35,6 +33,7 @@ async def get_py_files_dict(repo_path):
 
     return py_files_dict
 
+
 def get_edge(file_path: str, dependency: str, repo_path: str, relative_paths: bool = True) -> tuple:
     if relative_paths:
         file_path = os.path.relpath(file_path, repo_path)
@@ -58,4 +57,5 @@ async def get_repo_dependency_graph(repo_path: str) -> nx.DiGraph:
         dependencies = await get_local_script_dependencies(os.path.join(repo_path, file_path), repo_path)
         dependency_edges = [get_edge(file_path, dependency, repo_path) for dependency in dependencies]
         dependency_graph.add_edges_from(dependency_edges)
+
     return dependency_graph
