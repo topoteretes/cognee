@@ -87,6 +87,9 @@ class OpenAIAdapter(LLMInterface):
         transcription = litellm.transcription(
             model = self.transcription_model,
             file = Path(input),
+            api_key=self.api_key,
+            api_base=self.endpoint,
+            api_version=self.api_version,
             max_retries = 5,
         )
 
@@ -112,6 +115,9 @@ class OpenAIAdapter(LLMInterface):
                     },
                 ],
             }],
+            api_key=self.api_key,
+            api_base=self.endpoint,
+            api_version=self.api_version,
             max_tokens = 300,
             max_retries = 5,
         )
