@@ -7,10 +7,11 @@ from cognee.infrastructure.databases.relational import Base
 
 
 class Metadata(Base):
-    __tablename__ = "queries"
+    __tablename__ = "metadata_table"
 
     id = Column(UUID, primary_key=True, default=uuid4)
-    metadata = Column(String)
+    metadata_repr = Column(String)
+    metadata_source = Column(String)
 
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

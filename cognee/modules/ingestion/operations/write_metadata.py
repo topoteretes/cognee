@@ -15,7 +15,7 @@ async def write_metadata(data_item: Any) -> UUID:
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         metadata = Metadata(
-            metadata=json.dumps(metadata_dict),
+            metadata_repr=json.dumps(metadata_dict),
             metadata_source=parse_type(type(data_item)),
         )
         session.add(metadata)
