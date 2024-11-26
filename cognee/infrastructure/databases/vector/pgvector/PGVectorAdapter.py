@@ -192,8 +192,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
-        closest_items = []
-
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             # Find closest vectors to query_vector

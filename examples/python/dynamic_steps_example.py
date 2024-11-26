@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-from cognee.pipelines.retriever.two_steps_retriever import two_step_retriever
+from cognee.pipelines.retriever.brute_force_triplet_search import brute_force_triplet_search
 
 job_1 = """
 CV 1: Relevant
@@ -181,13 +181,13 @@ async def main(enable_steps):
 
     # Step 4: Query insights
     if enable_steps.get("retriever"):
-        await two_step_retriever('Who has Phd?')
+        await brute_force_triplet_search('Who has Phd?')
 
 
 if __name__ == '__main__':
     # Flags to enable/disable steps
 
-    rebuild_kg = True
+    rebuild_kg = False
     retrieve = True
     steps_to_enable = {
         "prune_data": rebuild_kg,

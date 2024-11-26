@@ -164,9 +164,9 @@ class CogneeGraph(CogneeAbstractGraph):
             source_node = self.get_node(edge.node1.id)
             target_node = self.get_node(edge.node2.id)
 
-            source_distance = source_node.attributes.get("vector_distance", 0) if source_node else 0
-            target_distance = target_node.attributes.get("vector_distance", 0) if target_node else 0
-            edge_distance = edge.attributes.get("vector_distance", 0)
+            source_distance = source_node.attributes.get("vector_distance", 1) if source_node else 1
+            target_distance = target_node.attributes.get("vector_distance", 1) if target_node else 1
+            edge_distance = edge.attributes.get("vector_distance", 1)
 
             total_distance = source_distance + target_distance + edge_distance
 
