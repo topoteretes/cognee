@@ -9,18 +9,21 @@ async def get_graph_engine() -> GraphDBInterface :
     config = get_graph_config()
 
     if config.graph_database_provider == "neo4j":
-        try:
-            from .neo4j_driver.adapter import Neo4jAdapter
+        if not (config.graph_database_url and config.graph_database_username and config.graph_database_password):
+            raise EnvironmentError("Missing required Neo4j credentials.")
+      
+        from .neo4j_driver.adapter import Neo4jAdapter
 
-            return Neo4jAdapter(
-                graph_database_url = config.graph_database_url,
-                graph_database_username = config.graph_database_username,
-                graph_database_password = config.graph_database_password
-            )
-        except:
-            pass
+        return Neo4jAdapter(
+            graph_database_url = config.graph_database_url,
+            graph_database_username = config.graph_database_username,
+            graph_database_password = config.graph_database_password
+        )
 
     elif config.graph_database_provider == "falkordb":
+        if not (config.graph_database_url and config.graph_database_username and config.graph_database_password):
+            raise EnvironmentError("Missing required FalkorDB credentials.")
+      
         from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
         from cognee.infrastructure.databases.hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
 

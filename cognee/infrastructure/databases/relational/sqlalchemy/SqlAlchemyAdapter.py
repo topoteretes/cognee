@@ -130,6 +130,29 @@ class SQLAlchemyAdapter():
                     return metadata.tables[full_table_name]
                 raise ValueError(f"Table '{full_table_name}' not found.")
 
+    async def get_table_names(self) -> List[str]:
+        """
+        Return a list of all tables names in database
+        """
+        table_names = []
+        async with self.engine.begin() as connection:
+            if self.engine.dialect.name == "sqlite":
+                await connection.run_sync(Base.metadata.reflect)
+                for table in Base.metadata.tables:
+                    table_names.append(str(table))
+            else:
+                schema_list = await self.get_schema_list()
+                # Create a MetaData instance to load table information
+                metadata = MetaData()
+                # Drop all tables from all schemas
+                for schema_name in schema_list:
+                    # Load the schema information into the MetaData object
+                    await connection.run_sync(metadata.reflect, schema=schema_name)
+                    for table in metadata.sorted_tables:
+                        table_names.append(str(table))
+                    metadata.clear()
+        return table_names
+
 
     async def get_data(self, table_name: str, filters: dict = None):
         async with self.engine.begin() as connection:
