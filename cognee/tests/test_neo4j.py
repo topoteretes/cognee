@@ -62,7 +62,7 @@ async def main():
 
     assert len(history) == 6, "Search history is not correct."
 
-    results = await brute_force_triplet_search('Who has the most experience with graphic design?')
+    results = await brute_force_triplet_search('What is a quantum computer?')
     assert len(results) > 0
 
     await cognee.prune.prune_data()
