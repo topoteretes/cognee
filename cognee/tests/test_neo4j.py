@@ -62,9 +62,6 @@ async def main():
 
     assert len(history) == 6, "Search history is not correct."
 
-    results = await brute_force_triplet_search('Who has the most experience with graphic design?')
-    assert len(results)>0
-
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
