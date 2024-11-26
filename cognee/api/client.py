@@ -7,6 +7,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from cognee.exceptions.exceptions import CogneeApiError
+from traceback import format_exc
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -74,6 +77,22 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     return JSONResponse(
         status_code = 400,
         content = jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
+    )
+
+@app.exception_handler(CogneeApiError)
+async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
+    #TODO: Add checking if all values exist for exception
+    detail = {}
+    if exc.message:
+        detail["message"] = exc.message
+
+    if exc.name:
+        detail["message"] = f"{detail['message']} [{exc.name}]"
+
+    # log the stack trace for easier serverside debugging
+    logger.error(format_exc())
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": detail["message"]}
     )
 
 app.include_router(
