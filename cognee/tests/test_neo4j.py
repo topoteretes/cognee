@@ -62,6 +62,9 @@ async def main():
 
     assert len(history) == 6, "Search history is not correct."
 
+    results = await brute_force_triplet_search('Who has the most experience with graphic design?')
+    assert len(results) > 0
+
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
 
