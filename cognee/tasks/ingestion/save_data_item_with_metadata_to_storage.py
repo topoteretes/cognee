@@ -1,14 +1,15 @@
 from typing import Union, BinaryIO, Any
 from cognee.modules.ingestion import save_data_to_file
+from cognee.modules.ingestion.operations.write_metadata import write_metadata
 
 def save_data_item_with_metadata_to_storage(data_item: Union[BinaryIO, str, Any], dataset_name: str) -> str:
     # Dynamic import is used because the llama_index module is optional. 
     # For the same reason Any is accepted as a data item
-    from llama_index.core import Document
-    from .transform_data import get_data_from_llama_index
+    metadata_id = write_metadata(data_item)
 
     # Check if data is of type Document or any of it's subclasses
-    if isinstance(data_item, Document):
+    if str(type(data_item)).startswith("llama_index"):
+        from .transform_data import get_data_from_llama_index
         file_path = get_data_from_llama_index(data_item, dataset_name)
 
     # data is a file object coming from upload.
@@ -25,4 +26,4 @@ def save_data_item_with_metadata_to_storage(data_item: Union[BinaryIO, str, Any]
     else:
         raise ValueError(f"Data type not supported: {type(data_item)}")
 
-    return file_path
+    return file_path, metadata_id

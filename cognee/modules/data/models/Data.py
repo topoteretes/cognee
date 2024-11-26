@@ -15,6 +15,7 @@ class Data(Base):
     extension = Column(String)
     mime_type = Column(String)
     raw_data_location = Column(String)
+    metadata_id = Column(UUID)
 
     created_at = Column(DateTime(timezone = True), default = lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone = True), onupdate = lambda: datetime.now(timezone.utc))
