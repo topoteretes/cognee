@@ -38,7 +38,7 @@ Then run:
 `cd cognee`
 `source evals/cloud/setup_ubuntu_instance.sh`
 
-sudo usermod -aG docker $USER
+`sudo usermod -aG docker $USER`
 
 disconnect, and reconnect. 
 
