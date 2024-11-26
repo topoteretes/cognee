@@ -158,7 +158,7 @@ class CogneeGraph(CogneeAbstractGraph):
             print(f"Error mapping vector distances to edges: {ex}")
 
 
-    async def calculate_top_triplet_importances(self, k = int) -> List:
+    async def calculate_top_triplet_importances(self, k: int) -> List:
         min_heap = []
         for i, edge in enumerate(self.edges):
             source_node = self.get_node(edge.node1.id)

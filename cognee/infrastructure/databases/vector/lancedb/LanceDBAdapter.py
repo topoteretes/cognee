@@ -146,8 +146,7 @@ class LanceDBAdapter(VectorDBInterface):
             self,
             collection_name: str,
             query_text: str = None,
-            query_vector: List[float] = None,
-            with_vector: bool = False
+            query_vector: List[float] = None
     ):
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
