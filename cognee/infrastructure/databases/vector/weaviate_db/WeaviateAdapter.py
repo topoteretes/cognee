@@ -153,6 +153,36 @@ class WeaviateAdapter(VectorDBInterface):
 
         return await future
 
+    async def get_distances_of_collection(
+            self,
+            collection_name: str,
+            query_text: str = None,
+            query_vector: List[float] = None,
+            with_vector: bool = False
+    ) -> List[ScoredResult]:
+        import weaviate.classes as wvc
+
+        if query_text is None and query_vector is None:
+            raise ValueError("One of query_text or query_vector must be provided!")
+
+        if query_vector is None:
+            query_vector = (await self.embed_data([query_text]))[0]
+
+        search_result = self.get_collection(collection_name).query.hybrid(
+            query=None,
+            vector=query_vector,
+            include_vector=with_vector,
+            return_metadata=wvc.query.MetadataQuery(score=True),
+        )
+
+        return [
+            ScoredResult(
+                id=UUID(str(result.uuid)),
+                payload=result.properties,
+                score=1 - float(result.metadata.score)
+            ) for result in search_result.objects
+        ]
+
     async def search(
             self,
             collection_name: str,
