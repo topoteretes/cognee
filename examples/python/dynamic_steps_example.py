@@ -1,6 +1,7 @@
 import cognee
 import asyncio
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.brute_force_triplet_search import format_triplets
 
 job_1 = """
 CV 1: Relevant
@@ -181,8 +182,8 @@ async def main(enable_steps):
 
     # Step 4: Query insights
     if enable_steps.get("retriever"):
-        await brute_force_triplet_search('Who has Phd?')
-
+        results = await brute_force_triplet_search('Who has the most experience with graphic design?')
+        print(format_triplets(results))
 
 if __name__ == '__main__':
     # Flags to enable/disable steps
