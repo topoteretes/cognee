@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-from cognee.pipelines.retriever.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
 
 job_1 = """
 CV 1: Relevant
@@ -187,7 +187,7 @@ async def main(enable_steps):
 if __name__ == '__main__':
     # Flags to enable/disable steps
 
-    rebuild_kg = False
+    rebuild_kg = True
     retrieve = True
     steps_to_enable = {
         "prune_data": rebuild_kg,
