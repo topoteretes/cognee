@@ -1,7 +1,7 @@
 import asyncio
-from textwrap import dedent
-from typing import Any
+# from datetime import datetime
 from uuid import UUID
+from textwrap import dedent
 from falkordb import FalkorDB
 
 from cognee.infrastructure.engine import DataPoint
@@ -43,23 +43,31 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         return await self.embedding_engine.embed_text(data)
 
-    async def stringify_properties(self, properties: dict, vectorize_fields = []) -> str:
-        async def get_value(key, value):
-            return f"'{value}'" if key not in vectorize_fields else await self.get_vectorized_value(value)
+    async def stringify_properties(self, properties: dict) -> str:
+        def parse_value(value):
+            if type(value) is UUID:
+                return f"'{str(value)}'"
+            if type(value) is int or type(value) is float:
+                return value
+            if type(value) is list and type(value[0]) is float and len(value) == self.embedding_engine.get_vector_size():
+                return f"'vecf32({value})'"
+            # if type(value) is datetime:
+            #     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
+            return f"'{value}'"
 
-        return ",".join([f"{key}:{await get_value(key, value)}" for key, value in properties.items()])
+        return ",".join([f"{key}:{parse_value(value)}" for key, value in properties.items()])
 
-    async def get_vectorized_value(self, value: Any) -> str:
-        vector = (await self.embed_data([value]))[0]
-        return f"vecf32({vector})"
+    async def create_data_point_query(self, data_point: DataPoint, vectorized_values: list = None):
+        node_label = type(data_point).__tablename__
+        embeddable_fields = data_point._metadata.get("index_fields", [])
 
-    async def create_data_point_query(self, data_point: DataPoint):
-        node_label = type(data_point).__name__
-        node_properties = await self.stringify_properties(
-            data_point.model_dump(),
-            data_point._metadata["index_fields"],
-            # data_point._metadata["index_fields"] if hasattr(data_point, "_metadata") else [],
-        )
+        node_properties = await self.stringify_properties({
+            **data_point.model_dump(),
+            **({
+                embeddable_fields[index]: vectorized_values[index] \
+                    for index in range(len(embeddable_fields)) \
+            } if vectorized_values is not None else {}),
+        })
 
         return dedent(f"""
             MERGE (node:{node_label} {{id: '{str(data_point.id)}'}})
@@ -90,7 +98,33 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         return collection_name in collections
 
     async def create_data_points(self, data_points: list[DataPoint]):
-        queries = [await self.create_data_point_query(data_point) for data_point in data_points]
+        embeddable_values = [DataPoint.get_embeddable_properties(data_point) for data_point in data_points]
+
+        vectorized_values = await self.embed_data(
+            sum(embeddable_values, [])
+        )
+
+        index = 0
+        positioned_vectorized_values = []
+
+        for values in embeddable_values:
+            if len(values) > 0:
+                values_list = []
+                for i in range(len(values)):
+                    values_list.append(vectorized_values[index + i])
+
+                positioned_vectorized_values.append(values_list)
+                index += len(values)
+            else:
+                positioned_vectorized_values.append(None)
+
+        queries = [
+            await self.create_data_point_query(
+                data_point,
+                positioned_vectorized_values[index],
+            ) for index, data_point in enumerate(data_points)
+        ]
+
         for query in queries:
             self.query(query)
 
@@ -205,10 +239,12 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         if query_text and not query_vector:
             query_vector = (await self.embed_data([query_text]))[0]
 
+        [label, attribute_name] = collection_name.split(".")
+
         query = dedent(f"""
             CALL db.idx.vector.queryNodes(
-                {collection_name},
-                'text',
+                '{label}',
+                '{attribute_name}',
                 {limit},
                 vecf32({query_vector})
             ) YIELD node, score
@@ -216,7 +252,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
 
         result = self.query(query)
 
-        return result
+        return result.result_set
 
     async def batch_search(
         self,
@@ -235,6 +271,30 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                 with_vector = with_vectors,
             ) for query_vector in query_vectors]
         )
+
+    async def get_graph_data(self):
+        query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+
+        result = self.query(query)
+
+        nodes = [(
+            record[2]["id"],
+            record[2],
+        ) for record in result.result_set]
+
+        query = """
+        MATCH (n)-[r]->(m)
+        RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
+        """
+        result = self.query(query)
+        edges = [(
+            record[3]["source_node_id"],
+            record[3]["target_node_id"],
+            record[2],
+            record[3],
+        ) for record in result.result_set]
+
+        return (nodes, edges)
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         return self.query(

@@ -23,7 +23,15 @@ class DataPoint(BaseModel):
         if self._metadata and len(self._metadata["index_fields"]) > 0 \
             and hasattr(self, self._metadata["index_fields"][0]):
             attribute = getattr(self, self._metadata["index_fields"][0])
+
             if isinstance(attribute, str):
-                return(attribute.strip())
+                return attribute.strip()
             else:
-                return (attribute)
+                return attribute
+
+    @classmethod
+    def get_embeddable_properties(self, data_point):
+        if data_point._metadata and len(data_point._metadata["index_fields"]) > 0:
+            return [getattr(data_point, field, None) for field in data_point._metadata["index_fields"]]
+
+        return []

@@ -122,6 +122,7 @@ async def get_graph_from_model(
         type(data_point),
         include_fields = {
             "_metadata": (dict, data_point._metadata),
+            "__tablename__": data_point.__tablename__,
         },
         exclude_fields = excluded_properties,
     )

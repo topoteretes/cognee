@@ -1,4 +1,3 @@
-import inspect
 from typing import List, Optional, get_type_hints, Generic, TypeVar
 import asyncio
 from uuid import UUID

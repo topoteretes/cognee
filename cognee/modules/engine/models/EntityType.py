@@ -1,8 +1,5 @@
-from typing import Union
-
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.shared.CodeGraphEntities import Repository
 
 
 class EntityType(DataPoint):
@@ -10,7 +7,7 @@ class EntityType(DataPoint):
     name: str
     type: str
     description: str
-    exists_in: Union[DocumentChunk, Repository]
+    exists_in: DocumentChunk
     _metadata: dict = {
         "index_fields": ["name"],
     }

@@ -36,10 +36,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 api_version = self.api_version
             )
 
-            return response.data[0]["embedding"]
+            return [data["embedding"] for data in response.data]
 
-        tasks = [get_embedding(text_) for text_ in text]
-        result = await asyncio.gather(*tasks)
+        # tasks = [get_embedding(text_) for text_ in text]
+        result = await get_embedding(text)
         return result
 
     def get_vector_size(self) -> int:
