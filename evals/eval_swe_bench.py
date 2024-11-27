@@ -26,9 +26,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from evals.eval_utils import download_instances
-from evals.eval_utils import ingest_repos
-from evals.eval_utils import download_github_repo
-from evals.eval_utils import delete_repo
 
 
 def check_install_package(package_name):
@@ -49,8 +46,14 @@ def check_install_package(package_name):
             return False
 
 
+<<<<<<< HEAD
 
 async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
+=======
+async def generate_patch_with_cognee(
+    instance, search_type=SearchType.CHUNKS
+):
+>>>>>>> c4e3634 (Update eval_swe_bench)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
@@ -81,7 +84,7 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
 
     await render_graph(None, include_labels = True, include_nodes = True)
 
-    problem_statement = instance["problem_statement"]
+    problem_statement = instance['problem_statement']
     instructions = read_query_prompt("patch_gen_instructions.txt")
 
     graph_str = 'HERE WE SHOULD PASS THE TRIPLETS FROM GRAPHRAG'
@@ -97,7 +100,6 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
         ]
     )
 
-    llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
         text_input=problem_statement,
         system_prompt=prompt,
@@ -106,8 +108,9 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
 
     return answer_prediction
 
+
 async def generate_patch_without_cognee(instance, llm_client):
-    problem_statement = instance["problem_statement"]
+    problem_statement = instance['problem_statement']
     prompt = instance["text"]
 
     answer_prediction = await llm_client.acreate_structured_output(
@@ -134,7 +137,10 @@ async def get_preds(dataset, with_cognee=True):
             for instance in dataset
         ]
     model_patches = await asyncio.gather(*[x[1] for x in futures])
+<<<<<<< HEAD
 
+=======
+>>>>>>> c4e3634 (Update eval_swe_bench)
     preds = [
         {
             "instance_id": instance_id,
@@ -149,9 +155,8 @@ async def get_preds(dataset, with_cognee=True):
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Run LLM predictions on SWE-bench dataset"
-    )
-    parser.add_argument("--cognee_off", action="store_true")
+        description="Run LLM predictions on SWE-bench dataset")
+    parser.add_argument('--cognee_off', action='store_true')
     parser.add_argument("--max_workers", type=int, required=True)
     args = parser.parse_args()
 
@@ -159,16 +164,17 @@ async def main():
         check_install_package(dependency)
 
     if args.cognee_off:
-        dataset_name = "princeton-nlp/SWE-bench_Lite_bm25_13K"
-        dataset = load_swebench_dataset(dataset_name, split="test")
+        dataset_name = 'princeton-nlp/SWE-bench_Lite_bm25_13K'
+        dataset = load_swebench_dataset(dataset_name, split='test')
         predictions_path = "preds_nocognee.json"
         if not Path(predictions_path).exists():
             preds = await get_preds(dataset, with_cognee=False)
             with open(predictions_path, "w") as file:
                 json.dump(preds, file)
     else:
-        dataset_name = "princeton-nlp/SWE-bench_Lite"
-        swe_dataset = load_swebench_dataset(dataset_name, split="test")[:1]
+        dataset_name = 'princeton-nlp/SWE-bench_Lite'
+        swe_dataset = load_swebench_dataset(
+            dataset_name, split='test')[:1]
         filepath = Path("SWE-bench_testsample")
         if filepath.exists():
             dataset = Dataset.load_from_disk(filepath)
@@ -179,6 +185,7 @@ async def main():
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
 
+<<<<<<< HEAD
 
     subprocess.run(
         [
@@ -198,6 +205,14 @@ async def main():
         ]
     )
 
+=======
+    subprocess.run(["python", "-m", "swebench.harness.run_evaluation",
+                    "--dataset_name", dataset_name,
+                    "--split", "test",
+                    "--predictions_path",  predictions_path,
+                    "--max_workers", "1",
+                    "--run_id", "test_run"])
+>>>>>>> c4e3634 (Update eval_swe_bench)
 
 if __name__ == "__main__":
     import asyncio
