@@ -4,12 +4,12 @@ from cognee.modules.ingestion import save_data_to_file
 from cognee.modules.ingestion.operations.write_metadata import write_metadata
 
 
-def save_data_item_with_metadata_to_storage(
+async def save_data_item_with_metadata_to_storage(
     data_item: Union[BinaryIO, str, Any], dataset_name: str
 ) -> str:
     # Dynamic import is used because the llama_index module is optional.
     # For the same reason Any is accepted as a data item
-    metadata_id = write_metadata(data_item)
+    metadata_id = await write_metadata(data_item)
 
     # Check if data is of type Document or any of it's subclasses
     if str(type(data_item)).startswith("llama_index"):
