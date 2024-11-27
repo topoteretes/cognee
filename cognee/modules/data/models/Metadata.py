@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import UUID, Column, DateTime, String, ForeignKey, relationship
+from sqlalchemy import UUID, Column, DateTime, String, ForeignKey
+from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -20,5 +21,6 @@ class Metadata(Base):
         DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
     )
 
-    dataset_id = Column(UUID, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key = True)
-    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"), primary_key = True)
+    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"), primary_key = False)
+    data = relationship("Data", back_populates="metadata_relationship")
+

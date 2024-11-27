@@ -9,11 +9,12 @@ from cognee.modules.data.operations.delete_metadata import delete_metadata
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.shared.utils import send_telemetry
-
+from cognee.modules.data.operations.write_metadata import write_metadata
 from .get_dlt_destination import get_dlt_destination
 from .save_data_item_with_metadata_to_storage import (
     save_data_item_with_metadata_to_storage,
 )
+
 
 
 async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
@@ -32,8 +33,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
 
         # Process data
         for data_item in data:
-
-            file_path, metadata_id = await save_data_item_with_metadata_to_storage(
+            file_path = await save_data_item_with_metadata_to_storage(
                 data_item, dataset_name
             )
 
@@ -64,21 +64,20 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
                         data_point.raw_data_location = file_metadata["file_path"]
                         data_point.extension = file_metadata["extension"]
                         data_point.mime_type = file_metadata["mime_type"]
-                        data_point.metadata_id = metadata_id
                         await session.merge(data_point)
-                        await session.commit()
                     else:
                         data_point = Data(
                             id=data_id,
                             name=file_metadata["name"],
                             raw_data_location=file_metadata["file_path"],
                             extension=file_metadata["extension"],
-                            mime_type=file_metadata["mime_type"],
-                            metadata_id=metadata_id,
+                            mime_type=file_metadata["mime_type"]
                         )
 
                         dataset.data.append(data_point)
-                        await session.commit()
+                    await session.commit()
+                    await write_metadata(data_item, data_point.id)
+
 
                 yield {
                     "id": data_id,

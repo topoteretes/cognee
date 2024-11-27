@@ -19,8 +19,6 @@ class Data(Base):
     extension = Column(String)
     mime_type = Column(String)
     raw_data_location = Column(String)
-    metadata_id = Column(UUID)
-
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -36,9 +34,8 @@ class Data(Base):
         cascade="all, delete",
     )
 
-    metadata = relationship(
+    metadata_relationship = relationship(
         "Metadata",
-        secondary=Metadata.__tablename__,
         back_populates="data",
         lazy="noload",
         cascade="all, delete",
