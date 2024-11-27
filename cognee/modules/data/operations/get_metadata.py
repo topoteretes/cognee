@@ -14,4 +14,6 @@ async def get_metadata(metadata_id: UUID) -> Metadata:
     async with db_engine.get_async_session() as session:
         metadata = await session.get(Metadata, metadata_id)
 
-        return json.parse(metadata)
+        return metadata
+    
+
