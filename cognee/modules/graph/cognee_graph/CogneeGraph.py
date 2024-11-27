@@ -42,7 +42,7 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
 
-    def get_edges_of_node(self, node_id: str) -> List[Edge]:
+    def get_edges_from_node(self, node_id: str) -> List[Edge]:
         node = self.get_node(node_id)
         if node:
             return node.skeleton_edges
@@ -50,16 +50,18 @@ class CogneeGraph(CogneeAbstractGraph):
             raise ValueError(f"Node with id {node_id} does not exist.")
 
     def get_edges(self)-> List[Edge]:
-        return edges
+        return self.edges
 
-    async def project_graph_from_db(self,
-                                    adapter: Union[GraphDBInterface],
-                                    node_properties_to_project: List[str],
-                                    edge_properties_to_project: List[str],
-                                    directed = True,
-                                    node_dimension = 1,
-                                    edge_dimension = 1,
-                                    memory_fragment_filter = []) -> None:
+    async def project_graph_from_db(
+        self,
+        adapter: Union[GraphDBInterface],
+        node_properties_to_project: List[str],
+        edge_properties_to_project: List[str],
+        directed = True,
+        node_dimension = 1,
+        edge_dimension = 1,
+        memory_fragment_filter = [],
+    ) -> None:
 
         if node_dimension < 1 or edge_dimension < 1:
             raise ValueError("Dimensions must be positive integers")
@@ -158,15 +160,15 @@ class CogneeGraph(CogneeAbstractGraph):
             print(f"Error mapping vector distances to edges: {ex}")
 
 
-    async def calculate_top_triplet_importances(self, k = int) -> List:
+    async def calculate_top_triplet_importances(self, k: int) -> List:
         min_heap = []
         for i, edge in enumerate(self.edges):
             source_node = self.get_node(edge.node1.id)
             target_node = self.get_node(edge.node2.id)
 
-            source_distance = source_node.attributes.get("vector_distance", 0) if source_node else 0
-            target_distance = target_node.attributes.get("vector_distance", 0) if target_node else 0
-            edge_distance = edge.attributes.get("vector_distance", 0)
+            source_distance = source_node.attributes.get("vector_distance", 1) if source_node else 1
+            target_distance = target_node.attributes.get("vector_distance", 1) if target_node else 1
+            edge_distance = edge.attributes.get("vector_distance", 1)
 
             total_distance = source_distance + target_distance + edge_distance
 

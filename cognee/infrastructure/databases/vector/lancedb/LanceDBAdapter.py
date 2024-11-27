@@ -142,12 +142,11 @@ class LanceDBAdapter(VectorDBInterface):
             score = 0,
         ) for result in results.to_dict("index").values()]
 
-    async def get_distances_of_collection(
-            self,
-            collection_name: str,
-            query_text: str = None,
-            query_vector: List[float] = None,
-            with_vector: bool = False
+    async def get_distance_from_collection_elements(
+        self,
+        collection_name: str,
+        query_text: str = None,
+        query_vector: List[float] = None
     ):
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")

@@ -176,7 +176,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 ) for result in results
             ]
 
-    async def get_distances_of_collection(
+    async def get_distance_from_collection_elements(
             self,
             collection_name: str,
             query_text: str = None,
@@ -191,8 +191,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
-
-        closest_items = []
 
         # Use async session to connect to the database
         async with self.get_async_session() as session:
