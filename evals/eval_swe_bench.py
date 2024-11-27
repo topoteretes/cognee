@@ -8,29 +8,62 @@ from swebench.harness.utils import load_swebench_dataset
 from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 
 import cognee
+
+from cognee.shared.data_models import SummarizedContent
+from cognee.shared.utils import render_graph
+from cognee.tasks.repo_processor import (
+    enrich_dependency_graph,
+    expand_dependency_graph,
+    get_repo_file_dependencies,
+)
+from cognee.tasks.storage import add_data_points
+from cognee.tasks.summarization import summarize_code
+from cognee.modules.pipelines import Task, run_tasks
 from cognee.api.v1.cognify.code_graph_pipeline import code_graph_pipeline
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from evals.eval_utils import download_instances
+from evals.eval_utils import ingest_repos
+from evals.eval_utils import download_github_repo
+from evals.eval_utils import delete_repo
 
-
-async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
+async def generate_patch_with_cognee(instance):
 
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.prune.prune_system()
 
-    dataset_name = "SWE_test_data"
-    code_text = instance["text"]
-    await cognee.add([code_text], dataset_name)
-    await code_graph_pipeline([dataset_name])
-    graph_engine = await get_graph_engine()
-    with open(graph_engine.filename, "r") as f:
-        graph_str = f.read()
+    #dataset_name = "SWE_test_data"
+
+    #await cognee.add('', dataset_name = dataset_name)
+
+    # repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
+
+    repo_path = '/Users/borisarzentar/Projects/graphrag'
+
+    tasks = [
+        Task(get_repo_file_dependencies),
+        Task(add_data_points),
+        Task(enrich_dependency_graph),
+        Task(expand_dependency_graph),
+        Task(add_data_points),
+        # Task(summarize_code, summarization_model = SummarizedContent),
+    ]
+
+    pipeline = run_tasks(tasks, repo_path, "cognify_code_pipeline")
+
+    async for result in pipeline:
+        print(result)
+
+    print('Here we have the repo under the repo_path')
+
+    await render_graph()
 
     problem_statement = instance['problem_statement']
     instructions = read_query_prompt("patch_gen_instructions.txt")
+
+    graph_str = 'HERE WE SHOULD PASS THE TRIPLETS FROM GRAPHRAG'
 
     prompt = "\n".join([
         instructions,
@@ -41,14 +74,18 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
         graph_str
     ])
 
+    return 0
+
+    ''' :TODO: We have to find out how do we do the generation
     llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
         text_input=problem_statement,
         system_prompt=prompt,
         response_model=str,
     )
-    return answer_prediction
 
+    return answer_prediction
+    '''
 
 async def generate_patch_without_cognee(instance):
     problem_statement = instance['problem_statement']
@@ -71,11 +108,16 @@ async def get_preds(dataset, with_cognee=True):
         model_name = "without_cognee"
         pred_func = generate_patch_without_cognee
 
+
+    for instance in dataset:
+        await pred_func(instance)
+
+    '''
     preds = [{"instance_id": instance["instance_id"],
               "model_patch": await pred_func(instance),
               "model_name_or_path": model_name} for instance in dataset]
-
-    return preds
+    '''
+    return 0
 
 
 async def main():
@@ -115,4 +157,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main(), debug=True)

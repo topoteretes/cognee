@@ -2,9 +2,18 @@ from datetime import datetime, timezone
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import copy_model
 
-def get_graph_from_model(data_point: DataPoint, include_root = True, added_nodes = {}, added_edges = {}):
+async def get_graph_from_model(
+    data_point: DataPoint,
+    include_root = True,
+    added_nodes = None,
+    added_edges = None,
+    visited_properties = None,
+):
     nodes = []
     edges = []
+    added_nodes = added_nodes or {}
+    added_edges = added_edges or {}
+    visited_properties = visited_properties or {}
 
     data_point_properties = {}
     excluded_properties = set()
@@ -13,10 +22,27 @@ def get_graph_from_model(data_point: DataPoint, include_root = True, added_nodes
         if field_name == "_metadata":
             continue
 
+        if field_value is None:
+            excluded_properties.add(field_name)
+            continue
+
         if isinstance(field_value, DataPoint):
             excluded_properties.add(field_name)
 
-            property_nodes, property_edges = get_graph_from_model(field_value, True, added_nodes, added_edges)
+            property_key = f"{str(data_point.id)}{field_name}{str(field_value.id)}"
+
+            if property_key in visited_properties:
+                return [], []
+
+            visited_properties[property_key] = 0
+
+            property_nodes, property_edges = await get_graph_from_model(
+                field_value,
+                True,
+                added_nodes,
+                added_edges,
+                visited_properties,
+            )
 
             for node in property_nodes:
                 if str(node.id) not in added_nodes:
@@ -47,7 +73,20 @@ def get_graph_from_model(data_point: DataPoint, include_root = True, added_nodes
             excluded_properties.add(field_name)
 
             for item in field_value:
-                property_nodes, property_edges = get_graph_from_model(item, True, added_nodes, added_edges)
+                property_key = f"{str(data_point.id)}{field_name}{str(item.id)}"
+
+                if property_key in visited_properties:
+                    return [], []
+
+                visited_properties[property_key] = 0
+
+                property_nodes, property_edges = await get_graph_from_model(
+                    item,
+                    True,
+                    added_nodes,
+                    added_edges,
+                    visited_properties,
+                )
 
                 for node in property_nodes:
                     if str(node.id) not in added_nodes:

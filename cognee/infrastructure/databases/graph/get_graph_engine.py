@@ -4,7 +4,7 @@ from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
 
 
-async def get_graph_engine() -> GraphDBInterface :
+async def get_graph_engine() -> GraphDBInterface:
     """Factory function to get the appropriate graph client based on the graph type."""
     config = get_graph_config()
 

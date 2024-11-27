@@ -1,4 +1,4 @@
-name: test | python 3.10
+name: test | multimedia notebook
 
 on:
   workflow_dispatch:
@@ -7,30 +7,27 @@ on:
       - main
     types: [labeled, synchronize]
 
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
-  ENV: 'dev'
 
 jobs:
   get_docs_changes:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
-  run_common:
+  run_notebook_test:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
     defaults:
       run:
         shell: bash
-
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -38,10 +35,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version:  '3.10.x'
+          python-version: '3.11.x'
 
       - name: Install Poetry
-        # https://github.com/snok/install-poetry#running-on-windows
         uses: snok/install-poetry@v1.3.2
         with:
           virtualenvs-create: true
@@ -49,30 +45,19 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: |
+          poetry install --no-interaction
+          poetry add jupyter --no-interaction
 
-      - name: Run unit tests
-        run: poetry run pytest cognee/tests/unit/
-
-      - name: Run integration tests
-        run: poetry run pytest cognee/tests/integration/
-
-      - name: Run default basic pipeline
+      - name: Execute Jupyter Notebook
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: poetry run python ./cognee/tests/test_library.py
-
-      - name: Clean up disk space
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: |
-          sudo rm -rf ~/.cache
-          sudo rm -rf /tmp/*
-          df -h
-
-      - name: Build with Poetry
-        run: poetry build
-
-      - name: Install Package
-        run: |
-         cd dist
-         pip install *.whl
+          poetry run jupyter nbconvert \
+          --to notebook \
+          --execute notebooks/cognee_multimedia_demo.ipynb \
+          --output executed_notebook.ipynb \
+          --ExecutePreprocessor.timeout=1200

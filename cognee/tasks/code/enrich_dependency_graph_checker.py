@@ -1,7 +1,7 @@
 import os
 import asyncio
 import argparse
-from cognee.tasks.repo_processor.get_repo_dependency_graph import get_repo_dependency_graph
+from cognee.tasks.repo_processor.get_repo_file_dependencies import get_repo_file_dependencies
 from cognee.tasks.repo_processor.enrich_dependency_graph import enrich_dependency_graph
 
 
@@ -15,7 +15,7 @@ def main():
         print(f"Error: The provided repository path does not exist: {repo_path}")
         return
 
-    graph = asyncio.run(get_repo_dependency_graph(repo_path))
+    graph = asyncio.run(get_repo_file_dependencies(repo_path))
     graph = asyncio.run(enrich_dependency_graph(graph))
     for node in graph.nodes:
         print(f"Node: {node}")

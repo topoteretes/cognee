@@ -16,6 +16,9 @@ async def index_data_points(data_points: list[DataPoint]):
         data_point_type = type(data_point)
 
         for field_name in data_point._metadata["index_fields"]:
+            if getattr(data_point, field_name, None) is None:
+                continue
+
             index_name = f"{data_point_type.__tablename__}.{field_name}"
 
             if index_name not in created_indexes:
@@ -35,12 +38,21 @@ async def index_data_points(data_points: list[DataPoint]):
 
     return data_points
 
-def get_data_points_from_model(data_point: DataPoint, added_data_points = {}) -> list[DataPoint]:
+def get_data_points_from_model(data_point: DataPoint, added_data_points = None, visited_properties = None) -> list[DataPoint]:
     data_points = []
+    added_data_points = added_data_points or {}
+    visited_properties = visited_properties or {}
 
     for field_name, field_value in data_point:
         if isinstance(field_value, DataPoint):
-            new_data_points = get_data_points_from_model(field_value, added_data_points)
+            property_key = f"{str(data_point.id)}{field_name}{str(field_value.id)}"
+
+            if property_key in visited_properties:
+                return []
+
+            visited_properties[property_key] = True
+
+            new_data_points = get_data_points_from_model(field_value, added_data_points, visited_properties)
 
             for new_point in new_data_points:
                 if str(new_point.id) not in added_data_points:
@@ -49,7 +61,14 @@ def get_data_points_from_model(data_point: DataPoint, added_data_points = {}) ->
 
         if isinstance(field_value, list) and len(field_value) > 0 and isinstance(field_value[0], DataPoint):
             for field_value_item in field_value:
-                new_data_points = get_data_points_from_model(field_value_item, added_data_points)
+                property_key = f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
+
+                if property_key in visited_properties:
+                    return []
+
+                visited_properties[property_key] = True
+              
+                new_data_points = get_data_points_from_model(field_value_item, added_data_points, visited_properties)
 
                 for new_point in new_data_points:
                     if str(new_point.id) not in added_data_points:
@@ -79,4 +98,3 @@ if __name__ == "__main__":
     data_points = get_data_points_from_model(person)
 
     print(data_points)
-    

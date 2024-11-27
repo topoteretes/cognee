@@ -24,11 +24,13 @@ async def extract_graph_from_data(
         (chunk, chunk_graph) for chunk, chunk_graph in zip(data_chunks, chunk_graphs)
     ]
     existing_edges_map = await retrieve_existing_edges(
-        chunk_and_chunk_graphs, graph_engine
+        chunk_and_chunk_graphs,
+        graph_engine,
     )
 
     graph_nodes, graph_edges = expand_with_nodes_and_edges(
-        chunk_and_chunk_graphs, existing_edges_map
+        chunk_and_chunk_graphs,
+        existing_edges_map,
     )
 
     if len(graph_nodes) > 0:

@@ -11,6 +11,7 @@ class DataPoint(BaseModel):
     __tablename__ = "data_point"
     id: UUID = Field(default_factory = uuid4)
     updated_at: Optional[datetime] = datetime.now(timezone.utc)
+    topological_rank: Optional[int] = 0
     _metadata: Optional[MetaData] = {
         "index_fields": []
     }
