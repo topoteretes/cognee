@@ -1,7 +1,7 @@
 """ This module is used to set the configuration of the system."""
 import os
 from cognee.base_config import get_base_config
-from cognee.exceptions import InvalidValueError
+from cognee.exceptions import InvalidValueError, InvalidAttributeError
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
@@ -86,7 +86,7 @@ class config():
             if hasattr(llm_config, key):
                 object.__setattr__(llm_config, key, value)
             else:
-                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+                raise InvalidAttributeError(message=f"'{key}' is not a valid attribute of the config.")
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -124,7 +124,7 @@ class config():
             if hasattr(relational_db_config, key):
                 object.__setattr__(relational_db_config, key, value)
             else:
-                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+                raise InvalidAttributeError(message=f"'{key}' is not a valid attribute of the config.")
 
     @staticmethod
     def set_vector_db_config(config_dict: dict):
@@ -136,7 +136,7 @@ class config():
             if hasattr(vector_db_config, key):
                 object.__setattr__(vector_db_config, key, value)
             else:
-                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+                raise InvalidAttributeError(message=f"'{key}' is not a valid attribute of the config.")
 
     @staticmethod
     def set_vector_db_key(db_key: str):

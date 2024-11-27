@@ -1,4 +1,6 @@
 from typing import Union, BinaryIO, Any
+
+from cognee.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 
 def save_data_item_with_metadata_to_storage(data_item: Union[BinaryIO, str, Any], dataset_name: str) -> str:
@@ -23,6 +25,6 @@ def save_data_item_with_metadata_to_storage(data_item: Union[BinaryIO, str, Any]
         else:
             file_path = save_data_to_file(data_item, dataset_name)
     else:
-        raise ValueError(f"Data type not supported: {type(data_item)}")
+        raise IngestionError(message=f"Data type not supported: {type(data_item)}")
 
     return file_path

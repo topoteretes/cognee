@@ -4,6 +4,7 @@ import csv
 import json
 import logging
 from datetime import datetime, timezone
+from fastapi import status
 from typing import Any, Dict, List, Optional, Union, Type
 
 import aiofiles
@@ -78,7 +79,8 @@ class OntologyEngine:
             else:
                 raise IngestionError(message="Unsupported file format")
         except Exception as e:
-            raise RuntimeError(f"Failed to load data from {file_path}: {e}")
+            raise IngestionError(message=f"Failed to load data from {file_path}: {e}",
+                                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
     async def add_graph_ontology(self, file_path: str = None, documents: list = None):
         """Add graph ontology from a JSON or CSV file or infer from documents content."""
