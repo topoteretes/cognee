@@ -1,5 +1,6 @@
 from typing import List, Dict, Union
 
+from cognee.exceptions import EntityAlreadyExistsError, EntityNotFoundError, InvalidValueError
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
@@ -26,7 +27,7 @@ class CogneeGraph(CogneeAbstractGraph):
         if node.id not in self.nodes:
             self.nodes[node.id] = node
         else:
-            raise ValueError(f"Node with id {node.id} already exists.")
+            raise EntityAlreadyExistsError(message=f"Node with id {node.id} already exists.")
 
     def add_edge(self, edge: Edge) -> None:
         if edge not in self.edges:
@@ -34,7 +35,7 @@ class CogneeGraph(CogneeAbstractGraph):
             edge.node1.add_skeleton_edge(edge)
             edge.node2.add_skeleton_edge(edge)
         else:
-            raise ValueError(f"Edge {edge} already exists in the graph.")
+            raise EntityAlreadyExistsError(message=f"Edge {edge} already exists in the graph.")
 
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
@@ -44,7 +45,7 @@ class CogneeGraph(CogneeAbstractGraph):
         if node:
             return node.skeleton_edges
         else:
-            raise ValueError(f"Node with id {node_id} does not exist.")
+            raise EntityNotFoundError(message=f"Node with id {node_id} does not exist.")
 
     async def project_graph_from_db(self,
                                     adapter: Union[GraphDBInterface],
@@ -55,15 +56,15 @@ class CogneeGraph(CogneeAbstractGraph):
                                     edge_dimension = 1) -> None:
 
         if node_dimension < 1 or edge_dimension < 1:
-            raise ValueError("Dimensions must be positive integers")
+            raise InvalidValueError(message="Dimensions must be positive integers")
 
         try:
             nodes_data, edges_data = await adapter.get_graph_data()
 
             if not nodes_data:
-                raise ValueError("No node data retrieved from the database.")
+                raise EntityNotFoundError(message="No node data retrieved from the database.")
             if not edges_data:
-                raise ValueError("No edge data retrieved from the database.")
+                raise EntityNotFoundError(message="No edge data retrieved from the database.")
 
             for node_id, properties in nodes_data:
                 node_attributes = {key: properties.get(key) for key in node_properties_to_project}
@@ -83,7 +84,7 @@ class CogneeGraph(CogneeAbstractGraph):
                     target_node.add_skeleton_edge(edge)
 
                 else:
-                    raise ValueError(f"Edge references nonexistent nodes: {source_id} -> {target_id}")
+                    raise EntityNotFoundError(message=f"Edge references nonexistent nodes: {source_id} -> {target_id}")
 
         except (ValueError, TypeError) as e:
             print(f"Error projecting graph: {e}")

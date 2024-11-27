@@ -6,7 +6,7 @@ class CogneeApiError(Exception):
 
     def __init__(
         self,
-        message: str = "Service is unavailable",
+        message: str = "Service is unavailable.",
         name: str = "Cognee",
         status_code=status.HTTP_418_IM_A_TEAPOT,
     ):
@@ -21,47 +21,105 @@ class ServiceError(CogneeApiError):
 
     def __init__(
         self,
-        message: str = "Service is unavailable",
+        message: str = "Service is unavailable.",
         name: str = "ServiceError",
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
-        self.message = message
-        self.name = name
-        self.status_code = status_code
-        super().__init__(self.message, self.name)
+        super().__init__(message, name, status_code)
 
 
-class EntityDoesNotExistError(CogneeApiError):
-    """Database returns nothing"""
-
-    pass
-
-
-class GroupNotFound(CogneeApiError):
+class GroupNotFoundError(CogneeApiError):
     """User group not found"""
 
-    pass
+    def __init__(
+        self,
+        message: str = "User group not found.",
+        name: str = "GroupNotFoundError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class UserNotFoundError(CogneeApiError):
+    """User not found"""
+
+    def __init__(
+        self,
+        message: str = "No user found in the system. Please create a user.",
+        name: str = "UserNotFoundError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class EntityNotFoundError(CogneeApiError):
+    """Database returns nothing"""
+
+    def __init__(
+        self,
+        message: str = "The requested entity does not exist.",
+        name: str = "EntityNotFoundError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)
 
 
 class EntityAlreadyExistsError(CogneeApiError):
     """Conflict detected, like trying to create a resource that already exists"""
 
-    pass
+    def __init__(
+        self,
+        message: str = "The entity already exists.",
+        name: str = "EntityAlreadyExistsError",
+        status_code=status.HTTP_409_CONFLICT,
+    ):
+        super().__init__(message, name, status_code)
 
 
 class InvalidOperationError(CogneeApiError):
     """Invalid operations like trying to delete a non-existing entity, etc."""
 
-    pass
+    def __init__(
+        self,
+        message: str = "Invalid operation attempted.",
+        name: str = "InvalidOperationError",
+        status_code=status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
 
 
-class AuthenticationFailed(CogneeApiError):
-    """Invalid authentication credentials"""
+class PermissionDeniedError(CogneeApiError):
+    def __init__(
+            self,
+            message: str = "User does not have permission on documents.",
+            name: str = "PermissionDeniedError",
+            status_code=status.HTTP_403_FORBIDDEN,
+    ):
+        super().__init__(message, name, status_code)
 
-    pass
+class IngestionError(CogneeApiError):
+    def __init__(
+            self,
+            message: str = "Type of data sent to classify not supported.",
+            name: str = "IngestionError",
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    ):
+        super().__init__(message, name, status_code)
 
+class InvalidValueError(CogneeApiError):
+    def __init__(
+            self,
+            message: str = "Invalid Value.",
+            name: str = "InvalidValueError",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ):
+        super().__init__(message, name, status_code)
 
-class InvalidTokenError(CogneeApiError):
-    """Invalid token"""
-
-    pass
+class InvalidAttributeError(CogneeApiError):
+    def __init__(
+            self,
+            message: str = "Invalid attribute.",
+            name: str = "InvalidAttributeError",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ):
+        super().__init__(message, name, status_code)

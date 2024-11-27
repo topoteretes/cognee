@@ -1,6 +1,7 @@
 """ This module is used to set the configuration of the system."""
 import os
 from cognee.base_config import get_base_config
+from cognee.exceptions import InvalidValueError
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
@@ -153,7 +154,7 @@ class config():
         base_config = get_base_config()
 
         if "username" not in graphistry_config or "password" not in graphistry_config:
-            raise ValueError("graphistry_config dictionary must contain 'username' and 'password' keys.")
+            raise InvalidValueError(message="graphistry_config dictionary must contain 'username' and 'password' keys.")
 
         base_config.graphistry_username = graphistry_config.get("username")
         base_config.graphistry_password = graphistry_config.get("password")

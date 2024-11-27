@@ -9,6 +9,8 @@ from cognee.modules.search.graph.search_adjacent import search_adjacent
 from cognee.modules.search.vector.search_traverse import search_traverse
 from cognee.modules.search.graph.search_summary import search_summary
 from cognee.modules.search.graph.search_similarity import search_similarity
+
+from cognee.exceptions import UserNotFoundError
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.modules.users.methods import get_default_user
@@ -47,7 +49,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
         user = await get_default_user()
 
     if user is None:
-        raise PermissionError("No user found in the system. Please create a user.")
+        raise UserNotFoundError
 
     own_document_ids = await get_document_ids_for_user(user.id)
     search_params = SearchParameters(search_type = search_type, params = params)

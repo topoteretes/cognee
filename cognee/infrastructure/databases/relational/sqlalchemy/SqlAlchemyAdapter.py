@@ -7,6 +7,7 @@ from sqlalchemy import text, select, MetaData, Table
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
+from cognee.exceptions import EntityNotFoundError
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
@@ -117,7 +118,7 @@ class SQLAlchemyAdapter():
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
                 else:
-                    raise ValueError(f"Table '{table_name}' not found.")
+                    raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:
                 # Create a MetaData instance to load table information
                 metadata = MetaData()
@@ -128,7 +129,7 @@ class SQLAlchemyAdapter():
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
-                raise ValueError(f"Table '{full_table_name}' not found.")
+                raise EntityNotFoundError(message=f"Table '{full_table_name}' not found.")
 
     async def get_table_names(self) -> List[str]:
         """

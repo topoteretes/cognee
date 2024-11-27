@@ -10,6 +10,7 @@ import aiofiles
 import pandas as pd
 from pydantic import BaseModel
 
+from cognee.exceptions import IngestionError, EntityNotFoundError
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.data.chunking.config import get_chunk_config
@@ -75,7 +76,7 @@ class OntologyEngine:
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
             else:
-                raise ValueError("Unsupported file format")
+                raise IngestionError(message="Unsupported file format")
         except Exception as e:
             raise RuntimeError(f"Failed to load data from {file_path}: {e}")
 
@@ -148,7 +149,7 @@ class OntologyEngine:
                     if node_id in valid_ids:
                         await graph_client.add_node(node_id, node_data)
                     if node_id not in valid_ids:
-                        raise ValueError(f"Node ID {node_id} not found in the dataset")
+                        raise EntityNotFoundError(message=f"Node ID {node_id} not found in the dataset")
                     if pd.notna(row.get("relationship_source")) and pd.notna(row.get("relationship_target")):
                         await graph_client.add_edge(
                             row["relationship_source"],

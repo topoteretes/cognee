@@ -5,6 +5,8 @@ from pydantic import BaseModel
 import instructor
 from tenacity import retry, stop_after_attempt
 import openai
+
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import MonitoringTool
@@ -128,7 +130,7 @@ class GenericAPIAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise ValueError("No system prompt path provided.")
+            raise InvalidValueError(message="No system prompt path provided.")
         system_prompt = read_query_prompt(system_prompt)
 
         formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n""" if system_prompt else None
