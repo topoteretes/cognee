@@ -25,7 +25,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
         destination=destination,
     )
 
-    @dlt.resource(standalone=True, merge_key="id")
+    @dlt.resource(standalone = True, merge_key = "id")
     async def data_resources(data: Any, user: User):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -38,7 +38,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
             )
 
             # Ingest data and add metadata
-            with open(file_path.replace("file://", ""), mode="rb") as file:
+            with open(file_path.replace("file://", ""), mode = "rb") as file:
                 classified_data = ingestion.classify(file)
 
                 data_id = ingestion.identify(classified_data)
@@ -67,11 +67,11 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
                         await session.merge(data_point)
                     else:
                         data_point = Data(
-                            id=data_id,
-                            name=file_metadata["name"],
-                            raw_data_location=file_metadata["file_path"],
-                            extension=file_metadata["extension"],
-                            mime_type=file_metadata["mime_type"]
+                            id = data_id,
+                            name = file_metadata["name"],
+                            raw_data_location = file_metadata["file_path"],
+                            extension = file_metadata["extension"],
+                            mime_type = file_metadata["mime_type"]
                         )
 
                         dataset.data.append(data_point)
@@ -93,9 +93,9 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
     send_telemetry("cognee.add EXECUTION STARTED", user_id=user.id)
     run_info = pipeline.run(
         data_resources(data, user),
-        table_name="file_metadata",
-        dataset_name=dataset_name,
-        write_disposition="merge",
+        table_name = "file_metadata",
+        dataset_name = dataset_name,
+        write_disposition = "merge",
     )
     send_telemetry("cognee.add EXECUTION COMPLETED", user_id=user.id)
 
