@@ -13,6 +13,7 @@ concurrency:
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
 
 jobs:
   get_docs_changes:

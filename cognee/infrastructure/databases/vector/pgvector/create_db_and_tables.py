@@ -10,5 +10,3 @@ async def create_db_and_tables():
         await vector_engine.create_database()
         async with vector_engine.engine.begin() as connection:
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-         
-            
