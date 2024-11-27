@@ -142,7 +142,7 @@ class QDrantAdapter(VectorDBInterface):
         await client.close()
         return results
 
-    async def get_distances_of_collection(
+    async def get_distance_from_collection_elements(
             self,
             collection_name: str,
             query_text: str = None,

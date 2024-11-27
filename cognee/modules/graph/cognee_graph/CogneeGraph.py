@@ -42,7 +42,7 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
 
-    def get_edges_of_node(self, node_id: str) -> List[Edge]:
+    def get_edges_from_node(self, node_id: str) -> List[Edge]:
         node = self.get_node(node_id)
         if node:
             return node.skeleton_edges

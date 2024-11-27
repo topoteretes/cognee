@@ -114,7 +114,7 @@ async def brute_force_search(
 
     try:
         results = await asyncio.gather(
-            *[vector_engine.get_distances_of_collection(collection, query_text=query) for collection in collections]
+            *[vector_engine.get_distance_from_collection_elements(collection, query_text=query) for collection in collections]
         )
 
         ############################################# :TODO: Change when vector db does not contain duplicates

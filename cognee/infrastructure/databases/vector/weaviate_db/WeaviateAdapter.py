@@ -153,7 +153,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         return await future
 
-    async def get_distances_of_collection(
+    async def get_distance_from_collection_elements(
             self,
             collection_name: str,
             query_text: str = None,
