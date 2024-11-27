@@ -16,7 +16,7 @@ def test_node_initialization():
 
 def test_node_invalid_dimension():
     """Test that initializing a Node with a non-positive dimension raises an error."""
-    with pytest.raises(ValueError, match="Dimension must be a positive integer"):
+    with pytest.raises(InvalidValueError, match="Dimension must be a positive integer"):
         Node("node1", dimension=0)
 
 
@@ -69,7 +69,7 @@ def test_is_node_alive_in_dimension():
 def test_node_alive_invalid_dimension():
     """Test that checking alive status with an invalid dimension raises an error."""
     node = Node("node1", dimension=1)
-    with pytest.raises(ValueError, match="Dimension 1 is out of range"):
+    with pytest.raises(InvalidValueError, match="Dimension 1 is out of range"):
         node.is_node_alive_in_dimension(1)
 
 
