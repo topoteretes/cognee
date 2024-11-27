@@ -1,5 +1,7 @@
 from fastapi import status
+import logging
 
+logger = logging.getLogger(__name__)
 
 class CogneeApiError(Exception):
     """Base exception class"""
@@ -13,6 +15,10 @@ class CogneeApiError(Exception):
         self.message = message
         self.name = name
         self.status_code = status_code
+
+        # Automatically log the exception details
+        logger.error(f"{self.name}: {self.message} (Status code: {self.status_code})")
+
         super().__init__(self.message, self.name)
 
 
