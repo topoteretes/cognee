@@ -34,8 +34,7 @@ class TextChunker():
                             word_count = chunk_data["word_count"],
                             is_part_of = self.document,
                             chunk_index = self.chunk_index,
-                            cut_type = chunk_data["cut_type"],
-                            metadata_id = self.document.metadata_id
+                            cut_type = chunk_data["cut_type"]
                         )
                         paragraph_chunks = []
                         self.chunk_size = 0
@@ -48,8 +47,7 @@ class TextChunker():
                                 word_count = self.chunk_size,
                                 is_part_of = self.document,
                                 chunk_index = self.chunk_index,
-                                cut_type = paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
-                                metadata_id = self.document.metadata_id
+                                cut_type = paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"]
                             )
                         except Exception as e:
                             print(e)
@@ -66,8 +64,7 @@ class TextChunker():
                     word_count = self.chunk_size,
                     is_part_of = self.document,
                     chunk_index = self.chunk_index,
-                    cut_type = paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
-                    metadata_id = self.document.metadata_id
+                    cut_type = paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"]
                 )
             except Exception as e:
                 print(e)
