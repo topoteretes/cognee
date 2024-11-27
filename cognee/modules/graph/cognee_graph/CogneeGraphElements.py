@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 
 class Node:
     """
@@ -21,6 +21,7 @@ class Node:
             raise ValueError("Dimension must be a positive integer")
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
+        self.attributes["vector_distance"] = float('inf')
         self.skeleton_neighbours = []
         self.skeleton_edges = []
         self.status = np.ones(dimension, dtype=int)
@@ -55,6 +56,12 @@ class Node:
             raise ValueError(f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
         return self.status[dimension] == 1
 
+    def add_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
+    def get_attribute(self, key: str) -> Union[str, int, float]:
+        return self.attributes[key]
+
     def __repr__(self) -> str:
         return f"Node({self.id}, attributes={self.attributes})"
 
@@ -87,6 +94,7 @@ class Edge:
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
+        self.attributes["vector_distance"] = float('inf')
         self.directed = directed
         self.status = np.ones(dimension, dtype=int)
 
@@ -94,6 +102,12 @@ class Edge:
         if dimension < 0 or dimension >= len(self.status):
             raise ValueError(f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
         return self.status[dimension] == 1
+
+    def add_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
+    def get_attribute(self, key: str, value: Any) -> Union[str, int, float]:
+        return self.attributes[key]
 
     def __repr__(self) -> str:
         direction = "->" if self.directed else "--"

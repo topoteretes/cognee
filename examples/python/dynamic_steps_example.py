@@ -1,32 +1,7 @@
 import cognee
 import asyncio
-from cognee.api.v1.search import SearchType
-
-job_position = """0:Senior Data Scientist (Machine Learning)
-
-Company: TechNova Solutions
-Location: San Francisco, CA
-
-Job Description:
-
-TechNova Solutions is seeking a Senior Data Scientist specializing in Machine Learning to join our dynamic analytics team. The ideal candidate will have a strong background in developing and deploying machine learning models, working with large datasets, and translating complex data into actionable insights.
-
-Responsibilities:
-
-Develop and implement advanced machine learning algorithms and models.
-Analyze large, complex datasets to extract meaningful patterns and insights.
-Collaborate with cross-functional teams to integrate predictive models into products.
-Stay updated with the latest advancements in machine learning and data science.
-Mentor junior data scientists and provide technical guidance.
-Qualifications:
-
-Master’s or Ph.D. in Data Science, Computer Science, Statistics, or a related field.
-5+ years of experience in data science and machine learning.
-Proficient in Python, R, and SQL.
-Experience with deep learning frameworks (e.g., TensorFlow, PyTorch).
-Strong problem-solving skills and attention to detail.
-Candidate CVs
-"""
+from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.brute_force_triplet_search import format_triplets
 
 job_1 = """
 CV 1: Relevant
@@ -195,7 +170,7 @@ async def main(enable_steps):
 
     # Step 2: Add text
     if enable_steps.get("add_text"):
-        text_list = [job_position, job_1, job_2, job_3, job_4, job_5]
+        text_list = [job_1, job_2, job_3, job_4, job_5]
         for text in text_list:
             await cognee.add(text)
             print(f"Added text: {text[:35]}...")
@@ -206,24 +181,21 @@ async def main(enable_steps):
         print("Knowledge graph created.")
 
     # Step 4: Query insights
-    if enable_steps.get("search_insights"):
-        search_results = await cognee.search(
-            SearchType.INSIGHTS,
-            {'query': 'Which applicant has the most relevant experience in data science?'}
-        )
-        print("Search results:")
-        for result_text in search_results:
-            print(result_text)
-
+    if enable_steps.get("retriever"):
+        results = await brute_force_triplet_search('Who has the most experience with graphic design?')
+        print(format_triplets(results))
 
 if __name__ == '__main__':
     # Flags to enable/disable steps
+
+    rebuild_kg = True
+    retrieve = True
     steps_to_enable = {
-        "prune_data": True,
-        "prune_system": True,
-        "add_text": True,
-        "cognify": True,
-        "search_insights": True
+        "prune_data": rebuild_kg,
+        "prune_system": rebuild_kg,
+        "add_text": rebuild_kg,
+        "cognify": rebuild_kg,
+        "retriever": retrieve
     }
 
     asyncio.run(main(steps_to_enable))
