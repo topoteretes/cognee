@@ -8,7 +8,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from .get_user_db import get_user_db
 from .models import User
 from .methods import get_user
-from ...exceptions import UserNotFoundError
+from cognee.exceptions import UserNotFoundError
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
