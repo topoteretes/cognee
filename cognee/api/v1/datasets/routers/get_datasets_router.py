@@ -156,18 +156,13 @@ def get_datasets_router() -> APIRouter:
         dataset_data = await get_dataset_data(dataset.id)
 
         if dataset_data is None:
-            raise HTTPException(status_code=404, detail=f"No data found in dataset ({dataset_id}).")
+            raise EntityNotFoundError(message=f"No data found in dataset ({dataset_id}).")
 
         matching_data = [data for data in dataset_data if str(data.id) == data_id]
 
         # Check if matching_data contains an element
         if len(matching_data) == 0:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": f"Data ({data_id}) not found in dataset ({dataset_id})."
-                }
-            )
+            raise EntityNotFoundError(message= f"Data ({data_id}) not found in dataset ({dataset_id}).")
 
         data = matching_data[0]
 
