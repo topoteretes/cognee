@@ -50,7 +50,7 @@ class CogneeGraph(CogneeAbstractGraph):
             raise ValueError(f"Node with id {node_id} does not exist.")
 
     def get_edges(self)-> List[Edge]:
-        return edges
+        return self.edges
 
     async def project_graph_from_db(self,
                                     adapter: Union[GraphDBInterface],
