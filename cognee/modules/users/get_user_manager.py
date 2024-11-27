@@ -8,7 +8,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from .get_user_db import get_user_db
 from .models import User
 from .methods import get_user
-from cognee.exceptions import UserNotFoundError
+from fastapi_users.exceptions import UserNotExists
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
@@ -26,7 +26,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         user = await get_user(id)
 
         if user is None:
-            raise UserNotFoundError
+            raise UserNotExists()
 
         return user
 
