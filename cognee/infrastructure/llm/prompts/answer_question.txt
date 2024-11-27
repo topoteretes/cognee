@@ -1,0 +1,2 @@
+Answer the question using the provided context. Be as brief as possible.
+Each entry in the context is a paragraph, which is represented as a list with two elements [title, sentences] and sentences is a list of strings.
