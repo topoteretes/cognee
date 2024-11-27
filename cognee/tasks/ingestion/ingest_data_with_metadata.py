@@ -5,7 +5,7 @@ import dlt
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset
-from cognee.modules.ingestion.operations.delete_metadata import delete_metadata
+from cognee.modules.data.operations.delete_metadata import delete_metadata
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_document
 from cognee.shared.utils import send_telemetry

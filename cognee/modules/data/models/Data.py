@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, relationship
 from cognee.infrastructure.databases.relational import Base
 
 from .DatasetData import DatasetData
-
+from .Metadata import Metadata
 
 class Data(Base):
     __tablename__ = "data"
@@ -28,13 +28,22 @@ class Data(Base):
         DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
     )
 
-    datasets: Mapped[List["Dataset"]] = relationship(
+    datasets = relationship(
         "Dataset",
         secondary=DatasetData.__tablename__,
         back_populates="data",
         lazy="noload",
         cascade="all, delete",
     )
+
+    metadata = relationship(
+        "Metadata",
+        secondary=Metadata.__tablename__,
+        back_populates="data",
+        lazy="noload",
+        cascade="all, delete",
+    )
+
 
     def to_json(self) -> dict:
         return {

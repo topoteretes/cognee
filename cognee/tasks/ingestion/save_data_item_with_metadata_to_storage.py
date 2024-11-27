@@ -1,7 +1,7 @@
 from typing import Any, BinaryIO, Union
 
 from cognee.modules.ingestion import save_data_to_file
-from cognee.modules.ingestion.operations.write_metadata import write_metadata
+from cognee.modules.data.operations.write_metadata import write_metadata
 
 
 async def save_data_item_with_metadata_to_storage(
