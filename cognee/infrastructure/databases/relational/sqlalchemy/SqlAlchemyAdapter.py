@@ -188,7 +188,7 @@ class SQLAlchemyAdapter():
             result = await session.execute(query)
 
             # Fetch all rows as a list of dictionaries
-            rows = result.mappings().all()  # Use `.mappings()` to get key-value pairs
+            rows = result.mappings().all()
             return rows
 
     async def execute_query(self, query):
