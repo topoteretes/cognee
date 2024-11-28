@@ -16,7 +16,6 @@ class LLMInterface(Protocol):
         """To get structured output, import/call this function"""
         raise NotImplementedError
 
-    @abstractmethod
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
         """Format and display the prompt for a user query."""
         if not text_input:
