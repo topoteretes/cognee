@@ -170,7 +170,7 @@ class SQLAlchemyAdapter():
                 results = await connection.execute(query)
             return {result["data_id"]: result["status"] for result in results}
 
-    async def get_all_data_from_table(self, table_name: str, schema: str = None):
+    async def get_all_data_from_table(self, table_name: str, schema: str = "public"):
         async with self.get_async_session() as session:
             # Validate inputs to prevent SQL injection
             if not table_name.isidentifier():
@@ -178,7 +178,10 @@ class SQLAlchemyAdapter():
             if schema and not schema.isidentifier():
                 raise ValueError("Invalid schema name")
 
-            table = await self.get_table(table_name, schema)
+            if self.engine.dialect.name == "sqlite":
+                table = await self.get_table(table_name)
+            else:
+                table = await self.get_table(table_name, schema)
 
             # Query all data from the table
             query = select(table)
@@ -222,7 +225,6 @@ class SQLAlchemyAdapter():
                 from cognee.infrastructure.files.storage import LocalStorage
 
                 LocalStorage.remove(self.db_path)
-                self.db_path = None
             else:
                 async with self.engine.begin() as connection:
                     schema_list = await self.get_schema_list()

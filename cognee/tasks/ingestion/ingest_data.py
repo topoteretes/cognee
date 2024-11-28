@@ -1,6 +1,7 @@
 import dlt
 import cognee.modules.ingestion as ingestion
 
+from uuid import UUID
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -43,7 +44,7 @@ async def ingest_data(file_paths: list[str], dataset_name: str, user: User):
                     dataset = await create_dataset(dataset_name, user.id, session)
 
                     data = (await session.execute(
-                        select(Data).filter(Data.id == file_metadata["id"])
+                        select(Data).filter(Data.id == UUID(file_metadata["id"]))
                     )).scalar_one_or_none()
 
                     if data is not None:
@@ -56,7 +57,7 @@ async def ingest_data(file_paths: list[str], dataset_name: str, user: User):
                         await session.commit()
                     else:
                         data = Data(
-                            id = file_metadata["id"],
+                            id = UUID(file_metadata["id"]),
                             name = file_metadata["name"],
                             raw_data_location = file_metadata["file_path"],
                             extension = file_metadata["extension"],
@@ -66,17 +67,32 @@ async def ingest_data(file_paths: list[str], dataset_name: str, user: User):
                         dataset.data.append(data)
                         await session.commit()
 
-                    await give_permission_on_document(user, file_metadata["id"], "read")
-                    await give_permission_on_document(user, file_metadata["id"], "write")
+                    await give_permission_on_document(user, UUID(file_metadata["id"]), "read")
+                    await give_permission_on_document(user, UUID(file_metadata["id"]), "write")
 
 
     send_telemetry("cognee.add EXECUTION STARTED", user_id = user.id)
-    run_info = pipeline.run(
-        data_resources(file_paths),
-        table_name = "file_metadata",
-        dataset_name = dataset_name,
-        write_disposition = "merge",
-    )
+
+    db_engine = get_relational_engine()
+
+    # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
+    # can't be used inside the pipeline
+    if db_engine.engine.dialect.name == "sqlite":
+        # To use sqlite with dlt dataset_name must be set to "main".
+        # Sqlite doesn't support schemas
+        run_info = pipeline.run(
+            data_resources(file_paths),
+            table_name = "file_metadata",
+            dataset_name = "main",
+            write_disposition = "merge",
+        )
+    else:
+        run_info = pipeline.run(
+            data_resources(file_paths),
+            table_name="file_metadata",
+            dataset_name=dataset_name,
+            write_disposition="merge",
+        )
 
     await data_storing("file_metadata", dataset_name, user)
     send_telemetry("cognee.add EXECUTION COMPLETED", user_id = user.id)
