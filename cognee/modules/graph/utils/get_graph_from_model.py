@@ -118,17 +118,17 @@ async def get_graph_from_model(
 
         data_point_properties[field_name] = field_value
 
-    SimpleDataPointModel = copy_model(
-        type(data_point),
-        include_fields = {
-            "_metadata": (dict, data_point._metadata),
-            "__tablename__": data_point.__tablename__,
-        },
-        exclude_fields = excluded_properties,
-    )
-
     if include_root:
+        SimpleDataPointModel = copy_model(
+            type(data_point),
+            include_fields = {
+                "_metadata": (dict, data_point._metadata),
+                "__tablename__": data_point.__tablename__,
+            },
+            exclude_fields = excluded_properties,
+        )
         nodes.append(SimpleDataPointModel(**data_point_properties))
+        added_nodes[str(data_point.id)] = True
 
     return nodes, edges
 

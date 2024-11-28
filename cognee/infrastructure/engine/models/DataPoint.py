@@ -35,3 +35,7 @@ class DataPoint(BaseModel):
             return [getattr(data_point, field, None) for field in data_point._metadata["index_fields"]]
 
         return []
+
+    @classmethod
+    def get_embeddable_property_names(self, data_point):
+        return data_point._metadata["index_fields"] or []

@@ -1,9 +1,10 @@
-import asyncio
+import logging
 from typing import List, Optional
 import litellm
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 
 litellm.set_verbose = False
+logger = logging.getLogger("LiteLLMEmbeddingEngine")
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
     api_key: str
@@ -28,13 +29,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         async def get_embedding(text_):
-            response = await litellm.aembedding(
-                self.model,
-                input = text_,
-                api_key = self.api_key,
-                api_base = self.endpoint,
-                api_version = self.api_version
-            )
+            try:
+                response = await litellm.aembedding(
+                    self.model,
+                    input = text_,
+                    api_key = self.api_key,
+                    api_base = self.endpoint,
+                    api_version = self.api_version
+                )
+            except litellm.exceptions.BadRequestError as error:
+                logger.error("Error embedding text: %s", str(error))
+                raise error
 
             return [data["embedding"] for data in response.data]
 

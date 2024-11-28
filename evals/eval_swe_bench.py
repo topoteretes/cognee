@@ -30,7 +30,6 @@ from evals.eval_utils import download_github_repo
 from evals.eval_utils import delete_repo
 
 async def generate_patch_with_cognee(instance):
-
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
 
@@ -44,10 +43,10 @@ async def generate_patch_with_cognee(instance):
 
     tasks = [
         Task(get_repo_file_dependencies),
-        Task(add_data_points),
-        Task(enrich_dependency_graph),
-        Task(expand_dependency_graph),
-        Task(add_data_points),
+        Task(add_data_points, task_config = { "batch_size": 50 }),
+        Task(enrich_dependency_graph, task_config = { "batch_size": 50 }),
+        Task(expand_dependency_graph, task_config = { "batch_size": 50 }),
+        Task(add_data_points, task_config = { "batch_size": 50 }),
         # Task(summarize_code, summarization_model = SummarizedContent),
     ]
 
@@ -58,7 +57,7 @@ async def generate_patch_with_cognee(instance):
 
     print('Here we have the repo under the repo_path')
 
-    await render_graph()
+    await render_graph(None, include_labels = True, include_nodes = True)
 
     problem_statement = instance['problem_statement']
     instructions = read_query_prompt("patch_gen_instructions.txt")

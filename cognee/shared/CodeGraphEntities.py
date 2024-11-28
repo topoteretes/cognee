@@ -19,7 +19,6 @@ class CodeFile(DataPoint):
     }
 
 class CodePart(DataPoint):
-    type: str
     # part_of: Optional[CodeFile]
     source_code: str
     type: Optional[str] = "CodePart"

@@ -1,6 +1,5 @@
-import asyncio
 import networkx as nx
-from typing import Dict, List
+from typing import AsyncGenerator, Dict, List
 from tqdm.asyncio import tqdm
 
 from cognee.infrastructure.engine import DataPoint
@@ -66,20 +65,25 @@ async def node_enrich_and_connect(
         if desc_id not in topological_order[:topological_rank + 1]:
             continue
 
+        desc = None
 
         if desc_id in data_points_map:
             desc = data_points_map[desc_id]
         else:
             node_data = await graph_engine.extract_node(desc_id)
-            desc = convert_node_to_data_point(node_data)
+            try:
+                desc = convert_node_to_data_point(node_data)
+            except Exception:
+                pass
 
-        new_connections.append(desc)
+        if desc is not None:
+            new_connections.append(desc)
 
     node.depends_directly_on = node.depends_directly_on or []
     node.depends_directly_on.extend(new_connections)
 
 
-async def enrich_dependency_graph(data_points: list[DataPoint]) -> list[DataPoint]:
+async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerator[list[DataPoint], None]:
     """Enriches the graph with topological ranks and 'depends_on' edges."""
     nodes = []
     edges = []
@@ -108,17 +112,18 @@ async def enrich_dependency_graph(data_points: list[DataPoint]) -> list[DataPoin
     #     data_points.append(node_enrich_and_connect(graph, topological_order, node))
 
     data_points_map = {data_point.id: data_point for data_point in data_points}
-    data_points_futures = []
+    # data_points_futures = []
 
     for data_point in tqdm(data_points, desc = "Enriching dependency graph", unit = "data_point"):
         if data_point.id not in node_rank_map:
             continue
 
         if isinstance(data_point, CodeFile):
-            data_points_futures.append(node_enrich_and_connect(graph, topological_order, data_point, data_points_map))
+            # data_points_futures.append(node_enrich_and_connect(graph, topological_order, data_point, data_points_map))
+            await node_enrich_and_connect(graph, topological_order, data_point, data_points_map)
 
-        # yield data_point
+        yield data_point
     
-    await asyncio.gather(*data_points_futures)
+    # await asyncio.gather(*data_points_futures)
 
-    return data_points
+    # return data_points

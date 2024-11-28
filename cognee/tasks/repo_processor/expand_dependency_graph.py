@@ -1,3 +1,4 @@
+from typing import AsyncGenerator
 from uuid import NAMESPACE_OID, uuid5
 # from tqdm import tqdm
 from cognee.infrastructure.engine import DataPoint
@@ -53,11 +54,12 @@ def _process_single_node(code_file: CodeFile) -> None:
         _add_code_parts_nodes_and_edges(code_file, part_type, code_parts)
 
 
-async def expand_dependency_graph(data_points: list[DataPoint]) -> list[DataPoint]:
+async def expand_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerator[list[DataPoint], None]:
     """Process Python file nodes, adding code part nodes and edges."""
     # for data_point in tqdm(data_points, desc = "Expand dependency graph", unit = "data_point"):
     for data_point in data_points:
         if isinstance(data_point, CodeFile):
             _process_single_node(data_point)
+        yield data_point
 
-    return data_points
+    # return data_points

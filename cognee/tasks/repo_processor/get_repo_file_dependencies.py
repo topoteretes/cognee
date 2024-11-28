@@ -1,4 +1,5 @@
 import os
+from typing import AsyncGenerator
 from uuid import NAMESPACE_OID, uuid5
 import aiofiles
 from tqdm.asyncio import tqdm
@@ -44,7 +45,7 @@ def get_edge(file_path: str, dependency: str, repo_path: str, relative_paths: bo
     return (file_path, dependency, {"relation": "depends_directly_on"})
 
 
-async def get_repo_file_dependencies(repo_path: str) -> list[DataPoint]:
+async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list[DataPoint], None]:
     """Generate a dependency graph for Python files in the given repository path."""
     py_files_dict = await get_py_files_dict(repo_path)
 
@@ -53,7 +54,8 @@ async def get_repo_file_dependencies(repo_path: str) -> list[DataPoint]:
         path = repo_path,
     )
 
-    data_points = [repo]
+    # data_points = [repo]
+    yield repo
 
     # dependency_graph = nx.DiGraph()
 
@@ -66,7 +68,8 @@ async def get_repo_file_dependencies(repo_path: str) -> list[DataPoint]:
 
         dependencies = await get_local_script_dependencies(os.path.join(repo_path, file_path), repo_path)
 
-        data_points.append(CodeFile(
+        # data_points.append()
+        yield CodeFile(
             id = uuid5(NAMESPACE_OID, file_path),
             source_code = source_code,
             extracted_id = file_path,
@@ -78,10 +81,10 @@ async def get_repo_file_dependencies(repo_path: str) -> list[DataPoint]:
                     part_of = repo,
                 ) for dependency in dependencies
             ] if len(dependencies) else None,
-        ))
+        )
         # dependency_edges = [get_edge(file_path, dependency, repo_path) for dependency in dependencies]
 
         # dependency_graph.add_edges_from(dependency_edges)
 
-    return data_points
+    # return data_points
     # return dependency_graph

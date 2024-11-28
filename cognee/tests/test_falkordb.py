@@ -8,9 +8,9 @@ from cognee.shared.utils import render_graph
 logging.basicConfig(level = logging.DEBUG)
 
 async def  main():
-    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_library")).resolve())
+    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_falkordb")).resolve())
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_library")).resolve())
+    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_falkordb")).resolve())
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
