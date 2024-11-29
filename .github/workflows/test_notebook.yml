@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   run_notebook_test:
-      uses: ./.github/reusable_workflows/notebook.yml
+      uses: ./.github/workflows/reusable_notebook.yml
       with:
         notebook-location: notebooks/cognee_demo.ipynb
       secrets:
