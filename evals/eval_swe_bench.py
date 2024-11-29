@@ -29,7 +29,8 @@ from evals.eval_utils import (delete_repo, download_github_repo,
 
 def node_to_string(node):
     text = node.attributes["text"]
-    return f"Node({node.id}, {text})"
+    type = node.attributes["type"]
+    return f"Node(id: {node.id}, type: {type}, description: {text})"
 def retrieved_edges_to_string(retrieved_edges):
     edge_strings = []
     for edge in retrieved_edges:
