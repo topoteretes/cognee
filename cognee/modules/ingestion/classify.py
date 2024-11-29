@@ -3,7 +3,7 @@ from typing import Union, BinaryIO
 from .data_types import TextData, BinaryData
 from tempfile import SpooledTemporaryFile
 
-from cognee.exceptions import IngestionError
+from cognee.modules.ingestion.exceptions import IngestionError
 
 
 def classify(data: Union[str, BinaryIO], filename: str = None):

@@ -11,8 +11,6 @@ from .exceptions import (
     EntityNotFoundError,
     EntityAlreadyExistsError,
     InvalidOperationError,
-    PermissionDeniedError,
-    IngestionError,
     InvalidValueError,
     InvalidAttributeError,
 )

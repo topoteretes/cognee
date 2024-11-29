@@ -1,6 +1,6 @@
 from typing import Union, BinaryIO
 
-from cognee.exceptions import IngestionError
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 
 def save_data_item_to_storage(data_item: Union[BinaryIO, str], dataset_name: str) -> str:
