@@ -7,10 +7,6 @@ on:
         description: "Location of Jupyter notebook to run"
         required: true
         type: string
-      label-name:
-        description: "Name of the label triggering the event"
-        required: true
-        type: string
     secrets:
       GRAPHISTRY_USERNAME:
         required: true

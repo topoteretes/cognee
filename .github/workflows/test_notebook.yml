@@ -17,7 +17,6 @@ jobs:
       uses: ./.github/workflows/reusable_notebook.yml
       with:
         notebook-location: notebooks/cognee_demo.ipynb
-        label-name: ${{ github.event.label.name }} # Pass event information explicitly
       secrets:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
