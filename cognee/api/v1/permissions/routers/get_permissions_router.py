@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from cognee.exceptions import GroupNotFoundError, UserNotFoundError
+from cognee.modules.users.exceptions import UserNotFoundError, GroupNotFoundError
 from cognee.modules.users import get_user_db
 from cognee.modules.users.models import User, Group, Permission
 

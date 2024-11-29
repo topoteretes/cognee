@@ -3,10 +3,11 @@ from uuid import UUID
 from enum import Enum
 from typing import Callable, Dict
 
-from cognee.exceptions import UserNotFoundError, InvalidValueError
+from cognee.exceptions import InvalidValueError
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.utils import send_telemetry
+from cognee.modules.users.exceptions import UserNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
