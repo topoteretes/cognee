@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from datasets import Dataset
@@ -29,7 +30,28 @@ from evals.eval_utils import ingest_repos
 from evals.eval_utils import download_github_repo
 from evals.eval_utils import delete_repo
 
-async def generate_patch_with_cognee(instance):
+
+def check_install_package(package_name):
+    """
+    Check if a pip package is installed and install it if not.
+    Returns True if package is/was installed successfully, False otherwise.
+    """
+    try:
+        __import__(package_name)
+        return True
+    except ImportError:
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", package_name]
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+
+
+async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
 
@@ -59,23 +81,22 @@ async def generate_patch_with_cognee(instance):
 
     await render_graph(None, include_labels = True, include_nodes = True)
 
-    problem_statement = instance['problem_statement']
+    problem_statement = instance["problem_statement"]
     instructions = read_query_prompt("patch_gen_instructions.txt")
 
     graph_str = 'HERE WE SHOULD PASS THE TRIPLETS FROM GRAPHRAG'
 
-    prompt = "\n".join([
-        instructions,
-        "<patch>",
-        PATCH_EXAMPLE,
-        "</patch>",
-        "This is the knowledge graph:",
-        graph_str
-    ])
+    prompt = "\n".join(
+        [
+            instructions,
+            "<patch>",
+            PATCH_EXAMPLE,
+            "</patch>",
+            "This is the knowledge graph:",
+            graph_str,
+        ]
+    )
 
-    return 0
-
-    ''' :TODO: We have to find out how do we do the generation
     llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
         text_input=problem_statement,
@@ -84,13 +105,11 @@ async def generate_patch_with_cognee(instance):
     )
 
     return answer_prediction
-    '''
 
-async def generate_patch_without_cognee(instance):
-    problem_statement = instance['problem_statement']
+async def generate_patch_without_cognee(instance, llm_client):
+    problem_statement = instance["problem_statement"]
     prompt = instance["text"]
 
-    llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
         text_input=problem_statement,
         system_prompt=prompt,
@@ -100,43 +119,56 @@ async def generate_patch_without_cognee(instance):
 
 
 async def get_preds(dataset, with_cognee=True):
+    llm_client = get_llm_client()
+
     if with_cognee:
         model_name = "with_cognee"
-        pred_func = generate_patch_with_cognee
+        futures = [
+            (instance["instance_id"], generate_patch_with_cognee(instance))
+            for instance in dataset
+        ]
     else:
         model_name = "without_cognee"
-        pred_func = generate_patch_without_cognee
+        futures = [
+            (instance["instance_id"], generate_patch_without_cognee(instance, llm_client))
+            for instance in dataset
+        ]
+    model_patches = await asyncio.gather(*[x[1] for x in futures])
 
+    preds = [
+        {
+            "instance_id": instance_id,
+            "model_patch": model_patch,
+            "model_name_or_path": model_name,
+        }
+        for (instance_id, _), model_patch in zip(futures, model_patches)
+    ]
 
-    for instance in dataset:
-        await pred_func(instance)
-
-    '''
-    preds = [{"instance_id": instance["instance_id"],
-              "model_patch": await pred_func(instance),
-              "model_name_or_path": model_name} for instance in dataset]
-    '''
-    return 0
+    return preds
 
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Run LLM predictions on SWE-bench dataset")
-    parser.add_argument('--cognee_off', action='store_true')
+        description="Run LLM predictions on SWE-bench dataset"
+    )
+    parser.add_argument("--cognee_off", action="store_true")
+    parser.add_argument("--max_workers", type=int, required=True)
     args = parser.parse_args()
 
+    for dependency in ["transformers", "sentencepiece", "swebench"]:
+        check_install_package(dependency)
+
     if args.cognee_off:
-        dataset_name = 'princeton-nlp/SWE-bench_Lite_bm25_13K'
-        dataset = load_swebench_dataset(dataset_name, split='test')
+        dataset_name = "princeton-nlp/SWE-bench_Lite_bm25_13K"
+        dataset = load_swebench_dataset(dataset_name, split="test")
         predictions_path = "preds_nocognee.json"
         if not Path(predictions_path).exists():
             preds = await get_preds(dataset, with_cognee=False)
             with open(predictions_path, "w") as file:
                 json.dump(preds, file)
     else:
-        dataset_name = 'princeton-nlp/SWE-bench_Lite'
-        swe_dataset = load_swebench_dataset(
-            dataset_name, split='test')[:1]
+        dataset_name = "princeton-nlp/SWE-bench_Lite"
+        swe_dataset = load_swebench_dataset(dataset_name, split="test")[:1]
         filepath = Path("SWE-bench_testsample")
         if filepath.exists():
             dataset = Dataset.load_from_disk(filepath)
@@ -147,12 +179,25 @@ async def main():
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
 
-    subprocess.run(["python", "-m", "swebench.harness.run_evaluation",
-                    "--dataset_name", dataset_name,
-                    "--split", "test",
-                    "--predictions_path",  predictions_path,
-                    "--max_workers", "1",
-                    "--run_id", "test_run"])
+
+    subprocess.run(
+        [
+            "python",
+            "-m",
+            "swebench.harness.run_evaluation",
+            "--dataset_name",
+            dataset_name,
+            "--split",
+            "test",
+            "--predictions_path",
+            predictions_path,
+            "--max_workers",
+            str(args.max_workers),
+            "--run_id",
+            "test_run",
+        ]
+    )
+
 
 if __name__ == "__main__":
     import asyncio
