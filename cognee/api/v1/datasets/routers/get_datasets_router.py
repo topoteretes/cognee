@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
 from cognee.api.DTO import OutDTO
-from cognee.exceptions import EntityNotFoundError
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunStatus

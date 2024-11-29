@@ -1,10 +1,11 @@
 from typing import List, Dict, Union
 
-from cognee.exceptions import EntityAlreadyExistsError, EntityNotFoundError, InvalidValueError
+from cognee.exceptions import InvalidValueError
+from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
-from cognee.infrastructure.databases.graph import get_graph_engine
+
 
 class CogneeGraph(CogneeAbstractGraph):
     """

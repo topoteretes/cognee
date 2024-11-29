@@ -7,7 +7,7 @@ from sqlalchemy import text, select, MetaData, Table
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from cognee.exceptions import EntityNotFoundError
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():

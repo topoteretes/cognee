@@ -6,7 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from cognee.exceptions import EntityNotFoundError, InvalidValueError
+from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
 
 from .serialize_data import serialize_data
