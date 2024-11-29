@@ -1,4 +1,4 @@
-name: test | multimedia notebook
+name: test | multimedia example
 
 on:
   workflow_dispatch:
@@ -7,15 +7,16 @@ on:
       - main
     types: [labeled, synchronize]
 
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  run_notebook_test:
-      uses: ./.github/workflows/reusable_notebook.yml
+  run_multimedia_example_test:
+      uses: ./.github/workflows/reusable_python_example.yml
       with:
-        notebook-location: notebooks/cognee_multimedia_demo.ipynb
+        example-location: ./examples/python/multimedia_example.py
       secrets:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
