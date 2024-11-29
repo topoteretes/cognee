@@ -9,8 +9,6 @@ from .exceptions import (
     CogneeApiError,
     ServiceError,
     EntityNotFoundError,
-    GroupNotFoundError,
-    UserNotFoundError,
     EntityAlreadyExistsError,
     InvalidOperationError,
     PermissionDeniedError,
