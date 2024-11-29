@@ -4,14 +4,15 @@ import re
 import warnings
 from typing import Any
 from uuid import UUID
+from typing import Any, BinaryIO, Union
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-
+from cognee.infrastructure.files.utils.get_file_metadata import FileMetadata
 from ..models.Metadata import Metadata
 
 
-async def write_metadata(data_item: Any, data_id: UUID) -> UUID:
-    metadata_dict = get_metadata_dict(data_item)
+async def write_metadata(data_item: Union[BinaryIO, str, Any], data_id: UUID, file_metadata: FileMetadata) -> UUID:
+    metadata_dict = get_metadata_dict(data_item, file_metadata)
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         metadata = Metadata(
@@ -34,14 +35,18 @@ def parse_type(type_: Any) -> str:
         raise Exception(f"type: {type_} could not be parsed")
 
 
-def get_metadata_dict(metadata: Any) -> dict[str, Any]:
-    if hasattr(metadata, "dict") and inspect.ismethod(getattr(metadata, "dict")):
-        return metadata.dict()
+def get_metadata_dict(data_item: Union[BinaryIO, str, Any], file_metadata: FileMetadata) -> dict[str, Any]:
+    if isinstance(data_item, str):
+        return(file_metadata)
+    elif isinstance(data_item, BinaryIO):
+        return(file_metadata)
+    elif hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
+        return {**file_metadata, **data_item.dict()}
     else:
         warnings.warn(
-            f"metadata of type {type(metadata)}: {str(metadata)[:20]}... does not have dict method. Defaulting to string method"
+            f"metadata of type {type(data_item)}: {str(data_item)[:20]}... does not have dict method. Defaulting to string method"
         )
         try:
-            return {"content": str(metadata)}
+            return {**dict(file_metadata), "content": str(data_item)}
         except Exception as e:
             raise Exception(f"Could not cast metadata to string: {e}")

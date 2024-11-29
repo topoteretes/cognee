@@ -1,7 +1,6 @@
 from typing import Any
 
 import dlt
-
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset
@@ -76,7 +75,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
 
                         dataset.data.append(data_point)
                     await session.commit()
-                    await write_metadata(data_item, data_point.id)
+                    await write_metadata(data_item, data_point.id, file_metadata)
 
 
                 yield {
