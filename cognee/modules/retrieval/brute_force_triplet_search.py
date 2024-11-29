@@ -1,12 +1,14 @@
 import asyncio
 import logging
 from typing import List
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
-from cognee.infrastructure.databases.vector import get_vector_engine
+
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
+
 
 def format_triplets(edges):
     print("\n\n\n")
@@ -48,16 +50,14 @@ def format_triplets(edges):
     return "".join(triplets)
 
 
-async def brute_force_triplet_search(query: str, user: User = None, top_k = 5) -> list:
+async def brute_force_triplet_search(query: str, user: User = None, top_k = 5, collections = None) -> list:
     if user is None:
         user = await get_default_user()
 
     if user is None:
         raise PermissionError("No user found in the system. Please create a user.")
 
-    retrieved_results = await brute_force_search(query, user, top_k)
-
-
+    retrieved_results = await brute_force_search(query, user, top_k, collections=collections)
     return retrieved_results
 
 
