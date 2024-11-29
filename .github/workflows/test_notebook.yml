@@ -14,17 +14,10 @@ concurrency:
 
 jobs:
   run_notebook_test:
-    name: test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: run notebook workflow
-        uses: ./.github/reusable_workflows/notebook.yml
-        with:
-          notebook-location: notebooks/cognee_demo.ipynb
-        secrets:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+      uses: ./.github/reusable_workflows/notebook.yml
+      with:
+        notebook-location: notebooks/cognee_demo.ipynb
+      secrets:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+        GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
