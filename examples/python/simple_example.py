@@ -9,6 +9,7 @@ from cognee.api.v1.search import SearchType
 
 
 async def main():
+    raise ValueError
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
     await cognee.prune.prune_data()
