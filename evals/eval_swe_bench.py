@@ -45,15 +45,7 @@ def check_install_package(package_name):
         except subprocess.CalledProcessError:
             return False
 
-
-<<<<<<< HEAD
-
 async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
-=======
-async def generate_patch_with_cognee(
-    instance, search_type=SearchType.CHUNKS
-):
->>>>>>> c4e3634 (Update eval_swe_bench)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
@@ -137,10 +129,7 @@ async def get_preds(dataset, with_cognee=True):
             for instance in dataset
         ]
     model_patches = await asyncio.gather(*[x[1] for x in futures])
-<<<<<<< HEAD
 
-=======
->>>>>>> c4e3634 (Update eval_swe_bench)
     preds = [
         {
             "instance_id": instance_id,
@@ -185,7 +174,6 @@ async def main():
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
 
-<<<<<<< HEAD
 
     subprocess.run(
         [
@@ -205,14 +193,6 @@ async def main():
         ]
     )
 
-=======
-    subprocess.run(["python", "-m", "swebench.harness.run_evaluation",
-                    "--dataset_name", dataset_name,
-                    "--split", "test",
-                    "--predictions_path",  predictions_path,
-                    "--max_workers", "1",
-                    "--run_id", "test_run"])
->>>>>>> c4e3634 (Update eval_swe_bench)
 
 if __name__ == "__main__":
     import asyncio
