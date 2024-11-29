@@ -4,17 +4,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-from datasets import Dataset
 from swebench.harness.utils import load_swebench_dataset
 from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 
 import cognee
-from cognee.api.v1.cognify.code_graph_pipeline import code_graph_pipeline
 from cognee.api.v1.search import SearchType
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from evals.eval_utils import download_instances
+from cognee.modules.pipelines import Task, run_tasks
+from cognee.modules.retrieval.brute_force_triplet_search import \
+    brute_force_triplet_search
+from cognee.shared.data_models import SummarizedContent
+from cognee.shared.utils import render_graph
+from cognee.tasks.repo_processor import (enrich_dependency_graph,
+                                         expand_dependency_graph,
+                                         get_repo_file_dependencies)
+from cognee.tasks.storage import add_data_points
+from cognee.tasks.summarization import summarize_code
+from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
 def check_install_package(package_name):
@@ -33,44 +40,17 @@ def check_install_package(package_name):
             return True
         except subprocess.CalledProcessError:
             return False
-from cognee.modules.pipelines import Task, run_tasks
-from cognee.modules.retrieval.brute_force_triplet_search import \
-    brute_force_triplet_search
-from cognee.shared.data_models import SummarizedContent
-from cognee.shared.utils import render_graph
-from cognee.tasks.repo_processor import (enrich_dependency_graph,
-                                         expand_dependency_graph,
-                                         get_repo_file_dependencies)
-from cognee.tasks.storage import add_data_points
-from cognee.tasks.summarization import summarize_code
-from evals.eval_utils import (delete_repo, download_github_repo,
-                              download_instances, ingest_repos)
 
-
-def node_to_string(node):
-    text = node.attributes["text"]
-    type = node.attributes["type"]
-    return f"Node(id: {node.id}, type: {type}, description: {text})"
-def retrieved_edges_to_string(retrieved_edges):
-    edge_strings = []
-    for edge in retrieved_edges:
-        relationship_type = edge.attributes["relationship_type"]
-        edge_str = f"{node_to_string(edge.node1)} {relationship_type} {node_to_string(edge.node2)}"
-        edge_strings.append(edge_str)
-    return "\n".join(edge_strings)  
 
 async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
 
-    #dataset_name = "SWE_test_data"
-
-    #await cognee.add('', dataset_name = dataset_name)
-
     # repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
-
-    repo_path = '../minimal_repo'
+    
+    repo_path = '/Users/borisarzentar/Projects/graphrag'
+    
     tasks = [
         Task(get_repo_file_dependencies),
         Task(add_data_points, task_config = { "batch_size": 50 }),
@@ -92,11 +72,12 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
     problem_statement = instance['problem_statement']
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
-    retrieved_edges = await brute_force_triplet_search(problem_statement, top_k = 3)
+    retrieved_edges = await brute_force_triplet_search(problem_statement, top_k = 3, collections = ["data_point_source_code", "data_point_text"])
     
     retrieved_edges_str = retrieved_edges_to_string(retrieved_edges)
 
     prompt = "\n".join([
+        problem_statement,
         "<patch>",
         PATCH_EXAMPLE,
         "</patch>",
@@ -175,13 +156,8 @@ async def main():
         dataset_name = 'princeton-nlp/SWE-bench_Lite'
         swe_dataset = load_swebench_dataset(
             dataset_name, split='test')[:1]
-        filepath = Path("SWE-bench_testsample")
-        if filepath.exists():
-            dataset = Dataset.load_from_disk(filepath)
-        else:
-            dataset = download_instances(swe_dataset, filepath)
         predictions_path = "preds.json"
-        preds = await get_preds(dataset, with_cognee=not args.cognee_off)
+        preds = await get_preds(swe_dataset, with_cognee=not args.cognee_off)
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
 
