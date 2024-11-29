@@ -45,7 +45,7 @@ def check_install_package(package_name):
         except subprocess.CalledProcessError:
             return False
 
-async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
+async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
@@ -77,13 +77,13 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
     await render_graph(None, include_labels = True, include_nodes = True)
 
     problem_statement = instance['problem_statement']
-    instructions = read_query_prompt("patch_gen_instructions.txt")
+    instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
     graph_str = 'HERE WE SHOULD PASS THE TRIPLETS FROM GRAPHRAG'
 
     prompt = "\n".join(
         [
-            instructions,
+            problem_statement,
             "<patch>",
             PATCH_EXAMPLE,
             "</patch>",
@@ -93,8 +93,8 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
     )
 
     answer_prediction = await llm_client.acreate_structured_output(
-        text_input=problem_statement,
-        system_prompt=prompt,
+        text_input=prompt,
+        system_prompt=instructions,
         response_model=str,
     )
 
@@ -102,12 +102,11 @@ async def generate_patch_with_cognee(instance, search_type=SearchType.CHUNKS):
 
 
 async def generate_patch_without_cognee(instance, llm_client):
-    problem_statement = instance['problem_statement']
-    prompt = instance["text"]
+    instructions = read_query_prompt("patch_gen_instructions.txt")
 
     answer_prediction = await llm_client.acreate_structured_output(
-        text_input=problem_statement,
-        system_prompt=prompt,
+        text_input=instance["text"],
+        system_prompt=instructions,
         response_model=str,
     )
     return answer_prediction
@@ -118,16 +117,15 @@ async def get_preds(dataset, with_cognee=True):
 
     if with_cognee:
         model_name = "with_cognee"
-        futures = [
-            (instance["instance_id"], generate_patch_with_cognee(instance))
-            for instance in dataset
-        ]
+        pred_func = generate_patch_with_cognee
     else:
         model_name = "without_cognee"
-        futures = [
-            (instance["instance_id"], generate_patch_without_cognee(instance, llm_client))
-            for instance in dataset
-        ]
+        pred_func = generate_patch_without_cognee
+
+    futures = [
+        (instance["instance_id"], pred_func(instance, llm_client))
+        for instance in dataset
+    ]
     model_patches = await asyncio.gather(*[x[1] for x in futures])
 
     preds = [
