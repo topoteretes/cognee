@@ -16,7 +16,7 @@ The commotion has attracted an audience: a murder of crows has gathered in the l
 def test_ImageDocument():
 
     document = ImageDocument(
-        id=uuid.uuid4(), name="image-dummy-test", raw_data_location=""
+        id=uuid.uuid4(), name="image-dummy-test", raw_data_location="", metadata_id=uuid.uuid4()
     )
     with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
 
