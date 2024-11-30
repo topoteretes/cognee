@@ -61,7 +61,7 @@ import cognee
 cognee.config.set_llm_api_key("YOUR_OPENAI_API_KEY")
 ```
 You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
-To use different LLM providers, for more info check out our <a href="https://topoteretes.github.io/cognee">documentation</a>
+To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
 
 If you are using Network, create an account on Graphistry to visualize results:
 ```
@@ -282,7 +282,7 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 
 ### Install Server
 
-Please see the [cognee Quick Start Guide](https://topoteretes.github.io/cognee/quickstart/) for important configuration information.
+Please see the [cognee Quick Start Guide](https://docs.cognee.ai/quickstart/) for important configuration information.
 
 ```bash
 docker compose up
@@ -291,7 +291,7 @@ docker compose up
 
 ### Install SDK
 
-Please see the cognee [Development Guide](https://topoteretes.github.io/cognee/quickstart/) for important beta information and usage instructions.
+Please see the cognee [Development Guide](https://docs.cognee.ai/quickstart/) for important beta information and usage instructions.
 
 ```bash
 pip install cognee
