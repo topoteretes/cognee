@@ -6,7 +6,6 @@ import instructor
 from tenacity import retry, stop_after_attempt
 import openai
 from cognee.infrastructure.llm.llm_interface import LLMInterface
-from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import MonitoringTool
 from cognee.base_config import get_base_config
 from cognee.infrastructure.llm.config import get_llm_config
@@ -123,13 +122,3 @@ class GenericAPIAdapter(LLMInterface):
             response_model = response_model,
         )
 
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """Format and display the prompt for a user query."""
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise ValueError("No system prompt path provided.")
-        system_prompt = read_query_prompt(system_prompt)
-
-        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n""" if system_prompt else None
-        return formatted_prompt

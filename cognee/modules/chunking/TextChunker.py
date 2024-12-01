@@ -35,6 +35,10 @@ class TextChunker():
                             is_part_of = self.document,
                             chunk_index = self.chunk_index,
                             cut_type = chunk_data["cut_type"],
+                            _metadata = {
+                                "index_fields": ["text"],
+                                "metadata_id": self.document.metadata_id
+                            }
                         )
                         paragraph_chunks = []
                         self.chunk_size = 0
@@ -48,6 +52,10 @@ class TextChunker():
                                 is_part_of = self.document,
                                 chunk_index = self.chunk_index,
                                 cut_type = paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
+                                _metadata = {
+                                    "index_fields": ["text"],
+                                    "metadata_id": self.document.metadata_id
+                                }
                             )
                         except Exception as e:
                             print(e)
@@ -65,6 +73,10 @@ class TextChunker():
                     is_part_of = self.document,
                     chunk_index = self.chunk_index,
                     cut_type = paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
+                    _metadata = {
+                        "index_fields": ["text"],
+                        "metadata_id": self.document.metadata_id
+                    }
                 )
             except Exception as e:
                 print(e)

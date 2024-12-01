@@ -1,3 +1,4 @@
+import asyncio
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils import get_graph_from_model
@@ -8,11 +9,13 @@ async def add_data_points(data_points: list[DataPoint]):
     nodes = []
     edges = []
 
-    for data_point in data_points:
-        property_nodes, property_edges = get_graph_from_model(data_point)
+    results = await asyncio.gather(*[
+        get_graph_from_model(data_point) for data_point in data_points
+    ])
 
-        nodes.extend(property_nodes)
-        edges.extend(property_edges)
+    for result_nodes, result_edges in results:
+        nodes.extend(result_nodes)
+        edges.extend(result_edges)
 
     graph_engine = await get_graph_engine()
 

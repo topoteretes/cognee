@@ -4,6 +4,7 @@ from .guess_file_type import guess_file_type
 
 class FileMetadata(TypedDict):
     name: str
+    file_path: str
     mime_type: str
     extension: str
 
