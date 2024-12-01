@@ -77,11 +77,11 @@ def test_get_edges_success(setup_graph):
     graph.add_node(node2)
     edge = Edge(node1, node2)
     graph.add_edge(edge)
-    assert edge in graph.get_edges("node1")
+    assert edge in graph.get_edges_from_node("node1")
 
 
 def test_get_edges_nonexistent_node(setup_graph):
     """Test retrieving edges for a nonexistent node raises an exception."""
     graph = setup_graph
     with pytest.raises(ValueError, match="Node with id nonexistent does not exist."):
-        graph.get_edges("nonexistent")
+        graph.get_edges_from_node("nonexistent")
