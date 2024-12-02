@@ -63,37 +63,36 @@ async def answer_with_cognee(instance):
 
 async def eval_answers(instances, answers, eval_metric):
     test_cases = []
-    for i in range(len(answers)):
-        instance = instances[i]
-        answer = answers[i]
+    for instance, answer in zip(instances, answers):
         test_case = LLMTestCase(
             input=instance["question"],
             actual_output=answer,
             expected_output=instance["answer"]
         )
         test_cases.append(test_case)
-    evalset = EvaluationDataset(test_cases)
-    evalresults = evalset.evaluate([eval_metric])
-    return evalresults
+    eval_set = EvaluationDataset(test_cases)
+    eval_results = eval_set.evaluate([eval_metric])
+    return eval_results
 
 async def eval_on_hotpotQA(answer_provider, num_samples, eval_metric):
     base_config = get_base_config()
     data_root_dir = base_config.data_root_directory
+    if not Path(data_root_dir).exists():
+        data_root_dir.mkdir()
     filepath = data_root_dir / Path("hotpot_dev_fullwiki_v1.json")
     if not filepath.exists():
         url = 'http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json'
         wget.download(url, out=data_root_dir)
     with open(filepath, "r") as file:
         dataset = json.load(file)
-    if not num_samples:
-        num_samples = len(dataset)
-    instances = dataset[:num_samples]
+    
+    instances = dataset if not num_samples else dataset[:num_samples]
     answers = []
     for instance in tqdm(instances, desc="Getting answers"):
         answer = await answer_provider(instance)
         answers.append(answer)
-    evalresults = await eval_answers(instances, answers, eval_metric)
-    avg_score = statistics.mean([result.metrics_data[0].score for result in evalresults.test_results])
+    eval_results = await eval_answers(instances, answers, eval_metric)
+    avg_score = statistics.mean([result.metrics_data[0].score for result in eval_results.test_results])
     return avg_score
 
 if __name__ == "__main__":
