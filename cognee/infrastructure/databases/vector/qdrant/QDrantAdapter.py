@@ -143,6 +143,41 @@ class QDrantAdapter(VectorDBInterface):
         await client.close()
         return results
 
+    async def get_distance_from_collection_elements(
+            self,
+            collection_name: str,
+            query_text: str = None,
+            query_vector: List[float] = None,
+            with_vector: bool = False
+    ) -> List[ScoredResult]:
+
+        if query_text is None and query_vector is None:
+            raise ValueError("One of query_text or query_vector must be provided!")
+
+        client = self.get_qdrant_client()
+
+        results = await client.search(
+            collection_name = collection_name,
+            query_vector = models.NamedVector(
+                name = "text",
+                vector = query_vector if query_vector is not None else (await self.embed_data([query_text]))[0],
+            ),
+            with_vectors = with_vector
+        )
+
+        await client.close()
+
+        return [
+            ScoredResult(
+                id = UUID(result.id),
+                payload = {
+                    **result.payload,
+                    "id": UUID(result.id),
+                },
+                score = 1 - result.score,
+            ) for result in results
+        ]
+
     async def search(
         self,
         collection_name: str,

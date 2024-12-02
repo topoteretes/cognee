@@ -2,7 +2,7 @@
 import logging
 import asyncio
 from textwrap import dedent
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Union
 from contextlib import asynccontextmanager
 from uuid import UUID
 from neo4j import AsyncSession
@@ -430,5 +430,51 @@ class Neo4jAdapter(GraphDBInterface):
             record["type"],
             record["properties"],
         ) for record in result]
+
+        return (nodes, edges)
+
+    async def get_filtered_graph_data(self, attribute_filters):
+        """
+        Fetches nodes and relationships filtered by specified attribute values.
+
+        Args:
+            attribute_filters (list of dict): A list of dictionaries where keys are attributes and values are lists of values to filter on.
+                                              Example: [{"community": ["1", "2"]}]
+
+        Returns:
+            tuple: A tuple containing two lists: nodes and edges.
+        """
+        where_clauses = []
+        for attribute, values in attribute_filters[0].items():
+            values_str = ", ".join(f"'{value}'" if isinstance(value, str) else str(value) for value in values)
+            where_clauses.append(f"n.{attribute} IN [{values_str}]")
+
+        where_clause = " AND ".join(where_clauses)
+
+        query_nodes = f"""
+        MATCH (n)
+        WHERE {where_clause}
+        RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties
+        """
+        result_nodes = await self.query(query_nodes)
+
+        nodes = [(
+            record["id"],
+            record["properties"],
+        ) for record in result_nodes]
+
+        query_edges = f"""
+        MATCH (n)-[r]->(m)
+        WHERE {where_clause} AND {where_clause.replace('n.', 'm.')}
+        RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
+        """
+        result_edges = await self.query(query_edges)
+
+        edges = [(
+            record["source"],
+            record["target"],
+            record["type"],
+            record["properties"],
+        ) for record in result_edges]
 
         return (nodes, edges)
