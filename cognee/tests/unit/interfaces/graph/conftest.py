@@ -1,14 +1,9 @@
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
 import pytest
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils import (
-    get_graph_from_model,
-    get_model_instance_from_graph,
-)
 
 
 class CarTypeName(Enum):
@@ -47,8 +42,8 @@ class Person(DataPoint):
     _metadata: dict = dict(index_fields=["name"])
 
 
-@pytest.fixture(scope="session")
-def graph_outputs():
+@pytest.fixture(scope="function")
+def boris():
     boris = Person(
         id="boris",
         name="Boris",
@@ -70,11 +65,4 @@ def graph_outputs():
             "expires_on": "2025-11-06",
         },
     )
-    nodes, edges = get_graph_from_model(boris)
-
-    car, person = nodes[0], nodes[1]
-    edge = edges[0]
-
-    parsed_person = get_model_instance_from_graph(nodes, edges, "boris")
-
-    return (car, person, edge, parsed_person)
+    return boris
