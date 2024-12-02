@@ -32,6 +32,24 @@ pip install cognee
 pip install 'cognee[postgres]'
 ```
 
+### With pip with Weaviate support
+
+```bash
+pip install 'cognee[weaviate]'
+```
+
+### With pip with Qdrant support
+
+```bash
+pip install 'cognee[qdrant]'
+```
+
+### With pip with Neo4j support
+
+```bash
+pip install 'cognee[neo4j]'
+```
+
 ### With poetry
 
 ```bash
@@ -42,6 +60,24 @@ poetry add cognee
 
 ```bash
 poetry add cognee -E postgres
+```
+
+### With poetry with Weaviate support
+
+```bash
+poetry add cognee -E weaviate
+```
+
+### With poetry with Qdrant support
+
+```bash
+poetry add cognee -E qdrant
+```
+
+### With poetry with Neo4j support
+
+```bash
+poetry add cognee -E neo4j
 ```
 
 
