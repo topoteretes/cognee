@@ -78,7 +78,7 @@ async def eval_on_hotpotQA(answer_provider, num_samples, eval_metric):
     base_config = get_base_config()
     data_root_dir = base_config.data_root_directory
     if not Path(data_root_dir).exists():
-        data_root_dir.mkdir()
+        Path(data_root_dir).mkdir()
     filepath = data_root_dir / Path("hotpot_dev_fullwiki_v1.json")
     if not filepath.exists():
         url = 'http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json'
