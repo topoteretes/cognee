@@ -30,7 +30,7 @@ typing_extensions = "4.12.2"
 nest_asyncio = "1.6.0"
 numpy = "1.26.4"
 datasets = "3.1.0"
-falkordb = "1.0.9"
+falkordb = {version = "1.0.9", optional = true}
 boto3 = "^1.26.125"
 botocore="^1.35.54"
 gunicorn = "^20.1.0"
@@ -56,7 +56,7 @@ tiktoken = "0.7.0"
 langchain_text_splitters = "0.3.2" 
 langsmith = "0.1.139"
 langdetect = "1.0.9"
-posthog = "^3.5.0"
+posthog = {version = "^3.5.0", optional = true}
 lancedb = "0.15.0"
 litellm = "1.49.1"
 groq = "0.8.0"
@@ -80,6 +80,8 @@ neo4j = ["neo4j"]
 postgres = ["psycopg2", "pgvector", "asyncpg"]
 notebook = ["ipykernel", "overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
 llama-index = ["llama-index-core"]
+posthog = ["posthog"]
+falkordb = ["falkordb"]
 
 
 [tool.poetry.group.dev.dependencies]

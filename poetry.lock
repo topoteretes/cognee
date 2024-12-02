@@ -1485,7 +1485,7 @@ tests = ["asttokens (>=2.1.0)", "coverage", "coverage-enable-subprocess", "ipyth
 name = "falkordb"
 version = "1.0.9"
 description = "Python client for interacting with FalkorDB database"
-optional = false
+optional = true
 python-versions = "<4.0,>=3.8"
 files = [
     {file = "falkordb-1.0.9.tar.gz", hash = "sha256:177008e63c7e4d9ebbdfeb8cad24b0e49175bb0f6e96cac9b4ffb641c0eff0f1"},
@@ -3783,7 +3783,7 @@ mkdocstrings = ">=0.26"
 name = "monotonic"
 version = "1.6"
 description = "An implementation of time.monotonic() for Python 2 & < 3.3"
-optional = false
+optional = true
 python-versions = "*"
 files = [
     {file = "monotonic-1.6-py2.py3-none-any.whl", hash = "sha256:68687e19a14f11f26d140dd5c86f3dba4bf5df58003000ed467e0e2a69bca96c"},
@@ -4780,7 +4780,7 @@ tests = ["pytest (>=5.4.1)", "pytest-cov (>=2.8.1)", "pytest-mypy (>=0.8.0)", "p
 name = "posthog"
 version = "3.7.0"
 description = "Integrate PostHog into any python application."
-optional = false
+optional = true
 python-versions = "*"
 files = [
     {file = "posthog-3.7.0-py2.py3-none-any.whl", hash = "sha256:3555161c3a9557b5666f96d8e1f17f410ea0f07db56e399e336a1656d4e5c722"},
@@ -5763,7 +5763,7 @@ fastembed-gpu = ["fastembed-gpu (==0.3.6)"]
 name = "redis"
 version = "5.2.0"
 description = "Python client for Redis database and key-value store"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "redis-5.2.0-py3-none-any.whl", hash = "sha256:ae174f2bb3b1bf2b09d54bf3e51fbc1469cf6c10aa03e21141f51969801a7897"},
@@ -7630,15 +7630,17 @@ type = ["pytest-mypy"]
 
 [extras]
 cli = []
+falkordb = ["falkordb"]
 filesystem = ["botocore"]
 llama-index = ["llama-index-core"]
 neo4j = ["neo4j"]
 notebook = []
 postgres = ["asyncpg", "pgvector", "psycopg2"]
+posthog = ["posthog"]
 qdrant = ["qdrant-client"]
 weaviate = ["weaviate-client"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-content-hash = "bf097b51f6147b82c63f67c34885981c2166b50755b0f3e690ab1c1e55fa56ee"
+content-hash = "12148f1911ef4d74f01e6cfd7ee071ea8a9dfe435c55ab6124ac811669450e67"
