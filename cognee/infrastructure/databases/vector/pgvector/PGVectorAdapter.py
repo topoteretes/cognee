@@ -6,6 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
+from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
 
 from .serialize_data import serialize_data
@@ -156,7 +158,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if collection_name in Base.metadata.tables:
                 return Base.metadata.tables[collection_name]
             else:
-                raise ValueError(f"Table '{collection_name}' not found.")
+                raise EntityNotFoundError(message=f"Table '{collection_name}' not found.")
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
@@ -230,7 +232,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vector: bool = False,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]

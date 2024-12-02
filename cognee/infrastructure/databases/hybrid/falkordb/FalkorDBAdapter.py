@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 from falkordb import FalkorDB
 
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.vector.embeddings import EmbeddingEngine
@@ -200,7 +201,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         with_vector: bool = False,
     ):
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         if query_text and not query_vector:
             query_vector = (await self.embed_data([query_text]))[0]
