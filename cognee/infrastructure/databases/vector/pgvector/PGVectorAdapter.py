@@ -1,6 +1,5 @@
 import asyncio
 from uuid import UUID
-from pgvector.sqlalchemy import Vector
 from typing import List, Optional, get_type_hints
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete
@@ -68,6 +67,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
 
         if not await self.has_collection(collection_name):
+
+            from pgvector.sqlalchemy import Vector
             class PGVectorDataPoint(Base):
                 __tablename__ = collection_name
                 __table_args__ = {"extend_existing": True}
@@ -105,6 +106,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         vector_size = self.embedding_engine.get_vector_size()
 
+        from pgvector.sqlalchemy import Vector
         class PGVectorDataPoint(Base):
             __tablename__ = collection_name
             __table_args__ = {"extend_existing": True}

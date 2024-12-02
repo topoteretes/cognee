@@ -47,7 +47,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install -E qdrant --no-interaction
 
       - name: Run default Qdrant
         env:
