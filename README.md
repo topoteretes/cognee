@@ -20,6 +20,9 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 
 ## 📦 Installation
 
+You can install Cognee using either **pip** or **poetry**. 
+Support for various databases and vector stores is available through extras.
+
 ### With pip
 
 ```bash
