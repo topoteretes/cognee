@@ -406,7 +406,7 @@ files = [
 name = "asyncpg"
 version = "0.30.0"
 description = "An asyncio PostgreSQL driver"
-optional = false
+optional = true
 python-versions = ">=3.8.0"
 files = [
     {file = "asyncpg-0.30.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:bfb4dd5ae0699bad2b233672c8fc5ccbd9ad24b89afded02341786887e37927e"},
@@ -491,7 +491,7 @@ tests-mypy = ["mypy (>=1.11.1)", "pytest-mypy-plugins"]
 name = "authlib"
 version = "1.3.2"
 description = "The ultimate Python library in building OAuth and OpenID Connect servers and clients."
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "Authlib-1.3.2-py2.py3-none-any.whl", hash = "sha256:ede026a95e9f5cdc2d4364a52103f5405e75aa156357e831ef2bfd0bc5094dfc"},
@@ -2041,7 +2041,7 @@ typing-extensions = ">=4.7,<5"
 name = "grpcio"
 version = "1.67.1"
 description = "HTTP/2-based RPC framework"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "grpcio-1.67.1-cp310-cp310-linux_armv7l.whl", hash = "sha256:8b0341d66a57f8a3119b77ab32207072be60c9bf79760fa609c5609f2deb1f3f"},
@@ -2108,7 +2108,7 @@ protobuf = ["grpcio-tools (>=1.67.1)"]
 name = "grpcio-health-checking"
 version = "1.67.1"
 description = "Standard Health Checking Service for gRPC"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "grpcio_health_checking-1.67.1-py3-none-any.whl", hash = "sha256:93753da5062152660aef2286c9b261e07dd87124a65e4dc9fbd47d1ce966b39d"},
@@ -2123,7 +2123,7 @@ protobuf = ">=5.26.1,<6.0dev"
 name = "grpcio-tools"
 version = "1.67.1"
 description = "Protobuf code generator for gRPC"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "grpcio_tools-1.67.1-cp310-cp310-linux_armv7l.whl", hash = "sha256:c701aaa51fde1f2644bd94941aa94c337adb86f25cd03cf05e37387aaea25800"},
@@ -2223,7 +2223,7 @@ files = [
 name = "h2"
 version = "4.1.0"
 description = "HTTP/2 State-Machine based protocol implementation"
-optional = false
+optional = true
 python-versions = ">=3.6.1"
 files = [
     {file = "h2-4.1.0-py3-none-any.whl", hash = "sha256:03a46bcf682256c95b5fd9e9a99c1323584c3eec6440d379b9903d709476bc6d"},
@@ -2254,7 +2254,7 @@ test = ["eth-utils (>=2.0.0)", "hypothesis (>=3.44.24,<=6.31.6)", "pytest (>=7.0
 name = "hpack"
 version = "4.0.0"
 description = "Pure-Python HPACK header compression"
-optional = false
+optional = true
 python-versions = ">=3.6.1"
 files = [
     {file = "hpack-4.0.0-py3-none-any.whl", hash = "sha256:84a076fad3dc9a9f8063ccb8041ef100867b1878b25ef0ee63847a5d53818a6c"},
@@ -2369,7 +2369,7 @@ tests = ["freezegun", "pytest", "pytest-cov"]
 name = "hyperframe"
 version = "6.0.1"
 description = "HTTP/2 framing layer for Python"
-optional = false
+optional = true
 python-versions = ">=3.6.1"
 files = [
     {file = "hyperframe-6.0.1-py3-none-any.whl", hash = "sha256:0ec6bafd80d8ad2195c4f03aacba3a8265e57bc4cff261e802bf39970ed02a15"},
@@ -4067,7 +4067,7 @@ test = ["pep440", "pre-commit", "pytest", "testpath"]
 name = "neo4j"
 version = "5.26.0"
 description = "Neo4j Bolt driver for Python"
-optional = false
+optional = true
 python-versions = ">=3.7"
 files = [
     {file = "neo4j-5.26.0-py3-none-any.whl", hash = "sha256:511a6a9468ca89b521bf686f885a2070acc462b1d09821d43710bd477acdf11e"},
@@ -4613,7 +4613,7 @@ ptyprocess = ">=0.5"
 name = "pgvector"
 version = "0.3.6"
 description = "pgvector support for Python"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "pgvector-0.3.6-py3-none-any.whl", hash = "sha256:f6c269b3c110ccb7496bac87202148ed18f34b390a0189c783e351062400a75a"},
@@ -4761,7 +4761,7 @@ files = [
 name = "portalocker"
 version = "2.10.1"
 description = "Wraps the portalocker recipe for easy usage"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "portalocker-2.10.1-py3-none-any.whl", hash = "sha256:53a5984ebc86a025552264b459b46a2086e269b21823cb572f8f28ee759e45bf"},
@@ -4938,7 +4938,7 @@ files = [
 name = "protobuf"
 version = "5.28.3"
 description = ""
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "protobuf-5.28.3-cp310-abi3-win32.whl", hash = "sha256:0c4eec6f987338617072592b97943fdbe30d019c56126493111cf24344c1cc24"},
@@ -5739,7 +5739,7 @@ cffi = {version = "*", markers = "implementation_name == \"pypy\""}
 name = "qdrant-client"
 version = "1.12.1"
 description = "Client library for the Qdrant vector search engine"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "qdrant_client-1.12.1-py3-none-any.whl", hash = "sha256:b2d17ce18e9e767471368380dd3bbc4a0e3a0e2061fedc9af3542084b48451e0"},
@@ -7144,7 +7144,7 @@ standard = ["colorama (>=0.4)", "httptools (>=0.5.0)", "python-dotenv (>=0.13)",
 name = "validators"
 version = "0.33.0"
 description = "Python Data Validation for Humans™"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "validators-0.33.0-py3-none-any.whl", hash = "sha256:134b586a98894f8139865953899fc2daeb3d0c35569552c5518f089ae43ed075"},
@@ -7211,7 +7211,7 @@ files = [
 name = "weaviate-client"
 version = "4.6.7"
 description = "A python native Weaviate client"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "weaviate_client-4.6.7-py3-none-any.whl", hash = "sha256:8793de35264cab33a84fe8cb8c422a257fe4d8334657aaddd8ead853da3fb34a"},
@@ -7641,4 +7641,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-content-hash = "474ae44ef721bf9b2d34d1cd139cddf42542ef9167895960784b6e88214dd1e6"
+content-hash = "bf097b51f6147b82c63f67c34885981c2166b50755b0f3e690ab1c1e55fa56ee"
