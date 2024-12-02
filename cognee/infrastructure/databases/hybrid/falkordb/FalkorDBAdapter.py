@@ -67,8 +67,9 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         node_properties = await self.stringify_properties({
             **data_point.model_dump(),
             **({
-                property_names[index]: (vectorized_values[index] if index in vectorized_values else None) \
-                    for index in range(len(property_names)) \
+                property_names[index]: (vectorized_values[index] \
+                    if index < len(vectorized_values) else getattr(data_point, property_name, None)) \
+                        for index, property_name in enumerate(property_names)
             }),
         })
 
@@ -111,8 +112,8 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                 property_value = getattr(data_point, property_name, None)
 
                 if property_value is not None:
+                    vector_map[key][property_name] = len(embeddable_values)
                     embeddable_values.append(property_value)
-                    vector_map[key][property_name] = len(embeddable_values) - 1
                 else:
                     vector_map[key][property_name] = None
 
@@ -123,7 +124,9 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                 data_point,
                 [
                     vectorized_values[vector_map[str(data_point.id)][property_name]] \
-                        for property_name in DataPoint.get_embeddable_property_names(data_point)
+                        if vector_map[str(data_point.id)][property_name] is not None \
+                        else None \
+                    for property_name in DataPoint.get_embeddable_property_names(data_point)
                 ],
             ) for data_point in data_points
         ]

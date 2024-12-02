@@ -43,7 +43,6 @@ def check_install_package(package_name):
 
 
 async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
-
     await cognee.prune.prune_data()
     await cognee.prune.prune_system()
 
@@ -57,11 +56,11 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
         Task(enrich_dependency_graph, task_config = { "batch_size": 50 }),
         Task(expand_dependency_graph, task_config = { "batch_size": 50 }),
         Task(add_data_points, task_config = { "batch_size": 50 }),
-        Task(summarize_code, summarization_model = SummarizedContent),
+        # Task(summarize_code, summarization_model = SummarizedContent),
     ]
 
     pipeline = run_tasks(tasks, repo_path, "cognify_code_pipeline")
-        
+
     async for result in pipeline:
         print(result)
 

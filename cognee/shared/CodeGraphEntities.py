@@ -2,10 +2,12 @@ from typing import List, Optional
 from cognee.infrastructure.engine import DataPoint
 
 class Repository(DataPoint):
+    __tablename__ = "Repository"
     path: str
     type: Optional[str] = "Repository"
 
 class CodeFile(DataPoint):
+    __tablename__ = "CodeFile"
     extracted_id: str  # actually file path
     type: Optional[str] = "CodeFile"
     source_code: Optional[str] = None
@@ -19,6 +21,7 @@ class CodeFile(DataPoint):
     }
 
 class CodePart(DataPoint):
+    __tablename__ = "CodePart"
     # part_of: Optional[CodeFile]
     source_code: str
     type: Optional[str] = "CodePart"

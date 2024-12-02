@@ -8,16 +8,7 @@ async def index_data_points(data_points: list[DataPoint]):
 
     vector_engine = get_vector_engine()
 
-    flat_data_points: list[DataPoint] = []
-
-    results = await asyncio.gather(*[
-        get_data_points_from_model(data_point) for data_point in data_points
-    ])
-
-    for result in results:
-        flat_data_points.extend(result)
-
-    for data_point in flat_data_points:
+    for data_point in data_points:
         data_point_type = type(data_point)
 
         for field_name in data_point._metadata["index_fields"]:

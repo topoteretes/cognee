@@ -11,7 +11,7 @@ from cognee.tests.unit.interfaces.graph.util import (
 
 
 @pytest.mark.parametrize("recursive_depth", [1, 2, 3])
-def test_society_nodes_and_edges(recursive_depth):
+async def test_society_nodes_and_edges(recursive_depth):
     import sys
 
     if sys.version_info[0] == 3 and sys.version_info[1] >= 11:
@@ -22,7 +22,7 @@ def test_society_nodes_and_edges(recursive_depth):
         n_organizations, n_persons = count_society(society)
         society_counts_total = n_organizations + n_persons
 
-        nodes, edges = get_graph_from_model(society)
+        nodes, edges = await get_graph_from_model(society)
 
         assert (
             len(nodes) == society_counts_total
