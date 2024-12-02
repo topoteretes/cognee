@@ -17,7 +17,7 @@ from uuid import uuid4
 import pathlib
 
 # Analytics Proxy Url, currently hosted by Vercel
-vercel_url = "https://proxyanalytics.vercel.app"
+proxy_url = "https://test.prometh.ai"
 
 def get_anonymous_id():
     """Creates or reads a anonymous user id"""
@@ -57,7 +57,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         },
     }
 
-    response = requests.post(vercel_url, json=payload)
+    response = requests.post(proxy_url, json=payload)
 
     if response.status_code != 200:
         print(f"Error sending telemetry through proxy: {response.status_code}")
