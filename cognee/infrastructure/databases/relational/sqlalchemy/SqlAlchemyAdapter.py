@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from sqlalchemy import text, select, MetaData, Table
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
@@ -171,6 +170,27 @@ class SQLAlchemyAdapter():
                 results = await connection.execute(query)
             return {result["data_id"]: result["status"] for result in results}
 
+    async def get_all_data_from_table(self, table_name: str, schema: str = "public"):
+        async with self.get_async_session() as session:
+            # Validate inputs to prevent SQL injection
+            if not table_name.isidentifier():
+                raise ValueError("Invalid table name")
+            if schema and not schema.isidentifier():
+                raise ValueError("Invalid schema name")
+
+            if self.engine.dialect.name == "sqlite":
+                table = await self.get_table(table_name)
+            else:
+                table = await self.get_table(table_name, schema)
+
+            # Query all data from the table
+            query = select(table)
+            result = await session.execute(query)
+
+            # Fetch all rows as a list of dictionaries
+            rows = result.mappings().all()
+            return rows
+
     async def execute_query(self, query):
         async with self.engine.begin() as connection:
             result = await connection.execute(text(query))
@@ -205,7 +225,6 @@ class SQLAlchemyAdapter():
                 from cognee.infrastructure.files.storage import LocalStorage
 
                 LocalStorage.remove(self.db_path)
-                self.db_path = None
             else:
                 async with self.engine.begin() as connection:
                     schema_list = await self.get_schema_list()
