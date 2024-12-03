@@ -53,6 +53,12 @@ pip install 'cognee[qdrant]'
 pip install 'cognee[neo4j]'
 ```
 
+### With pip with Milvus support
+
+```bash
+pip install 'cognee[milvus]'
+```
+
 ### With poetry
 
 ```bash
@@ -81,6 +87,12 @@ poetry add cognee -E qdrant
 
 ```bash
 poetry add cognee -E neo4j
+```
+
+### With poetry with Milvus support
+
+```bash
+poetry add cognee -E milvus
 ```
 
 
@@ -356,12 +368,13 @@ pip install cognee
   }
 </style>
 
-| Name             | Type               | Current state     | Known Issues                          |
-|------------------|--------------------|-------------------|---------------------------------------|
-| Qdrant           | Vector             | Stable &#x2705;   |                                       |
-| Weaviate         | Vector             | Stable &#x2705;   |                                       |
-| LanceDB          | Vector             | Stable &#x2705;   |                                       |
-| Neo4j            | Graph              | Stable &#x2705;   |                                       |
-| NetworkX         | Graph              | Stable &#x2705;   |                                       |
-| FalkorDB         | Vector/Graph       | Unstable &#x274C; |                                       |
-| PGVector         | Vector             | Unstable &#x274C; | Postgres DB returns the Timeout error |
+| Name     | Type               | Current state     | Known Issues |
+|----------|--------------------|-------------------|--------------|
+| Qdrant   | Vector             | Stable &#x2705;   |              |
+| Weaviate | Vector             | Stable &#x2705;   |              |
+| LanceDB  | Vector             | Stable &#x2705;   |              |
+| Neo4j    | Graph              | Stable &#x2705;   |              |
+| NetworkX | Graph              | Stable &#x2705;   |              |
+| FalkorDB | Vector/Graph       | Unstable &#x274C; |              |
+| PGVector | Vector             | Stable &#x2705;   |              |
+| Milvus   | Vector             | Stable &#x2705;   |              |
