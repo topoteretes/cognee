@@ -12,7 +12,6 @@ __pycache__/
 *$py.class
 
 full_run.ipynb
-evals/
 
 # C extensions
 *.so
