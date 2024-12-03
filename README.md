@@ -53,6 +53,12 @@ pip install 'cognee[qdrant]'
 pip install 'cognee[neo4j]'
 ```
 
+### With pip with Milvus support
+
+```bash
+pip install 'cognee[milvus]'
+```
+
 ### With poetry
 
 ```bash
@@ -81,6 +87,12 @@ poetry add cognee -E qdrant
 
 ```bash
 poetry add cognee -E neo4j
+```
+
+### With poetry with Milvus support
+
+```bash
+poetry add cognee -E milvus
 ```
 
 
