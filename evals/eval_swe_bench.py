@@ -7,20 +7,19 @@ from pathlib import Path
 from swebench.harness.utils import load_swebench_dataset
 from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 
-import cognee
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.pipelines import Task, run_tasks
 from cognee.modules.retrieval.brute_force_triplet_search import \
     brute_force_triplet_search
-from cognee.shared.data_models import SummarizedContent
+# from cognee.shared.data_models import SummarizedContent
 from cognee.shared.utils import render_graph
 from cognee.tasks.repo_processor import (enrich_dependency_graph,
                                          expand_dependency_graph,
                                          get_repo_file_dependencies)
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.summarization import summarize_code
+# from cognee.tasks.summarization import summarize_code
 from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
@@ -43,8 +42,21 @@ def check_install_package(package_name):
 
 
 async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
+    import os
+    import pathlib
+    import cognee
+    from cognee.infrastructure.databases.relational import create_db_and_tables
+
+    file_path = Path(__file__).parent
+    data_directory_path = str(pathlib.Path(os.path.join(file_path, ".data_storage/code_graph")).resolve())
+    cognee.config.data_root_directory(data_directory_path)
+    cognee_directory_path = str(pathlib.Path(os.path.join(file_path, ".cognee_system/code_graph")).resolve())
+    cognee.config.system_root_directory(cognee_directory_path)
+
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system()
+    await cognee.prune.prune_system(metadata = True)
+
+    await create_db_and_tables()
 
     # repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
     
