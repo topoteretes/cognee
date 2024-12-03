@@ -102,7 +102,9 @@ class QDrantAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         client = self.get_qdrant_client()
 
-        data_vectors = await self.embed_data([data_point.get_embeddable_data() for data_point in data_points])
+        data_vectors = await self.embed_data([
+            DataPoint.get_embeddable_data(data_point) for data_point in data_points
+        ])
 
         def convert_to_qdrant_point(data_point: DataPoint):
             return models.PointStruct(

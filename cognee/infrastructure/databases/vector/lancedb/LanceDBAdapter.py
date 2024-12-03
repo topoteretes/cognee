@@ -87,7 +87,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await connection.open_table(collection_name)
 
         data_vectors = await self.embed_data(
-            [data_point.get_embeddable_data() for data_point in data_points]
+            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
         IdType = TypeVar("IdType")

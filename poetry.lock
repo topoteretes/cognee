@@ -4659,8 +4659,8 @@ files = [
 [package.dependencies]
 numpy = [
     {version = ">=1.20.3", markers = "python_version < \"3.10\""},
-    {version = ">=1.23.2", markers = "python_version >= \"3.11\""},
     {version = ">=1.21.0", markers = "python_version >= \"3.10\" and python_version < \"3.11\""},
+    {version = ">=1.23.2", markers = "python_version >= \"3.11\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -7840,4 +7840,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-content-hash = "b63498e7aa23cfe29d8bea1fc29b0fe4a5f1a9e8ae5ec75d45b4bd20438e26f9"
+content-hash = "e2360f4be222743bb83b1e7316185c5f62bd73c0baaab3eee984e1c84f1cea65"

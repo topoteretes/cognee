@@ -83,7 +83,7 @@ class WeaviateAdapter(VectorDBInterface):
         from weaviate.classes.data import DataObject
 
         data_vectors = await self.embed_data(
-            [data_point.get_embeddable_data() for data_point in data_points]
+            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
@@ -116,12 +116,20 @@ class WeaviateAdapter(VectorDBInterface):
                         )
             else:
                 data_point: DataObject = data_points[0]
-                return collection.data.update(
-                    uuid = data_point.uuid,
-                    vector = data_point.vector,
-                    properties = data_point.properties,
-                    references = data_point.references,
-                )
+                if collection.data.exists(data_point.uuid):
+                    return collection.data.update(
+                        uuid = data_point.uuid,
+                        vector = data_point.vector,
+                        properties = data_point.properties,
+                        references = data_point.references,
+                    )
+                else:
+                    return collection.data.insert(
+                        uuid = data_point.uuid,
+                        vector = data_point.vector,
+                        properties = data_point.properties,
+                        references = data_point.references,
+                    )
         except Exception as error:
             logger.error("Error creating data points: %s", str(error))
             raise error
@@ -133,7 +141,7 @@ class WeaviateAdapter(VectorDBInterface):
         await self.create_data_points(f"{index_name}_{index_property_name}", [
             IndexSchema(
                 id = data_point.id,
-                text = data_point.get_embeddable_data(),
+                text = DataPoint.get_embeddable_data(data_point),
             ) for data_point in data_points
         ])
 

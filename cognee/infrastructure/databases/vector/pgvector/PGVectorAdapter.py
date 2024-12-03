@@ -102,7 +102,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             )
 
         data_vectors = await self.embed_data(
-            [data_point.get_embeddable_data() for data_point in data_points]
+            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
         vector_size = self.embedding_engine.get_vector_size()
@@ -143,7 +143,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.create_data_points(f"{index_name}_{index_property_name}", [
             IndexSchema(
                 id = data_point.id,
-                text = data_point.get_embeddable_data(),
+                text = DataPoint.get_embeddable_data(data_point),
             ) for data_point in data_points
         ])
 

@@ -19,10 +19,11 @@ class DataPoint(BaseModel):
     # class Config:
     #     underscore_attrs_are_private = True
 
-    def get_embeddable_data(self):
-        if self._metadata and len(self._metadata["index_fields"]) > 0 \
-            and hasattr(self, self._metadata["index_fields"][0]):
-            attribute = getattr(self, self._metadata["index_fields"][0])
+    @classmethod
+    def get_embeddable_data(self, data_point):
+        if data_point._metadata and len(data_point._metadata["index_fields"]) > 0 \
+            and hasattr(data_point, data_point._metadata["index_fields"][0]):
+            attribute = getattr(data_point, data_point._metadata["index_fields"][0])
 
             if isinstance(attribute, str):
                 return attribute.strip()

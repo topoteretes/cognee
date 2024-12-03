@@ -20,8 +20,8 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
-        pipeline_name="file_load_from_filesystem",
-        destination=destination,
+        pipeline_name = "file_load_from_filesystem",
+        destination = destination,
     )
 
     @dlt.resource(standalone = True, merge_key = "id")

@@ -1,4 +1,3 @@
-import asyncio
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
