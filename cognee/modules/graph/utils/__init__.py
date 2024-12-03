@@ -1,2 +1,6 @@
+from .expand_with_nodes_and_edges import expand_with_nodes_and_edges
 from .get_graph_from_model import get_graph_from_model
 from .get_model_instance_from_graph import get_model_instance_from_graph
+from .retrieve_existing_edges import retrieve_existing_edges
+from .convert_node_to_data_point import convert_node_to_data_point
+from .deduplicate_nodes_and_edges import deduplicate_nodes_and_edges

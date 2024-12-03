@@ -1,7 +1,6 @@
 from typing import Type
 from pydantic import BaseModel
 import instructor
-from tenacity import retry, stop_after_attempt
 import anthropic
 
 from cognee.exceptions import InvalidValueError

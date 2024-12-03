@@ -55,14 +55,16 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_edges(self)-> List[Edge]:
         return self.edges
 
-    async def project_graph_from_db(self,
-                                    adapter: Union[GraphDBInterface],
-                                    node_properties_to_project: List[str],
-                                    edge_properties_to_project: List[str],
-                                    directed = True,
-                                    node_dimension = 1,
-                                    edge_dimension = 1,
-                                    memory_fragment_filter = []) -> None:
+    async def project_graph_from_db(
+        self,
+        adapter: Union[GraphDBInterface],
+        node_properties_to_project: List[str],
+        edge_properties_to_project: List[str],
+        directed = True,
+        node_dimension = 1,
+        edge_dimension = 1,
+        memory_fragment_filter = [],
+    ) -> None:
 
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidValueError(message="Dimensions must be positive integers")
