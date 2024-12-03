@@ -216,10 +216,15 @@ class MilvusAdapter(VectorDBInterface):
             raise e
 
     async def batch_search(self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False):
-        def query_search(query_vector):
-            return self.search(collection_name, query_vector=query_vector, limit=limit, with_vector=with_vectors)
+        query_vectors = await self.embed_data(query_texts)
 
-        return [await query_search(query_vector) for query_vector in await self.embed_data(query_texts)]
+        return await asyncio.gather(
+            *[self.search(collection_name=collection_name,
+                          query_vector=query_vector,
+                          limit=limit,
+                          with_vector=with_vectors,
+            ) for query_vector in query_vectors]
+        )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         from pymilvus import MilvusException
