@@ -9,8 +9,15 @@ async def add_data_points(data_points: list[DataPoint]):
     nodes = []
     edges = []
 
+    added_nodes = {}
+    added_edges = {}
+
     results = await asyncio.gather(*[
-        get_graph_from_model(data_point) for data_point in data_points
+        get_graph_from_model(
+            data_point,
+            added_nodes = added_nodes,
+            added_edges = added_edges,
+        ) for data_point in data_points
     ])
 
     for result_nodes, result_edges in results:

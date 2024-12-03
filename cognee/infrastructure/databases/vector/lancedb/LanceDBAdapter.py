@@ -114,19 +114,11 @@ class LanceDBAdapter(VectorDBInterface):
                 for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        # TODO: This enables us to work with pydantic version but shouldn't
-        #  stay like this, existing rows should be updated
+        await collection.merge_insert("id") \
+            .when_matched_update_all() \
+            .when_not_matched_insert_all() \
+            .execute(lance_data_points)
 
-        await collection.delete("id IS NOT NULL")
-
-        original_size = await collection.count_rows()
-        await collection.add(lance_data_points)
-        new_size = await collection.count_rows()
-
-        if new_size <= original_size:
-            raise InvalidValueError(message=
-                "LanceDB create_datapoints error: data points did not get added.")
-        
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         connection = await self.get_connection()

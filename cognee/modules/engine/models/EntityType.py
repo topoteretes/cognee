@@ -8,6 +8,7 @@ class EntityType(DataPoint):
     type: str
     description: str
     exists_in: DocumentChunk
+
     _metadata: dict = {
         "index_fields": ["name"],
     }

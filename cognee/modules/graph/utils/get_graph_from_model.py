@@ -19,8 +19,8 @@ async def get_graph_from_model(
     data_point_properties = {}
     excluded_properties = set()
 
-    if include_root:
-        added_nodes[str(data_point.id)] = True
+    if str(data_point.id) in added_nodes:
+        return nodes, edges
 
     for field_name, field_value in data_point:
         if field_name == "_metadata":
