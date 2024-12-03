@@ -27,7 +27,7 @@ TEST_TEXT = """
 def test_AudioDocument():
 
     document = AudioDocument(
-        id=uuid.uuid4(), name="audio-dummy-test", raw_data_location=""
+        id=uuid.uuid4(), name="audio-dummy-test", raw_data_location="", metadata_id=uuid.uuid4()
     )
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
         for ground_truth, paragraph_data in zip(

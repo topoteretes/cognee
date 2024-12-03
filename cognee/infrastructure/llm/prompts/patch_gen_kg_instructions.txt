@@ -1,0 +1,3 @@
+I need you to solve this issue by looking at the provided edges retrieved from a knowledge graph and 
+generate a single patch file that I can apply directly to this repository using git apply. 
+Please respond with a single patch file in the following format.

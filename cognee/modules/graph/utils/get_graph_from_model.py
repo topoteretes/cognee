@@ -3,26 +3,44 @@ from datetime import datetime, timezone
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import copy_model
 
-
-def get_graph_from_model(data_point: DataPoint, added_nodes=None, added_edges=None):
-
-    if not added_nodes:
-        added_nodes = {}
-    if not added_edges:
-        added_edges = {}
-
+async def get_graph_from_model(
+    data_point: DataPoint,
+    include_root = True,
+    added_nodes = None,
+    added_edges = None,
+    visited_properties = None,
+):
     nodes = []
     edges = []
+    added_nodes = added_nodes or {}
+    added_edges = added_edges or {}
+    visited_properties = visited_properties or {}
 
     data_point_properties = {}
     excluded_properties = set()
 
+    if str(data_point.id) in added_nodes:
+        return nodes, edges
+
     for field_name, field_value in data_point:
         if field_name == "_metadata":
             continue
-        elif isinstance(field_value, DataPoint):
+
+        if field_value is None:
             excluded_properties.add(field_name)
-            nodes, edges, added_nodes, added_edges = add_nodes_and_edges(
+            continue
+
+        if isinstance(field_value, DataPoint):
+            excluded_properties.add(field_name)
+
+            property_key = f"{str(data_point.id)}{field_name}{str(field_value.id)}"
+
+            if property_key in visited_properties:
+                continue
+
+            visited_properties[property_key] = True
+
+            nodes, edges = await add_nodes_and_edges(
                 data_point,
                 field_name,
                 field_value,
@@ -30,46 +48,68 @@ def get_graph_from_model(data_point: DataPoint, added_nodes=None, added_edges=No
                 edges,
                 added_nodes,
                 added_edges,
+                visited_properties,
             )
 
-        elif (
-            isinstance(field_value, list)
-            and len(field_value) > 0
-            and isinstance(field_value[0], DataPoint)
-        ):
+            continue
+
+        if isinstance(field_value, list) and len(field_value) > 0 and isinstance(field_value[0], DataPoint):
             excluded_properties.add(field_name)
 
-            for item in field_value:
-                n_edges_before = len(edges)
-                nodes, edges, added_nodes, added_edges = add_nodes_and_edges(
-                    data_point, field_name, item, nodes, edges, added_nodes, added_edges
+            for field_value_item in field_value:
+                property_key = f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
+
+                if property_key in visited_properties:
+                    continue
+
+                visited_properties[property_key] = True
+
+                nodes, edges = await add_nodes_and_edges(
+                    data_point,
+                    field_name,
+                    field_value_item,
+                    nodes,
+                    edges,
+                    added_nodes,
+                    added_edges,
+                    visited_properties,
                 )
-                edges = edges[:n_edges_before] + [
-                    (*edge[:3], {**edge[3], "metadata": {"type": "list"}})
-                    for edge in edges[n_edges_before:]
-                ]
-        else:
-            data_point_properties[field_name] = field_value
 
-    SimpleDataPointModel = copy_model(
-        type(data_point),
-        include_fields={
-            "_metadata": (dict, data_point._metadata),
-        },
-        exclude_fields=excluded_properties,
-    )
+            continue
 
-    nodes.append(SimpleDataPointModel(**data_point_properties))
+        data_point_properties[field_name] = field_value
+
+    if include_root:
+        SimpleDataPointModel = copy_model(
+            type(data_point),
+            include_fields = {
+                "_metadata": (dict, data_point._metadata),
+                "__tablename__": data_point.__tablename__,
+            },
+            exclude_fields = excluded_properties,
+        )
+        nodes.append(SimpleDataPointModel(**data_point_properties))
+        added_nodes[str(data_point.id)] = True
 
     return nodes, edges
 
 
-def add_nodes_and_edges(
-    data_point, field_name, field_value, nodes, edges, added_nodes, added_edges
+async def add_nodes_and_edges(
+    data_point,
+    field_name,
+    field_value,
+    nodes,
+    edges,
+    added_nodes,
+    added_edges,
+    visited_properties,
 ):
-
-    property_nodes, property_edges = get_graph_from_model(
-        field_value, dict(added_nodes), dict(added_edges)
+    property_nodes, property_edges = await get_graph_from_model(
+        field_value,
+        True,
+        added_nodes,
+        added_edges,
+        visited_properties,
     )
 
     for node in property_nodes:
@@ -105,7 +145,7 @@ def add_nodes_and_edges(
             )
             added_edges[str(edge_key)] = True
 
-    return (nodes, edges, added_nodes, added_edges)
+    return (nodes, edges)
 
 
 def get_own_properties(property_nodes, property_edges):

@@ -25,8 +25,8 @@ CAR_GROUND_TRUTH = {
 }
 
 
-def test_parsed_person(boris):
-    nodes, edges = get_graph_from_model(boris)
+async def test_parsed_person(boris):
+    nodes, edges = await get_graph_from_model(boris)
     parsed_person = get_model_instance_from_graph(nodes, edges, "boris")
 
     run_test_against_ground_truth(

@@ -58,7 +58,7 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
         )
 
     elif config["vector_db_provider"] == "falkordb":
-        if not (config["vector_db_url"] and config["vector_db_key"]):
+        if not (config["vector_db_url"] and config["vector_db_port"]):
             raise EnvironmentError("Missing requred FalkorDB credentials!")
 
         from ..hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
