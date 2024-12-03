@@ -3,6 +3,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
 from ..models.ScoredResult import ScoredResult
@@ -194,7 +195,7 @@ class WeaviateAdapter(VectorDBInterface):
         import weaviate.classes as wvc
 
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         if query_vector is None:
             query_vector = (await self.embed_data([query_text]))[0]

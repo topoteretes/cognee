@@ -1,9 +1,11 @@
 from typing import Type
 from pydantic import BaseModel
 import instructor
-from tenacity import retry, stop_after_attempt
 import anthropic
+
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
+from cognee.infrastructure.llm.prompts import read_query_prompt
 
 
 class AnthropicAdapter(LLMInterface):
@@ -37,3 +39,17 @@ class AnthropicAdapter(LLMInterface):
             }],
             response_model = response_model,
         )
+
+    def show_prompt(self, text_input: str, system_prompt: str) -> str:
+        """Format and display the prompt for a user query."""
+
+        if not text_input:
+            text_input = "No user input provided."
+        if not system_prompt:
+            raise InvalidValueError(message="No system prompt path provided.")
+
+        system_prompt = read_query_prompt(system_prompt)
+
+        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n""" if system_prompt else None
+
+        return formatted_prompt

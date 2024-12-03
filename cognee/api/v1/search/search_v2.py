@@ -2,9 +2,12 @@ import json
 from uuid import UUID
 from enum import Enum
 from typing import Callable, Dict
+
+from cognee.exceptions import InvalidValueError
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.utils import send_telemetry
+from cognee.modules.users.exceptions import UserNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
@@ -22,7 +25,7 @@ async def search(query_type: SearchType, query_text: str, user: User = None) -> 
         user = await get_default_user()
 
     if user is None:
-        raise PermissionError("No user found in the system. Please create a user.")
+        raise UserNotFoundError
 
     query = await log_query(query_text, str(query_type), user.id)
 
@@ -52,7 +55,7 @@ async def specific_search(query_type: SearchType, query: str, user) -> list:
     search_task = search_tasks.get(query_type)
 
     if search_task is None:
-        raise ValueError(f"Unsupported search type: {query_type}")
+        raise InvalidValueError(message=f"Unsupported search type: {query_type}")
 
     send_telemetry("cognee.search EXECUTION STARTED", user.id)
 

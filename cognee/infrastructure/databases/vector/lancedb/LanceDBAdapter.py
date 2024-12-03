@@ -4,6 +4,8 @@ from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import Vector, LanceModel
+
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
@@ -122,7 +124,7 @@ class LanceDBAdapter(VectorDBInterface):
         new_size = await collection.count_rows()
 
         if new_size <= original_size:
-            raise ValueError(
+            raise InvalidValueError(message=
                 "LanceDB create_datapoints error: data points did not get added.")
         
 
@@ -148,7 +150,7 @@ class LanceDBAdapter(VectorDBInterface):
         query_vector: List[float] = None
     ):
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
@@ -178,7 +180,7 @@ class LanceDBAdapter(VectorDBInterface):
         normalized: bool = True
     ):
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]

@@ -7,6 +7,7 @@ from sqlalchemy import text, select, MetaData, Table
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
@@ -117,7 +118,7 @@ class SQLAlchemyAdapter():
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
                 else:
-                    raise ValueError(f"Table '{table_name}' not found.")
+                    raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:
                 # Create a MetaData instance to load table information
                 metadata = MetaData()
@@ -128,7 +129,7 @@ class SQLAlchemyAdapter():
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
-                raise ValueError(f"Table '{full_table_name}' not found.")
+                raise EntityNotFoundError(message=f"Table '{full_table_name}' not found.")
 
     async def get_table_names(self) -> List[str]:
         """
@@ -171,6 +172,27 @@ class SQLAlchemyAdapter():
                 results = await connection.execute(query)
             return {result["data_id"]: result["status"] for result in results}
 
+    async def get_all_data_from_table(self, table_name: str, schema: str = "public"):
+        async with self.get_async_session() as session:
+            # Validate inputs to prevent SQL injection
+            if not table_name.isidentifier():
+                raise ValueError("Invalid table name")
+            if schema and not schema.isidentifier():
+                raise ValueError("Invalid schema name")
+
+            if self.engine.dialect.name == "sqlite":
+                table = await self.get_table(table_name)
+            else:
+                table = await self.get_table(table_name, schema)
+
+            # Query all data from the table
+            query = select(table)
+            result = await session.execute(query)
+
+            # Fetch all rows as a list of dictionaries
+            rows = result.mappings().all()
+            return rows
+
     async def execute_query(self, query):
         async with self.engine.begin() as connection:
             result = await connection.execute(text(query))
@@ -205,7 +227,6 @@ class SQLAlchemyAdapter():
                 from cognee.infrastructure.files.storage import LocalStorage
 
                 LocalStorage.remove(self.db_path)
-                self.db_path = None
             else:
                 async with self.engine.begin() as connection:
                     schema_list = await self.get_schema_list()
