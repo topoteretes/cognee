@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from typing import List, Optional
@@ -6,7 +8,6 @@ from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
 from ..models.ScoredResult import ScoredResult
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from pymilvus import MilvusClient
 
 logger = logging.getLogger("MilvusAdapter")
 
@@ -31,8 +32,9 @@ class MilvusAdapter(VectorDBInterface):
 
         self.embedding_engine = embedding_engine
 
-    def get_milvus_client(self) -> MilvusClient:
-        if self.api_key is not None:
+    def get_milvus_client(self) -> "MilvusClient":
+        from pymilvus import MilvusClient
+        if self.api_key:
             client = MilvusClient(uri=self.url, token=self.api_key)
         else:
             client = MilvusClient(uri=self.url)

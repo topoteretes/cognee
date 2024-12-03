@@ -16,6 +16,14 @@ async def main():
         pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_milvus")).resolve())
     cognee.config.system_root_directory(cognee_directory_path)
 
+    cognee.config.set_vector_db_config(
+        {
+            "vector_db_url": os.path.join(cognee_directory_path, "databases/milvus.db"),
+            "vector_db_key": "",
+            "vector_db_provider": "milvus"
+        }
+    )
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
