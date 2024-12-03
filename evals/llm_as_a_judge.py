@@ -24,7 +24,7 @@ async def answer_without_cognee(instance):
         "context": instance["context"],
     }
     user_prompt = render_prompt("context_for_question.txt", args)
-    system_prompt = read_query_prompt("answer_question.txt")
+    system_prompt = read_query_prompt("answer_hotpot_question.txt")
 
     llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
@@ -50,7 +50,7 @@ async def answer_with_cognee(instance):
         "context": search_results,
     }
     user_prompt = render_prompt("context_for_question.txt", args)
-    system_prompt = read_query_prompt("answer_question_kg.txt")
+    system_prompt = read_query_prompt("answer_hotpot_using_cognee_search.txt")
 
     llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
