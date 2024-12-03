@@ -49,7 +49,7 @@ Replace \<database> with any of the following databases:
 - neo4j
 - milvus
 
-For example with postgres and neo4j support:
+Installing Cognee with PostgreSQL and Neo4j support example:
 ```bash
 pip install 'cognee[postgres, neo4j]'
 ```
@@ -67,7 +67,7 @@ Replace \<database> with any of the following databases:
 - neo4j
 - milvus
 
-For example with postgres and neo4j support:
+Installing Cognee with PostgreSQL and Neo4j support example:
 ```bash
 poetry add cognee -E postgres -E neo4j
 ```
