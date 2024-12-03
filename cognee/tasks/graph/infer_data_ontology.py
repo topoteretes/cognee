@@ -4,12 +4,15 @@ import csv
 import json
 import logging
 from datetime import datetime, timezone
+from fastapi import status
 from typing import Any, Dict, List, Optional, Union, Type
 
 import aiofiles
 import pandas as pd
 from pydantic import BaseModel
 
+from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.data.chunking.config import get_chunk_config
@@ -75,9 +78,10 @@ class OntologyEngine:
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
             else:
-                raise ValueError("Unsupported file format")
+                raise IngestionError(message="Unsupported file format")
         except Exception as e:
-            raise RuntimeError(f"Failed to load data from {file_path}: {e}")
+            raise IngestionError(message=f"Failed to load data from {file_path}: {e}",
+                                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
     async def add_graph_ontology(self, file_path: str = None, documents: list = None):
         """Add graph ontology from a JSON or CSV file or infer from documents content."""
@@ -148,7 +152,7 @@ class OntologyEngine:
                     if node_id in valid_ids:
                         await graph_client.add_node(node_id, node_data)
                     if node_id not in valid_ids:
-                        raise ValueError(f"Node ID {node_id} not found in the dataset")
+                        raise EntityNotFoundError(message=f"Node ID {node_id} not found in the dataset")
                     if pd.notna(row.get("relationship_source")) and pd.notna(row.get("relationship_target")):
                         await graph_client.add_edge(
                             row["relationship_source"],

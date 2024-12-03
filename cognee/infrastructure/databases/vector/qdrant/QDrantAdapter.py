@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import List, Dict, Optional
 from qdrant_client import AsyncQdrantClient, models
 
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
@@ -186,7 +187,7 @@ class QDrantAdapter(VectorDBInterface):
         with_vector: bool = False
     ):
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         client = self.get_qdrant_client()
 
