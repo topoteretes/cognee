@@ -18,6 +18,7 @@ from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline
 from cognee.tasks.documents import classify_documents, check_permissions_on_documents, extract_chunks_from_documents
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage.index_graph_edges import index_graph_edges
 from cognee.tasks.summarization import summarize_text
 
 logger = logging.getLogger("cognify.v2")
@@ -98,6 +99,8 @@ async def run_cognify_pipeline(dataset: Dataset, user: User):
 
         async for result in pipeline:
             print(result)
+
+        await index_graph_edges()
 
         send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
 
