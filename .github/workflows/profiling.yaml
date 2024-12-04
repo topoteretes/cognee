@@ -1,0 +1,70 @@
+name: Profiling Comparison for Specific File
+
+on:
+  push
+jobs:
+  profiler:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Set up Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    # Install necessary dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install scalene # Replace with your preferred profiler
+        pip install requests # For posting PR comments if needed
+
+    # Run profiler on the base branch
+    - name: Run profiler on base branch
+      run: |
+        echo "Profiling the base branch for code_graph_pipeline.py"
+        git checkout ${{ github.event.pull_request.base.sha }}
+        scalene --profile-only cognee/api/v1/cognify/code_graph_pipeline.py --json-output base_results.json
+
+    # Run profiler on the head branch
+    - name: Run profiler on head branch
+      run: |
+        echo "Profiling the head branch for code_graph_pipeline.py"
+        git checkout ${{ github.event.pull_request.head.sha }}
+        scalene --profile-only cognee/api/v1/cognify/code_graph_pipeline.py --json-output head_results.json
+
+    # Compare profiling results
+    - name: Compare profiling results
+      id: compare
+      run: |
+        python -c "
+import json
+with open('base_results.json') as f:
+    base = json.load(f)
+with open('head_results.json') as f:
+    head = json.load(f)
+cpu_diff = head['total_cpu_samples'] - base['total_cpu_samples']
+memory_diff = head['total_memory_mb'] - base['total_memory_mb']
+with open('profiling_diff.txt', 'w') as f:
+    f.write(f'CPU Usage Difference: {cpu_diff}\\n')
+    f.write(f'Memory Usage Difference: {memory_diff:.2f} MB\\n')
+        "
+
+    # Post results to the pull request
+    - name: Post profiling results to PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff}\n\`\`\``
+          });
