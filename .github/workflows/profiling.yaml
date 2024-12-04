@@ -1,15 +1,20 @@
 name: Profiling Comparison for Specific File
 
 on:
-  push
+  pull_request:
+    paths:
+      - 'cognee/api/v1/cognify/code_graph_pipeline.py' # Trigger only if this specific file changes
+
 jobs:
   profiler:
     runs-on: ubuntu-latest
 
     steps:
-    # Checkout the code from the repository
+    # Checkout the code from the repository with full history
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch all history so we can checkout any commit
 
     # Set up Python environment
     - name: Set up Python
@@ -21,52 +26,74 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install scalene # Replace with your preferred profiler
-        pip install requests # For posting PR comments if needed
+        pip install scalene requests
+        # Install your project's dependencies if needed
+        pip install -r requirements.txt  # If you have a requirements file
+
+    # Set environment variables for SHAs
+    - name: Set environment variables
+      run: |
+        echo "BASE_SHA=${{ github.event.pull_request.base.sha }}" >> $GITHUB_ENV
+        echo "HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
 
     # Run profiler on the base branch
     - name: Run profiler on base branch
+      env:
+        BASE_SHA: ${{ env.BASE_SHA }}
       run: |
         echo "Profiling the base branch for code_graph_pipeline.py"
-        git checkout ${{ github.event.pull_request.base.sha }}
+        echo "Checking out base SHA: $BASE_SHA"
+        git checkout $BASE_SHA
         echo "This is the working directory: $PWD"
-        scalene --profile-only /home/runner/work/cognee/cognee/api/v1/cognify/code_graph_pipeline.py 
+        # Ensure the script is executable
+        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
+        # Run Scalene
+        scalene --json --outfile base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
 
-    # Run profiler on the head branch
+    # Run profiler on head branch
     - name: Run profiler on head branch
+      env:
+        HEAD_SHA: ${{ env.HEAD_SHA }}
       run: |
         echo "Profiling the head branch for code_graph_pipeline.py"
-        git checkout ${{ github.event.pull_request.head.sha }}
+        echo "Checking out head SHA: $HEAD_SHA"
+        git checkout $HEAD_SHA
         echo "This is the working directory: $PWD"
-        scalene --profile-only /home/runner/work/cognee/cognee/api/v1/cognify/code_graph_pipeline.py 
+        # Ensure the script is executable
+        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
+        # Run Scalene
+        scalene --json --outfile head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
 
     # Compare profiling results
     - name: Compare profiling results
-      id: compare
       run: |
         python -c "
-        import json
-        with open('base_results.json') as f:
-            base = json.load(f)
-        with open('head_results.json') as f:
-            head = json.load(f)
-        cpu_diff = head['total_cpu_samples'] - base['total_cpu_samples']
-        memory_diff = head['total_memory_mb'] - base['total_memory_mb']
-        with open('profiling_diff.txt', 'w') as f:
-            f.write(f'CPU Usage Difference: {cpu_diff}\\n')
-            f.write(f'Memory Usage Difference: {memory_diff:.2f} MB\\n')
-                "
-        
-            # Post results to the pull request
-            - name: Post profiling results to PR
-              uses: actions/github-script@v6
-              with:
-                script: |
-                  const fs = require('fs');
-                  const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
-                  github.rest.issues.createComment({
-                    issue_number: context.issue.number,
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff}\n\`\`\``
-                  });
+import json
+try:
+    with open('base_results.json') as f:
+        base = json.load(f)
+    with open('head_results.json') as f:
+        head = json.load(f)
+    cpu_diff = head.get('total_cpu_samples_python', 0) - base.get('total_cpu_samples_python', 0)
+    memory_diff = head.get('malloc_samples', 0) - base.get('malloc_samples', 0)
+    with open('profiling_diff.txt', 'w') as f:
+        f.write(f'CPU Usage Difference: {cpu_diff}\\n')
+        f.write(f'Memory Usage Difference: {memory_diff} bytes\\n')
+except Exception as e:
+    with open('profiling_diff.txt', 'w') as f:
+        f.write(f'Error comparing profiling results: {e}\\n')
+"
+
+    # Post results to the pull request
+    - name: Post profiling results to PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff || 'No differences found.'}\n\`\`\``
+          });
