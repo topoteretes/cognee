@@ -1,4 +1,4 @@
-name: test | qdrant
+name: test | milvus
 
 on:
   workflow_dispatch:
@@ -7,25 +7,26 @@ on:
       - main
     types: [labeled, synchronize]
 
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
 
 jobs:
   get_docs_changes:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
-  run_qdrant_integration_test:
+  run_milvus:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
     defaults:
       run:
         shell: bash
@@ -37,9 +38,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.x'
+          python-version:  '3.11.x'
 
       - name: Install Poetry
+        # https://github.com/snok/install-poetry#running-on-windows
         uses: snok/install-poetry@v1.3.2
         with:
           virtualenvs-create: true
@@ -47,12 +49,16 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install -E qdrant --no-interaction
+        run: poetry install -E milvus --no-interaction
 
-      - name: Run default Qdrant
+      - name: Run default basic pipeline
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
-          VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
-        run: poetry run python ./cognee/tests/test_qdrant.py
+        run: poetry run python ./cognee/tests/test_milvus.py
+
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf ~/.cache
+          sudo rm -rf /tmp/*
+          df -h
