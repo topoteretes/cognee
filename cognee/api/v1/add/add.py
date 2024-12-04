@@ -33,11 +33,11 @@ async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_nam
 
         # data is text
         else:
-            file_path = save_data_to_file(data, dataset_name)
+            file_path = save_data_to_file(data)
             return await add([file_path], dataset_name)
 
     if hasattr(data, "file"):
-        file_path = save_data_to_file(data.file, dataset_name, filename = data.filename)
+        file_path = save_data_to_file(data.file, filename = data.filename)
         return await add([file_path], dataset_name)
 
     # data is a list of file paths or texts
@@ -45,13 +45,13 @@ async def add(data: Union[BinaryIO, List[BinaryIO], str, List[str]], dataset_nam
 
     for data_item in data:
         if hasattr(data_item, "file"):
-            file_paths.append(save_data_to_file(data_item, dataset_name, filename = data_item.filename))
+            file_paths.append(save_data_to_file(data_item, filename = data_item.filename))
         elif isinstance(data_item, str) and (
             data_item.startswith("/") or data_item.startswith("file://")
         ):
             file_paths.append(data_item)
         elif isinstance(data_item, str):
-            file_paths.append(save_data_to_file(data_item, dataset_name))
+            file_paths.append(save_data_to_file(data_item))
 
     if len(file_paths) > 0:
         return await add_files(file_paths, dataset_name, user)

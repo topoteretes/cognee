@@ -90,8 +90,6 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
                             mime_type = file_metadata["mime_type"]
                         )
 
-
-
                     # Check if data is already in dataset
                     dataset_data = (
                         await session.execute(select(DatasetData).filter(DatasetData.data_id == data_id,
