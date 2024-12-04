@@ -1,7 +1,7 @@
 import argparse
-import asyncio
+import time
 
-from .benchmark_function import benchmark_function
+from benchmark_function import benchmark_function
 
 from cognee.modules.graph.utils import get_graph_from_model
 from cognee.tests.unit.interfaces.graph.util import (
@@ -28,12 +28,9 @@ if __name__ == "__main__":
     society = create_organization_recursive(
         "society", "Society", PERSON_NAMES, args.recursive_depth
     )
-    nodes, edges = asyncio.run(get_graph_from_model(society))
+    nodes, edges = get_graph_from_model(society)
 
-    def get_graph_from_model_sync(model):
-        return asyncio.run(get_graph_from_model(model))
-
-    results = benchmark_function(get_graph_from_model_sync, society, num_runs=args.runs)
+    results = benchmark_function(get_graph_from_model, society, num_runs=args.runs)
     print("\nBenchmark Results:")
     print(
         f"N nodes: {len(nodes)}, N edges: {len(edges)}, Recursion depth: {args.recursive_depth}"

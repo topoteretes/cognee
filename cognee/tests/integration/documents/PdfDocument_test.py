@@ -17,7 +17,7 @@ def test_PdfDocument():
         "artificial-intelligence.pdf",
     )
     document = PdfDocument(
-        id=uuid.uuid4(), name="Test document.pdf", raw_data_location=test_file_path, metadata_id=uuid.uuid4()
+        id=uuid.uuid4(), name="Test document.pdf", raw_data_location=test_file_path
     )
 
     for ground_truth, paragraph_data in zip(

@@ -3,7 +3,6 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 
-from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from ..vector_db_interface import VectorDBInterface
 from ..models.ScoredResult import ScoredResult
@@ -83,7 +82,7 @@ class WeaviateAdapter(VectorDBInterface):
         from weaviate.classes.data import DataObject
 
         data_vectors = await self.embed_data(
-            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
+            [data_point.get_embeddable_data() for data_point in data_points]
         )
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
@@ -116,20 +115,12 @@ class WeaviateAdapter(VectorDBInterface):
                         )
             else:
                 data_point: DataObject = data_points[0]
-                if collection.data.exists(data_point.uuid):
-                    return collection.data.update(
-                        uuid = data_point.uuid,
-                        vector = data_point.vector,
-                        properties = data_point.properties,
-                        references = data_point.references,
-                    )
-                else:
-                    return collection.data.insert(
-                        uuid = data_point.uuid,
-                        vector = data_point.vector,
-                        properties = data_point.properties,
-                        references = data_point.references,
-                    )
+                return collection.data.update(
+                    uuid = data_point.uuid,
+                    vector = data_point.vector,
+                    properties = data_point.properties,
+                    references = data_point.references,
+                )
         except Exception as error:
             logger.error("Error creating data points: %s", str(error))
             raise error
@@ -141,7 +132,7 @@ class WeaviateAdapter(VectorDBInterface):
         await self.create_data_points(f"{index_name}_{index_property_name}", [
             IndexSchema(
                 id = data_point.id,
-                text = DataPoint.get_embeddable_data(data_point),
+                text = data_point.get_embeddable_data(),
             ) for data_point in data_points
         ])
 
@@ -203,7 +194,7 @@ class WeaviateAdapter(VectorDBInterface):
         import weaviate.classes as wvc
 
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise ValueError("One of query_text or query_vector must be provided!")
 
         if query_vector is None:
             query_vector = (await self.embed_data([query_text]))[0]

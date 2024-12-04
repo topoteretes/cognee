@@ -1,9 +1,6 @@
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
 
-from cognee.exceptions import InvalidValueError
-
-
 class Node:
     """
         Represents a node in a graph.
@@ -21,7 +18,7 @@ class Node:
 
     def __init__(self, node_id: str, attributes: Optional[Dict[str, Any]] = None, dimension: int = 1):
         if dimension <= 0:
-            raise InvalidValueError(message="Dimension must be a positive integer")
+            raise ValueError("Dimension must be a positive integer")
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
         self.attributes["vector_distance"] = float('inf')
@@ -56,7 +53,7 @@ class Node:
 
     def is_node_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
-            raise InvalidValueError(message=f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
+            raise ValueError(f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
         return self.status[dimension] == 1
 
     def add_attribute(self, key: str, value: Any) -> None:
@@ -93,7 +90,7 @@ class Edge:
 
     def __init__(self, node1: "Node", node2: "Node", attributes: Optional[Dict[str, Any]] = None, directed: bool = True, dimension: int = 1):
         if dimension <= 0:
-            raise InvalidValueError(message="Dimensions must be a positive integer.")
+            raise ValueError("Dimensions must be a positive integer.")
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
@@ -103,7 +100,7 @@ class Edge:
 
     def is_edge_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
-            raise InvalidValueError(message=f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
+            raise ValueError(f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}.")
         return self.status[dimension] == 1
 
     def add_attribute(self, key: str, value: Any) -> None:

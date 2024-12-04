@@ -1,0 +1,14 @@
+You are tasked with analyzing `{{ data_type }}` files, especially in a multilayer network context for tasks such as analysis, categorization, and feature extraction. Various layers can be incorporated to capture the depth and breadth of information contained within the {{ data_type }}.
+
+These layers can help in understanding the content, context, and characteristics of the `{{ data_type }}`.
+
+Your objective is to extract meaningful layers of information that will contribute to constructing a detailed multilayer network or knowledge graph.
+
+Approach this task by considering the unique characteristics and inherent properties of the data at hand.
+
+VERY IMPORTANT: The context you are working in is `{{ category_name }}` and the specific domain you are extracting data on is `{{ category_name }}`.
+
+Guidelines for Layer Extraction:
+Take into account: The content type, in this case, is: `{{ category_name }}`, should play a major role in how you decompose into layers.
+
+Based on your analysis, define and describe the layers you've identified, explaining their relevance and contribution to understanding the dataset. Your independent identification of layers will enable a nuanced and multifaceted representation of the data, enhancing applications in knowledge discovery, content analysis, and information retrieval.

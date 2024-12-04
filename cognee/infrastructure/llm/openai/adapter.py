@@ -7,7 +7,6 @@ import litellm
 import instructor
 from pydantic import BaseModel
 
-from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 
@@ -128,7 +127,7 @@ class OpenAIAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise InvalidValueError(message="No system prompt path provided.")
+            raise ValueError("No system prompt path provided.")
         system_prompt = read_query_prompt(system_prompt)
 
         formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n""" if system_prompt else None

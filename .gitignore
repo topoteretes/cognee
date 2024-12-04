@@ -4,8 +4,6 @@
 .prod.env
 cognee/.data/
 
-code_pipeline_output*/
-
 *.lance/
 .DS_Store
 # Byte-compiled / optimized / DLL files
@@ -14,6 +12,7 @@ __pycache__/
 *$py.class
 
 full_run.ipynb
+evals/
 
 # C extensions
 *.so
@@ -182,6 +181,3 @@ cognee/cache/
 .anon_id
 
 node_modules/
-
-# Evals
-SWE-bench_testsample/

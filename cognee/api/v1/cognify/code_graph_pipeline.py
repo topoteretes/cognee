@@ -22,6 +22,11 @@ logger = logging.getLogger("code_graph_pipeline")
 
 update_status_lock = asyncio.Lock()
 
+class PermissionDeniedException(Exception):
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
 async def code_graph_pipeline(datasets: Union[str, list[str]] = None, user: User = None):
     if user is None:
         user = await get_default_user()

@@ -1,6 +1,8 @@
 from typing import List
 
+
 def normalize_distances(result_values: List[dict]) -> List[float]:
+
     min_value = min(result["_distance"] for result in result_values)
     max_value = max(result["_distance"] for result in result_values)
 

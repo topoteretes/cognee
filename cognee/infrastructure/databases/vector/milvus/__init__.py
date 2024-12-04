@@ -1,1 +1,0 @@
-from .MilvusAdapter import MilvusAdapter

@@ -1,7 +1,5 @@
 import logging
 
-from cognee.exceptions import InvalidValueError
-
 logger = logging.getLogger(__name__)
 
 async def translate_text(text, source_language: str = "sr", target_language: str = "en", region_name = "eu-west-1"):
@@ -20,10 +18,10 @@ async def translate_text(text, source_language: str = "sr", target_language: str
     from botocore.exceptions import BotoCoreError, ClientError
 
     if not text:
-        raise InvalidValueError(message="No text to translate.")
+        raise ValueError("No text to translate.")
 
     if not source_language or not target_language:
-        raise InvalidValueError(message="Source and target language codes are required.")
+        raise ValueError("Source and target language codes are required.")
 
     try:
         translate = boto3.client(service_name = "translate", region_name = region_name, use_ssl = True)

@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-
-from cognee.modules.users.exceptions import UserNotFoundError, GroupNotFoundError
 from cognee.modules.users import get_user_db
 from cognee.modules.users.models import User, Group, Permission
 
@@ -14,7 +12,7 @@ def get_permissions_router() -> APIRouter:
         group = db.query(Group).filter(Group.id == group_id).first()
 
         if not group:
-            raise GroupNotFoundError
+            raise HTTPException(status_code = 404, detail = "Group not found")
 
         permission = db.query(Permission).filter(Permission.name == permission).first()
 
@@ -33,10 +31,8 @@ def get_permissions_router() -> APIRouter:
         user = db.query(User).filter(User.id == user_id).first()
         group = db.query(Group).filter(Group.id == group_id).first()
 
-        if not user:
-            raise UserNotFoundError
-        elif not group:
-            raise GroupNotFoundError
+        if not user or not group:
+            raise HTTPException(status_code = 404, detail = "User or group not found")
 
         user.groups.append(group)
 

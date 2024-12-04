@@ -38,7 +38,7 @@ def create_graph_engine() -> GraphDBInterface:
         )
 
     elif config.graph_database_provider == "falkordb":
-        if not (config.graph_database_url and config.graph_database_port):
+        if not (config.graph_database_url and config.graph_database_username and config.graph_database_password):
             raise EnvironmentError("Missing required FalkorDB credentials.")
 
         from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
