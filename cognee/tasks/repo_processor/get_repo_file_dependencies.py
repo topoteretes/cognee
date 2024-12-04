@@ -1,12 +1,14 @@
+import asyncio
 import os
+from concurrent.futures import ProcessPoolExecutor
 from typing import AsyncGenerator
 from uuid import NAMESPACE_OID, uuid5
+
 import aiofiles
-from concurrent.futures import ProcessPoolExecutor
-import asyncio
 
 from cognee.shared.CodeGraphEntities import CodeFile, Repository
-from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
+from cognee.tasks.repo_processor.get_local_dependencies import \
+    get_local_script_dependencies
 
 
 async def get_py_path_and_source(file_path):
@@ -54,6 +56,10 @@ def run_coroutine(coroutine_func, *args, **kwargs):
 
 async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list, None]:
     """Generate a dependency graph for Python files in the given repository path."""
+    
+    if not os.path.exists(repo_path):
+        raise FileNotFoundError(f"Repository path {repo_path} does not exist.")
+    
     py_files_dict = await get_py_files_dict(repo_path)
 
     repo = Repository(
