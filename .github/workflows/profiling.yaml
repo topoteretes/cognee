@@ -29,12 +29,7 @@ jobs:
     - name: Install dependencies
       run: |
         poetry install --no-interaction --all-extras
-
-    # Install necessary dependencies
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install scalene requests
+        poetry add scalene requests
 
 
     # Set environment variables for SHAs
@@ -55,7 +50,7 @@ jobs:
         # Ensure the script is executable
         chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
         # Run Scalene
-        scalene --json --outfile base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+        poetry run scalene --json --outfile base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
 
     # Run profiler on head branch
     - name: Run profiler on head branch
@@ -69,7 +64,7 @@ jobs:
         # Ensure the script is executable
         chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
         # Run Scalene
-        scalene --json --outfile head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+        poetry run scalene --json --outfile head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
 
     # Compare profiling results
     - name: Compare profiling results
