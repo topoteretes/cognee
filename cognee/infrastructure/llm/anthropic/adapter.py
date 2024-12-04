@@ -1,8 +1,9 @@
 from typing import Type
 from pydantic import BaseModel
 import instructor
-from tenacity import retry, stop_after_attempt
 import anthropic
+
+from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 
@@ -45,7 +46,7 @@ class AnthropicAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise ValueError("No system prompt path provided.")
+            raise InvalidValueError(message="No system prompt path provided.")
 
         system_prompt = read_query_prompt(system_prompt)
 

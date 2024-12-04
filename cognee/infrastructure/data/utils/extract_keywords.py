@@ -1,9 +1,11 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
+
+from cognee.exceptions import InvalidValueError
 from cognee.shared.utils import extract_pos_tags
 
 def extract_keywords(text: str) -> list[str]:
     if len(text) == 0:
-        raise ValueError("extract_keywords cannot extract keywords from empty text.")
+        raise InvalidValueError(message="extract_keywords cannot extract keywords from empty text.")
 
     tags = extract_pos_tags(text)
     nouns = [word for (word, tag) in tags if tag == "NN"]

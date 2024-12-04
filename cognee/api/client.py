@@ -3,9 +3,12 @@ import os
 import uvicorn
 import logging
 import sentry_sdk
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+
+from cognee.exceptions import CogneeApiError
+from traceback import format_exc
 
 # Set up logging
 logging.basicConfig(
@@ -74,6 +77,26 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     return JSONResponse(
         status_code = 400,
         content = jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
+    )
+
+@app.exception_handler(CogneeApiError)
+async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
+    detail = {}
+
+    if exc.name and exc.message and exc.status_code:
+        status_code = exc.status_code
+        detail["message"] = f"{exc.message} [{exc.name}]"
+    else:
+        # Log an error indicating the exception is improperly defined
+        logger.error("Improperly defined exception: %s", exc)
+        # Provide a default error response
+        detail["message"] = "An unexpected error occurred."
+        status_code = status.HTTP_418_IM_A_TEAPOT
+
+    # log the stack trace for easier serverside debugging
+    logger.error(format_exc())
+    return JSONResponse(
+        status_code=status_code, content={"detail": detail["message"]}
     )
 
 app.include_router(
