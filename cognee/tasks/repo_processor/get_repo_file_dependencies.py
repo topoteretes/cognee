@@ -34,6 +34,10 @@ async def get_py_files_dict(repo_path):
     py_files_dict = {}
     for file_path in py_files_paths:
         absolute_path = os.path.abspath(file_path)
+        
+        if os.path.getsize(absolute_path) == 0:
+            continue
+        
         relative_path, source_code = await get_py_path_and_source(absolute_path)
         py_files_dict[relative_path] = {"source_code": source_code}
 
