@@ -20,16 +20,13 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 
 ## 📦 Installation
 
+You can install Cognee using either **pip** or **poetry**.
+Support for various databases and vector stores is available through extras.
+
 ### With pip
 
 ```bash
 pip install cognee
-```
-
-### With pip with PostgreSQL support
-
-```bash
-pip install 'cognee[postgres]'
 ```
 
 ### With poetry
@@ -38,12 +35,42 @@ pip install 'cognee[postgres]'
 poetry add cognee
 ```
 
-### With poetry with PostgreSQL support
+### With pip with specific database support
 
+To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
 ```bash
-poetry add cognee -E postgres
+pip install 'cognee[<database>]'
 ```
 
+Replace \<database> with any of the following databases:
+- postgres
+- weaviate
+- qdrant
+- neo4j
+- milvus
+
+Installing Cognee with PostgreSQL and Neo4j support example:
+```bash
+pip install 'cognee[postgres, neo4j]'
+```
+
+### With poetry with specific database support
+
+To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
+```bash
+poetry add cognee -E <database>
+```
+Replace \<database> with any of the following databases:
+- postgres
+- weaviate
+- qdrant
+- neo4j
+- milvus
+
+Installing Cognee with PostgreSQL and Neo4j support example:
+```bash
+poetry add cognee -E postgres -E neo4j
+```
 
 ## 💻 Basic Usage
 
@@ -317,12 +344,13 @@ pip install cognee
   }
 </style>
 
-| Name             | Type               | Current state     | Known Issues                          |
-|------------------|--------------------|-------------------|---------------------------------------|
-| Qdrant           | Vector             | Stable &#x2705;   |                                       |
-| Weaviate         | Vector             | Stable &#x2705;   |                                       |
-| LanceDB          | Vector             | Stable &#x2705;   |                                       |
-| Neo4j            | Graph              | Stable &#x2705;   |                                       |
-| NetworkX         | Graph              | Stable &#x2705;   |                                       |
-| FalkorDB         | Vector/Graph       | Unstable &#x274C; |                                       |
-| PGVector         | Vector             | Unstable &#x274C; | Postgres DB returns the Timeout error |
+| Name     | Type               | Current state     | Known Issues |
+|----------|--------------------|-------------------|--------------|
+| Qdrant   | Vector             | Stable &#x2705;   |              |
+| Weaviate | Vector             | Stable &#x2705;   |              |
+| LanceDB  | Vector             | Stable &#x2705;   |              |
+| Neo4j    | Graph              | Stable &#x2705;   |              |
+| NetworkX | Graph              | Stable &#x2705;   |              |
+| FalkorDB | Vector/Graph       | Unstable &#x274C; |              |
+| PGVector | Vector             | Stable &#x2705;   |              |
+| Milvus   | Vector             | Stable &#x2705;   |              |

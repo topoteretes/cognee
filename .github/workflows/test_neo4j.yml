@@ -46,7 +46,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install -E neo4j --no-interaction
 
       - name: Run default Neo4j
         env:
