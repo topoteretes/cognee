@@ -1,7 +1,7 @@
 name: Profiling Comparison for Specific File 2
 
 on:
-  push
+  pull_request
 jobs:
   profiler:
     runs-on: ubuntu-latest
