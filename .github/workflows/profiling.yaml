@@ -66,23 +66,23 @@ jobs:
 
     # Compare profiling results
     - name: Compare profiling results
-      run: |
+      run: | 
         python -c "
-        import json
-        try:
-            with open('base_results.json') as f:
-                base = json.load(f)
-            with open('head_results.json') as f:
-                head = json.load(f)
-            cpu_diff = head.get('total_cpu_samples_python', 0) - base.get('total_cpu_samples_python', 0)
-            memory_diff = head.get('malloc_samples', 0) - base.get('malloc_samples', 0)
-            with open('profiling_diff.txt', 'w') as f:
-                f.write(f'CPU Usage Difference: {cpu_diff}\\n')
-                f.write(f'Memory Usage Difference: {memory_diff} bytes\\n')
-        except Exception as e:
-            with open('profiling_diff.txt', 'w') as f:
-                f.write(f'Error comparing profiling results: {e}\\n')
-        "
+          import json
+          try:
+              with open('base_results.json') as f:
+                  base = json.load(f)
+              with open('head_results.json') as f:
+                  head = json.load(f)
+              cpu_diff = head.get('total_cpu_samples_python', 0) - base.get('total_cpu_samples_python', 0)
+              memory_diff = head.get('malloc_samples', 0) - base.get('malloc_samples', 0)
+              with open('profiling_diff.txt', 'w') as f:
+                  f.write(f'CPU Usage Difference: {cpu_diff}\\n')
+                  f.write(f'Memory Usage Difference: {memory_diff} bytes\\n')
+          except Exception as e:
+              with open('profiling_diff.txt', 'w') as f:
+                  f.write(f'Error comparing profiling results: {e}\\n')
+          "
 
     # Post results to the pull request
     - name: Post profiling results to PR
