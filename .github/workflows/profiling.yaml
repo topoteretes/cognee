@@ -1,7 +1,7 @@
 name: Profiling Comparison for Specific File 2
 
 on:
-  pull_request
+  pull_request_target
 jobs:
   profiler:
     runs-on: ubuntu-latest
@@ -12,6 +12,30 @@ jobs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 0  # Fetch all history so we can checkout any commit
+
+    - name: Check if the sender is a maintainer
+      id: check_permissions
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const sender = context.payload.sender.login;
+          const { data: membership } = await github.rest.orgs.getMembershipForUser({
+            org: context.repo.owner,
+            username: sender,
+          }).catch(() => ({ data: { role: null } }));
+          return membership.role;
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set is_maintainer variable
+      run: |
+        echo "is_maintainer=${{ steps.check_permissions.outputs.result == 'admin' || steps.check_permissions.outputs.result == 'maintainer' }}" >> $GITHUB_ENV
+
+    - name: Stop if not a maintainer
+      if: env.is_maintainer != 'true'
+      run: |
+        echo "User ${{ github.event.sender.login }} is not a maintainer. Exiting."
+        exit 0  # Use exit 0 to mark the job as successful but stop execution
 
     # Set up Python environment
     - name: Set up Python
