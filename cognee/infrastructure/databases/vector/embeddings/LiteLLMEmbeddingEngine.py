@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import math
 from typing import List, Optional
 import litellm
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
@@ -36,11 +38,26 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 api_base = self.endpoint,
                 api_version = self.api_version
             )
-        except litellm.exceptions.BadRequestError as error:
-            logger.error("Error embedding text: %s", str(error))
+            return [data["embedding"] for data in response.data]
+
+        except litellm.exceptions.ContextWindowExceededError as error:
+            if isinstance(text, list):
+                parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
+                parts_futures = [self.embed_text(part) for part in parts]
+                embeddings = await asyncio.gather(*parts_futures)
+
+                all_embeddings = []
+                for embeddings_part in embeddings:
+                    all_embeddings.extend(embeddings_part)
+
+                return [data["embedding"] for data in all_embeddings]
+
+            logger.error("Context window exceeded for embedding text: %s", str(error))
             raise error
 
-        return [data["embedding"] for data in response.data]
+        except Exception as error:
+            logger.error("Error embedding text: %s", str(error))
+            raise error
 
     def get_vector_size(self) -> int:
         return self.dimensions
