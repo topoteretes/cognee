@@ -117,7 +117,7 @@ class MilvusAdapter(VectorDBInterface):
         from pymilvus import MilvusException
         client = self.get_milvus_client()
         data_vectors = await self.embed_data(
-            [data_point.get_embeddable_data() for data_point in data_points]
+            [data_point.get_embeddable_data(data_point) for data_point in data_points]
         )
 
         insert_data = [
