@@ -1,7 +1,11 @@
 name: Profiling Comparison for Specific File 2
 
 on:
-  pull_request_target
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
 jobs:
   profiler:
     runs-on: ubuntu-latest
