@@ -43,28 +43,28 @@ jobs:
       id: compare
       run: |
         python -c "
-import json
-with open('base_results.json') as f:
-    base = json.load(f)
-with open('head_results.json') as f:
-    head = json.load(f)
-cpu_diff = head['total_cpu_samples'] - base['total_cpu_samples']
-memory_diff = head['total_memory_mb'] - base['total_memory_mb']
-with open('profiling_diff.txt', 'w') as f:
-    f.write(f'CPU Usage Difference: {cpu_diff}\\n')
-    f.write(f'Memory Usage Difference: {memory_diff:.2f} MB\\n')
-        "
-
-    # Post results to the pull request
-    - name: Post profiling results to PR
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff}\n\`\`\``
-          });
+        import json
+        with open('base_results.json') as f:
+            base = json.load(f)
+        with open('head_results.json') as f:
+            head = json.load(f)
+        cpu_diff = head['total_cpu_samples'] - base['total_cpu_samples']
+        memory_diff = head['total_memory_mb'] - base['total_memory_mb']
+        with open('profiling_diff.txt', 'w') as f:
+            f.write(f'CPU Usage Difference: {cpu_diff}\\n')
+            f.write(f'Memory Usage Difference: {memory_diff:.2f} MB\\n')
+                "
+        
+            # Post results to the pull request
+            - name: Post profiling results to PR
+              uses: actions/github-script@v6
+              with:
+                script: |
+                  const fs = require('fs');
+                  const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
+                  github.rest.issues.createComment({
+                    issue_number: context.issue.number,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff}\n\`\`\``
+                  });
