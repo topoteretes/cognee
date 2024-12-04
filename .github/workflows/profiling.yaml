@@ -1,11 +1,7 @@
 name: Profiling Comparison for Specific File 2
 
 on:
-  pull_request_target:
-    types:
-      - opened
-      - reopened
-      - synchronize
+  push
 jobs:
   profiler:
     runs-on: ubuntu-latest
@@ -97,6 +93,7 @@ jobs:
     # Compare profiling results
     - name: Compare profiling results
       run: |
+        |
         python -c '
         import json
         try:
@@ -106,24 +103,30 @@ jobs:
                 head = json.load(f)
             cpu_diff = head.get("total_cpu_samples_python", 0) - base.get("total_cpu_samples_python", 0)
             memory_diff = head.get("malloc_samples", 0) - base.get("malloc_samples", 0)
+            results = [
+                f"CPU Usage Difference: {cpu_diff}",
+                f"Memory Usage Difference: {memory_diff} bytes"
+            ]
             with open("profiling_diff.txt", "w") as f:
-                f.write(f"CPU Usage Difference: {cpu_diff}\\n")
-                f.write(f"Memory Usage Difference: {memory_diff} bytes\\n")
+                f.write("\\n".join(results) + "\\n")
+            print("\\n".join(results))  # Print results to terminal
         except Exception as e:
+            error_message = f"Error comparing profiling results: {e}"
             with open("profiling_diff.txt", "w") as f:
-                f.write(f"Error comparing profiling results: {e}\\n")
-        '
+                f.write(error_message + "\\n")
+            print(error_message)  # Print error to terminal
+            '
 
     # Post results to the pull request
-    - name: Post profiling results to PR
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff || 'No differences found.'}\n\`\`\``
-          });
+#    - name: Post profiling results to PR
+#      uses: actions/github-script@v6
+#      with:
+#        script: |
+#          const fs = require('fs');
+#          const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
+#          github.rest.issues.createComment({
+#            issue_number: context.issue.number,
+#            owner: context.repo.owner,
+#            repo: context.repo.repo,
+#            body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff || 'No differences found.'}\n\`\`\``
+#          });
