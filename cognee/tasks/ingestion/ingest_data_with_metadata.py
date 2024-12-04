@@ -75,7 +75,6 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
                     ).scalar_one_or_none()
 
                     if data_point is not None:
-                        await delete_metadata(data_point.metadata_id)
                         data_point.name = file_metadata["name"]
                         data_point.raw_data_location = file_metadata["file_path"]
                         data_point.extension = file_metadata["extension"]
