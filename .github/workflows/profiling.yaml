@@ -17,7 +17,18 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.11'
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1.3.2
+      with:
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        installer-parallel: true
+
+    - name: Install dependencies
+      run: |
+        poetry install --no-interaction --all-extras
 
     # Install necessary dependencies
     - name: Install dependencies
