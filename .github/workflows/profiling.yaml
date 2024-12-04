@@ -29,6 +29,7 @@ jobs:
       run: |
         echo "Profiling the base branch for code_graph_pipeline.py"
         git checkout ${{ github.event.pull_request.base.sha }}
+        echo "This is the working directory: $PWD"
         scalene --profile-only $GITHUB_WORKSPACE/cognee/api/v1/cognify/code_graph_pipeline.py 
 
     # Run profiler on the head branch
@@ -36,6 +37,7 @@ jobs:
       run: |
         echo "Profiling the head branch for code_graph_pipeline.py"
         git checkout ${{ github.event.pull_request.head.sha }}
+        echo "This is the working directory: $PWD"
         scalene --profile-only $GITHUB_WORKSPACE/cognee/api/v1/cognify/code_graph_pipeline.py 
 
     # Compare profiling results
