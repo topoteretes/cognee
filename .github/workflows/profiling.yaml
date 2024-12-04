@@ -1,10 +1,7 @@
 name: Profiling Comparison for Specific File 2
 
 on:
-  pull_request:
-    paths:
-      - 'cognee/api/v1/cognify/code_graph_pipeline.py' # Trigger only if this specific file changes
-
+  push
 jobs:
   profiler:
     runs-on: ubuntu-latest
