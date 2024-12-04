@@ -29,14 +29,14 @@ jobs:
       run: |
         echo "Profiling the base branch for code_graph_pipeline.py"
         git checkout ${{ github.event.pull_request.base.sha }}
-        scalene --profile-only $GITHUB_WORKSPACE/cognee/api/v1/cognify/code_graph_pipeline.py --json-output base_results.json
+        scalene --profile-only $GITHUB_WORKSPACE/cognee/api/v1/cognify/code_graph_pipeline.py --json-output=base_results.json
 
     # Run profiler on the head branch
     - name: Run profiler on head branch
       run: |
         echo "Profiling the head branch for code_graph_pipeline.py"
         git checkout ${{ github.event.pull_request.head.sha }}
-        scalene --profile-only $GITHUB_WORKSPACE/cognee/api/v1/cognify/code_graph_pipeline.py --json-output head_results.json
+        scalene --profile-only $GITHUB_WORKSPACE/cognee/api/v1/cognify/code_graph_pipeline.py --json-output=head_results.json
 
     # Compare profiling results
     - name: Compare profiling results
