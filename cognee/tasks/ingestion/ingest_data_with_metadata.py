@@ -4,6 +4,7 @@ import dlt
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset
+from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.data.operations.delete_metadata import delete_metadata
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_document
@@ -89,7 +90,17 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
                             mime_type = file_metadata["mime_type"]
                         )
 
+
+
+                    # Check if data is already in dataset
+                    dataset_data = (
+                        await session.execute(select(DatasetData).filter(DatasetData.data_id == data_id,
+                                                                         DatasetData.dataset_id == dataset.id))
+                    ).scalar_one_or_none()
+                    # If data is not present in dataset add it
+                    if dataset_data is None:
                         dataset.data.append(data_point)
+
                     await session.commit()
                     await write_metadata(data_item, data_point.id, file_metadata)
 
