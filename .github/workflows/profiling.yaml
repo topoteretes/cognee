@@ -1,4 +1,4 @@
-name: Profiling Comparison for Specific File
+name: Profiling Comparison for Specific File 2
 
 on:
   pull_request:
