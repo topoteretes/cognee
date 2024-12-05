@@ -1,20 +1,20 @@
 """ This module contains utility functions for the cognee. """
 import os
-import requests
+import pathlib
 from datetime import datetime, timezone
+from uuid import uuid4
+
 import graphistry
+import matplotlib.pyplot as plt
 import networkx as nx
+import nltk
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import requests
 import tiktoken
-import nltk
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
-
-from uuid import uuid4
-import pathlib
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
