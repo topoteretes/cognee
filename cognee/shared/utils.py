@@ -1,6 +1,9 @@
 """ This module contains utility functions for the cognee. """
 import os
+from typing import BinaryIO, Union
+
 import requests
+import hashlib
 from datetime import datetime, timezone
 import graphistry
 import networkx as nx
@@ -70,6 +73,26 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
     num_tokens = len(encoding.encode(string))
     return num_tokens
 
+def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
+    h = hashlib.md5()
+
+    if isinstance(file_obj, str):
+        with open(file_obj, 'rb') as file:
+            while True:
+                # Reading is buffered, so we can read smaller chunks.
+                chunk = file.read(h.block_size)
+                if not chunk:
+                    break
+                h.update(chunk)
+    else:
+        while True:
+            # Reading is buffered, so we can read smaller chunks.
+            chunk = file_obj.read(h.block_size)
+            if not chunk:
+                break
+            h.update(chunk)
+
+    return h.hexdigest()
 
 def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
     """

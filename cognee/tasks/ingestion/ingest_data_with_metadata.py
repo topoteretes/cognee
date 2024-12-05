@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, List
 
 import dlt
 import cognee.modules.ingestion as ingestion
@@ -24,7 +24,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
     )
 
     @dlt.resource(standalone=True, primary_key="id", merge_key="id")
-    async def data_resources(file_paths: str, user: User):
+    async def data_resources(file_paths: List[str], user: User):
         for file_path in file_paths:
             with open(file_path.replace("file://", ""), mode="rb") as file:
                 classified_data = ingestion.classify(file)
