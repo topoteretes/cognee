@@ -87,9 +87,17 @@ async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerato
     """Enriches the graph with topological ranks and 'depends_on' edges."""
     nodes = []
     edges = []
+    added_nodes = {}
+    added_edges = {}
+    visited_properties = {}
 
     for data_point in data_points:
-        graph_nodes, graph_edges = await get_graph_from_model(data_point)
+        graph_nodes, graph_edges = await get_graph_from_model(
+            data_point,
+            added_nodes = added_nodes,
+            added_edges = added_edges,
+            visited_properties = visited_properties,
+        )
         nodes.extend(graph_nodes)
         edges.extend(graph_edges)
 
