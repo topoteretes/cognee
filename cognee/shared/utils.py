@@ -19,6 +19,8 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from uuid import uuid4
 import pathlib
 
+from cognee.shared.exceptions import IngestionError
+
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
 
@@ -76,23 +78,26 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
 def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
     h = hashlib.md5()
 
-    if isinstance(file_obj, str):
-        with open(file_obj, 'rb') as file:
+    try:
+        if isinstance(file_obj, str):
+            with open(file_obj, 'rb') as file:
+                while True:
+                    # Reading is buffered, so we can read smaller chunks.
+                    chunk = file.read(h.block_size)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+        else:
             while True:
                 # Reading is buffered, so we can read smaller chunks.
-                chunk = file.read(h.block_size)
+                chunk = file_obj.read(h.block_size)
                 if not chunk:
                     break
                 h.update(chunk)
-    else:
-        while True:
-            # Reading is buffered, so we can read smaller chunks.
-            chunk = file_obj.read(h.block_size)
-            if not chunk:
-                break
-            h.update(chunk)
 
-    return h.hexdigest()
+        return h.hexdigest()
+    except IOError as e:
+        raise IngestionError(message=f"Failed to load data from {file}: {e}")
 
 def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
     """
