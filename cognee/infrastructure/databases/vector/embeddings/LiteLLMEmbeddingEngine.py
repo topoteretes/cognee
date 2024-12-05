@@ -42,7 +42,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list):
-                parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
+                if len(text) == 1:
+                    parts = [text]
+                else:
+                    parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
+
                 parts_futures = [self.embed_text(part) for part in parts]
                 embeddings = await asyncio.gather(*parts_futures)
 
@@ -54,6 +58,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             logger.error("Context window exceeded for embedding text: %s", str(error))
             raise error
+
+        except litellm.exceptions.RateLimitError:
+            await asyncio.sleep(10)
+            return await self.embed_text(text)
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
