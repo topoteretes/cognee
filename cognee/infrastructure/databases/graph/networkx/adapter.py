@@ -274,6 +274,9 @@ class NetworkXAdapter(GraphDBInterface):
                             edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
 
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
+
+                    for node_id, node_data in self.graph.nodes(data=True):
+                        node_data['id'] = node_id
             else:
                 # Log that the file does not exist and an empty graph is initialized
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
