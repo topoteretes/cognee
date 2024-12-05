@@ -75,8 +75,6 @@ async def get_graph_from_model(
         if index is not None:
             field_value = field_value[int(index)]
 
-        if str(field_value.id) in added_nodes:
-            continue
         
         edge_key = str(data_point.id) + str(field_value.id) + field_name
 
@@ -88,6 +86,9 @@ async def get_graph_from_model(
                 "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             }))
             added_edges[str(edge_key)] = True
+
+        if str(field_value.id) in added_nodes:
+            continue
 
         property_nodes, property_edges = await get_graph_from_model(
             field_value,
