@@ -1,6 +1,6 @@
 from typing import Optional
 
-from cognee.infrastructure.engine import DataPoint
+from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
     generate_edge_name,
@@ -11,7 +11,7 @@ from cognee.shared.data_models import KnowledgeGraph
 
 
 def expand_with_nodes_and_edges(
-    graph_node_index: list[tuple[DataPoint, KnowledgeGraph]],
+    graph_node_index: list[tuple[DocumentChunk, KnowledgeGraph]],
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
@@ -21,7 +21,7 @@ def expand_with_nodes_and_edges(
     relationships = []
     data_points = []
 
-    for graph_source, graph in graph_node_index:
+    for document_chunk, graph in graph_node_index:
         if graph is None:
             continue
 
@@ -38,7 +38,6 @@ def expand_with_nodes_and_edges(
                     name = type_node_name,
                     type = type_node_name,
                     description = type_node_name,
-                    exists_in = graph_source,
                 )
                 added_nodes_map[f"{str(type_node_id)}_type"] = type_node
             else:
@@ -50,9 +49,8 @@ def expand_with_nodes_and_edges(
                     name = node_name,
                     is_a = type_node,
                     description = node.description,
-                    mentioned_in = graph_source,
                 )
-                data_points.append(entity_node)
+                document_chunk.contains.append(entity_node)
                 added_nodes_map[f"{str(node_id)}_entity"] = entity_node
 
         # Add relationship that came from graphs.

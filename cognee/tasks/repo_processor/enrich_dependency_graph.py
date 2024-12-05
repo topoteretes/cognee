@@ -70,7 +70,7 @@ async def node_enrich_and_connect(
         if desc_id in data_points_map:
             desc = data_points_map[desc_id]
         else:
-            node_data = await graph_engine.extract_node(desc_id)
+            node_data = await graph_engine.extract_node(str(desc_id))
             try:
                 desc = convert_node_to_data_point(node_data)
             except Exception:
