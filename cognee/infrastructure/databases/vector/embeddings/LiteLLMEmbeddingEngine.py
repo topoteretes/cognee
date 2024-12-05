@@ -2,8 +2,11 @@ import asyncio
 import logging
 import math
 from typing import List, Optional
+
 import litellm
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import \
+    EmbeddingEngine
 
 litellm.set_verbose = False
 logger = logging.getLogger("LiteLLMEmbeddingEngine")
@@ -42,18 +45,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list):
-                parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
-                parts_futures = [self.embed_text(part) for part in parts]
-                embeddings = await asyncio.gather(*parts_futures)
+                if len(text) == 1:
+                    parts = [text]
+                else:
+                    parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
+            elif isinstance(text, str):
+                parts = [[text[0:math.ceil(len(text)/2)]], [text[math.ceil(len(text)/2):]]]
+                
+            parts_futures = [self.embed_text(part) for part in parts]
+            embeddings = await asyncio.gather(*parts_futures)
 
-                all_embeddings = []
-                for embeddings_part in embeddings:
-                    all_embeddings.extend(embeddings_part)
-
-                return [data["embedding"] for data in all_embeddings]
-
-            logger.error("Context window exceeded for embedding text: %s", str(error))
-            raise error
+            all_embeddings = []
+            for embeddings_part in embeddings:
+                all_embeddings.extend(embeddings_part)
+            return [data["embedding"] for data in all_embeddings]
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
