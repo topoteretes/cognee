@@ -1,0 +1,54 @@
+name: test | deduplication
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    types: [labeled, synchronize]
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+
+jobs:
+  get_docs_changes:
+    name: docs changes
+    uses: ./.github/workflows/get_docs_changes.yml
+
+  start_postgres:
+    name: test
+    needs: get_docs_changes
+    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+  run_simple_example_test:
+    needs: start_postgres
+    uses: ./.github/workflows/reusable_python_example.yml
+    with:
+      example-location: ./cognee/tests/test_deduplication.py
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}

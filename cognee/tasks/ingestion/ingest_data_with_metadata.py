@@ -131,10 +131,11 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
             write_disposition="merge",
         )
     else:
+        # Data should be stored in the same schema to allow deduplication
         run_info = pipeline.run(
             data_resources(file_paths, user),
             table_name="file_metadata",
-            dataset_name=dataset_name,
+            dataset_name="public",
             write_disposition="merge",
         )
 
