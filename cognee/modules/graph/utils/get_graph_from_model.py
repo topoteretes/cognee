@@ -9,6 +9,9 @@ async def get_graph_from_model(
     visited_properties: dict = None,
     include_root = True,
 ):
+    if str(data_point.id) in added_nodes:
+        return [], []
+
     nodes = []
     edges = []
     visited_properties = visited_properties or {}
@@ -74,6 +77,17 @@ async def get_graph_from_model(
 
         if str(field_value.id) in added_nodes:
             continue
+        
+        edge_key = str(data_point.id) + str(field_value.id) + field_name
+
+        if str(edge_key) not in added_edges:
+            edges.append((data_point.id, field_value.id, field_name, {
+                "source_node_id": data_point.id,
+                "target_node_id": field_value.id,
+                "relationship_name": field_name,
+                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            }))
+            added_edges[str(edge_key)] = True
 
         property_nodes, property_edges = await get_graph_from_model(
             field_value,
@@ -88,21 +102,6 @@ async def get_graph_from_model(
 
         for edge in property_edges:
             edges.append(edge)
-
-        for property_node in get_own_property_nodes(property_nodes, property_edges):
-            if str(data_point.id) == str(property_node.id):
-                continue
-
-            edge_key = str(data_point.id) + str(property_node.id) + field_name
-
-            if str(edge_key) not in added_edges:
-                edges.append((data_point.id, property_node.id, field_name, {
-                    "source_node_id": data_point.id,
-                    "target_node_id": property_node.id,
-                    "relationship_name": field_name,
-                    "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                }))
-                added_edges[str(edge_key)] = True
 
         property_key = str(data_point.id) + field_name + str(field_value.id)
         visited_properties[property_key] = True
