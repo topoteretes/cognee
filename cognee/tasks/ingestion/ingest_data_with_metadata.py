@@ -23,7 +23,7 @@ async def ingest_data_with_metadata(data: Any, dataset_name: str, user: User):
         destination = destination,
     )
 
-    @dlt.resource(standalone=True, merge_key="id")
+    @dlt.resource(standalone=True, primary_key="id", merge_key="id")
     async def data_resources(file_paths: str, user: User):
         for file_path in file_paths:
             with open(file_path.replace("file://", ""), mode="rb") as file:
