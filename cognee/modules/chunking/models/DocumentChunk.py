@@ -10,7 +10,7 @@ class DocumentChunk(DataPoint):
     chunk_index: int
     cut_type: str
     is_part_of: Document
-    contains: List[Entity] = []
+    contains: List[Entity] = None
 
     _metadata: Optional[dict] = {
         "index_fields": ["text"],

@@ -12,7 +12,7 @@ class Document(DataPoint):
 class DocumentChunk(DataPoint):
     part_of: Document
     text: str
-    contains: List["Entity"] = []
+    contains: List["Entity"] = None
 
 class EntityType(DataPoint):
     name: str

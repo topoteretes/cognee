@@ -11,7 +11,8 @@ from cognee.shared.data_models import KnowledgeGraph
 
 
 def expand_with_nodes_and_edges(
-    graph_node_index: list[tuple[DocumentChunk, KnowledgeGraph]],
+    data_chunks: list[DocumentChunk],
+    chunk_graphs: list[KnowledgeGraph],
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
@@ -19,9 +20,10 @@ def expand_with_nodes_and_edges(
 
     added_nodes_map = {}
     relationships = []
-    data_points = []
 
-    for document_chunk, graph in graph_node_index:
+    for index, data_chunk in enumerate(data_chunks):
+        graph = chunk_graphs[index]
+
         if graph is None:
             continue
 
@@ -50,7 +52,8 @@ def expand_with_nodes_and_edges(
                     is_a = type_node,
                     description = node.description,
                 )
-                document_chunk.contains.append(entity_node)
+
+                data_chunk.contains.append(entity_node)
                 added_nodes_map[f"{str(node_id)}_entity"] = entity_node
 
         # Add relationship that came from graphs.
@@ -78,4 +81,4 @@ def expand_with_nodes_and_edges(
                 )
                 existing_edges_map[edge_key] = True
 
-        return (data_points, relationships)
+    return (data_chunks, relationships)
