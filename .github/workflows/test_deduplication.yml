@@ -20,7 +20,7 @@ jobs:
     name: docs changes
     uses: ./.github/workflows/get_docs_changes.yml
 
-  start_postgres:
+  run_deduplication_test:
     name: test
     needs: get_docs_changes
     if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
@@ -43,12 +43,27 @@ jobs:
         ports:
           - 5432:5432
 
-  run_simple_example_test:
-    needs: start_postgres
-    uses: ./.github/workflows/reusable_python_example.yml
-    with:
-      example-location: ./cognee/tests/test_deduplication.py
-    secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.3.2
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install dependencies
+        run: poetry install -E postgres --no-interaction
+
+      - name: Run deduplication test
+        env:
+          ENV: 'dev'
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: poetry run python ./cognee/tests/test_deduplication.py

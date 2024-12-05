@@ -36,6 +36,11 @@ async def test_deduplication():
     assert result[0]["name"] == dataset_name, "Result name does not match expected value."
     assert result[1]["name"] == dataset_name2, "Result name does not match expected value."
 
+    result = await relational_engine.get_all_data_from_table("dataset_data")
+    assert len(result) == 2, "Unexpected number of dataset data relationships found."
+    assert result[0]["data_id"] == result[1]["data_id"], "Data item is not reused between datasets."
+    assert result[0]["dataset_id"] != result[1]["dataset_id"], "Dataset items are not different."
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
