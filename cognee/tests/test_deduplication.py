@@ -74,6 +74,7 @@ async def test_deduplication():
     await cognee.add([explanation_file_path], dataset_name)
     await cognee.add([explanation_file_path2], dataset_name2)
 
+    result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
 
     await cognee.prune.prune_data()
@@ -90,6 +91,7 @@ async def test_deduplication():
     await cognee.add([explanation_file_path], dataset_name)
     await cognee.add([explanation_file_path2], dataset_name2)
 
+    result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
 
     await cognee.prune.prune_data()
