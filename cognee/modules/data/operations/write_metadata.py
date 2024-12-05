@@ -2,7 +2,6 @@ import inspect
 import json
 import re
 import warnings
-from typing import Any
 from uuid import UUID
 from sqlalchemy import select
 from typing import Any, BinaryIO, Union
