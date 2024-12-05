@@ -4,6 +4,7 @@ import re
 import warnings
 from typing import Any
 from uuid import UUID
+from sqlalchemy import select
 from typing import Any, BinaryIO, Union
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -15,13 +16,24 @@ async def write_metadata(data_item: Union[BinaryIO, str, Any], data_id: UUID, fi
     metadata_dict = get_metadata_dict(data_item, file_metadata)
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        metadata = Metadata(
-            id=data_id,
-            metadata_repr=json.dumps(metadata_dict),
-            metadata_source=parse_type(type(data_item)),
-            data_id=data_id
-        )
-        session.add(metadata)
+
+        metadata = (
+            await session.execute(select(Metadata).filter(Metadata.data_id == data_id))
+        ).scalar_one_or_none()
+
+        if metadata is not None:
+            metadata.metadata_repr = json.dumps(metadata_dict)
+            metadata.metadata_source = parse_type(type(data_item))
+            await session.merge(metadata)
+        else:
+            metadata = Metadata(
+                id=data_id,
+                metadata_repr=json.dumps(metadata_dict),
+                metadata_source=parse_type(type(data_item)),
+                data_id=data_id
+            )
+            session.add(metadata)
+
         await session.commit()
 
 

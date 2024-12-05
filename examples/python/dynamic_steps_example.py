@@ -186,8 +186,6 @@ async def main(enable_steps):
         print(format_triplets(results))
 
 if __name__ == '__main__':
-    # Flags to enable/disable steps
-
     rebuild_kg = True
     retrieve = True
     steps_to_enable = {
