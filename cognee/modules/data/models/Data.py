@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from typing import List
 from uuid import uuid4
-
 from sqlalchemy import UUID, Column, DateTime, String
 from sqlalchemy.orm import Mapped, relationship
 
@@ -19,6 +18,8 @@ class Data(Base):
     extension = Column(String)
     mime_type = Column(String)
     raw_data_location = Column(String)
+    owner_id = Column(UUID, index=True)
+    content_hash = Column(String)
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

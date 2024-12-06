@@ -8,11 +8,11 @@ def get_data_from_llama_index(data_point: Union[Document, ImageDocument], datase
     if type(data_point) == Document:
         file_path = data_point.metadata.get("file_path")
         if file_path is None:
-            file_path = save_data_to_file(data_point.text, dataset_name)
+            file_path = save_data_to_file(data_point.text)
             return file_path
         return file_path
     elif type(data_point) == ImageDocument:
         if data_point.image_path is None:
-            file_path = save_data_to_file(data_point.text, dataset_name)
+            file_path = save_data_to_file(data_point.text)
             return file_path
         return data_point.image_path
