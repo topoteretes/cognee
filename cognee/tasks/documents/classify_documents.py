@@ -5,12 +5,14 @@ from cognee.modules.data.processing.document_types import (
     AudioDocument,
     ImageDocument,
     TextDocument,
+    UnstructuredDocument,
 )
 from cognee.modules.data.operations.get_metadata import get_metadata
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
     "txt": TextDocument,
+    "docx": UnstructuredDocument,
     "png": ImageDocument,  # Image documents
     "dwg": ImageDocument,
     "xcf": ImageDocument,
