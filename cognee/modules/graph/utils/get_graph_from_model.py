@@ -75,7 +75,6 @@ async def get_graph_from_model(
         if index is not None:
             field_value = field_value[int(index)]
 
-        
         edge_key = str(data_point.id) + str(field_value.id) + field_name
 
         if str(edge_key) not in added_edges:
