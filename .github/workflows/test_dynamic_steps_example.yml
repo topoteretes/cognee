@@ -3,8 +3,6 @@ name: test | dynamic steps example
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - main
     types: [labeled, synchronize]
 
 
