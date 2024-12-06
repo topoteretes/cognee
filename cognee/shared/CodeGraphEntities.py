@@ -7,7 +7,7 @@ class Repository(DataPoint):
     type: Optional[str] = "Repository"
 
 class CodeFile(DataPoint):
-    __tablename__ = "CodeFile"
+    __tablename__ = "codefile"
     extracted_id: str  # actually file path
     type: Optional[str] = "CodeFile"
     source_code: Optional[str] = None
@@ -21,7 +21,7 @@ class CodeFile(DataPoint):
     }
 
 class CodePart(DataPoint):
-    __tablename__ = "CodePart"
+    __tablename__ = "codepart"
     # part_of: Optional[CodeFile]
     source_code: str
     type: Optional[str] = "CodePart"
