@@ -28,10 +28,27 @@ if __name__ == "__main__":
     society = create_organization_recursive(
         "society", "Society", PERSON_NAMES, args.recursive_depth
     )
-    nodes, edges = asyncio.run(get_graph_from_model(society))
+    added_nodes = {}
+    added_edges = {}
+    visited_properties = {}
+    nodes, edges = asyncio.run(get_graph_from_model(
+        society,
+        added_nodes = added_nodes,
+        added_edges = added_edges,
+        visited_properties = visited_properties,
+    ))
 
     def get_graph_from_model_sync(model):
-        return asyncio.run(get_graph_from_model(model))
+        added_nodes = {}
+        added_edges = {}
+        visited_properties = {}
+
+        return asyncio.run(get_graph_from_model(
+            model,
+            added_nodes = added_nodes,
+            added_edges = added_edges,
+            visited_properties = visited_properties,
+        ))
 
     results = benchmark_function(get_graph_from_model_sync, society, num_runs=args.runs)
     print("\nBenchmark Results:")

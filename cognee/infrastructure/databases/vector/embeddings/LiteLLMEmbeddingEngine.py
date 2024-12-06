@@ -29,7 +29,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
 
+    MAX_RETRIES = 5
+    retry_count = 0
+
     async def embed_text(self, text: List[str]) -> List[List[float]]:
+        async def exponential_backoff(attempt):
+            wait_time = min(10 * (2 ** attempt), 60)  # Max 60 seconds
+            await asyncio.sleep(wait_time)
+      
         try:
             response = await litellm.aembedding(
                 self.model,
@@ -38,11 +45,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 api_base = self.endpoint,
                 api_version = self.api_version
             )
+
+            self.retry_count = 0
+
             return [data["embedding"] for data in response.data]
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list):
-                parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
+                if len(text) == 1:
+                    parts = [text]
+                else:
+                    parts = [text[0:math.ceil(len(text)/2)], text[math.ceil(len(text)/2):]]
+
                 parts_futures = [self.embed_text(part) for part in parts]
                 embeddings = await asyncio.gather(*parts_futures)
 
@@ -50,10 +64,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 for embeddings_part in embeddings:
                     all_embeddings.extend(embeddings_part)
 
-                return [data["embedding"] for data in all_embeddings]
+                return all_embeddings
 
             logger.error("Context window exceeded for embedding text: %s", str(error))
             raise error
+
+        except litellm.exceptions.RateLimitError:
+            if self.retry_count >= self.MAX_RETRIES:
+                raise Exception(f"Rate limit exceeded and no more retries left.")
+
+            await exponential_backoff(self.retry_count)
+
+            self.retry_count += 1
+
+            return await self.embed_text(text)
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
