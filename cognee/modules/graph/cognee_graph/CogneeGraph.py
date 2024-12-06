@@ -40,7 +40,7 @@ class CogneeGraph(CogneeAbstractGraph):
             edge.node1.add_skeleton_edge(edge)
             edge.node2.add_skeleton_edge(edge)
         else:
-            raise EntityAlreadyExistsError(message=f"Edge {edge} already exists in the graph.")
+            print(f"Edge {edge} already exists in the graph.")
 
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)

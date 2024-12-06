@@ -65,6 +65,12 @@ class Node:
     def get_attribute(self, key: str) -> Union[str, int, float]:
         return self.attributes[key]
 
+    def get_skeleton_edges(self):
+        return self.skeleton_edges
+
+    def get_skeleton_neighbours(self):
+        return self.skeleton_neighbours
+
     def __repr__(self) -> str:
         return f"Node({self.id}, attributes={self.attributes})"
 
@@ -109,8 +115,14 @@ class Edge:
     def add_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
 
-    def get_attribute(self, key: str, value: Any) -> Union[str, int, float]:
+    def get_attribute(self, key: str) -> Union[str, int, float]:
         return self.attributes[key]
+
+    def get_node_from(self):
+        return self.node1
+
+    def get_node_to(self):
+        return self.node2
 
     def __repr__(self) -> str:
         direction = "->" if self.directed else "--"
