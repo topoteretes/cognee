@@ -3,8 +3,6 @@ name: test | milvus
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - main
     types: [labeled, synchronize]
 
 concurrency:
