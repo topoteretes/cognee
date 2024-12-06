@@ -37,14 +37,9 @@ async def get_graph_from_model_test():
     for document_chunk in document_chunks:
         document_chunk.contains.append(Entity(
             name = f"Entity",
-            is_type = random.choice([
-                EntityType(
-                    name = "Type 1",
-                ),
-                EntityType(
-                    name = "Type 2",
-                ),
-            ]),
+            is_type = EntityType(
+                name = "Type 1",
+            ),
         ))
 
     nodes = []
@@ -52,12 +47,14 @@ async def get_graph_from_model_test():
 
     added_nodes = {}
     added_edges = {}
+    visited_properties = {}
 
     results = await asyncio.gather(*[
         get_graph_from_model(
             document_chunk,
             added_nodes = added_nodes,
             added_edges = added_edges,
+            visited_properties = visited_properties,
         ) for document_chunk in document_chunks
     ])
 

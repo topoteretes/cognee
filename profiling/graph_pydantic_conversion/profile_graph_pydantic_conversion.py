@@ -39,7 +39,16 @@ if __name__ == "__main__":
     ))
 
     def get_graph_from_model_sync(model):
-        return asyncio.run(get_graph_from_model(model))
+        added_nodes = {}
+        added_edges = {}
+        visited_properties = {}
+
+        return asyncio.run(get_graph_from_model(
+            model,
+            added_nodes = added_nodes,
+            added_edges = added_edges,
+            visited_properties = visited_properties,
+        ))
 
     results = benchmark_function(get_graph_from_model_sync, society, num_runs=args.runs)
     print("\nBenchmark Results:")
