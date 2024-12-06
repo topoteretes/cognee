@@ -1,6 +1,5 @@
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.processing.document_types import Document
+from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.CodeGraphEntities import CodeFile
 
 
