@@ -17,7 +17,7 @@ async def save_data_item_with_metadata_to_storage(
     # data is a file object coming from upload.
     elif hasattr(data_item, "file"):
         file_path = save_data_to_file(
-            data_item.file, dataset_name, filename=data_item.filename
+            data_item.file, filename=data_item.filename
         )
 
     elif isinstance(data_item, str):
@@ -26,7 +26,7 @@ async def save_data_item_with_metadata_to_storage(
             file_path = data_item.replace("file://", "")
         # data is text
         else:
-            file_path = save_data_to_file(data_item, dataset_name)
+            file_path = save_data_to_file(data_item)
     else:
         raise IngestionError(message=f"Data type not supported: {type(data_item)}")
 
