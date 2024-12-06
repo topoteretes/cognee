@@ -1,10 +1,12 @@
-import json
 import inspect
+import json
 import logging
+
 from cognee.modules.settings import get_current_settings
-from cognee.shared.utils import send_telemetry
-from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.utils import send_telemetry
+
 from ..tasks.Task import Task
 
 logger = logging.getLogger("run_tasks(tasks: [Task], data)")
@@ -159,15 +161,18 @@ async def run_tasks_base(tasks: list[Task], data = None, user: User = None):
             })
             raise error
 
-async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
+async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str, config: dict):
+    logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent = 1))
+    
     user = await get_default_user()
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)
         send_telemetry("Pipeline Run Started", user.id, {
             "pipeline_name": pipeline_name,
-        })
-
+        } | config
+        )
+        
         async for result in run_tasks_base(tasks, data, user):
             yield result
 
@@ -190,7 +195,6 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
 
 async def run_tasks(tasks: list[Task], data = None, pipeline_name: str = "default_pipeline"):
     config = get_current_settings()
-    logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent = 1))
 
-    async for result in run_tasks_with_telemetry(tasks, data, pipeline_name):
+    async for result in run_tasks_with_telemetry(tasks, data, pipeline_name, config):
         yield result
