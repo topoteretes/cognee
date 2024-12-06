@@ -7,7 +7,7 @@ def save_data_item_to_storage(data_item: Union[BinaryIO, str], dataset_name: str
 
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
-        file_path = save_data_to_file(data_item.file, dataset_name, filename=data_item.filename)
+        file_path = save_data_to_file(data_item.file, filename=data_item.filename)
 
     elif isinstance(data_item, str):
         # data is a file path
@@ -15,7 +15,7 @@ def save_data_item_to_storage(data_item: Union[BinaryIO, str], dataset_name: str
             file_path = data_item.replace("file://", "")
         # data is text
         else:
-            file_path = save_data_to_file(data_item, dataset_name)
+            file_path = save_data_to_file(data_item)
     else:
         raise IngestionError(message=f"Data type not supported: {type(data_item)}")
 
