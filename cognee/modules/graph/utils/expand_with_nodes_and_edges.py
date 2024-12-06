@@ -1,6 +1,6 @@
 from typing import Optional
 
-from cognee.infrastructure.engine import DataPoint
+from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
     generate_edge_name,
@@ -11,7 +11,8 @@ from cognee.shared.data_models import KnowledgeGraph
 
 
 def expand_with_nodes_and_edges(
-    graph_node_index: list[tuple[DataPoint, KnowledgeGraph]],
+    data_chunks: list[DocumentChunk],
+    chunk_graphs: list[KnowledgeGraph],
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
@@ -19,9 +20,10 @@ def expand_with_nodes_and_edges(
 
     added_nodes_map = {}
     relationships = []
-    data_points = []
 
-    for graph_source, graph in graph_node_index:
+    for index, data_chunk in enumerate(data_chunks):
+        graph = chunk_graphs[index]
+
         if graph is None:
             continue
 
@@ -38,7 +40,6 @@ def expand_with_nodes_and_edges(
                     name = type_node_name,
                     type = type_node_name,
                     description = type_node_name,
-                    exists_in = graph_source,
                 )
                 added_nodes_map[f"{str(type_node_id)}_type"] = type_node
             else:
@@ -50,9 +51,13 @@ def expand_with_nodes_and_edges(
                     name = node_name,
                     is_a = type_node,
                     description = node.description,
-                    mentioned_in = graph_source,
                 )
-                data_points.append(entity_node)
+
+                if data_chunk.contains is None:
+                    data_chunk.contains = []
+
+                data_chunk.contains.append(entity_node)
+
                 added_nodes_map[f"{str(node_id)}_entity"] = entity_node
 
         # Add relationship that came from graphs.
@@ -80,4 +85,4 @@ def expand_with_nodes_and_edges(
                 )
                 existing_edges_map[edge_key] = True
 
-        return (data_points, relationships)
+    return (data_chunks, relationships)

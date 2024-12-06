@@ -3,8 +3,6 @@ name: test | python 3.10
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - main
     types: [labeled, synchronize]
 
 concurrency:

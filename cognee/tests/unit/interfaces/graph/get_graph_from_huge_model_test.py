@@ -73,10 +73,13 @@ async def test_circular_reference_extraction():
     nodes = []
     edges = []
 
+    added_nodes = {}
+    added_edges = {}
+
     start = time.perf_counter_ns()
 
     results = await asyncio.gather(*[
-        get_graph_from_model(code_file) for code_file in code_files
+        get_graph_from_model(code_file, added_nodes = added_nodes, added_edges = added_edges) for code_file in code_files
     ])
 
     time_to_run = time.perf_counter_ns() - start
@@ -86,12 +89,6 @@ async def test_circular_reference_extraction():
     for result_nodes, result_edges in results:
         nodes.extend(result_nodes)
         edges.extend(result_edges)
-
-    # for code_file in code_files:
-    #     model_nodes, model_edges = get_graph_from_model(code_file)
-
-    #     nodes.extend(model_nodes)
-    #     edges.extend(model_edges)
 
     assert len(nodes) == 1501
     assert len(edges) == 1501 * 20 + 1500 * 5
