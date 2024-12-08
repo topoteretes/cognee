@@ -9,7 +9,7 @@ class UnstructuredDocument(Document):
     def read(self, chunk_size: int):
         def get_text():
             from unstructured.partition.auto import partition
-            elements = partition(self.raw_data_location)
+            elements = partition(self.raw_data_location, content_type=self.mime_type)
             in_memory_file = StringIO("\n\n".join([str(el) for el in elements]))
             in_memory_file.seek(0)
 

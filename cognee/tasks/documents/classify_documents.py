@@ -13,6 +13,14 @@ EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
     "txt": TextDocument,
     "docx": UnstructuredDocument,
+    "doc": UnstructuredDocument,
+    "odt": UnstructuredDocument,
+    "xls": UnstructuredDocument,
+    "xlsx": UnstructuredDocument,
+    "ppt": UnstructuredDocument,
+    "pptx": UnstructuredDocument,
+    "odp": UnstructuredDocument,
+    "ods": UnstructuredDocument,
     "png": ImageDocument,  # Image documents
     "dwg": ImageDocument,
     "xcf": ImageDocument,
@@ -50,6 +58,7 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
             title = f"{data_item.name}.{data_item.extension}",
             raw_data_location = data_item.raw_data_location,
             name = data_item.name,
+            mime_type = data_item.mime_type,
             metadata_id = metadata.id
         )
         documents.append(document)
