@@ -20,16 +20,16 @@ async def extract_graph_from_data(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
     graph_engine = await get_graph_engine()
-    chunk_and_chunk_graphs = [
-        (chunk, chunk_graph) for chunk, chunk_graph in zip(data_chunks, chunk_graphs)
-    ]
+
     existing_edges_map = await retrieve_existing_edges(
-        chunk_and_chunk_graphs,
+        data_chunks,
+        chunk_graphs,
         graph_engine,
     )
 
     graph_nodes, graph_edges = expand_with_nodes_and_edges(
-        chunk_and_chunk_graphs,
+        data_chunks,
+        chunk_graphs,
         existing_edges_map,
     )
 

@@ -70,7 +70,7 @@ async def node_enrich_and_connect(
         if desc_id in data_points_map:
             desc = data_points_map[desc_id]
         else:
-            node_data = await graph_engine.extract_node(desc_id)
+            node_data = await graph_engine.extract_node(str(desc_id))
             try:
                 desc = convert_node_to_data_point(node_data)
             except Exception:
@@ -87,9 +87,17 @@ async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerato
     """Enriches the graph with topological ranks and 'depends_on' edges."""
     nodes = []
     edges = []
+    added_nodes = {}
+    added_edges = {}
+    visited_properties = {}
 
     for data_point in data_points:
-        graph_nodes, graph_edges = await get_graph_from_model(data_point)
+        graph_nodes, graph_edges = await get_graph_from_model(
+            data_point,
+            added_nodes = added_nodes,
+            added_edges = added_edges,
+            visited_properties = visited_properties,
+        )
         nodes.extend(graph_nodes)
         edges.extend(graph_edges)
 

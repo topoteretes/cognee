@@ -81,13 +81,13 @@ async def run_cognify_pipeline(dataset: Dataset, user: User):
             Task(classify_documents),
             Task(check_permissions_on_documents, user = user, permissions = ["write"]),
             Task(extract_chunks_from_documents), # Extract text chunks based on the document type.
-            Task(add_data_points, task_config = { "batch_size": 10 }),
             Task(extract_graph_from_data, graph_model = KnowledgeGraph, task_config = { "batch_size": 10 }), # Generate knowledge graphs from the document chunks.
             Task(
                 summarize_text,
                 summarization_model = cognee_config.summarization_model,
                 task_config = { "batch_size": 10 }
             ),
+            Task(add_data_points, task_config = { "batch_size": 10 }),
         ]
 
         pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")

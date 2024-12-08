@@ -5,7 +5,8 @@ from cognee.shared.data_models import KnowledgeGraph
 
 
 async def retrieve_existing_edges(
-    graph_node_index: list[tuple[DataPoint, KnowledgeGraph]],
+    data_chunks: list[DataPoint],
+    chunk_graphs: list[KnowledgeGraph],
     graph_engine: GraphDBInterface,
 ) -> dict[str, bool]:
     processed_nodes = {}
@@ -13,23 +14,25 @@ async def retrieve_existing_edges(
     entity_node_edges = []
     type_entity_edges = []
 
-    for graph_source, graph in graph_node_index:
+    for index, data_chunk in enumerate(data_chunks):
+        graph = chunk_graphs[index]
+
         for node in graph.nodes:
             type_node_id = generate_node_id(node.type)
             entity_node_id = generate_node_id(node.id)
 
             if str(type_node_id) not in processed_nodes:
                 type_node_edges.append(
-                    (str(graph_source), str(type_node_id), "exists_in")
+                    (data_chunk.id, type_node_id, "exists_in")
                 )
                 processed_nodes[str(type_node_id)] = True
 
             if str(entity_node_id) not in processed_nodes:
                 entity_node_edges.append(
-                    (str(graph_source), entity_node_id, "mentioned_in")
+                    (data_chunk.id, entity_node_id, "mentioned_in")
                 )
                 type_entity_edges.append(
-                    (str(entity_node_id), str(type_node_id), "is_a")
+                    (entity_node_id, type_node_id, "is_a")
                 )
                 processed_nodes[str(entity_node_id)] = True
 

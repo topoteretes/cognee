@@ -64,7 +64,6 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
     
     tasks = [
         Task(get_repo_file_dependencies),
-        Task(add_data_points, task_config = { "batch_size": 50 }),
         Task(enrich_dependency_graph, task_config = { "batch_size": 50 }),
         Task(expand_dependency_graph, task_config = { "batch_size": 50 }),
         Task(add_data_points, task_config = { "batch_size": 50 }),
