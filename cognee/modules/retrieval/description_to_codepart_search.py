@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from typing import Set
+from typing import Set, List
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
@@ -10,7 +10,7 @@ from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
 
-async def code_description_to_code_part_search(query: str, user: User = None, top_k = 1) -> list:
+async def code_description_to_code_part_search(query: str, user: User = None, top_k = 2) -> list:
     if user is None:
         user = await get_default_user()
 
@@ -26,7 +26,7 @@ async def code_description_to_code_part(
     query: str,
     user: User,
     top_k: int
-) -> Set[str]:
+) -> List[str]:
     """
     Maps a code description query to relevant code parts using a CodeGraph pipeline.
 
