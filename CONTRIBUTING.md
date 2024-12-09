@@ -49,10 +49,10 @@ python cognee/cognee/tests/test_library.py
 
 ```shell
 # Add your changes to the staging area:
-git add . 
+git add .
 
-# Commit changes with an adequate description: 
-git commit -m "Describe your changes here" 
+# Commit changes with an adequate description:
+git commit -m "Describe your changes here"
 
 # Push your feature branch to your forked repository:
 git push origin feature/your-feature-name
@@ -73,7 +73,7 @@ The project maintainers will review your work, possibly suggest improvements, or
 
 ## 5. 📜 Code of Conduct
 
-Ensure you adhere to the project's Code of Conduct throughout your participation.
+Ensure you adhere to the project's [Code of Conduct](https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md) throughout your participation.
 
 ## 6. 📫 Contact
 
