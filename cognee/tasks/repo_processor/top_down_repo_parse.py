@@ -152,9 +152,12 @@ def parse_repo(repo_path):
         logger.error(f"Error creating Jedi project for repository at {repo_path}: {e}")
         return {}
 
+    EXCLUDE_DIRS = {'venv', '.git', '__pycache__', 'build'}
+
     python_files = [
         os.path.join(directory, file)
         for directory, _, filenames in os.walk(repo_path)
+        if not any(excluded in directory for excluded in EXCLUDE_DIRS)
         for file in filenames
         if file.endswith(".py")
     ]
