@@ -7,5 +7,5 @@ class Document(DataPoint):
     raw_data_location: str
     metadata_id: UUID
 
-    def read(self, chunk_size: int) -> str:
+    def read(self, chunk_size: int, chunker = str) -> str:
         pass
