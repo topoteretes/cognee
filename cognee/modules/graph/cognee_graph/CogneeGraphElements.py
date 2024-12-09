@@ -115,8 +115,8 @@ class Edge:
     def add_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
 
-    def get_attribute(self, key: str) -> Union[str, int, float]:
-        return self.attributes[key]
+    def get_attribute(self, key: str) -> Optional[Union[str, int, float]]:
+        return self.attributes.get(key)
 
     def get_node_from(self):
         return self.node1
