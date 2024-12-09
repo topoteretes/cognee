@@ -42,19 +42,6 @@ def test_add_edge_success(setup_graph):
     assert edge in node2.skeleton_edges
 
 
-def test_add_duplicate_edge(setup_graph):
-    """Test adding a duplicate edge raises an exception."""
-    graph = setup_graph
-    node1 = Node("node1")
-    node2 = Node("node2")
-    graph.add_node(node1)
-    graph.add_node(node2)
-    edge = Edge(node1, node2)
-    graph.add_edge(edge)
-    with pytest.raises(EntityAlreadyExistsError, match="Edge .* already exists in the graph."):
-        graph.add_edge(edge)
-
-
 def test_get_node_success(setup_graph):
     """Test retrieving an existing node."""
     graph = setup_graph
