@@ -50,7 +50,7 @@ def test_UnstructuredDocument():
     )
 
     xlsx_document = UnstructuredDocument(
-        id=uuid.uuid4(), name="example.xslx", raw_data_location=xlsx_file_path, metadata_id=uuid.uuid4(),
+        id=uuid.uuid4(), name="example.xlsx", raw_data_location=xlsx_file_path, metadata_id=uuid.uuid4(),
         mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
