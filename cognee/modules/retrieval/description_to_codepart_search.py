@@ -84,7 +84,7 @@ async def code_description_to_code_part(
 
             for code_file in node_to_search_from.get_skeleton_neighbours():
                 for code_file_edge in code_file.get_skeleton_edges():
-                    if code_file_edge.get_attribute('relationship_type') == 'contains':
+                    if code_file_edge.get_attribute('relationship_name') == 'contains':
                         code_pieces_to_return.add(code_file_edge.get_node_to())
 
         logging.info("Search completed for user: %s, query: '%s'. Found %d code pieces.",
