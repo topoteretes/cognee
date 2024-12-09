@@ -63,7 +63,7 @@ async def code_description_to_code_part(
         )
         if not results:
             logging.warning("No results found for query: '%s' by user: %s", query, user.id)
-            return set()
+            return []
 
         memory_fragment = CogneeGraph()
         await memory_fragment.project_graph_from_db(
