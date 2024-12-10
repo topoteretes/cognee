@@ -117,7 +117,6 @@ def find_entity_usages(project, module_path, line, column):
         logger.error(f"Error retrieving references for entity at {module_path}:{line},{column}: {e}")
         references = []
 
-    # for ref in tqdm(references, desc="Processing references"):
     for ref in references:
         if ref.module_path:  # Collect unique module paths
             usages.add(ref.module_path)
@@ -159,7 +158,7 @@ def parse_repo(repo_path):
         for directory, _, filenames in os.walk(repo_path)
         if not any(excluded in directory for excluded in EXCLUDE_DIRS)
         for file in filenames
-        if file.endswith(".py")
+        if file.endswith(".py") and os.path.getsize(os.path.join(directory, file)) > 0
     ]
 
     results = {
