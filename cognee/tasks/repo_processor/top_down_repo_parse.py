@@ -83,30 +83,21 @@ def extract_importable_objects_with_positions(file_path):
 
 
 
-def find_entity_usages(project, module_path, line, column):
+def find_entity_usages(script, line, column):
     """
     Return a list of files in the repo where the entity at module_path:line,column is used.
     """
     usages = set()
 
-    if not os.path.isfile(module_path):
-        logger.warning(f"Module file does not exist: {module_path}")
-        return []
-
-    try:
-        script = jedi.Script(path=module_path, project=project)
-    except Exception as e:
-        logger.error(f"Error initializing Jedi Script: {e}")
-        return []
 
     try:
         inferred = script.infer(line, column)
     except Exception as e:
-        logger.error(f"Error inferring entity at {module_path}:{line},{column}: {e}")
+        logger.error(f"Error inferring entity at {script.path}:{line},{column}: {e}")
         return []
 
     if not inferred or not inferred[0]:
-        logger.info(f"No entity inferred at {module_path}:{line},{column}")
+        logger.info(f"No entity inferred at {script.path}:{line},{column}")
         return []
 
     logger.debug(f"Inferred entity: {inferred[0].name}, type: {inferred[0].type}")
@@ -114,7 +105,7 @@ def find_entity_usages(project, module_path, line, column):
     try:
         references = script.get_references(line=line, column=column, scope="project", include_builtins=False)
     except Exception as e:
-        logger.error(f"Error retrieving references for entity at {module_path}:{line},{column}: {e}")
+        logger.error(f"Error retrieving references for entity at {script.path}:{line},{column}: {e}")
         references = []
 
     for ref in references:
@@ -132,11 +123,21 @@ def parse_file_with_references(project, file_path):
         logger.error(f"Error extracting objects from {file_path}: {e}")
         return []
 
+    if not os.path.isfile(file_path):
+        logger.warning(f"Module file does not exist: {file_path}")
+        return []
+
+    try:
+        script = jedi.Script(path=file_path, project=project)
+    except Exception as e:
+        logger.error(f"Error initializing Jedi Script: {e}")
+        return []
+
     parsed_results = [
         {
             "name": obj["name"],
             "type": obj["type"],
-            "references": find_entity_usages(project, file_path, obj["line"], obj["column"]),
+            "references": find_entity_usages(script, obj["line"], obj["column"]),
         }
         for obj in importable_objects
     ]
