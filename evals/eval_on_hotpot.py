@@ -111,7 +111,9 @@ if __name__ == "__main__":
     
     parser.add_argument("--with_cognee", action="store_true")
     parser.add_argument("--num_samples", type=int, default=500)
-    parser.add_argument("--metric", type=str, default="correctness_metric")
+    parser.add_argument("--metric", type=str, default="correctness_metric",
+                        help="Valid options are Deepeval metrics (e.g. AnswerRelevancyMetric) \
+                              and metrics defined in evals/deepeval_metrics.py, e.g. f1_score_metric")
     
     args = parser.parse_args()
 
@@ -120,6 +122,8 @@ if __name__ == "__main__":
         metric = metric_cls()
     except AttributeError:
         metric = getattr(evals.deepeval_metrics, args.metric)
+        if isinstance(metric, type):
+            metric = metric()
     
     if args.with_cognee:
         answer_provider = answer_with_cognee
