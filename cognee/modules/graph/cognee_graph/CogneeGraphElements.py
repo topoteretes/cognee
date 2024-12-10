@@ -118,10 +118,10 @@ class Edge:
     def get_attribute(self, key: str) -> Optional[Union[str, int, float]]:
         return self.attributes.get(key)
 
-    def get_node_from(self):
+    def get_source_node(self):
         return self.node1
 
-    def get_node_to(self):
+    def get_destination_node(self):
         return self.node2
 
     def __repr__(self) -> str:
