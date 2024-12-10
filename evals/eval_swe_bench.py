@@ -13,13 +13,13 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.pipelines import Task, run_tasks
 from cognee.modules.retrieval.brute_force_triplet_search import \
     brute_force_triplet_search
-# from cognee.shared.data_models import SummarizedContent
+from cognee.shared.data_models import SummarizedContent
 from cognee.shared.utils import render_graph
 from cognee.tasks.repo_processor import (enrich_dependency_graph,
                                          expand_dependency_graph,
                                          get_repo_file_dependencies)
 from cognee.tasks.storage import add_data_points
-# from cognee.tasks.summarization import summarize_code
+from cognee.tasks.summarization import summarize_code
 from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
@@ -41,7 +41,7 @@ def check_install_package(package_name):
             return False
 
 
-async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
+async def run_code_graph_pipeline(repo_path):
     import os
     import pathlib
     import cognee
@@ -54,36 +54,37 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata = True)
-
+    await cognee.prune.prune_system(metadata=True)
     await create_db_and_tables()
 
-    # repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
-    
-    repo_path = '/Users/borisarzentar/Projects/graphrag'
-    
     tasks = [
         Task(get_repo_file_dependencies),
-        Task(enrich_dependency_graph, task_config = { "batch_size": 50 }),
-        Task(expand_dependency_graph, task_config = { "batch_size": 50 }),
-        Task(add_data_points, task_config = { "batch_size": 50 }),
-        # Task(summarize_code, summarization_model = SummarizedContent),
+        Task(enrich_dependency_graph, task_config={"batch_size": 50}),
+        Task(expand_dependency_graph, task_config={"batch_size": 50}),
+        Task(summarize_code, summarization_model=SummarizedContent, task_config={"batch_size": 50}),
+        Task(add_data_points, task_config={"batch_size": 50}),
     ]
 
-    pipeline = run_tasks(tasks, repo_path, "cognify_code_pipeline")
+    return run_tasks(tasks, repo_path, "cognify_code_pipeline")
+
+
+async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
+    repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
+    pipeline = await run_code_graph_pipeline(repo_path)
 
     async for result in pipeline:
         print(result)
 
     print('Here we have the repo under the repo_path')
 
-    await render_graph(None, include_labels = True, include_nodes = True)
+    await render_graph(None, include_labels=True, include_nodes=True)
 
     problem_statement = instance['problem_statement']
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
-    retrieved_edges = await brute_force_triplet_search(problem_statement, top_k = 3, collections = ["data_point_source_code", "data_point_text"])
-    
+    retrieved_edges = await brute_force_triplet_search(problem_statement, top_k=3,
+                                                       collections=["data_point_source_code", "data_point_text"])
+
     retrieved_edges_str = retrieved_edges_to_string(retrieved_edges)
 
     prompt = "\n".join([
@@ -170,7 +171,6 @@ async def main():
         preds = await get_preds(swe_dataset, with_cognee=not args.cognee_off)
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
-
 
     subprocess.run(
         [
