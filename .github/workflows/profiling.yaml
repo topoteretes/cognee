@@ -116,6 +116,12 @@ jobs:
             print(error_message)  # Print error to terminal
             '
 
+    - name: Upload profiling diff artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: profiling-diff
+        path: profiling_diff.txt
+
     # Post results to the pull request
 #    - name: Post profiling results to PR
 #      uses: actions/github-script@v6
