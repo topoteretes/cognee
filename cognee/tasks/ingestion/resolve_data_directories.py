@@ -1,18 +1,3 @@
-# import os
-# from typing import List, Union, BinaryIO
-#
-# def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, List[str]]):
-#     # We want to work with lists from now on
-#     if type(data) is not list:
-#         data = [data]
-#
-#     # Check if data item in list is a directory
-#     for item in data:
-#         if type(item) is str:
-#             # If it's a directory add all files inside the directory to data list instead
-#             if os.path.isdir(item):
-#                 pass
-
 import os
 from typing import List, Union, BinaryIO
 
@@ -55,7 +40,3 @@ def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, List[str
             raise TypeError(f"Unsupported type: {type(item)}. Expected str or BinaryIO.")
 
     return resolved_data
-
-# Example usage:
-# files = resolve_data_directories(["/path/to/dir", "/path/to/file.txt"], include_subdirectories=True)
-# print(files)
