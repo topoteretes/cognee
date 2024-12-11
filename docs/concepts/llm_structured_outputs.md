@@ -1,8 +1,0 @@
-Function calling in the context of Large Language Models (LLMs) like GPT-3, GPT-4, and their derivatives extends beyond traditional programming paradigms. In this scenario, function calling involves prompting the LLM to simulate the behavior of a function within its generated output. This capability allows users to interact with LLMs in a structured way, effectively requesting specific operations or information retrieval tasks by framing their prompts as function calls.
-
-How LLM Function Calling Works:
-Prompt Construction: The user constructs a prompt that mimics a function call in programming. This prompt includes the "name" of the function (often a description of the task) and the "arguments" (the specific inputs or conditions for the task). For example, a prompt might look like "Generate a summary for the following article:" followed by the article text.
-
-LLM Interpretation: The LLM interprets this structured prompt and understands it as a request to perform a specific task, similar to how a function in a program would be invoked. The model then generates an output that aligns with the expected behavior of the function described in the prompt.
-
-Parameters and Outputs: In LLM function calling, the parameters are the details provided in the prompt, and the output is the generated text that the model produces in response. This output is intended to fulfill the function's "purpose" as inferred from the prompt.
