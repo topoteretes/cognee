@@ -117,7 +117,7 @@ jobs:
             '
 
     - name: Upload profiling diff artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: profiling-diff
         path: profiling_diff.txt
