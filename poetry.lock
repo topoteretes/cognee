@@ -1244,13 +1244,13 @@ optimize = ["orjson"]
 
 [[package]]
 name = "deepeval"
-version = "2.0.1"
+version = "2.0.5"
 description = "The open-source LLMs evaluation framework."
 optional = true
 python-versions = "<3.13,>=3.9"
 files = [
-    {file = "deepeval-2.0.1-py3-none-any.whl", hash = "sha256:e06134a36f6b2a9173c92bdebe1e42325f4e27ded77bbf4b5323fa955682b6ea"},
-    {file = "deepeval-2.0.1.tar.gz", hash = "sha256:63360c4e0101d7ad29419bc754fba239d0d02d969bf5c070d387cf8b973cab01"},
+    {file = "deepeval-2.0.5-py3-none-any.whl", hash = "sha256:f3407cca1d707168c40dabff1cfcc25c3273a66eea02dca1b4ca4aecc031e7b7"},
+    {file = "deepeval-2.0.5.tar.gz", hash = "sha256:73e68effdc22237921e958c097767bf7e47bdc9f2151cb217886b84ca9d68c02"},
 ]
 
 [package.dependencies]
@@ -1261,6 +1261,7 @@ langchain = "*"
 langchain-community = "*"
 langchain-core = "*"
 langchain_openai = "*"
+nest-asyncio = "*"
 opentelemetry-api = ">=1.24.0,<2.0.0"
 opentelemetry-exporter-otlp-proto-grpc = ">=1.24.0,<2.0.0"
 opentelemetry-sdk = ">=1.24.0,<2.0.0"
