@@ -53,6 +53,6 @@ async def retrieve_existing_edges(
     existing_edges_map = {}
 
     for edge in existing_edges:
-        existing_edges_map[edge[0] + edge[1] + edge[2]] = True
+        existing_edges_map[str(edge[0]) + str(edge[1]) + edge[2]] = True
 
     return existing_edges_map
