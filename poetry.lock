@@ -3447,13 +3447,13 @@ six = "*"
 
 [[package]]
 name = "langfuse"
-version = "2.55.0"
+version = "2.56.1"
 description = "A client library for accessing langfuse"
 optional = true
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "langfuse-2.55.0-py3-none-any.whl", hash = "sha256:c902894b50befdd8639e5b0d78ca79f8b5d391bae2c3f0889a1f47ea59d795ad"},
-    {file = "langfuse-2.55.0.tar.gz", hash = "sha256:fb671a8cf5252a7d1def3b41b6f70f8de50c53250e5832209649301c14453222"},
+    {file = "langfuse-2.56.1-py3-none-any.whl", hash = "sha256:55dd0884ac6ab4f5035fa5d0529820f4526fd155bde70192de15997eacee1b58"},
+    {file = "langfuse-2.56.1.tar.gz", hash = "sha256:2da0211886c437f4d5da371a9879bff219471403a5abd3d72b1fce4abeb53193"},
 ]
 
 [package.dependencies]
