@@ -13,10 +13,6 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
 
 jobs:
-  get_docs_changes:
-    name: docs changes
-    uses: ./.github/workflows/get_docs_changes.yml
-
   run_neo4j_integration_test:
     name: test
     runs-on: ubuntu-latest
