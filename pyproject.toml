@@ -59,7 +59,7 @@ langdetect = "1.0.9"
 posthog = {version = "^3.5.0", optional = true}
 lancedb = "0.15.0"
 litellm = "1.49.1"
-groq = {version = "0.8.0", optional = true}
+groq = {version = "0.13.0", optional = true}
 langfuse = {version = "^2.32.0", optional = true}
 pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
