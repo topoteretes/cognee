@@ -14,6 +14,7 @@ class TextSummary(DataPoint):
 
 
 class CodeSummary(DataPoint):
+    __tablename__ = "code_summary"
     text: str
     made_from: CodeFile
 
