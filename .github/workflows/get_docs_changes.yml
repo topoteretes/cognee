@@ -12,11 +12,6 @@ env:
 
 
 jobs:
-  get_docs_changes:
-    name: docs changes
-    runs-on: ubuntu-latest
-    outputs:
-      changes_outside_docs: ${{ steps.check_changes.outputs.changes_outside_docs }}
 
     steps:
       - name: Checkout code
