@@ -30,7 +30,7 @@ typing_extensions = "4.12.2"
 nest_asyncio = "1.6.0"
 numpy = "1.26.4"
 datasets = "3.1.0"
-falkordb = {version = "1.0.9", optional = true}
+falkordb = {version = "1.0.10", optional = true}
 boto3 = "^1.26.125"
 botocore="^1.35.54"
 gunicorn = "^20.1.0"
