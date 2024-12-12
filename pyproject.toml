@@ -38,7 +38,7 @@ sqlalchemy = "2.0.35"
 instructor = "1.5.2"
 networkx = "^3.2.1"
 aiosqlite = "^0.20.0"
-pandas = "2.0.3"
+pandas = "2.2.3"
 filetype = "^1.2.0"
 nltk = "^3.8.1"
 dlt = {extras = ["sqlalchemy"], version = "^1.4.1"}
