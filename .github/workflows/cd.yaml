@@ -3,7 +3,7 @@ name: publish dev | Docker image
 on:
   push:
     branches:
-      - main
+      - dev
       - feature/*
     paths-ignore:
       - '**.md'
@@ -28,13 +28,8 @@ jobs:
       - name: Set environment variable for stage
         id: set-env
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "STAGE=prd" >> $GITHUB_ENV
-            echo "::set-output name=stage::prd"
-          else
-            echo "STAGE=dev" >> $GITHUB_ENV
-            echo "::set-output name=stage::dev"
-          fi
+          echo "STAGE=dev" >> $GITHUB_ENV
+          echo "::set-output name=stage::dev"
 
       - name: Use output
         run: echo "The stage is ${{ steps.set-env.outputs.stage }}"
