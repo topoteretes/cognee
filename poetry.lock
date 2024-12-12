@@ -2003,13 +2003,13 @@ grpc = ["grpcio (>=1.44.0,<2.0.0.dev0)"]
 
 [[package]]
 name = "graphistry"
-version = "0.33.9"
+version = "0.35.1"
 description = "A visual graph analytics library for extracting, transforming, displaying, and sharing big graphs with end-to-end GPU acceleration"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "graphistry-0.33.9-py3-none-any.whl", hash = "sha256:6952d96a0dfd77d7b7498f93a4986ea2189cb62553d4a27df18f02106ea4db99"},
-    {file = "graphistry-0.33.9.tar.gz", hash = "sha256:40c095ae0ad4143d686b3802495c643a3decb4d663e0038aa6645c06c95d4d0b"},
+    {file = "graphistry-0.35.1-py3-none-any.whl", hash = "sha256:7db0c227b93a462f57dcd5d8e38ce2fa36ee734bd2074450133165e1e227c09c"},
+    {file = "graphistry-0.35.1.tar.gz", hash = "sha256:315491772982b1ab8a230240f8396e9eee15f57e255c2c1a4adfac2b00e44609"},
 ]
 
 [package.dependencies]
@@ -2025,16 +2025,17 @@ typing-extensions = "*"
 
 [package.extras]
 ai = ["dgl", "dirty-cat (==0.2.0)", "faiss-cpu", "joblib", "scikit-learn (>=1.0)", "scipy", "sentence-transformers", "torch (<2)", "umap-learn"]
-all = ["dgl", "dirty-cat (==0.2.0)", "faiss-cpu", "gremlinpython", "igraph", "ipython", "joblib", "neo4j", "neotime", "networkx (>=2.5)", "openpyxl (==3.1.0)", "scikit-learn (>=1.0)", "scipy", "sentence-transformers", "torch (<2)", "umap-learn", "xlrd"]
+all = ["dgl", "dirty-cat (==0.2.0)", "faiss-cpu", "gremlinpython", "igraph", "ipython", "joblib", "neo4j", "neotime", "networkx (>=2.5)", "openpyxl (==3.1.0)", "pygraphviz", "scikit-learn (>=1.0)", "scipy", "sentence-transformers", "torch (<2)", "umap-learn", "xlrd"]
 bolt = ["neo4j", "neotime"]
 build = ["build"]
-dev = ["Jinja2 (<3.1)", "build", "docutils (==0.16)", "flake8 (>=5.0)", "gremlinpython", "igraph", "ipython", "mock", "mypy", "neo4j", "neotime", "networkx (>=2.5)", "numba (>=0.57.1)", "openpyxl (==3.1.0)", "pandas-stubs", "pytest", "scikit-learn (<=1.3.2)", "sphinx (==3.4.3)", "sphinx-autodoc-typehints (==1.11.1)", "sphinx-rtd-theme (==0.5.1)", "tqdm-stubs", "types-requests", "xlrd"]
-docs = ["Jinja2 (<3.1)", "docutils (==0.16)", "sphinx (==3.4.3)", "sphinx-autodoc-typehints (==1.11.1)", "sphinx-rtd-theme (==0.5.1)"]
+dev = ["Jinja2 (==3.1.4)", "build", "docutils (==0.21.2)", "flake8 (>=5.0)", "gremlinpython", "igraph", "ipython", "ipython (==8.28)", "mock", "mypy", "myst-parser (==4.0.0)", "nbsphinx (==0.9.5)", "neo4j", "neotime", "networkx (>=2.5)", "numba (>=0.57.1)", "openpyxl (==3.1.0)", "pandas-stubs", "pygments (>2.10)", "pytest", "scikit-learn (<=1.3.2)", "sphinx (==8.0.2)", "sphinx-book-theme (==1.1.3)", "sphinx-copybutton (==0.5.2)", "tqdm-stubs", "types-requests", "xlrd"]
+docs = ["Jinja2 (==3.1.4)", "docutils (==0.21.2)", "ipython (==8.28)", "myst-parser (==4.0.0)", "nbsphinx (==0.9.5)", "pygments (>2.10)", "sphinx (==8.0.2)", "sphinx-book-theme (==1.1.3)", "sphinx-copybutton (==0.5.2)"]
 gremlin = ["gremlinpython"]
 igraph = ["igraph"]
 jupyter = ["ipython"]
 networkx = ["networkx (>=2.5)"]
 nodexl = ["openpyxl (==3.1.0)", "xlrd"]
+pygraphviz = ["pygraphviz"]
 test = ["flake8 (>=5.0)", "ipython", "mock", "mypy", "pandas-stubs", "pytest", "scikit-learn (<=1.3.2)", "tqdm-stubs", "types-requests"]
 testai = ["numba (>=0.57.1)"]
 umap-learn = ["dirty-cat (==0.2.0)", "scikit-learn (>=1.0)", "umap-learn"]
@@ -8879,6 +8880,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-
-
-content-hash = "11a43b99fb231db46cb07d72cb19b6ffde1a263862122c3f53e759b618ce18b7"
+content-hash = "c148c98eaa56f9d22bc6477276fce7cbc921b6898b7f3c18b53f8d2102b2a7ec"
