@@ -13,10 +13,8 @@ async def add(data: Union[BinaryIO, list[BinaryIO], str, list[str]], dataset_nam
     if user is None:
         user = await get_default_user()
 
-    # Resolve all directories from data to files
-    data = resolve_data_directories(data)
-
     tasks = [
+        Task(resolve_data_directories),
         Task(ingest_data_with_metadata, dataset_name, user)
     ]
 

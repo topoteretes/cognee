@@ -1,7 +1,7 @@
 import os
 from typing import List, Union, BinaryIO
 
-def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True):
+async def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True):
     """
     Resolves directories by replacing them with their contained files.
 
