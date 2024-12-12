@@ -1,0 +1,140 @@
+name: test | profiling
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+jobs:
+  profiler:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the code from the repository with full history
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history so we can checkout any commit
+
+    - name: Check if the sender is a maintainer
+      id: check_permissions
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const sender = context.payload.sender.login;
+          const { data: membership } = await github.rest.orgs.getMembershipForUser({
+            org: context.repo.owner,
+            username: sender,
+          }).catch(() => ({ data: { role: null } }));
+          return membership.role;
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set is_maintainer variable
+      run: |
+        echo "is_maintainer=${{ steps.check_permissions.outputs.result == 'admin' || steps.check_permissions.outputs.result == 'maintainer' }}" >> $GITHUB_ENV
+
+    - name: Stop if not a maintainer
+      if: env.is_maintainer != 'true'
+      run: |
+        echo "User ${{ github.event.sender.login }} is not a maintainer. Exiting."
+        exit 0  # Use exit 0 to mark the job as successful but stop execution
+
+    # Set up Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1.3.2
+      with:
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+        installer-parallel: true
+
+    - name: Install dependencies
+      run: |
+        poetry install --no-interaction --all-extras
+        poetry run pip install pyinstrument
+
+
+    # Set environment variables for SHAs
+    - name: Set environment variables
+      run: |
+        echo "BASE_SHA=${{ github.event.pull_request.base.sha }}" >> $GITHUB_ENV
+        echo "HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
+
+    # Run profiler on the base branch
+    - name: Run profiler on base branch
+      env:
+        BASE_SHA: ${{ env.BASE_SHA }}
+      run: |
+        echo "Profiling the base branch for code_graph_pipeline.py"
+        echo "Checking out base SHA: $BASE_SHA"
+        git checkout $BASE_SHA
+        echo "This is the working directory: $PWD"
+        # Ensure the script is executable
+        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
+        # Run Scalene
+        poetry run pyinstrument --renderer json -o base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+
+    # Run profiler on head branch
+    - name: Run profiler on head branch
+      env:
+        HEAD_SHA: ${{ env.HEAD_SHA }}
+      run: |
+        echo "Profiling the head branch for code_graph_pipeline.py"
+        echo "Checking out head SHA: $HEAD_SHA"
+        git checkout $HEAD_SHA
+        echo "This is the working directory: $PWD"
+        # Ensure the script is executable
+        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
+        # Run Scalene
+        poetry run pyinstrument --renderer json -o head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+
+    # Compare profiling results
+    - name: Compare profiling results
+      run: |
+        python -c '
+        import json
+        try:
+            with open("base_results.json") as f:
+                base = json.load(f)
+            with open("head_results.json") as f:
+                head = json.load(f)
+            cpu_diff = head.get("total_cpu_samples_python", 0) - base.get("total_cpu_samples_python", 0)
+            memory_diff = head.get("malloc_samples", 0) - base.get("malloc_samples", 0)
+            results = [
+                f"CPU Usage Difference: {cpu_diff}",
+                f"Memory Usage Difference: {memory_diff} bytes"
+            ]
+            with open("profiling_diff.txt", "w") as f:
+                f.write("\\n".join(results) + "\\n")
+            print("\\n".join(results))  # Print results to terminal
+        except Exception as e:
+            error_message = f"Error comparing profiling results: {e}"
+            with open("profiling_diff.txt", "w") as f:
+                f.write(error_message + "\\n")
+            print(error_message)  # Print error to terminal
+            '
+
+    - name: Upload profiling diff artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: profiling-diff
+        path: profiling_diff.txt
+
+    # Post results to the pull request
+#    - name: Post profiling results to PR
+#      uses: actions/github-script@v6
+#      with:
+#        script: |
+#          const fs = require('fs');
+#          const diff = fs.readFileSync('profiling_diff.txt', 'utf-8');
+#          github.rest.issues.createComment({
+#            issue_number: context.issue.number,
+#            owner: context.repo.owner,
+#            repo: context.repo.repo,
+#            body: `### Profiling Results for code_graph_pipeline.py\n\`\`\`\n${diff || 'No differences found.'}\n\`\`\``
+#          });
