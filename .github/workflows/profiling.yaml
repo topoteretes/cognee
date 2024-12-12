@@ -1,7 +1,10 @@
 name: test | profiling
 
 on:
-  push
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
 jobs:
   profiler:
     runs-on: ubuntu-latest
