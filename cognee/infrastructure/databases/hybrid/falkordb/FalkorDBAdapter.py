@@ -1,21 +1,26 @@
 import asyncio
 # from datetime import datetime
 import json
-from uuid import UUID
 from textwrap import dedent
+from uuid import UUID
+
 from falkordb import FalkorDB
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import \
+    GraphDBInterface
 from cognee.infrastructure.databases.vector.embeddings import EmbeddingEngine
-from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
+from cognee.infrastructure.databases.vector.vector_db_interface import \
+    VectorDBInterface
+from cognee.infrastructure.engine import DataPoint
+
 
 class IndexSchema(DataPoint):
     text: str
 
     _metadata: dict = {
-        "index_fields": ["text"]
+        "index_fields": ["text"],
+        "type": "IndexSchema"
     }
 
 class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):

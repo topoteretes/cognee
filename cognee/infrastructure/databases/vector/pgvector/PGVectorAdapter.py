@@ -1,27 +1,30 @@
 import asyncio
-from uuid import UUID
 from typing import List, Optional, get_type_hints
+from uuid import UUID
+
+from sqlalchemy import JSON, Column, Table, delete, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import JSON, Column, Table, select, delete
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
 
-from .serialize_data import serialize_data
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-from ..utils import normalize_distances
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
+from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..utils import normalize_distances
+from ..vector_db_interface import VectorDBInterface
+from .serialize_data import serialize_data
+
 
 class IndexSchema(DataPoint):
     text: str
 
     _metadata: dict = {
-        "index_fields": ["text"]
+        "index_fields": ["text"],
+        "type": "IndexSchema"
     }
 
 def singleton(class_):

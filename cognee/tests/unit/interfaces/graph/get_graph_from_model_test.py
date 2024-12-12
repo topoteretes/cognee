@@ -1,25 +1,38 @@
 import asyncio
 import random
 from typing import List
-from uuid import uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils import get_graph_from_model
 
+
 class Document(DataPoint):
     path: str
+    _metadata = {
+        "type": "Document"
+    }
 
 class DocumentChunk(DataPoint):
     part_of: Document
     text: str
     contains: List["Entity"] = None
+    _metadata = {
+        "type": "DocumentChunk"
+    }
 
 class EntityType(DataPoint):
     name: str
+    _metadata = {
+        "type": "EntityType"
+    }
 
 class Entity(DataPoint):
     name: str
     is_type: EntityType
+    _metadata = {
+        "type": "Entity"
+    }
 
 DocumentChunk.model_rebuild()
 
