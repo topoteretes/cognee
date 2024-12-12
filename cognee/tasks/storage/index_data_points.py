@@ -82,6 +82,7 @@ if __name__ == "__main__":
         model: str
         color: str
         _metadata = {
+            "index_fields": ["name"],
             "type": "Car"
         }
 
@@ -91,6 +92,7 @@ if __name__ == "__main__":
         age: int
         owns_car: list[Car]
         _metadata = {
+            "index_fields": ["name"],
             "type": "Person"
         }
 

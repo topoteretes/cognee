@@ -9,6 +9,7 @@ class Document(DataPoint):
     metadata_id: UUID
     mime_type: str
     _metadata: dict = {
+        "index_fields": ["name"],
         "type": "Document"
     }
 

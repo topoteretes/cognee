@@ -10,6 +10,7 @@ from cognee.modules.graph.utils import get_graph_from_model
 class Document(DataPoint):
     path: str
     _metadata = {
+        "index_fields": [],
         "type": "Document"
     }
 
@@ -18,12 +19,14 @@ class DocumentChunk(DataPoint):
     text: str
     contains: List["Entity"] = None
     _metadata = {
+        "index_fields": ["text"],
         "type": "DocumentChunk"
     }
 
 class EntityType(DataPoint):
     name: str
     _metadata = {
+        "index_fields": ["name"],
         "type": "EntityType"
     }
 
@@ -31,6 +34,7 @@ class Entity(DataPoint):
     name: str
     is_type: EntityType
     _metadata = {
+        "index_fields": ["name"],
         "type": "Entity"
     }
 

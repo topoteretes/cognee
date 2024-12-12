@@ -12,6 +12,7 @@ class Variable(DataPoint):
     data_type: str
 
     _metadata = {
+        "index_fields": ["name"],
         "type": "Variable"
     }
 
@@ -21,6 +22,7 @@ class Operator(DataPoint):
     description: str
     return_type: str
     _metadata = {
+        "index_fields": ["name"],
         "type": "Operator"
     }
 
@@ -33,6 +35,7 @@ class Class(DataPoint):
     has_methods: List["Function"]
 
     _metadata = {
+        "index_fields": ["name"],
         "type": "Class"
     }
 
@@ -45,6 +48,7 @@ class ClassInstance(DataPoint):
     instantiation_arguments: List[Variable]
 
     _metadata = {
+        "index_fields": ["name"],
         "type": "ClassInstance"
     }
 
@@ -57,6 +61,7 @@ class Function(DataPoint):
     is_static: Optional[bool] = False
 
     _metadata = {
+        "index_fields": ["name"],
         "type": "Function"
     }
 
@@ -66,6 +71,7 @@ class FunctionCall(DataPoint):
     function_called: Function
     function_arguments: List[Any]
     _metadata = {
+        "index_fields": [],
         "type": "FunctionCall"
     }
 
@@ -76,6 +82,7 @@ class Expression(DataPoint):
     expression: str
     members: List[Union[Variable, Function, Operator, "Expression"]]
     _metadata = {
+        "index_fields": ["name"],
         "type": "Expression"
     }
 
@@ -94,6 +101,7 @@ class SourceCodeGraph(DataPoint):
         Expression,
     ]]
     _metadata = {
+        "index_fields": ["name"],
         "type": "SourceCodeGraph"
     }
 

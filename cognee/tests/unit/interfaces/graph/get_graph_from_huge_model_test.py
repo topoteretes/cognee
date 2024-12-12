@@ -12,6 +12,7 @@ random.seed(1500)
 class Repository(DataPoint):
     path: str
     _metadata = {
+        "index_fields": [],
         "type": "Repository"
     }
 
@@ -21,6 +22,7 @@ class CodeFile(DataPoint):
     depends_on: List["CodeFile"] = []
     source_code: str
     _metadata = {
+        "index_fields": [],
         "type": "CodeFile"
     }
 
@@ -28,6 +30,7 @@ class CodePart(DataPoint):
     part_of: CodeFile
     source_code: str
     _metadata = {
+        "index_fields": [],
         "type": "CodePart"
     }
 
