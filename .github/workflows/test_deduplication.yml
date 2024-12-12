@@ -14,14 +14,8 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
 
 jobs:
-  get_docs_changes:
-    name: docs changes
-    uses: ./.github/workflows/get_docs_changes.yml
-
   run_deduplication_test:
     name: test
-    needs: get_docs_changes
-    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
     defaults:
       run:
