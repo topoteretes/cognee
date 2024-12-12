@@ -32,8 +32,8 @@ def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, List[str
                     )
             elif os.path.isfile(item):  # If it's a file, add it to the resolved_data list
                 resolved_data.append(item)
-            else:
-                raise ValueError(f"Path '{item}' is neither a file nor a directory.")
+            else: # If it's just text add it directly
+                resolved_data.append(item)
         elif isinstance(item, BinaryIO):  # If it's a binary stream, add it directly
             resolved_data.append(item)
         else:
