@@ -3499,13 +3499,13 @@ langsmith-pyo3 = ["langsmith-pyo3 (>=0.1.0rc2,<0.2.0)"]
 
 [[package]]
 name = "litellm"
-version = "1.49.1"
+version = "1.51.3"
 description = "Library to easily interface with LLM API providers"
 optional = false
 python-versions = "!=2.7.*,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,!=3.7.*,>=3.8"
 files = [
-    {file = "litellm-1.49.1-py3-none-any.whl", hash = "sha256:2ba6689fe4ea3b0d69f56f2843caff6422497489e6252943b13ef1463f016728"},
-    {file = "litellm-1.49.1.tar.gz", hash = "sha256:f51450ad823c8bdf057017009ae8bcce1a2810690b2f0d9dcdaff04ddc68209a"},
+    {file = "litellm-1.51.3-py3-none-any.whl", hash = "sha256:440d3c7cc5ab8eeb12cee8f4d806bff05b7db834ebc11117d7fa070a1142ced5"},
+    {file = "litellm-1.51.3.tar.gz", hash = "sha256:31eff9fcbf7b058bac0fd7432c4ea0487e8555f12446a1f30e5862e33716f44d"},
 ]
 
 [package.dependencies]
@@ -3514,7 +3514,7 @@ click = "*"
 importlib-metadata = ">=6.8.0"
 jinja2 = ">=3.1.2,<4.0.0"
 jsonschema = ">=4.22.0,<5.0.0"
-openai = ">=1.51.0"
+openai = ">=1.52.0"
 pydantic = ">=2.0.0,<3.0.0"
 python-dotenv = ">=0.2.0"
 requests = ">=2.31.0,<3.0.0"
@@ -8879,6 +8879,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.12"
-
-
-content-hash = "11a43b99fb231db46cb07d72cb19b6ffde1a263862122c3f53e759b618ce18b7"
+content-hash = "be34893ec7b078305b9f38f7a71a4ae5d4bebe2a2d1b7f921907413a88bbd19e"
