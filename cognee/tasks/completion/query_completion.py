@@ -1,10 +1,10 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.tasks.compute.exceptions import NoRelevantDataFound
+from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 
 
-async def query_compute(query: str) -> list:
+async def query_completion(query: str) -> list:
     """
     Parameters:
     - query (str): The query string to compute.
