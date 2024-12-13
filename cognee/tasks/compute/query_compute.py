@@ -24,7 +24,7 @@ async def query_compute(query: str) -> list:
         "context": found_chunks[0].payload["text"],
     }
     user_prompt = render_prompt("context_for_question.txt", args)
-    system_prompt = read_query_prompt("answer_hotpot_using_cognee_search.txt")
+    system_prompt = read_query_prompt("answer_simple_question.txt")
 
     llm_client = get_llm_client()
     computed_answer = await llm_client.acreate_structured_output(
