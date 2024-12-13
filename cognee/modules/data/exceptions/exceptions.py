@@ -13,7 +13,7 @@ class UnstructuredLibraryImportError(CogneeApiError):
 class UnauthorizedDataAccessError(CogneeApiError):
     def __init__(
             self,
-            message: str = "Usesr does not have permission to access this data.",
+            message: str = "User does not have permission to access this data.",
             name: str = "UnauthorizedDataAccessError",
             status_code=status.HTTP_401_UNAUTHORIZED,
     ):
