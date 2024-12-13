@@ -99,6 +99,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def create_data_points(
         self, collection_name: str, data_points: List[DataPoint]
     ):
+        data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
                 collection_name = collection_name,
@@ -119,7 +120,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             primary_key: Mapped[int] = mapped_column(
                 primary_key=True, autoincrement=True
             )
-            id: Mapped[type(data_points[0].id)]
+            id: Mapped[data_point_types["id"]]
             payload = Column(JSON)
             vector = Column(Vector(vector_size))
 
