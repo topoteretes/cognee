@@ -30,13 +30,8 @@ async def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, Li
                     resolved_data.extend(
                         [os.path.join(item, f) for f in os.listdir(item) if os.path.isfile(os.path.join(item, f))]
                     )
-            elif os.path.isfile(item):  # If it's a file, add it to the resolved_data list
+            else: # If it's a file or text add it directly
                 resolved_data.append(item)
-            else: # If it's just text add it directly
-                resolved_data.append(item)
-        elif isinstance(item, BinaryIO):  # If it's a binary stream, add it directly
+        else: # If it's not a string add it directly
             resolved_data.append(item)
-        else:
-            raise TypeError(f"Unsupported type: {type(item)}. Expected str or BinaryIO.")
-
     return resolved_data
