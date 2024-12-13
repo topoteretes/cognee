@@ -29,7 +29,7 @@ def test_TextDocument(input_file, chunk_size):
         input_file,
     )
     document = TextDocument(
-        id=uuid.uuid4(), name=input_file, raw_data_location=test_file_path, metadata_id=uuid.uuid4()
+        id=uuid.uuid4(), name=input_file, raw_data_location=test_file_path, metadata_id=uuid.uuid4(), mime_type="",
     )
 
     for ground_truth, paragraph_data in zip(

@@ -1,0 +1,44 @@
+## Reference: https://github.com/amannn/action-semantic-pull-request
+---
+name: lint | PR
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  pr_title:
+    permissions:
+      pull-requests: write
+      statuses: write
+    name: Validate & Label PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Configure which types are allowed (newline-delimited).
+          # From: https://github.com/commitizen/conventional-commit-types/blob/master/index.json
+          # listing all below
+          types: |
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            revert
+            test
+            break
+      - uses: release-drafter/release-drafter@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

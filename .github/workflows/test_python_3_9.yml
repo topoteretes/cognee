@@ -14,14 +14,9 @@ env:
   ENV: 'dev'
 
 jobs:
-  get_docs_changes:
-    name: docs changes
-    uses: ./.github/workflows/get_docs_changes.yml
 
   run_common:
     name: test
-    needs: get_docs_changes
-    if: needs.get_docs_changes.outputs.changes_outside_docs == 'true' && ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,7 +42,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction -E docs
 
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
