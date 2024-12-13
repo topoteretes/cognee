@@ -9,3 +9,12 @@ class UnstructuredLibraryImportError(CogneeApiError):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
+
+class UnauthorizedDataAccessError(CogneeApiError):
+    def __init__(
+            self,
+            message: str = "Usesr does not have permission to access this data.",
+            name: str = "UnauthorizedDataAccessError",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+    ):
+        super().__init__(message, name, status_code)
