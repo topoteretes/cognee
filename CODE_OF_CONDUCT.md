@@ -111,17 +111,6 @@ individual, or aggression toward or disparagement of classes of individuals.
 **Consequence**: A permanent ban from any sort of public interaction within
 the community.
 
-## Developer Certificate of Origin
-All contributions to the topoteretes codebase must be signed-off to indicate you have read and agreed to the Developer Certificate of Origin (DCO), which is in the root directory under name DCO. To sign the DCO, simply add -s after all commits that you make, to do this easily you can make a git alias from the command line, for example:
-
-$ git config alias.cos "commit -s"
-
-Will allow you to write git cos which will automatically sign-off your commit. By signing a commit you are agreeing to the DCO and agree that you will be banned from the topoteretes GitHub organisation and Discord server if you violate the DCO.
-
-We consider the following as violations to the DCO:
-
-Signing the DCO with a fake name or pseudonym, if you are registered on GitHub or another platform with a fake name then you will not be able to contribute to topoteretes before updating your name;
-Submitting a contribution that you did not have the right to submit whether due to licensing, copyright, or any other restrictions.
 
 ## Attribution
 

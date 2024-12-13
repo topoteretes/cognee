@@ -71,11 +71,23 @@ You're on the verge of completion! It's time to showcase your hard work. 🌐
 
 The project maintainers will review your work, possibly suggest improvements, or request further details. Once you receive approval, your contributions will become part of **cognee**!
 
-## 5. 📜 Code of Conduct
 
+## 5. Developer Certificate of Origin
+All contributions to the topoteretes codebase must be signed-off to indicate you have read and agreed to the Developer Certificate of Origin (DCO), which is in the root directory under name DCO. To sign the DCO, simply add -s after all commits that you make, to do this easily you can make a git alias from the command line, for example:
+
+$ git config alias.cos "commit -s"
+
+Will allow you to write git cos which will automatically sign-off your commit. By signing a commit you are agreeing to the DCO and agree that you will be banned from the topoteretes GitHub organisation and Discord server if you violate the DCO.
+
+We consider the following as violations to the DCO:
+
+Signing the DCO with a fake name or pseudonym, if you are registered on GitHub or another platform with a fake name then you will not be able to contribute to topoteretes before updating your name;
+Submitting a contribution that you did not have the right to submit whether due to licensing, copyright, or any other restrictions.
+
+## 6. 📜 Code of Conduct
 Ensure you adhere to the project's [Code of Conduct](https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md) throughout your participation.
 
-## 6. 📫 Contact
+## 7. 📫 Contact
 
 If you need assistance or simply wish to connect, we're here for you. Contact us by filing an issue on the GitHub repository or by messaging us on our Discord server.
 
