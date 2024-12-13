@@ -8,6 +8,7 @@ async def main(repo_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("repo_path", type=str, help="Path to the repository")
+    parser.add_argument("--repo-path", type=str, required=True, help="Path to the repository")
     args = parser.parse_args()
     asyncio.run(main(args.repo_path))
+
