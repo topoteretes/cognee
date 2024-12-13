@@ -6,27 +6,32 @@ from sqlalchemy import insert
 
 from cognee.modules.users.exceptions import UserNotFoundError, GroupNotFoundError
 from cognee.modules.users import get_user_db
-from cognee.modules.users.models import User, Group, Permission, UserGroup
+from cognee.modules.users.models import User, Group, Permission, UserGroup, GroupPermission
 
 def get_permissions_router() -> APIRouter:
     permissions_router = APIRouter()
 
     @permissions_router.post("/groups/{group_id}/permissions")
     async def give_permission_to_group(group_id: str, permission: str, db: Session = Depends(get_user_db)):
-        group = db.query(Group).filter(Group.id == group_id).first()
+        group = (await db.session.execute(select(Group).where(Group.id == group_id))).scalars().first()
 
         if not group:
             raise GroupNotFoundError
 
-        permission = db.query(Permission).filter(Permission.name == permission).first()
+        permission_entity = (
+            await db.session.execute(select(Permission).where(Permission.name == permission))).scalars().first()
 
-        if not permission:
-            permission = Permission(name = permission)
-            db.add(permission)
+        if not permission_entity:
+            stmt = insert(Permission).values(name=permission)
+            ret_val = await db.session.execute(stmt)
 
-        group.permissions.append(permission)
+        permission_entity = (
+            await db.session.execute(select(Permission).where(Permission.name == permission))).scalars().first()
 
-        db.commit()
+        # add permission to group
+        await db.session.execute(insert(GroupPermission).values(group_id=group.id, permission_id=permission_entity.id))
+
+        await db.session.commit()
 
         return JSONResponse(status_code = 200, content = {"message": "Permission assigned to group"})
 
@@ -43,7 +48,6 @@ def get_permissions_router() -> APIRouter:
         # Add association directly to the association table
         stmt = insert(UserGroup).values(user_id=user_id, group_id=group_id)
         await db.session.execute(stmt)
-        #user.groups.append(group)
 
         await db.session.commit()
 
