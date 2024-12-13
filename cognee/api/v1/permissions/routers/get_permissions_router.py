@@ -3,7 +3,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
 from sqlalchemy import insert
+from sqlalchemy.exc import IntegrityError
 
+from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.modules.users.exceptions import UserNotFoundError, GroupNotFoundError
 from cognee.modules.users import get_user_db
 from cognee.modules.users.models import User, Group, Permission, UserGroup, GroupPermission
@@ -23,13 +25,16 @@ def get_permissions_router() -> APIRouter:
 
         if not permission_entity:
             stmt = insert(Permission).values(name=permission)
-            ret_val = await db.session.execute(stmt)
+            await db.session.execute(stmt)
+            permission_entity = (
+                await db.session.execute(select(Permission).where(Permission.name == permission))).scalars().first()
 
-        permission_entity = (
-            await db.session.execute(select(Permission).where(Permission.name == permission))).scalars().first()
-
-        # add permission to group
-        await db.session.execute(insert(GroupPermission).values(group_id=group.id, permission_id=permission_entity.id))
+        try:
+            # add permission to group
+            await db.session.execute(
+                insert(GroupPermission).values(group_id=group.id, permission_id=permission_entity.id))
+        except IntegrityError as e:
+            raise EntityAlreadyExistsError(message="Group permission already exists.")
 
         await db.session.commit()
 
@@ -45,9 +50,12 @@ def get_permissions_router() -> APIRouter:
         elif not group:
             raise GroupNotFoundError
 
-        # Add association directly to the association table
-        stmt = insert(UserGroup).values(user_id=user_id, group_id=group_id)
-        await db.session.execute(stmt)
+        try:
+            # Add association directly to the association table
+            stmt = insert(UserGroup).values(user_id=user_id, group_id=group_id)
+            await db.session.execute(stmt)
+        except IntegrityError as e:
+            raise EntityAlreadyExistsError(message="User is already part of group.")
 
         await db.session.commit()
 
