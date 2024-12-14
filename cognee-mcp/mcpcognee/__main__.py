@@ -1,3 +1,4 @@
 from mcpcognee import main
+import asyncio
 
-main()
+asyncio.run(main())
