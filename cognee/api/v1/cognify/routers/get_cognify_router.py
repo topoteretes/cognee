@@ -9,12 +9,13 @@ from fastapi import Depends
 
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
+    graph_model: BaseModel
 
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/", response_model=None)
-    async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user), graph_model:BaseModel):
+    async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user), graph_model:BaseModel=None):
         """ This endpoint is responsible for the cognitive processing of the content."""
         from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
         try:
