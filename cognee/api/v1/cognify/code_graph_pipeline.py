@@ -1,3 +1,7 @@
+# NOTICE: This module contains deprecated functions.
+# Use only the run_code_graph_pipeline function; all other functions are deprecated.
+# Related issue: COG-906
+
 import asyncio
 import logging
 from pathlib import Path
@@ -55,6 +59,7 @@ async def code_graph_pipeline(datasets: Union[str, list[str]] = None, user: User
 
 
 async def run_pipeline(dataset: Dataset, user: User):
+    '''DEPRECATED: Use `run_code_graph_pipeline` instead. This function will be removed.'''
     data_documents: list[Data] = await get_dataset_data(dataset_id = dataset.id)
 
     document_ids_str = [str(document.id) for document in data_documents]
