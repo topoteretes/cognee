@@ -1,6 +1,7 @@
 import argparse
 import asyncio
-from evals.eval_swe_bench import run_code_graph_pipeline
+from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
+
 
 async def main(repo_path):
     async for result in await run_code_graph_pipeline(repo_path):
