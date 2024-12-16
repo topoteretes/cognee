@@ -1,8 +1,10 @@
 """Data models for the cognitive architecture."""
 
 from enum import Enum, auto
-from typing import Optional, List, Union, Dict, Any
+from typing import Any, Dict, List, Optional, Union
+
 from pydantic import BaseModel, Field
+
 
 class Node(BaseModel):
     """Node in a knowledge graph."""
@@ -193,6 +195,29 @@ class SummarizedContent(BaseModel):
     """Class for a single class label summary and description."""
     summary: str
     description: str
+
+class SummarizedFunction(BaseModel):
+    name: str
+    description: str
+    inputs: Optional[List[str]] = None
+    outputs: Optional[str] = None
+    decorators: Optional[List[str]] = None
+
+class SummarizedClass(BaseModel):
+    name: str
+    description: str
+    methods: Optional[List[SummarizedFunction]] = None
+    decorators: Optional[List[str]] = None
+
+class SummarizedCode(BaseModel):
+    file_name: str
+    high_level_summary: str
+    key_features: List[str]
+    imports: List[str] = []
+    constants: List[str] = []
+    classes: List[SummarizedClass] = []
+    functions: List[SummarizedFunction] = []
+    workflow_description: Optional[str] = None
 
 
 class GraphDBType(Enum):
