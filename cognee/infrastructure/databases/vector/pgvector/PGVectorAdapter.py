@@ -2,9 +2,9 @@ import asyncio
 from typing import List, Optional, get_type_hints
 from uuid import UUID
 
-from sqlalchemy import JSON, Column, Table, delete, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -51,10 +51,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def has_collection(self, collection_name: str) -> bool:
         async with self.engine.begin() as connection:
-            # Load the schema information into the MetaData object
-            await connection.run_sync(Base.metadata.reflect)
+            # Create a MetaData instance to load table information
+            metadata = MetaData()
+            # Load table information from schema into MetaData
+            await connection.run_sync(metadata.reflect)
 
-            if collection_name in Base.metadata.tables:
+            if collection_name in metadata.tables:
                 return True
             else:
                 return False
@@ -149,10 +151,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with an async engine.
         """
         async with self.engine.begin() as connection:
-            # Load the schema information into the MetaData object
-            await connection.run_sync(Base.metadata.reflect)
-            if collection_name in Base.metadata.tables:
-                return Base.metadata.tables[collection_name]
+            # Create a MetaData instance to load table information
+            metadata = MetaData()
+            # Load table information from schema into MetaData
+            await connection.run_sync(metadata.reflect)
+            if collection_name in metadata.tables:
+                return metadata.tables[collection_name]
             else:
                 raise EntityNotFoundError(message=f"Table '{collection_name}' not found.")
 
