@@ -113,10 +113,12 @@ class SQLAlchemyAdapter():
         """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # Load the schema information into the MetaData object
-                await connection.run_sync(Base.metadata.reflect)
-                if table_name in Base.metadata.tables:
-                    return Base.metadata.tables[table_name]
+                # Create a MetaData instance to load table information
+                metadata = MetaData()
+                # Load table information from schema into MetaData
+                await connection.run_sync(metadata.reflect)
+                if table_name in metadata.tables:
+                    return metadata.tables[table_name]
                 else:
                     raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:
@@ -138,8 +140,11 @@ class SQLAlchemyAdapter():
         table_names = []
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                await connection.run_sync(Base.metadata.reflect)
-                for table in Base.metadata.tables:
+                # Create a MetaData instance to load table information
+                metadata = MetaData()
+                # Load table information from schema into MetaData
+                await connection.run_sync(metadata.reflect)
+                for table in metadata.tables:
                     table_names.append(str(table))
             else:
                 schema_list = await self.get_schema_list()
