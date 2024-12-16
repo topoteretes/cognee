@@ -11,8 +11,8 @@ from .models import CodeSummary
 
 
 async def summarize_code(
-        code_graph_nodes: list[DataPoint],
-        summarization_model: Type[BaseModel],
+    code_graph_nodes: list[DataPoint],
+    summarization_model: Type[BaseModel],
 ) -> list[DataPoint]:
     if len(code_graph_nodes) == 0:
         return
@@ -35,6 +35,7 @@ async def summarize_code(
 
         if not isinstance(node, CodeFile):
             continue
+
         yield CodeSummary(
             id=uuid5(node.id, "CodeSummary"),
             made_from=node,
