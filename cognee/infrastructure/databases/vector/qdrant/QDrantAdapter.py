@@ -1,13 +1,16 @@
 import logging
+from typing import Dict, List, Optional
 from uuid import UUID
-from typing import List, Dict, Optional
+
 from qdrant_client import AsyncQdrantClient, models
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.infrastructure.databases.vector.models.ScoredResult import \
+    ScoredResult
 from cognee.infrastructure.engine import DataPoint
-from ..vector_db_interface import VectorDBInterface
+
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..vector_db_interface import VectorDBInterface
 
 logger = logging.getLogger("QDrantAdapter")
 
@@ -15,7 +18,8 @@ class IndexSchema(DataPoint):
     text: str
 
     _metadata: dict = {
-        "index_fields": ["text"]
+        "index_fields": ["text"],
+        "type": "IndexSchema"
     }
 
 # class CollectionConfig(BaseModel, extra = "forbid"):
