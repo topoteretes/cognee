@@ -5,11 +5,11 @@ from cognee.modules.users.models import User
 from fastapi.responses import JSONResponse
 from cognee.modules.users.methods import get_authenticated_user
 from fastapi import Depends
-
+from cognee.shared.data_models import KnowledgeGraph
 
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
-    graph_model: Optional[BaseModel] = None
+    graph_model: Optional[BaseModel] = KnowledgeGraph
 
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
