@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
-
+import pickle
 
 # Define metadata type
 class MetaData(TypedDict):
@@ -23,7 +23,7 @@ class DataPoint(BaseModel):
     source: Optional[str] = None  # Path to file, URL, etc.
     type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
-    extra: Optional[Dict[str, Any]] = None  # For additional properties
+    extra: Optional[Dict[str, Dict]] = None  # For additional properties
     _metadata: Optional[MetaData] = {
         "index_fields": [],
         "type": "DataPoint"
@@ -60,3 +60,24 @@ class DataPoint(BaseModel):
         """Update the version and updated_at timestamp."""
         self.version = new_version
         self.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+ # JSON Serialization
+    def to_json(self) -> str:
+        """Serialize the instance to a JSON string."""
+        return self.json()
+
+    @classmethod
+    def from_json(self, json_str: str):
+        """Deserialize the instance from a JSON string."""
+        return self.model_validate_json(json_str)
+
+    # Pickle Serialization
+    def to_pickle(self) -> bytes:
+        """Serialize the instance to pickle-compatible bytes."""
+        return pickle.dumps(self.dict())
+
+    @classmethod
+    def from_pickle(self, pickled_data: bytes):
+        """Deserialize the instance from pickled bytes."""
+        data = pickle.loads(pickled_data)
+        return self(**data)
