@@ -122,7 +122,6 @@ def generate_dataset_name(dataset_name: str) -> str:
 async def run_code_graph_pipeline(repo_path):
     import os
     import pathlib
-
     import cognee
     from cognee.infrastructure.databases.relational import create_db_and_tables
 

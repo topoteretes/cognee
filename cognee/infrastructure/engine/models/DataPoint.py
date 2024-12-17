@@ -1,8 +1,10 @@
-from typing_extensions import TypedDict
-from uuid import UUID, uuid4
-from typing import Optional
 from datetime import datetime, timezone
+from typing import Optional
+from uuid import UUID, uuid4
+
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
+
 
 class MetaData(TypedDict):
     index_fields: list[str]
@@ -13,7 +15,8 @@ class DataPoint(BaseModel):
     updated_at: Optional[datetime] = datetime.now(timezone.utc)
     topological_rank: Optional[int] = 0
     _metadata: Optional[MetaData] = {
-        "index_fields": []
+        "index_fields": [],
+        "type": "DataPoint"
     }
 
     # class Config:

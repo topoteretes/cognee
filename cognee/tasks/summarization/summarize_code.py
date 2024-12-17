@@ -1,10 +1,10 @@
 import asyncio
 from typing import AsyncGenerator, Union
 from uuid import uuid5
+from typing import Type
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.extraction.extract_summary import extract_code_summary
-
 from .models import CodeSummary
 
 

@@ -2,7 +2,7 @@ from cognee.infrastructure.engine import DataPoint
 
 
 def convert_node_to_data_point(node_data: dict) -> DataPoint:
-    subclass = find_subclass_by_name(DataPoint, node_data["type"])
+    subclass = find_subclass_by_name(DataPoint, node_data._metadata["type"])
 
     return subclass(**node_data)
 

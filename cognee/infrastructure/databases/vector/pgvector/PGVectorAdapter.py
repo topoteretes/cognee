@@ -1,6 +1,7 @@
 import asyncio
-from uuid import UUID
 from typing import List, Optional, get_type_hints
+from uuid import UUID
+
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -9,19 +10,21 @@ from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
 
-from .serialize_data import serialize_data
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-from ..utils import normalize_distances
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
+from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..utils import normalize_distances
+from ..vector_db_interface import VectorDBInterface
+from .serialize_data import serialize_data
+
 
 class IndexSchema(DataPoint):
     text: str
 
     _metadata: dict = {
-        "index_fields": ["text"]
+        "index_fields": ["text"],
+        "type": "IndexSchema"
     }
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
@@ -89,6 +92,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def create_data_points(
         self, collection_name: str, data_points: List[DataPoint]
     ):
+        data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
                 collection_name = collection_name,
@@ -108,7 +112,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             primary_key: Mapped[int] = mapped_column(
                 primary_key=True, autoincrement=True
             )
-            id: Mapped[type(data_points[0].id)]
+            id: Mapped[data_point_types["id"]]
             payload = Column(JSON)
             vector = Column(self.Vector(vector_size))
 
