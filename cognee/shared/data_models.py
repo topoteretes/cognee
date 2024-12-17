@@ -200,7 +200,7 @@ class SummarizedFunction(BaseModel):
     name: str
     description: str
     inputs: Optional[List[str]] = None
-    outputs: Optional[str] = None
+    outputs: Optional[List[str]] = None
     decorators: Optional[List[str]] = None
 
 class SummarizedClass(BaseModel):

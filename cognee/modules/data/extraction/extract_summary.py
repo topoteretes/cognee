@@ -17,10 +17,5 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
     return llm_output
 
 async def extract_code_summary(content: str):
-    llm_client = get_llm_client()
-
-    system_prompt = read_query_prompt("summarize_code.txt")
-
-    llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model=SummarizedCode)
-
-    return llm_output
+    
+    return await extract_summary(content, response_model=SummarizedCode)
