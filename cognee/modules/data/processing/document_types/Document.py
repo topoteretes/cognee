@@ -13,5 +13,5 @@ class Document(DataPoint):
         "type": "Document"
     }
 
-    def read(self, chunk_size: int) -> str:
+    def read(self, chunk_size: int, chunker = str) -> str:
         pass
