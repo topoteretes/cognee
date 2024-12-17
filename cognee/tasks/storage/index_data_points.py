@@ -1,6 +1,7 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
+
 async def index_data_points(data_points: list[DataPoint]):
     created_indexes = {}
     index_points = {}
@@ -80,11 +81,20 @@ if __name__ == "__main__":
     class Car(DataPoint):
         model: str
         color: str
+        _metadata = {
+            "index_fields": ["name"],
+            "type": "Car"
+        }
+
   
     class Person(DataPoint):
         name: str
         age: int
         owns_car: list[Car]
+        _metadata = {
+            "index_fields": ["name"],
+            "type": "Person"
+        }
 
     car1 = Car(model = "Tesla Model S", color = "Blue")
     car2 = Car(model = "Toyota Camry", color = "Red")
