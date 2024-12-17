@@ -23,7 +23,7 @@ class DataPoint(BaseModel):
     source: Optional[str] = None  # Path to file, URL, etc.
     type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
-    extra: Optional[str] = None  # For additional properties
+    extra: Optional[str] = "extra"  # For additional properties
     _metadata: Optional[MetaData] = {
         "index_fields": [],
         "type": "DataPoint"
