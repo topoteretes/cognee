@@ -15,6 +15,7 @@ env:
 jobs:
   run_neo4j_integration_test:
     name: test
+    if:  ${{ github.event.label.name == 'run-checks' }}
     runs-on: ubuntu-latest
 
     defaults:
