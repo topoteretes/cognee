@@ -31,7 +31,7 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
                             Dataset.name == dataset,
                             Dataset.owner_id == user_id,
                         )
-                    )).one()
+                    )).one_or_none()
 
                     # Check which documents are connected to this dataset
                     for document_id in document_ids:
@@ -41,7 +41,7 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
                                 DatasetData.dataset_id == dataset_id,
                                 DatasetData.data_id == document_id,
                             )
-                        )).one()
+                        )).one_or_none()
 
                         # If document is related to dataset added it to return value
                         if data_id:

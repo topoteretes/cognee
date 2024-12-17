@@ -4,6 +4,7 @@ import pathlib
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.users.methods import get_default_user
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -44,12 +45,13 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata = True)
 
-    dataset_name = "cs_explanations"
+    dataset_name_1 = "natural_language"
+    dataset_name_2 = "quantum"
 
     explanation_file_path = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    await cognee.add([explanation_file_path], dataset_name)
+    await cognee.add([explanation_file_path], dataset_name_1)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -59,11 +61,23 @@ async def main():
     In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
     """
 
-    await cognee.add([text], dataset_name)
+    await cognee.add([text], dataset_name_2)
 
-    await cognee.cognify([dataset_name])
+    await cognee.cognify([dataset_name_2, dataset_name_1])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
+
+    # Test getting of documents for search per dataset
+    from cognee.modules.users.permissions.methods import get_document_ids_for_user
+    user = await get_default_user()
+    document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
+    assert len(document_ids) == 1, f"Number of expected documents doesn't match {len(document_ids)} != 1"
+
+    # Test getting of documents for search when no dataset is provided
+    from cognee.modules.users.permissions.methods import get_document_ids_for_user
+    user = await get_default_user()
+    document_ids = await get_document_ids_for_user(user.id)
+    assert len(document_ids) == 2, f"Number of expected documents doesn't match {len(document_ids)} != 2"
 
     vector_engine = get_vector_engine()
     random_node = (await vector_engine.search("entity_name", "Quantum computer"))[0]
@@ -75,7 +89,7 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, query_text = random_node_name)
+    search_results = await cognee.search(SearchType.CHUNKS, query_text = random_node_name, datasets=[dataset_name_2])
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
