@@ -1,7 +1,7 @@
 import json
 from uuid import UUID
 from enum import Enum
-from typing import Callable, Dict
+from typing import Callable, Dict, Union
 
 from cognee.exceptions import InvalidValueError
 from cognee.modules.search.operations import log_query, log_result
@@ -22,7 +22,12 @@ class SearchType(Enum):
     CHUNKS = "CHUNKS"
     COMPLETION = "COMPLETION"
 
-async def search(query_type: SearchType, query_text: str, user: User = None) -> list:
+async def search(query_type: SearchType, query_text: str, user: User = None,
+                 datasets: Union[list[str], str, None] = None) -> list:
+    # We use lists from now on for datasets
+    if isinstance(datasets, str):
+        datasets = [datasets]
+
     if user is None:
         user = await get_default_user()
 
@@ -31,7 +36,7 @@ async def search(query_type: SearchType, query_text: str, user: User = None) -> 
 
     query = await log_query(query_text, str(query_type), user.id)
 
-    own_document_ids = await get_document_ids_for_user(user.id)
+    own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(query_type, query_text, user)
 
     filtered_search_results = []
