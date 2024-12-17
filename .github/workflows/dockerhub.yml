@@ -43,4 +43,9 @@ jobs:
 
     - name: Verify pushed Docker images
       run: |
-        echo "Successfully pushed images to Docker Hub"
+       # Verify both platform variants
+       for PLATFORM in "linux/amd64" "linux/arm64"; do
+         echo "Verifying image for $PLATFORM..."
+         docker buildx imagetools inspect "${IMAGE_NAME}:${TAG_VERSION}" --format "{{.Manifest.$PLATFORM.Digest}}"
+       done
+       echo "Successfully verified images in Docker Hub"
