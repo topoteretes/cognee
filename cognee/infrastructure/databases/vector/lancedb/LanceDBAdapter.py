@@ -1,25 +1,29 @@
-from typing import List, Optional, get_type_hints, Generic, TypeVar
 import asyncio
+from typing import Generic, List, Optional, TypeVar, get_type_hints
 from uuid import UUID
+
 import lancedb
+from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
-from lancedb.pydantic import Vector, LanceModel
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-from ..utils import normalize_distances
+
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..utils import normalize_distances
+from ..vector_db_interface import VectorDBInterface
+
 
 class IndexSchema(DataPoint):
     id: str
     text: str
 
     _metadata: dict = {
-        "index_fields": ["text"]
+        "index_fields": ["text"],
+        "type": "IndexSchema"
     }
 
 class LanceDBAdapter(VectorDBInterface):

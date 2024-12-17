@@ -2,7 +2,7 @@ import asyncio
 import random
 import time
 from typing import List
-from uuid import uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils import get_graph_from_model
@@ -11,16 +11,28 @@ random.seed(1500)
 
 class Repository(DataPoint):
     path: str
+    _metadata = {
+        "index_fields": [],
+        "type": "Repository"
+    }
 
 class CodeFile(DataPoint):
     part_of: Repository
     contains: List["CodePart"] = []
     depends_on: List["CodeFile"] = []
     source_code: str
+    _metadata = {
+        "index_fields": [],
+        "type": "CodeFile"
+    }
 
 class CodePart(DataPoint):
     part_of: CodeFile
     source_code: str
+    _metadata = {
+        "index_fields": [],
+        "type": "CodePart"
+    }
 
 CodeFile.model_rebuild()
 CodePart.model_rebuild()
