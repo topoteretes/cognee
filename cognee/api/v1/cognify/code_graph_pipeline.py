@@ -19,7 +19,6 @@ from cognee.modules.pipelines.operations.log_pipeline_status import \
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
-from cognee.shared.data_models import SummarizedCode, SummarizedContent
 from cognee.shared.SourceCodeGraph import SourceCodeGraph
 from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents import (check_permissions_on_documents,
@@ -141,7 +140,7 @@ async def run_code_graph_pipeline(repo_path):
         Task(get_repo_file_dependencies),
         Task(enrich_dependency_graph, task_config={"batch_size": 50}),
         Task(expand_dependency_graph, task_config={"batch_size": 50}),
-        Task(summarize_code, summarization_model=SummarizedCode, task_config={"batch_size": 50}),
+        Task(summarize_code, task_config={"batch_size": 50}),
         Task(add_data_points, task_config={"batch_size": 50}),
     ]
 
