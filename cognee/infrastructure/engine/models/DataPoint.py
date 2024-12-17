@@ -24,22 +24,20 @@ class DataPoint(BaseModel):
     type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
     extra: Optional[Dict[str, Any]] = None  # For additional properties
-    _metadata: Optional[MetaData] = Field(
-        default={"index_fields": [], "type": "DataPoint"}
-    )
+    _metadata: Optional[MetaData] = {
+        "index_fields": [],
+        "type": "DataPoint"
+    }
 
     # Override the Pydantic configuration
     class Config:
         underscore_attrs_are_private = True
 
     @classmethod
-    def get_embeddable_data(cls, data_point):
-        """Retrieve embeddable data based on metadata's index_fields."""
-        if (
-            data_point._metadata
-            and len(data_point._metadata["index_fields"]) > 0
-            and hasattr(data_point, data_point._metadata["index_fields"][0])
-        ):
+    @classmethod
+    def get_embeddable_data(self, data_point):
+        if data_point._metadata and len(data_point._metadata["index_fields"]) > 0 \
+            and hasattr(data_point, data_point._metadata["index_fields"][0]):
             attribute = getattr(data_point, data_point._metadata["index_fields"][0])
 
             if isinstance(attribute, str):
@@ -47,14 +45,14 @@ class DataPoint(BaseModel):
             return attribute
 
     @classmethod
-    def get_embeddable_properties(cls, data_point):
+    def get_embeddable_properties(self, data_point):
         """Retrieve all embeddable properties."""
         if data_point._metadata and len(data_point._metadata["index_fields"]) > 0:
             return [getattr(data_point, field, None) for field in data_point._metadata["index_fields"]]
         return []
 
     @classmethod
-    def get_embeddable_property_names(cls, data_point):
+    def get_embeddable_property_names(self, data_point):
         """Retrieve names of embeddable properties."""
         return data_point._metadata["index_fields"] or []
 
