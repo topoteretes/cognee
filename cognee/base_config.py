@@ -12,7 +12,7 @@ class BaseConfig(BaseSettings):
     graphistry_password: Optional[str] = os.getenv("GRAPHISTRY_PASSWORD")
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
-    langfuse_host: Optional[str] = os.environ["LANGFUSE_HOST"]
+    langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
 
     model_config = SettingsConfigDict(env_file = ".env", extra = "allow")
 
