@@ -25,8 +25,8 @@ jobs:
     - name: Extract Git information
       id: git-info
       run: |
-        echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | sed 's/\\//-/g')" >> $GITHUB_ENV
-        echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        echo "BRANCH_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+        echo "COMMIT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
     - name: Build and Push Docker Image
       run: |
