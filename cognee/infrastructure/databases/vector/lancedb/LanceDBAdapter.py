@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from lancedb.pydantic import Vector, LanceModel
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, Relationship
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 from ..models.ScoredResult import ScoredResult
@@ -71,6 +71,49 @@ class LanceDBAdapter(VectorDBInterface):
                 schema = LanceDataPoint,
                 exist_ok = True,
             )
+
+
+
+    async def create_relationships(self, collection_name: str, relationships: list[Relationship]):
+        """Create and store Relationship embeddings in LanceDB."""
+        connection = await self.get_connection()
+
+        # Ensure collection exists
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, Relationship)
+
+        collection = await connection.open_table(collection_name)
+
+        # Generate embeddings
+        data_vectors = await self.embed_data([
+            " ".join([str(v) for v in rel.get_embeddable_properties().values()])
+            for rel in relationships
+        ])
+
+        # Dynamic LanceDataPoint class for Relationship
+        vector_size = self.embedding_engine.get_vector_size()
+
+        class LanceRelationship(LanceModel):
+            id: str
+            vector: Vector(vector_size)
+            payload: dict
+
+        # Prepare LanceDB-compatible data points
+        lance_relationships = [
+            LanceRelationship(
+                id=str(rel.id),
+                vector=data_vectors[index],
+                payload=rel.to_dict()
+            )
+            for index, rel in enumerate(relationships)
+        ]
+
+        # Insert relationships into LanceDB
+        await collection.merge_insert("id") \
+            .when_matched_update_all() \
+            .when_not_matched_insert_all() \
+            .execute(lance_relationships)
+        print(f"Inserted {len(relationships)} relationships into LanceDB")
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         connection = await self.get_connection()
