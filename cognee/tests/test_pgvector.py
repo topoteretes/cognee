@@ -74,7 +74,6 @@ async def main():
     assert len(document_ids) == 1, f"Number of expected documents doesn't match {len(document_ids)} != 1"
 
     # Test getting of documents for search when no dataset is provided
-    from cognee.modules.users.permissions.methods import get_document_ids_for_user
     user = await get_default_user()
     document_ids = await get_document_ids_for_user(user.id)
     assert len(document_ids) == 2, f"Number of expected documents doesn't match {len(document_ids)} != 2"

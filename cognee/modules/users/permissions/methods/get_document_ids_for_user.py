@@ -21,7 +21,7 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
             )).all()
 
             if datasets:
-                documnets_ids_in_dataset = set()
+                documents_ids_in_dataset = set()
                 # If datasets are specified filter out documents that aren't part of the specified datasets
                 for dataset in datasets:
                     # Find dataset id for dataset element
@@ -45,6 +45,6 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
 
                         # If document is related to dataset added it to return value
                         if data_id:
-                            documnets_ids_in_dataset.add(document_id)
-                return list(documnets_ids_in_dataset)
+                            documents_ids_in_dataset.add(document_id)
+                return list(documents_ids_in_dataset)
             return document_ids
