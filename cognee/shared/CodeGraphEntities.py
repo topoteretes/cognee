@@ -1,15 +1,19 @@
 from typing import List, Optional
+
 from cognee.infrastructure.engine import DataPoint
+
 
 class Repository(DataPoint):
     __tablename__ = "Repository"
     path: str
-    type: Optional[str] = "Repository"
+    _metadata: dict = {
+        "index_fields": ["source_code"],
+        "type": "Repository"
+    }
 
 class CodeFile(DataPoint):
     __tablename__ = "codefile"
     extracted_id: str  # actually file path
-    type: Optional[str] = "CodeFile"
     source_code: Optional[str] = None
     part_of: Optional[Repository] = None
     depends_on: Optional[List["CodeFile"]] = None
@@ -17,24 +21,27 @@ class CodeFile(DataPoint):
     contains: Optional[List["CodePart"]] = None
 
     _metadata: dict = {
-        "index_fields": ["source_code"]
+        "index_fields": ["source_code"],
+        "type": "CodeFile"
     }
 
 class CodePart(DataPoint):
     __tablename__ = "codepart"
     # part_of: Optional[CodeFile]
     source_code: str
-    type: Optional[str] = "CodePart"
-
+    
     _metadata: dict = {
-        "index_fields": ["source_code"]
+        "index_fields": ["source_code"],
+        "type": "CodePart"
     }
 
 class CodeRelationship(DataPoint):
     source_id: str
     target_id: str
-    type: str  # between files
     relation: str  # depends on or depends directly
+    _metadata: dict = {
+        "type": "CodeRelationship"
+    }
 
 CodeFile.model_rebuild()
 CodePart.model_rebuild()
