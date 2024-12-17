@@ -57,6 +57,7 @@ jobs:
       run: |
         poetry install --no-interaction --all-extras
         poetry run pip install pyinstrument
+        poetry run pip install parso
 
 
     # Set environment variables for SHAs

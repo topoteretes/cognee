@@ -81,3 +81,12 @@ class DataPoint(BaseModel):
         """Deserialize the instance from pickled bytes."""
         data = pickle.loads(pickled_data)
         return self(**data)
+
+    def to_dict(self, **kwargs) -> Dict[str, Any]:
+        """Serialize model to a dictionary."""
+        return self.model_dump(**kwargs)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DataPoint":
+        """Deserialize model from a dictionary."""
+        return cls.model_validate(data)
