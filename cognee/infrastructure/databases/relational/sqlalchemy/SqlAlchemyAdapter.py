@@ -5,10 +5,12 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy import text, select, MetaData, Table, delete
 from sqlalchemy.orm import joinedload
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.data.models.Data import Data
+
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
@@ -119,12 +121,37 @@ class SQLAlchemyAdapter():
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-                data_entity = await session.execute(select(Data).where(Data.id == data_id))
+                data_entity = await session.scalars(select(Data).where(Data.id == data_id)).one()
+
+                # Check if other data objects point to the same raw data location
+                raw_data_location_entities= await session.execute(
+                    select(Data).where(Data.raw_data_location == data_entity.raw_data_location)).all()
+
+                # Don't delete local file unless this is the only reference to the file in the database
+                if len(raw_data_location_entities) == 1:
+                    # delete local file
+                    from cognee.base_config import get_base_config
+                    config get_base_config()
+
 
                 await session.execute(delete(Data).where(Data.id == data_id))
                 await session.commit()
         else:
             async with self.get_async_session() as session:
+                try:
+                    data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
+                except (ValueError, NoResultFound) as e:
+                    raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
+
+                # Check if other data objects point to the same raw data location
+                raw_data_location_entities = (await session.execute(
+                    select(Data).where(Data.raw_data_location == data_entity.raw_data_location))).all()
+
+                # Don't delete local file unless this is the only reference to the file in the database
+                if len(raw_data_location_entities) == 1:
+                    # delete local file
+                    pass
+
                 await session.execute(delete(Data).where(Data.id == data_id))
                 await session.commit()
 
