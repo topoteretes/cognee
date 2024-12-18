@@ -35,6 +35,6 @@ async def summarize_code(
 
         yield CodeSummary(
             id=uuid5(node.id, "CodeSummary"),
-            made_from=node,
+            summarizes=node,
             text=file_summaries_map[node.id],
         )

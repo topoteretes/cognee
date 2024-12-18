@@ -1,10 +1,14 @@
-from typing import Type
 import os
-from pydantic import BaseModel
+from typing import Type
+
+from instructor.exceptions import InstructorRetryException
+from pydantic import BaseModel, ValidationError
+from tenacity import RetryError
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.shared.data_models import SummarizedCode, SummarizedClass, SummarizedFunction
+from cognee.shared.data_models import (SummarizedClass, SummarizedCode,
+                                       SummarizedFunction)
 from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 
 
@@ -12,8 +16,12 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
 
     system_prompt = read_query_prompt("summarize_content.txt")
-
-    llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model)
+    
+    try:
+        llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model)
+    except (ValidationError, RetryError, InstructorRetryException) as e:
+        print(str(e))
+        llm_output = get_mock_summarized_code()
 
     return llm_output
 

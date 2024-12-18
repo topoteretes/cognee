@@ -37,14 +37,13 @@ def check_install_package(package_name):
 
 async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
     repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
-    pipeline = await run_code_graph_pipeline(repo_path)
-
-    async for result in pipeline:
+    
+    async for result in run_code_graph_pipeline(repo_path, include_docs=False):
         print(result)
 
     print('Here we have the repo under the repo_path')
 
-    await render_graph(None, include_labels=True, include_nodes=True)
+    # await render_graph(None, include_labels=True, include_nodes=True)
 
     problem_statement = instance['problem_statement']
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
