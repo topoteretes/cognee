@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+from itertools import chain
 from pathlib import Path
 from typing import Union
 
@@ -40,7 +41,7 @@ from cognee.tasks.ingestion import ingest_data_with_metadata
 from cognee.tasks.repo_processor import (enrich_dependency_graph,
                                          expand_dependency_graph,
                                          get_data_list_for_user,
-                                         get_non_code_files,
+                                         get_non_py_files,
                                          get_repo_file_dependencies)
 from cognee.tasks.repo_processor.get_source_code_chunks import \
     get_source_code_chunks
@@ -172,7 +173,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
 
     if include_docs:
         non_code_tasks = [
-            Task(get_non_code_files, task_config={"batch_size": 50}),
+            Task(get_non_py_files, task_config={"batch_size": 50}),
             Task(ingest_data_with_metadata, dataset_name="repo_docs", user=user),
             Task(get_data_list_for_user, dataset_name="repo_docs", user=user),
             Task(classify_documents),
@@ -185,6 +186,12 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
             ),
             Task(add_data_points, task_config={"batch_size": 50}),
         ]
-        tasks.extend(non_code_tasks)
 
-    return run_tasks(tasks, repo_path, "cognify_code_pipeline")
+    async for result in run_tasks(tasks, repo_path, "cognify_code_pipeline"):
+        yield result
+    
+    if include_docs:
+        async for result in run_tasks(non_code_tasks, repo_path):
+            yield result
+
+    

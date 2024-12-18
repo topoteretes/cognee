@@ -5,7 +5,7 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 
 
 async def main(repo_path, include_docs):
-    async for result in await run_code_graph_pipeline(repo_path, include_docs):
+    async for result in run_code_graph_pipeline(repo_path, include_docs):
         print(result)
 
 if __name__ == "__main__":
