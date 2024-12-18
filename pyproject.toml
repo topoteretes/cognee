@@ -115,11 +115,10 @@ mkdocstrings = {extras = ["python"], version = "^0.26.2"}
 
 [tool.ruff] # https://beta.ruff.rs/docs/
 line-length = 100
+
+[tool.ruff.lint]
 ignore = ["F401"]
-ignore-init-module-imports = true
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-
