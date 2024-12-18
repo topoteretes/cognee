@@ -17,6 +17,10 @@ from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline
 from cognee.tasks.documents import classify_documents, check_permissions_on_documents, extract_chunks_from_documents
 from cognee.tasks.graph import extract_graph_from_code
 from cognee.tasks.storage import add_data_points
+from cognee.base_config import get_base_config
+from cognee.shared.data_models import MonitoringTool
+if MonitoringTool.LANGFUSE:
+    from langfuse.decorators import observe
 
 logger = logging.getLogger("code_graph_pipeline")
 
@@ -49,7 +53,7 @@ async def code_graph_pipeline(datasets: Union[str, list[str]] = None, user: User
 
     return await asyncio.gather(*awaitables)
 
-
+@observe
 async def run_pipeline(dataset: Dataset, user: User):
     data_documents: list[Data] = await get_dataset_data(dataset_id = dataset.id)
 
