@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from cognee.modules.users.methods import get_authenticated_user
 from fastapi import Depends
 
+from cognee.shared.data_models import KnowledgeGraph
+
 
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
@@ -32,10 +34,10 @@ def get_cognify_router() -> APIRouter:
                 GraphModelDynamic = json_to_pydantic_model("GraphModelDynamic", graph_model_schema)
                 graph_model_instance = GraphModelDynamic(**graph_model_schema)
                 print(graph_model_instance)
-        else:
-            graph_model_instance = None
-        try:
-            await cognee_cognify(payload.datasets, user, payload.graph_model)
+            else:
+                graph_model_instance = KnowledgeGraph
+
+            await cognee_cognify(payload.datasets, user, graph_model_instance)
         except Exception as error:
             return JSONResponse(
                 status_code=409,
