@@ -184,14 +184,12 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
                 summarization_model=cognee_config.summarization_model,
                 task_config={"batch_size": 50}
             ),
-            Task(add_data_points, task_config={"batch_size": 50}),
         ]
-
-    async for result in run_tasks(tasks, repo_path, "cognify_code_pipeline"):
-        yield result
     
     if include_docs:
         async for result in run_tasks(non_code_tasks, repo_path):
             yield result
 
+    async for result in run_tasks(tasks, repo_path, "cognify_code_pipeline"):
+        yield result
     
