@@ -6,10 +6,11 @@ from typing import Type
 import litellm
 import instructor
 from pydantic import BaseModel
-
+from cognee.shared.data_models import MonitoringTool
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.base_config import get_base_config
 
 class OpenAIAdapter(LLMInterface):
     name = "OpenAI"
@@ -35,6 +36,15 @@ class OpenAIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.api_version = api_version
         self.streaming = streaming
+        base_config = get_base_config()
+        if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
+            # set callbacks
+            # litellm.success_callback = ["langfuse"]
+            # litellm.failure_callback = ["langfuse"]
+            self.aclient.success_callback = ["langfuse"]
+            self.aclient.failure_callback = ["langfuse"]
+            self.client.success_callback = ["langfuse"]
+            self.client.failure_callback = ["langfuse"]
 
     async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
