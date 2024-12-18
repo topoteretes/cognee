@@ -30,7 +30,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.api_version = api_version
         self.model = model
         self.dimensions = dimensions
-        self.mock = os.getenv("MOCK_EMBEDDING", False).lower() in ("true", "1", "yes")
+
+        enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
+        if isinstance(enable_mocking, bool):
+            enable_mocking= str(enable_mocking).lower()
+        self.mock = enable_mocking in ("true", "1", "yes")
 
     MAX_RETRIES = 5
     retry_count = 0
