@@ -10,4 +10,5 @@ class Entity(DataPoint):
 
     _metadata: dict = {
         "index_fields": ["name"],
+        "type": "Entity"
     }
