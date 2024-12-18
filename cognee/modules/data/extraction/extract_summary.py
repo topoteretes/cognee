@@ -16,6 +16,6 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
 
     return llm_output
 
+
 async def extract_code_summary(content: str):
-    
     return await extract_summary(content, response_model=SummarizedCode)

@@ -3,8 +3,8 @@ from typing import Union, BinaryIO
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 
-def save_data_item_to_storage(data_item: Union[BinaryIO, str], dataset_name: str) -> str:
 
+def save_data_item_to_storage(data_item: Union[BinaryIO, str], dataset_name: str) -> str:
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
         file_path = save_data_to_file(data_item.file, filename=data_item.filename)

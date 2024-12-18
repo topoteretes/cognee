@@ -6,14 +6,15 @@ from .Principal import Principal
 from .UserGroup import UserGroup
 from .Group import Group
 
+
 class User(SQLAlchemyBaseUserTableUUID, Principal):
     __tablename__ = "users"
 
-    id = Column(UUID, ForeignKey("principals.id"), primary_key = True)
+    id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
 
     groups: Mapped[list["Group"]] = relationship(
-        secondary = UserGroup.__tablename__,
-        back_populates = "users",
+        secondary=UserGroup.__tablename__,
+        back_populates="users",
     )
 
     __mapper_args__ = {
@@ -24,11 +25,14 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 # Keep these schemas in sync with User model
 from fastapi_users import schemas
 
+
 class UserRead(schemas.BaseUser[uuid_UUID]):
     pass
 
+
 class UserCreate(schemas.BaseUserCreate):
     pass
+
 
 class UserUpdate(schemas.BaseUserUpdate):
     pass

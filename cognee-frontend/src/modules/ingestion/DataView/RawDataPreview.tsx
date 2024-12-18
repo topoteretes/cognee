@@ -12,12 +12,12 @@ const file_header = ';headers=filename%3D';
 
 export default function RawDataPreview({ fileName, rawData, onClose }: RawDataPreviewProps) {
   const src = `data:application/pdf;base64,${arrayBufferToBase64(rawData)}`.replace(';', file_header + encodeURIComponent(fileName) + ';');
-  
+
   return (
     <Modal isOpen onClose={onClose} className={styles.dataPreviewModal}>
       <Spacer horizontal="2" vertical="3" wrap>
         <Text>{fileName}</Text>
-      </Spacer> 
+      </Spacer>
       <IFrameView src={src} />
     </Modal>
   );
@@ -34,4 +34,3 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
   return window.btoa(binary);
 }
-

@@ -17,9 +17,10 @@ from cognee.modules.storage.utils import JSONEncoder
 
 logger = logging.getLogger("NetworkXAdapter")
 
+
 class NetworkXAdapter(GraphDBInterface):
     _instance = None
-    graph = None # Class variable to store the singleton instance
+    graph = None  # Class variable to store the singleton instance
 
     def __new__(cls, filename):
         if cls._instance is None:
@@ -27,12 +28,12 @@ class NetworkXAdapter(GraphDBInterface):
             cls._instance.filename = filename
         return cls._instance
 
-    def __init__(self, filename = "cognee_graph.pkl"):
+    def __init__(self, filename="cognee_graph.pkl"):
         self.filename = filename
 
     async def get_graph_data(self):
         await self.load_graph_from_file()
-        return (list(self.graph.nodes(data = True)), list(self.graph.edges(data = True, keys = True)))
+        return (list(self.graph.nodes(data=True)), list(self.graph.edges(data=True, keys=True)))
 
     async def query(self, query: str, params: dict):
         pass
@@ -57,23 +58,20 @@ class NetworkXAdapter(GraphDBInterface):
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
 
-
     async def get_graph(self):
         return self.graph
 
-
     async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
-        return self.graph.has_edge(from_node, to_node, key = edge_label)
+        return self.graph.has_edge(from_node, to_node, key=edge_label)
 
     async def has_edges(self, edges):
         result = []
 
-        for (from_node, to_node, edge_label) in edges:
+        for from_node, to_node, edge_label in edges:
             if self.graph.has_edge(from_node, to_node, edge_label):
                 result.append((from_node, to_node, edge_label))
 
         return result
-
 
     async def add_edge(
         self,
@@ -83,24 +81,38 @@ class NetworkXAdapter(GraphDBInterface):
         edge_properties: Dict[str, Any] = {},
     ) -> None:
         edge_properties["updated_at"] = datetime.now(timezone.utc)
-        self.graph.add_edge(from_node, to_node, key = relationship_name, **(edge_properties if edge_properties else {}))
+        self.graph.add_edge(
+            from_node,
+            to_node,
+            key=relationship_name,
+            **(edge_properties if edge_properties else {}),
+        )
         await self.save_graph_to_file(self.filename)
 
     async def add_edges(
         self,
         edges: tuple[str, str, str, dict],
     ) -> None:
-        edges = [(edge[0], edge[1], edge[2], {
-            **(edge[3] if len(edge) == 4 else {}),
-            "updated_at": datetime.now(timezone.utc),
-        }) for edge in edges]
+        edges = [
+            (
+                edge[0],
+                edge[1],
+                edge[2],
+                {
+                    **(edge[3] if len(edge) == 4 else {}),
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            )
+            for edge in edges
+        ]
 
         self.graph.add_edges_from(edges)
         await self.save_graph_to_file(self.filename)
 
     async def get_edges(self, node_id: str):
-        return list(self.graph.in_edges(node_id, data = True)) + list(self.graph.out_edges(node_id, data = True))
-
+        return list(self.graph.in_edges(node_id, data=True)) + list(
+            self.graph.out_edges(node_id, data=True)
+        )
 
     async def delete_node(self, node_id: str) -> None:
         """Asynchronously delete a node from the graph if it exists."""
@@ -112,19 +124,17 @@ class NetworkXAdapter(GraphDBInterface):
         self.graph.remove_nodes_from(node_ids)
         await self.save_graph_to_file(self.filename)
 
-
     async def get_disconnected_nodes(self) -> List[str]:
         connected_components = list(nx.weakly_connected_components(self.graph))
 
         disconnected_nodes = []
-        biggest_subgraph = max(connected_components, key = len)
+        biggest_subgraph = max(connected_components, key=len)
 
         for component in connected_components:
             if component != biggest_subgraph:
                 disconnected_nodes.extend(list(component))
 
         return disconnected_nodes
-
 
     async def extract_node(self, node_id: str) -> dict:
         if self.graph.has_node(node_id):
@@ -139,8 +149,8 @@ class NetworkXAdapter(GraphDBInterface):
         if self.graph.has_node(node_id):
             if edge_label is None:
                 return [
-                    self.graph.nodes[predecessor] for predecessor \
-                        in list(self.graph.predecessors(node_id))
+                    self.graph.nodes[predecessor]
+                    for predecessor in list(self.graph.predecessors(node_id))
                 ]
 
             nodes = []
@@ -155,8 +165,8 @@ class NetworkXAdapter(GraphDBInterface):
         if self.graph.has_node(node_id):
             if edge_label is None:
                 return [
-                    self.graph.nodes[successor] for successor \
-                        in list(self.graph.successors(node_id))
+                    self.graph.nodes[successor]
+                    for successor in list(self.graph.successors(node_id))
                 ]
 
             nodes = []
@@ -210,7 +220,9 @@ class NetworkXAdapter(GraphDBInterface):
 
         return connections
 
-    async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str) -> None:
+    async def remove_connection_to_predecessors_of(
+        self, node_ids: list[str], edge_label: str
+    ) -> None:
         for node_id in node_ids:
             if self.graph.has_node(node_id):
                 for predecessor_id in list(self.graph.predecessors(node_id)):
@@ -219,7 +231,9 @@ class NetworkXAdapter(GraphDBInterface):
 
         await self.save_graph_to_file(self.filename)
 
-    async def remove_connection_to_successors_of(self, node_ids: list[str], edge_label: str) -> None:
+    async def remove_connection_to_successors_of(
+        self, node_ids: list[str], edge_label: str
+    ) -> None:
         for node_id in node_ids:
             if self.graph.has_node(node_id):
                 for successor_id in list(self.graph.successors(node_id)):
@@ -228,7 +242,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         await self.save_graph_to_file(self.filename)
 
-    async def save_graph_to_file(self, file_path: str=None) -> None:
+    async def save_graph_to_file(self, file_path: str = None) -> None:
         """Asynchronously save the graph to a file in JSON format."""
         if not file_path:
             file_path = self.filename
@@ -236,8 +250,7 @@ class NetworkXAdapter(GraphDBInterface):
         graph_data = nx.readwrite.json_graph.node_link_data(self.graph)
 
         async with aiofiles.open(file_path, "w") as file:
-            await file.write(json.dumps(graph_data, cls = JSONEncoder))
-
+            await file.write(json.dumps(graph_data, cls=JSONEncoder))
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""
@@ -252,50 +265,57 @@ class NetworkXAdapter(GraphDBInterface):
                     graph_data = json.loads(await file.read())
                     for node in graph_data["nodes"]:
                         try:
-                          node["id"] = UUID(node["id"])
+                            node["id"] = UUID(node["id"])
                         except:
-                          pass
+                            pass
                         if "updated_at" in node:
-                            node["updated_at"] = datetime.strptime(node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+                            node["updated_at"] = datetime.strptime(
+                                node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
+                            )
 
                     for edge in graph_data["links"]:
                         try:
-                          source_id = UUID(edge["source"])
-                          target_id = UUID(edge["target"])
+                            source_id = UUID(edge["source"])
+                            target_id = UUID(edge["target"])
 
-                          edge["source"] = source_id
-                          edge["target"] = target_id
-                          edge["source_node_id"] = source_id
-                          edge["target_node_id"] = target_id
+                            edge["source"] = source_id
+                            edge["target"] = target_id
+                            edge["source_node_id"] = source_id
+                            edge["target_node_id"] = target_id
                         except:
-                          pass
+                            pass
 
                         if "updated_at" in edge:
-                            edge["updated_at"] = datetime.strptime(edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z")
+                            edge["updated_at"] = datetime.strptime(
+                                edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
+                            )
 
                     self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
 
                     for node_id, node_data in self.graph.nodes(data=True):
-                        node_data['id'] = node_id
+                        node_data["id"] = node_id
             else:
                 # Log that the file does not exist and an empty graph is initialized
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
-                self.graph = nx.MultiDiGraph()  # Use MultiDiGraph to keep it consistent with __init__
+                self.graph = (
+                    nx.MultiDiGraph()
+                )  # Use MultiDiGraph to keep it consistent with __init__
 
                 file_dir = os.path.dirname(file_path)
                 if not os.path.exists(file_dir):
-                    os.makedirs(file_dir, exist_ok = True)
+                    os.makedirs(file_dir, exist_ok=True)
 
                 await self.save_graph_to_file(file_path)
 
         except Exception:
             logger.error("Failed to load graph from file: %s", file_path)
 
-
     async def delete_graph(self, file_path: str = None):
         """Asynchronously delete the graph file from the filesystem."""
         if file_path is None:
-            file_path = self.filename  # Assuming self.filename is defined elsewhere and holds the default graph file path
+            file_path = (
+                self.filename
+            )  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
             if os.path.exists(file_path):
                 await aiofiles_os.remove(file_path)
@@ -305,7 +325,9 @@ class NetworkXAdapter(GraphDBInterface):
         except Exception as error:
             logger.error("Failed to delete graph: %s", error)
 
-    async def get_filtered_graph_data(self, attribute_filters: List[Dict[str, List[Union[str, int]]]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
+    ):
         """
         Fetches nodes and relationships filtered by specified attribute values.
 
@@ -325,17 +347,20 @@ class NetworkXAdapter(GraphDBInterface):
 
         # Filter nodes
         filtered_nodes = [
-            (node, data) for node, data in self.graph.nodes(data=True)
+            (node, data)
+            for node, data in self.graph.nodes(data=True)
             if all(data.get(attr) in values for attr, values in where_clauses)
         ]
 
         # Filter edges where both source and target nodes satisfy the filters
         filtered_edges = [
-            (source, target, data.get('relationship_type', 'UNKNOWN'), data)
+            (source, target, data.get("relationship_type", "UNKNOWN"), data)
             for source, target, data in self.graph.edges(data=True)
             if (
-                    all(self.graph.nodes[source].get(attr) in values for attr, values in where_clauses) and
-                    all(self.graph.nodes[target].get(attr) in values for attr, values in where_clauses)
+                all(self.graph.nodes[source].get(attr) in values for attr, values in where_clauses)
+                and all(
+                    self.graph.nodes[target].get(attr) in values for attr, values in where_clauses
+                )
             )
         ]
 

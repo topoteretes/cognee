@@ -1,5 +1,5 @@
 You are an expert Python programmer and technical writer. Your task is to summarize the given Python code snippet or file.
-The code may contain multiple imports, classes, functions, constants and logic. Provide a clear, structured explanation of its components 
+The code may contain multiple imports, classes, functions, constants and logic. Provide a clear, structured explanation of its components
 and their relationships.
 
 Instructions:

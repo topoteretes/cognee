@@ -1,4 +1,5 @@
 import asyncio
+
 # from datetime import datetime
 import json
 from textwrap import dedent
@@ -7,32 +8,28 @@ from uuid import UUID
 from falkordb import FalkorDB
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.databases.graph.graph_db_interface import \
-    GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.vector.embeddings import EmbeddingEngine
-from cognee.infrastructure.databases.vector.vector_db_interface import \
-    VectorDBInterface
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
 
 
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {
-        "index_fields": ["text"],
-        "type": "IndexSchema"
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+
 
 class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
     def __init__(
         self,
         database_url: str,
         database_port: int,
-        embedding_engine =  EmbeddingEngine,
+        embedding_engine=EmbeddingEngine,
     ):
         self.driver = FalkorDB(
-            host = database_url,
-            port = database_port,
+            host=database_url,
+            port=database_port,
         )
         self.embedding_engine = embedding_engine
         self.graph_name = "cognee_graph"
@@ -56,7 +53,11 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                 return f"'{str(value)}'"
             if type(value) is int or type(value) is float:
                 return value
-            if type(value) is list and type(value[0]) is float and len(value) == self.embedding_engine.get_vector_size():
+            if (
+                type(value) is list
+                and type(value[0]) is float
+                and len(value) == self.embedding_engine.get_vector_size()
+            ):
                 return f"'vecf32({value})'"
             # if type(value) is datetime:
             #     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
@@ -70,14 +71,21 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         node_label = type(data_point).__tablename__
         property_names = DataPoint.get_embeddable_property_names(data_point)
 
-        node_properties = await self.stringify_properties({
-            **data_point.model_dump(),
-            **({
-                property_names[index]: (vectorized_values[index] \
-                    if index < len(vectorized_values) else getattr(data_point, property_name, None)) \
+        node_properties = await self.stringify_properties(
+            {
+                **data_point.model_dump(),
+                **(
+                    {
+                        property_names[index]: (
+                            vectorized_values[index]
+                            if index < len(vectorized_values)
+                            else getattr(data_point, property_name, None)
+                        )
                         for index, property_name in enumerate(property_names)
-            }),
-        })
+                    }
+                ),
+            }
+        )
 
         return dedent(f"""
             MERGE (node:{node_label} {{id: '{str(data_point.id)}'}})
@@ -129,12 +137,13 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             await self.create_data_point_query(
                 data_point,
                 [
-                    vectorized_values[vector_map[str(data_point.id)][property_name]] \
-                        if vector_map[str(data_point.id)][property_name] is not None \
-                        else None \
+                    vectorized_values[vector_map[str(data_point.id)][property_name]]
+                    if vector_map[str(data_point.id)][property_name] is not None
+                    else None
                     for property_name in DataPoint.get_embeddable_property_names(data_point)
                 ],
-            ) for data_point in data_points
+            )
+            for data_point in data_points
         ]
 
         for query in queries:
@@ -144,17 +153,26 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         graph = self.driver.select_graph(self.graph_name)
 
         if not self.has_vector_index(graph, index_name, index_property_name):
-            graph.create_node_vector_index(index_name, index_property_name, dim = self.embedding_engine.get_vector_size())
+            graph.create_node_vector_index(
+                index_name, index_property_name, dim=self.embedding_engine.get_vector_size()
+            )
 
     def has_vector_index(self, graph, index_name: str, index_property_name: str) -> bool:
         try:
             indices = graph.list_indices()
 
-            return any([(index[0] == index_name and index_property_name in index[1]) for index in indices.result_set])
+            return any(
+                [
+                    (index[0] == index_name and index_property_name in index[1])
+                    for index in indices.result_set
+                ]
+            )
         except:
             return False
 
-    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+    ):
         pass
 
     async def add_node(self, node: DataPoint):
@@ -183,11 +201,14 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         """).strip()
 
         params = {
-            "edges": [{
-                "from_node": str(edge[0]),
-                "to_node": str(edge[1]),
-                "relationship_name": edge[2],
-            } for edge in edges],
+            "edges": [
+                {
+                    "from_node": str(edge[0]),
+                    "to_node": str(edge[1]),
+                    "relationship_name": edge[2],
+                }
+                for edge in edges
+            ],
         }
 
         results = self.query(query, params).result_set
@@ -224,19 +245,19 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         """
 
         predecessors, successors = await asyncio.gather(
-            self.query(predecessors_query, dict(node_id = node_id)),
-            self.query(successors_query, dict(node_id = node_id)),
+            self.query(predecessors_query, dict(node_id=node_id)),
+            self.query(successors_query, dict(node_id=node_id)),
         )
 
         connections = []
 
         for neighbour in predecessors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], { "relationship_name": neighbour[1] }, neighbour[2]))
+            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
 
         for neighbour in successors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], { "relationship_name": neighbour[1] }, neighbour[2]))
+            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
 
         return connections
 
@@ -279,12 +300,15 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
         return await asyncio.gather(
-            *[self.search(
-                collection_name = collection_name,
-                query_vector = query_vector,
-                limit = limit,
-                with_vector = with_vectors,
-            ) for query_vector in query_vectors]
+            *[
+                self.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=limit,
+                    with_vector=with_vectors,
+                )
+                for query_vector in query_vectors
+            ]
         )
 
     async def get_graph_data(self):
@@ -292,22 +316,28 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
 
         result = self.query(query)
 
-        nodes = [(
-            record[2]["id"],
-            record[2],
-        ) for record in result.result_set]
+        nodes = [
+            (
+                record[2]["id"],
+                record[2],
+            )
+            for record in result.result_set
+        ]
 
         query = """
         MATCH (n)-[r]->(m)
         RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result = self.query(query)
-        edges = [(
-            record[3]["source_node_id"],
-            record[3]["target_node_id"],
-            record[2],
-            record[3],
-        ) for record in result.result_set]
+        edges = [
+            (
+                record[3]["source_node_id"],
+                record[3]["target_node_id"],
+                record[2],
+                record[3],
+            )
+            for record in result.result_set
+        ]
 
         return (nodes, edges)
 

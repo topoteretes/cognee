@@ -26,7 +26,7 @@ export default function Explorer({ dataset, className, style }: ExplorerProps) {
         setError(error);
       });
   }, [dataset]);
-  
+
   useEffect(() => {
     exploreData();
   }, [exploreData]);

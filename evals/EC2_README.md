@@ -1,6 +1,6 @@
 ## Creating the EC2 Instance
 
-Create an EC2 Instance with the 
+Create an EC2 Instance with the
 
 `Ubuntu Image`
 
@@ -40,7 +40,7 @@ Then run:
 
 `sudo usermod -aG docker $USER`
 
-disconnect, and reconnect. 
+disconnect, and reconnect.
 
 Confirm that `ubuntu` has been added to the docker user group with
 

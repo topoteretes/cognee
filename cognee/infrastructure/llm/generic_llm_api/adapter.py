@@ -1,4 +1,5 @@
-'''Adapter for Generic API LLM provider API'''
+"""Adapter for Generic API LLM provider API"""
+
 import asyncio
 from typing import List, Type
 from pydantic import BaseModel
@@ -14,7 +15,8 @@ from cognee.infrastructure.llm.config import get_llm_config
 
 
 class GenericAPIAdapter(LLMInterface):
-    """Adapter for Generic API LLM provider API """
+    """Adapter for Generic API LLM provider API"""
+
     name: str
     model: str
     api_key: str
@@ -28,11 +30,12 @@ class GenericAPIAdapter(LLMInterface):
 
         if llm_config.llm_provider == "groq":
             from groq import groq
+
             self.aclient = instructor.from_openai(
-                client = groq.Groq(
-                  api_key = api_key,
+                client=groq.Groq(
+                    api_key=api_key,
                 ),
-                mode = instructor.Mode.MD_JSON
+                mode=instructor.Mode.MD_JSON,
             )
         else:
             base_config = get_base_config()
@@ -42,24 +45,27 @@ class GenericAPIAdapter(LLMInterface):
             elif base_config.monitoring_tool == MonitoringTool.LANGSMITH:
                 from langsmith import wrappers
                 from openai import AsyncOpenAI
+
                 AsyncOpenAI = wrappers.wrap_openai(AsyncOpenAI())
             else:
                 from openai import AsyncOpenAI
 
             self.aclient = instructor.patch(
                 AsyncOpenAI(
-                    base_url = api_endpoint,
-                    api_key = api_key,  # required, but unused
+                    base_url=api_endpoint,
+                    api_key=api_key,  # required, but unused
                 ),
-                mode = instructor.Mode.JSON,
+                mode=instructor.Mode.JSON,
             )
 
-    async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
+    async def acreate_structured_output(
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+    ) -> BaseModel:
         """Generate a response from a user query."""
 
         return await self.aclient.chat.completions.create(
-            model = self.model,
-            messages = [
+            model=self.model,
+            messages=[
                 {
                     "role": "user",
                     "content": f"""Use the given format to
@@ -67,7 +73,7 @@ class GenericAPIAdapter(LLMInterface):
                 },
                 {"role": "system", "content": system_prompt},
             ],
-            response_model = response_model,
+            response_model=response_model,
         )
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
@@ -78,5 +84,9 @@ class GenericAPIAdapter(LLMInterface):
             raise InvalidValueError(message="No system prompt path provided.")
         system_prompt = read_query_prompt(system_prompt)
 
-        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n""" if system_prompt else None
+        formatted_prompt = (
+            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
+            if system_prompt
+            else None
+        )
         return formatted_prompt

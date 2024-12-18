@@ -44,7 +44,7 @@ function useDatasets() {
       checkDatasetStatuses(datasets);
     }, 5000);
   }, [fetchDatasetStatuses]);
-  
+
   useEffect(() => {
     return () => {
       if (statusTimeout.current !== null) {

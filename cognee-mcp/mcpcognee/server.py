@@ -67,7 +67,7 @@ async def handle_list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def handle_call_tool(
-        name: str, arguments: dict | None
+    name: str, arguments: dict | None
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """
     Handle tool execution requests.
@@ -93,9 +93,7 @@ async def handle_call_tool(
 
                 await cognee.add(text)
                 await cognee.cognify(graph_model=graph_model)
-                search_results = await cognee.search(
-                    SearchType.INSIGHTS, query_text=search_query
-                )
+                search_results = await cognee.search(SearchType.INSIGHTS, query_text=search_query)
 
                 results = retrieved_edges_to_string(search_results)
 

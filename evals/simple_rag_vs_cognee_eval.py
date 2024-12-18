@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Type
 from deepeval.test_case import LLMTestCase
 import dotenv
+
 dotenv.load_dotenv()
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
@@ -16,7 +17,7 @@ dataset.add_test_cases_from_json_file(
     input_key_name="input",
     actual_output_key_name="actual_output",
     expected_output_key_name="expected_output",
-    context_key_name="context"
+    context_key_name="context",
 )
 
 print(dataset)
@@ -38,31 +39,30 @@ print(dataset.goldens)
 print(dataset)
 
 
-
-
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class AnswerModel(BaseModel):
-    response:str
-def get_answer_base(content: str, context:str, response_model: Type[BaseModel]):
+    response: str
+
+
+def get_answer_base(content: str, context: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
 
     system_prompt = "THIS IS YOUR CONTEXT:" + str(context)
 
-    return  llm_client.create_structured_output(content, system_prompt, response_model)
-def get_answer(content: str,context, model: Type[BaseModel]= AnswerModel):
+    return llm_client.create_structured_output(content, system_prompt, response_model)
 
+
+def get_answer(content: str, context, model: Type[BaseModel] = AnswerModel):
     try:
-        return (get_answer_base(
-            content,
-            context,
-            model
-        ))
+        return get_answer_base(content, context, model)
     except Exception as error:
-        logger.error("Error extracting cognitive layers from content: %s", error, exc_info = True)
+        logger.error("Error extracting cognitive layers from content: %s", error, exc_info=True)
         raise error
+
 
 async def run_cognify_base_rag():
     from cognee.api.v1.add import add
@@ -75,8 +75,6 @@ async def run_cognify_base_rag():
 
     graph = await cognify("initial_test")
 
-
-
     pass
 
 
@@ -84,7 +82,8 @@ import os
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def cognify_search_base_rag(content:str, context:str):
+
+async def cognify_search_base_rag(content: str, context: str):
     base_config = get_base_config()
 
     cognee_directory_path = os.path.abspath(".cognee_system")
@@ -97,14 +96,15 @@ async def cognify_search_base_rag(content:str, context:str):
     print("results", return_)
     return return_
 
-async def cognify_search_graph(content:str, context:str):
+
+async def cognify_search_graph(content: str, context: str):
     from cognee.api.v1.search import search, SearchType
-    params = {'query': 'Donald Trump'}
+
+    params = {"query": "Donald Trump"}
 
     results = await search(SearchType.INSIGHTS, params)
     print("results", results)
     return results
-
 
 
 def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase]) -> List[LLMTestCase]:
@@ -113,13 +113,14 @@ def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase]) -> List[LLM
         test_case = LLMTestCase(
             input=case.input,
             # Generate actual output using the 'input' and 'additional_metadata'
-            actual_output= str(get_answer(case.input, case.context).model_dump()['response']),
+            actual_output=str(get_answer(case.input, case.context).model_dump()["response"]),
             expected_output=case.expected_output,
             context=case.context,
             retrieval_context=["retrieval_context"],
         )
         test_cases.append(test_case)
     return test_cases
+
 
 # # Data preprocessing before setting the dataset test cases
 # dataset.test_cases = convert_goldens_to_test_cases(dataset.test_cases)
@@ -133,13 +134,13 @@ def convert_goldens_to_test_cases(test_cases_raw: List[LLMTestCase]) -> List[LLM
 
 
 if __name__ == "__main__":
-
     import asyncio
 
     async def main():
         # await run_cognify_base_rag()
         # await cognify_search_base_rag("show_all_processes", "context")
         await cognify_search_graph("show_all_processes", "context")
+
     asyncio.run(main())
     # run_cognify_base_rag_and_search()
     # # Data preprocessing before setting the dataset test cases

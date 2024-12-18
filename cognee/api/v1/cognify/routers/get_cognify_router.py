@@ -20,13 +20,15 @@ def json_to_pydantic_model(name: str, json_schema: dict) -> BaseModel:
     """
     return create_model(name, **{k: (type(v), ...) for k, v in json_schema.items()})
 
+
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/", response_model=None)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
-        """ This endpoint is responsible for the cognitive processing of the content."""
+        """This endpoint is responsible for the cognitive processing of the content."""
         from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
+
         try:
             # Dynamic conversion of `graph_model` to Pydantic
             if payload.graph_model:
@@ -39,9 +41,6 @@ def get_cognify_router() -> APIRouter:
 
             await cognee_cognify(payload.datasets, user, graph_model_instance)
         except Exception as error:
-            return JSONResponse(
-                status_code=409,
-                content={"error": str(error)}
-            )
+            return JSONResponse(status_code=409, content={"error": str(error)})
 
     return router

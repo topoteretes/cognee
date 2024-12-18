@@ -82,7 +82,7 @@ import os
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
-or 
+or
 ```
 import cognee
 cognee.config.set_llm_api_key("YOUR_OPENAI_API_KEY")
@@ -118,7 +118,7 @@ DB_PORT=5432
 DB_NAME=cognee_db
 DB_USERNAME=cognee
 DB_PASSWORD=cognee
-``` 
+```
 
 ### Simple example
 
@@ -143,14 +143,14 @@ async def main():
     Natural language processing (NLP) is an interdisciplinary
     subfield of computer science and information retrieval.
     """
-    
+
     print("Adding text to cognee:")
-    print(text.strip())  
+    print(text.strip())
     # Add the text, and make it available for cognify
     await cognee.add(text)
     print("Text added successfully.\n")
 
-    
+
     print("Running cognify to create knowledge graph...\n")
     print("Cognify process steps:")
     print("1. Classifying the document: Determining the type and category of the input text.")
@@ -159,19 +159,19 @@ async def main():
     print("4. Adding data points: Storing the extracted chunks for processing.")
     print("5. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph.")
     print("6. Summarizing text: Creating concise summaries of the content for quick insights.\n")
-    
+
     # Use LLMs and cognee to create knowledge graph
     await cognee.cognify()
     print("Cognify process complete.\n")
 
-    
+
     query_text = 'Tell me about NLP'
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
     search_results = await cognee.search(
         SearchType.INSIGHTS, query_text=query_text
     )
-    
+
     print("Search results:")
     # Display results
     for result_text in search_results:
@@ -217,7 +217,7 @@ await cognee.add(text) # Add a new piece of information
 2. In the next step we make a task. The task can be any business logic we need, but the important part is that it should be encapsulated in one function.
 
 Here we show an example of creating a naive LLM classifier that takes a Pydantic model and then stores the data in both the graph and vector stores after analyzing each chunk.
-We provided just a snippet for reference, but feel free to check out the implementation in our repo. 
+We provided just a snippet for reference, but feel free to check out the implementation in our repo.
 
 ```
 async def chunk_naive_llm_classifier(
@@ -265,10 +265,10 @@ We have many tasks that can be used in your pipelines, and you can also create y
 
 
 3. Once we have our tasks, it is time to group them into a pipeline.
-This simplified snippet demonstrates how tasks can be added to a pipeline, and how they can pass the information forward from one to another. 
+This simplified snippet demonstrates how tasks can be added to a pipeline, and how they can pass the information forward from one to another.
 
 ```
-            
+
 
 Task(
     chunk_naive_llm_classifier,
@@ -294,7 +294,7 @@ Cognee supports a variety of tools and services for different operations:
 - **Language Models (LLMs)**: You can use either Anyscale or Ollama as your LLM provider.
 
 - **Graph Stores**: In addition to NetworkX, Neo4j is also supported for graph storage.
-  
+
 - **User management**: Create individual user graphs and manage permissions
 
 ## Demo

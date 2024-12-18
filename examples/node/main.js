@@ -23,7 +23,7 @@ async function run() {
     const authCredentials = new FormData();
     authCredentials.append('username', 'default_user@example.com');
     authCredentials.append('password', 'default_password');
-    
+
     const loginResponse = await fetch('/v1/auth/login', {
       method: 'POST',
       body: authCredentials,
@@ -45,7 +45,7 @@ async function run() {
       addData.append('data', file, file.name);
     })
     addData.append('datasetId', 'main');
-    
+
     await fetch('/v1/add', {
       method: 'POST',
       body: addData,

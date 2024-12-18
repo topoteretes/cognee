@@ -21,6 +21,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from cognee.infrastructure.databases.relational import Base
+
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
@@ -89,6 +90,7 @@ db_engine = get_relational_engine()
 
 if db_engine.engine.dialect.name == "sqlite":
     from cognee.infrastructure.files.storage import LocalStorage
+
     db_config = get_relational_config()
     LocalStorage.ensure_directory_exists(db_config.db_path)
 

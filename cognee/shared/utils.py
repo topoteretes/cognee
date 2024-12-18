@@ -1,4 +1,5 @@
-""" This module contains utility functions for the cognee. """
+"""This module contains utility functions for the cognee."""
+
 import os
 from typing import BinaryIO, Union
 
@@ -24,6 +25,7 @@ from cognee.shared.exceptions import IngestionError
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
 
+
 def get_anonymous_id():
     """Creates or reads a anonymous user id"""
     home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
@@ -39,6 +41,7 @@ def get_anonymous_id():
         with open(anonymous_id_file, "r", encoding="utf-8") as f:
             anonymous_id = f.read()
     return anonymous_id
+
 
 def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     if os.getenv("TELEMETRY_DISABLED"):
@@ -58,7 +61,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": str(user_id),
-            **additional_properties
+            **additional_properties,
         },
     }
 
@@ -66,6 +69,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
 
     if response.status_code != 200:
         print(f"Error sending telemetry through proxy: {response.status_code}")
+
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
     """Returns the number of tokens in a text string."""
@@ -75,12 +79,13 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
     num_tokens = len(encoding.encode(string))
     return num_tokens
 
+
 def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
     h = hashlib.md5()
 
     try:
         if isinstance(file_obj, str):
-            with open(file_obj, 'rb') as file:
+            with open(file_obj, "rb") as file:
                 while True:
                     # Reading is buffered, so we can read smaller chunks.
                     chunk = file.read(h.block_size)
@@ -98,6 +103,7 @@ def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
         return h.hexdigest()
     except IOError as e:
         raise IngestionError(message=f"Failed to load data from {file}: {e}")
+
 
 def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
     """
@@ -130,22 +136,30 @@ def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> s
 def generate_color_palette(unique_layers):
     colormap = plt.cm.get_cmap("viridis", len(unique_layers))
     colors = [colormap(i) for i in range(len(unique_layers))]
-    hex_colors = ["#%02x%02x%02x" % (int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255)) for rgb in colors]
+    hex_colors = [
+        "#%02x%02x%02x" % (int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
+        for rgb in colors
+    ]
 
     return dict(zip(unique_layers, hex_colors))
 
 
 async def register_graphistry():
     config = get_base_config()
-    graphistry.register(api = 3, username = config.graphistry_username, password = config.graphistry_password)
+    graphistry.register(
+        api=3, username=config.graphistry_username, password=config.graphistry_password
+    )
 
 
 def prepare_edges(graph, source, target, edge_key):
-    edge_list = [{
-        source: str(edge[0]),
-        target: str(edge[1]),
-        edge_key: str(edge[2]),
-    } for edge in graph.edges(keys = True, data = True)]
+    edge_list = [
+        {
+            source: str(edge[0]),
+            target: str(edge[1]),
+            edge_key: str(edge[2]),
+        }
+        for edge in graph.edges(keys=True, data=True)
+    ]
 
     return pd.DataFrame(edge_list)
 
@@ -167,7 +181,9 @@ def prepare_nodes(graph, include_size=False):
             default_size = 10  # Default node size
             larger_size = 20  # Size for nodes with specific keywords in their ID
             keywords = ["DOCUMENT", "User"]
-            node_size = larger_size if any(keyword in str(node) for keyword in keywords) else default_size
+            node_size = (
+                larger_size if any(keyword in str(node) for keyword in keywords) else default_size
+            )
             node_data["size"] = node_size
 
         nodes_data.append(node_data)
@@ -175,7 +191,9 @@ def prepare_nodes(graph, include_size=False):
     return pd.DataFrame(nodes_data)
 
 
-async def render_graph(graph, include_nodes=False, include_color=False, include_size=False, include_labels=False):
+async def render_graph(
+    graph, include_nodes=False, include_color=False, include_size=False, include_labels=False
+):
     await register_graphistry()
 
     if not isinstance(graph, nx.MultiDiGraph):
@@ -191,15 +209,14 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
 
     edges = prepare_edges(graph, "source_node", "target_node", "relationship_name")
     plotter = graphistry.edges(edges, "source_node", "target_node")
-    plotter = plotter.bind(edge_label = "relationship_name")
+    plotter = plotter.bind(edge_label="relationship_name")
 
     if include_nodes:
-        nodes = prepare_nodes(graph, include_size = include_size)
+        nodes = prepare_nodes(graph, include_size=include_size)
         plotter = plotter.nodes(nodes, "id")
 
         if include_size:
-            plotter = plotter.bind(point_size = "size")
-
+            plotter = plotter.bind(point_size="size")
 
         if include_color:
             pass
@@ -208,10 +225,8 @@ async def render_graph(graph, include_nodes=False, include_color=False, include_
             # plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
             #                                      default_mapping="silver")
 
-
         if include_labels:
-            plotter = plotter.bind(point_label = "name")
-
+            plotter = plotter.bind(point_label="name")
 
     # Visualization
     url = plotter.plot(render=False, as_files=True, memoize=False)
@@ -227,6 +242,7 @@ def sanitize_df(df):
 def get_entities(tagged_tokens):
     nltk.download("maxent_ne_chunker", quiet=True)
     from nltk.chunk import ne_chunk
+
     return ne_chunk(tagged_tokens)
 
 

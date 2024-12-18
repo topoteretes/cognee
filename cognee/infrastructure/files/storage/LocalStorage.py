@@ -3,6 +3,7 @@ import shutil
 from typing import BinaryIO, Union
 from .StorageManager import Storage
 
+
 class LocalStorage(Storage):
     storage_path: str = None
 
@@ -16,8 +17,8 @@ class LocalStorage(Storage):
 
         with open(
             full_file_path,
-            mode = "w" if isinstance(data, str) else "wb",
-            encoding = "utf-8" if isinstance(data, str) else None
+            mode="w" if isinstance(data, str) else "wb",
+            encoding="utf-8" if isinstance(data, str) else None,
         ) as f:
             if hasattr(data, "read"):
                 data.seek(0)
@@ -28,7 +29,7 @@ class LocalStorage(Storage):
     def retrieve(self, file_path: str, mode: str = "rb"):
         full_file_path = self.storage_path + "/" + file_path
 
-        with open(full_file_path, mode = mode) as f:
+        with open(full_file_path, mode=mode) as f:
             f.seek(0)
             return f.read()
 
@@ -39,7 +40,7 @@ class LocalStorage(Storage):
     @staticmethod
     def ensure_directory_exists(file_path: str):
         if not os.path.exists(file_path):
-            os.makedirs(file_path, exist_ok = True)
+            os.makedirs(file_path, exist_ok=True)
 
     @staticmethod
     def remove(file_path: str):

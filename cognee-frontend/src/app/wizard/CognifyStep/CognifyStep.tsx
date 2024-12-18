@@ -21,10 +21,10 @@ export default function CognifyStep({ onNext, dataset }: ConfigStepProps) {
     if (cognifyPromise.current) {
       return;
     }
-    
+
     cognifyPromise.current = cognifyDataset(dataset)
       .then(() => {
-        stopCognifyIndicator();        
+        stopCognifyIndicator();
       });
   }, [stopCognifyIndicator, dataset]);
 
