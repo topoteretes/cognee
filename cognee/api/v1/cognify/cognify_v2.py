@@ -69,17 +69,18 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, graph_model: BaseMo
 
     send_telemetry("cognee.cognify EXECUTION STARTED", user.id)
 
-    async with update_status_lock:
-        task_status = await get_pipeline_status([dataset_id])
+    #async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
+    task_status = await get_pipeline_status([dataset_id])
 
-        if dataset_id in task_status and task_status[dataset_id] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
-            logger.info("Dataset %s is already being processed.", dataset_name)
-            return
+    if dataset_id in task_status and task_status[dataset_id] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
+        logger.info("Dataset %s is already being processed.", dataset_name)
+        return
 
-        await log_pipeline_status(dataset_id, PipelineRunStatus.DATASET_PROCESSING_STARTED, {
-            "dataset_name": dataset_name,
-            "files": document_ids_str,
-        })
+    await log_pipeline_status(dataset_id, PipelineRunStatus.DATASET_PROCESSING_STARTED, {
+        "dataset_name": dataset_name,
+        "files": document_ids_str,
+    })
+
     try:
         cognee_config = get_cognify_config()
 
