@@ -74,6 +74,7 @@ deepeval = {version = "^2.0.1", optional = true}
 transformers = "^4.46.3"
 pymilvus = {version = "^2.5.0", optional = true}
 unstructured = { extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], version = "^0.16.10", optional = true }
+pre-commit = "^4.0.1"
 
 
 
