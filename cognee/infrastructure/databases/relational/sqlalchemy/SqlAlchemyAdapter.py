@@ -3,11 +3,12 @@ from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
-from sqlalchemy import text, select, MetaData, Table
+from sqlalchemy import text, select, MetaData, Table, delete
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.modules.data.models.Data import Data
 from ..ModelBase import Base
 
 class SQLAlchemyAdapter():
@@ -86,9 +87,9 @@ class SQLAlchemyAdapter():
                 return [schema[0] for schema in result.fetchall()]
         return []
 
-    async def delete_data_by_id(self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"):
+    async def delete_entity_by_id(self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"):
         """
-        Delete data in given table based on id. Table must have an id Column.
+        Delete entity in given table based on id. Table must have an id Column.
         """
         if self.engine.dialect.name == "sqlite":
             async with self.get_async_session() as session:
@@ -104,6 +105,27 @@ class SQLAlchemyAdapter():
             async with self.get_async_session() as session:
                 TableModel = await self.get_table(table_name, schema_name)
                 await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
+                await session.commit()
+
+
+    async def delete_data_entity(self, data_id: UUID):
+        """
+        Delete data and local files related to data if there are no references to it anymore.
+        """
+        if self.engine.dialect.name == "sqlite":
+            async with self.get_async_session() as session:
+
+                # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
+                # so must be enabled for each database connection/session separately.
+                await session.execute(text("PRAGMA foreign_keys = ON;"))
+
+                data_entity = await session.execute(select(Data).where(Data.id == data_id))
+
+                await session.execute(delete(Data).where(Data.id == data_id))
+                await session.commit()
+        else:
+            async with self.get_async_session() as session:
+                await session.execute(delete(Data).where(Data.id == data_id))
                 await session.commit()
 
 
