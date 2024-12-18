@@ -27,16 +27,6 @@ async def get_non_py_files(repo_path):
     return non_py_files_paths
 
 
-async def get_non_code_files(data_points: list[DataPoint]):
-    for data_point in data_points:
-        if isinstance(data_point, Repository):
-            repo_path = data_point.path
-            break
-
-    non_py_files_paths = await get_non_py_files(repo_path)
-    
-    return non_py_files_paths
-
 async def get_data_list_for_user(_, dataset_name, user):
     datasets = await get_datasets_by_name(dataset_name, user.id)
     data_documents: list[Data] = []
