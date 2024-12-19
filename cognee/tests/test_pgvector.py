@@ -2,11 +2,51 @@ import os
 import logging
 import pathlib
 import cognee
+
+from cognee.modules.data.models import Data
 from cognee.api.v1.search import SearchType
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.users.methods import get_default_user
 
 logging.basicConfig(level=logging.DEBUG)
+
+async def test_local_file_deletion(data_text, file_location):
+    from sqlalchemy import select
+    import hashlib
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    engine = get_relational_engine()
+
+    async with engine.get_async_session() as session:
+        # Get hash of data contents
+        encoded_text = data_text.encode("utf-8")
+        data_hash = hashlib.md5(encoded_text).hexdigest()
+        # Get data entry from database based on hash contents
+        data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
+        assert os.path.isfile(data.raw_data_location), f"Data location doesn't exist: {data.raw_data_location}"
+        # Test deletion of data along with local files created by cognee
+        await engine.delete_data_entity(data.id)
+        assert not os.path.exists(data.raw_data_location), f"Data location exists: {data.raw_data_location}"
+
+    async with engine.get_async_session() as session:
+        # Get data entry from database based on file path
+        data = (await session.scalars(select(Data).where(Data.raw_data_location == file_location))).one()
+        assert os.path.isfile(data.raw_data_location), f"Data location doesn't exist: {data.raw_data_location}"
+        # Test local files not created by cognee won't get deleted
+        await engine.delete_data_entity(data.id)
+        assert os.path.exists(data.raw_data_location), f"Data location doesn't exists: {data.raw_data_location}"
+
+async def test_getting_of_documents(dataset_name_1):
+    # Test getting of documents for search per dataset
+    from cognee.modules.users.permissions.methods import get_document_ids_for_user
+    user = await get_default_user()
+    document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
+    assert len(document_ids) == 1, f"Number of expected documents doesn't match {len(document_ids)} != 1"
+
+    # Test getting of documents for search when no dataset is provided
+    user = await get_default_user()
+    document_ids = await get_document_ids_for_user(user.id)
+    assert len(document_ids) == 2, f"Number of expected documents doesn't match {len(document_ids)} != 2"
 
 
 async def main():
@@ -67,16 +107,7 @@ async def main():
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
-    # Test getting of documents for search per dataset
-    from cognee.modules.users.permissions.methods import get_document_ids_for_user
-    user = await get_default_user()
-    document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
-    assert len(document_ids) == 1, f"Number of expected documents doesn't match {len(document_ids)} != 1"
-
-    # Test getting of documents for search when no dataset is provided
-    user = await get_default_user()
-    document_ids = await get_document_ids_for_user(user.id)
-    assert len(document_ids) == 2, f"Number of expected documents doesn't match {len(document_ids)} != 2"
+    await test_getting_of_documents(dataset_name_1)
 
     vector_engine = get_vector_engine()
     random_node = (await vector_engine.search("entity_name", "Quantum computer"))[0]
@@ -105,6 +136,8 @@ async def main():
 
     results = await brute_force_triplet_search('What is a quantum computer?')
     assert len(results) > 0
+
+    await test_local_file_deletion(text, explanation_file_path)
 
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"

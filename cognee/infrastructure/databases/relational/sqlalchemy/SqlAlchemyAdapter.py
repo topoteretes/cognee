@@ -128,7 +128,7 @@ class SQLAlchemyAdapter():
 
             # Check if other data objects point to the same raw data location
             raw_data_location_entities = (await session.execute(
-                select(Data).where(Data.raw_data_location == data_entity.raw_data_location))).all()
+                select(Data.raw_data_location).where(Data.raw_data_location == data_entity.raw_data_location))).all()
 
             # Don't delete local file unless this is the only reference to the file in the database
             if len(raw_data_location_entities) == 1:
@@ -136,7 +136,7 @@ class SQLAlchemyAdapter():
                 from cognee.base_config import get_base_config
                 config = get_base_config()
                 if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
-                    os.remove(raw_data_location_entities[0])
+                    os.remove(raw_data_location_entities[0].raw_data_location)
 
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
