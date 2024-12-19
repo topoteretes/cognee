@@ -12,6 +12,26 @@ def _count_tokens(tokenizer: tiktoken.Encoding, source_code: str) -> int:
     return len(tokenizer.encode(source_code))
 
 
+def _get_naive_subchunk_token_counts(
+        tokenizer: tiktoken.Encoding, source_code: str, max_subchunk_tokens: int = 8000
+) -> list[tuple[str, int]]:
+    """Splits source code into subchunks of up to max_subchunk_tokens and counts tokens."""
+
+    token_ids = tokenizer.encode(source_code)
+    subchunk_token_counts = []
+
+    for start_idx in range(0, len(token_ids), max_subchunk_tokens):
+        subchunk_token_ids = token_ids[start_idx: start_idx + max_subchunk_tokens]
+        token_count = len(subchunk_token_ids)
+        subchunk = ''.join(
+            tokenizer.decode_single_token_bytes(token_id).decode('utf-8', errors='replace')
+            for token_id in subchunk_token_ids
+        )
+        subchunk_token_counts.append((subchunk, token_count))
+
+    return subchunk_token_counts
+
+
 def _get_subchunk_token_counts(
         tokenizer: tiktoken.Encoding, source_code: str, max_subchunk_tokens: int = 8000
 ) -> list[tuple[str, int]]:
@@ -34,8 +54,16 @@ def _get_subchunk_token_counts(
     for child in module.children:
         subchunk = child.get_code()
         token_count = _count_tokens(tokenizer, subchunk)
+
+        if token_count == 0:
+            continue
+
         if token_count <= max_subchunk_tokens:
             subchunk_token_counts.append((subchunk, token_count))
+            continue
+
+        if child.type == 'string':
+            subchunk_token_counts.extend(_get_naive_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens))
             continue
 
         subchunk_token_counts.extend(_get_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens))
@@ -58,12 +86,12 @@ def _get_chunk_source_code(
             break
         current_source_code += f"\n{child_code}"
 
-    if current_count<= max_tokens:
+    if current_count <= max_tokens:
         return [], current_source_code.strip()
 
     cutoff = 1
     for i, cum_count in enumerate(cumulative_counts):
-        if cum_count> (1 - overlap) * max_tokens:
+        if cum_count > (1 - overlap) * max_tokens:
             break
         cutoff = i
 
@@ -98,7 +126,7 @@ def get_source_code_chunks_from_code_part(
 
 
 async def get_source_code_chunks(data_points: list[DataPoint], embedding_model="text-embedding-3-large") -> \
-AsyncGenerator[list[DataPoint], None]:
+        AsyncGenerator[list[DataPoint], None]:
     """Processes code graph datapoints, create SourceCodeChink datapoints."""
     for data_point in data_points:
         yield data_point
