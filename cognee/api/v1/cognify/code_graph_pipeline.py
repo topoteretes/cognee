@@ -29,7 +29,14 @@ from cognee.tasks.repo_processor import (enrich_dependency_graph,
                                          expand_dependency_graph,
                                          get_repo_file_dependencies)
 from cognee.tasks.storage import add_data_points
+
+from cognee.base_config import get_base_config
+from cognee.shared.data_models import MonitoringTool
+if MonitoringTool.LANGFUSE:
+    from langfuse.decorators import observe
+
 from cognee.tasks.summarization import summarize_code
+
 
 logger = logging.getLogger("code_graph_pipeline")
 
@@ -62,7 +69,7 @@ async def code_graph_pipeline(datasets: Union[str, list[str]] = None, user: User
 
     return await asyncio.gather(*awaitables)
 
-
+@observe
 async def run_pipeline(dataset: Dataset, user: User):
     '''DEPRECATED: Use `run_code_graph_pipeline` instead. This function will be removed.'''
     data_documents: list[Data] = await get_dataset_data(dataset_id = dataset.id)

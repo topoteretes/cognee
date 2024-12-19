@@ -6,26 +6,31 @@ from typing import Type
 import litellm
 import instructor
 from pydantic import BaseModel
-
+from cognee.shared.data_models import MonitoringTool
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.base_config import get_base_config
+
+if MonitoringTool.LANGFUSE:
+    from langfuse.decorators import observe
 
 class OpenAIAdapter(LLMInterface):
     name = "OpenAI"
     model: str
     api_key: str
     api_version: str
-  
+
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
+
     def __init__(
-        self,
-        api_key: str,
-        endpoint: str,
-        api_version: str,
-        model: str,
-        transcription_model: str,
-        streaming: bool = False,
+            self,
+            api_key: str,
+            endpoint: str,
+            api_version: str,
+            model: str,
+            transcription_model: str,
+            streaming: bool = False,
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
         self.client = instructor.from_litellm(litellm.completion)
@@ -35,13 +40,18 @@ class OpenAIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.api_version = api_version
         self.streaming = streaming
+        base_config = get_base_config()
 
-    async def acreate_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
+
+    @observe()
+    async def acreate_structured_output(self, text_input: str, system_prompt: str,
+                                        response_model: Type[BaseModel]) -> BaseModel:
+
         """Generate a response from a user query."""
 
         return await self.aclient.chat.completions.create(
-            model = self.model,
-            messages = [{
+            model=self.model,
+            messages=[{
                 "role": "user",
                 "content": f"""Use the given format to
                 extract information from the following input: {text_input}. """,
@@ -49,19 +59,21 @@ class OpenAIAdapter(LLMInterface):
                 "role": "system",
                 "content": system_prompt,
             }],
-            api_key = self.api_key,
-            api_base = self.endpoint,
-            api_version = self.api_version,
-            response_model = response_model,
-            max_retries = 5,
+            api_key=self.api_key,
+            api_base=self.endpoint,
+            api_version=self.api_version,
+            response_model=response_model,
+            max_retries=5,
         )
 
-    def create_structured_output(self, text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel:
+    @observe
+    def create_structured_output(self, text_input: str, system_prompt: str,
+                                 response_model: Type[BaseModel]) -> BaseModel:
         """Generate a response from a user query."""
 
         return self.client.chat.completions.create(
-            model = self.model,
-            messages = [{
+            model=self.model,
+            messages=[{
                 "role": "user",
                 "content": f"""Use the given format to
                 extract information from the following input: {text_input}. """,
@@ -69,11 +81,11 @@ class OpenAIAdapter(LLMInterface):
                 "role": "system",
                 "content": system_prompt,
             }],
-            api_key = self.api_key,
-            api_base = self.endpoint,
-            api_version = self.api_version,
-            response_model = response_model,
-            max_retries = 5,
+            api_key=self.api_key,
+            api_base=self.endpoint,
+            api_version=self.api_version,
+            response_model=response_model,
+            max_retries=5,
         )
 
     def create_transcript(self, input):
@@ -86,12 +98,12 @@ class OpenAIAdapter(LLMInterface):
         #     audio_data = audio_file.read()
 
         transcription = litellm.transcription(
-            model = self.transcription_model,
-            file = Path(input),
+            model=self.transcription_model,
+            file=Path(input),
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
-            max_retries = 5,
+            max_retries=5,
         )
 
         return transcription
@@ -101,8 +113,8 @@ class OpenAIAdapter(LLMInterface):
             encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
 
         return litellm.completion(
-            model = self.model,
-            messages = [{
+            model=self.model,
+            messages=[{
                 "role": "user",
                 "content": [
                     {
@@ -119,8 +131,8 @@ class OpenAIAdapter(LLMInterface):
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
-            max_tokens = 300,
-            max_retries = 5,
+            max_tokens=300,
+            max_retries=5,
         )
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
