@@ -73,7 +73,7 @@ async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list, Non
 
     yield repo
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers = 12) as executor:
         loop = asyncio.get_event_loop()
 
         tasks = [
