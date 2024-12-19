@@ -1,10 +1,10 @@
 import asyncio
 from typing import AsyncGenerator, Union
 from uuid import uuid5
-from typing import Type
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.extraction.extract_summary import extract_code_summary
+
 from .models import CodeSummary
 
 
@@ -21,7 +21,7 @@ async def summarize_code(
     )
 
     file_summaries_map = {
-        code_data_point.extracted_id: str(file_summary)
+        code_data_point.id: str(file_summary)
         for code_data_point, file_summary in zip(code_data_points, file_summaries)
     }
 
@@ -36,5 +36,5 @@ async def summarize_code(
         yield CodeSummary(
             id=uuid5(node.id, "CodeSummary"),
             made_from=node,
-            text=file_summaries_map[node.extracted_id],
+            text=file_summaries_map[node.id],
         )
