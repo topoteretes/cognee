@@ -32,7 +32,9 @@ from cognee.tasks.storage import add_data_points
 
 from cognee.base_config import get_base_config
 from cognee.shared.data_models import MonitoringTool
-if MonitoringTool.LANGFUSE:
+
+monitoring = get_base_config().monitoring_tool
+if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 
 from cognee.tasks.summarization import summarize_code
