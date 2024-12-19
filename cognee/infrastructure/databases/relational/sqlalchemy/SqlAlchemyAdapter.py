@@ -1,3 +1,4 @@
+import os
 from os import path
 from uuid import UUID
 from typing import Optional
@@ -114,54 +115,31 @@ class SQLAlchemyAdapter():
         """
         Delete data and local files related to data if there are no references to it anymore.
         """
-        if self.engine.dialect.name == "sqlite":
-            async with self.get_async_session() as session:
-
+        async with self.get_async_session() as session:
+            if self.engine.dialect.name == "sqlite":
                 # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-                data_entity = await session.scalars(select(Data).where(Data.id == data_id)).one()
+            try:
+                data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
+            except (ValueError, NoResultFound) as e:
+                raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
 
-                # Check if other data objects point to the same raw data location
-                raw_data_location_entities= await session.execute(
-                    select(Data).where(Data.raw_data_location == data_entity.raw_data_location)).all()
+            # Check if other data objects point to the same raw data location
+            raw_data_location_entities = (await session.execute(
+                select(Data).where(Data.raw_data_location == data_entity.raw_data_location))).all()
 
-                # Don't delete local file unless this is the only reference to the file in the database
-                if len(raw_data_location_entities) == 1:
-                    # delete local file
-                    from cognee.base_config import get_base_config
-                    config = get_base_config()
-                    if config.data_root_directory in raw_data_location_entities[0]:
-                        # delete local file
-                        pass
+            # Don't delete local file unless this is the only reference to the file in the database
+            if len(raw_data_location_entities) == 1:
+                # delete local file only if it's created by cognee
+                from cognee.base_config import get_base_config
+                config = get_base_config()
+                if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
+                    os.remove(raw_data_location_entities[0])
 
-
-                await session.execute(delete(Data).where(Data.id == data_id))
-                await session.commit()
-        else:
-            async with self.get_async_session() as session:
-                try:
-                    data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
-                except (ValueError, NoResultFound) as e:
-                    raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
-
-                # Check if other data objects point to the same raw data location
-                raw_data_location_entities = (await session.execute(
-                    select(Data).where(Data.raw_data_location == data_entity.raw_data_location))).all()
-
-                # Don't delete local file unless this is the only reference to the file in the database
-                if len(raw_data_location_entities) == 1:
-                    # delete local file
-                    from cognee.base_config import get_base_config
-                    config = get_base_config()
-                    if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
-                        # delete local file
-                        pass
-
-                await session.execute(delete(Data).where(Data.id == data_id))
-                await session.commit()
-
+            await session.execute(delete(Data).where(Data.id == data_id))
+            await session.commit()
 
     async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
         """
