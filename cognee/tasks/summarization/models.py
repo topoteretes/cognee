@@ -19,7 +19,7 @@ class TextSummary(DataPoint):
 class CodeSummary(DataPoint):
     __tablename__ = "code_summary"
     text: str
-    made_from: Union[CodeFile, CodePart, SourceCodeChunk]
+    summarizes: Union[CodeFile, CodePart, SourceCodeChunk]
 
     _metadata: dict = {
         "index_fields": ["text"],
