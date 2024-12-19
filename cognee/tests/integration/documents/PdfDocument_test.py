@@ -22,7 +22,7 @@ def test_PdfDocument():
     )
 
     for ground_truth, paragraph_data in zip(
-        GROUND_TRUTH, document.read(chunk_size=1024)
+        GROUND_TRUTH, document.read(chunk_size=1024, chunker='text_chunker')
     ):
         assert (
             ground_truth["word_count"] == paragraph_data.word_count

@@ -5,9 +5,10 @@ from uuid import UUID
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
-from ..vector_db_interface import VectorDBInterface
-from ..models.ScoredResult import ScoredResult
+
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 
 logger = logging.getLogger("WeaviateAdapter")
 
@@ -15,7 +16,8 @@ class IndexSchema(DataPoint):
     text: str
 
     _metadata: dict = {
-        "index_fields": ["text"]
+        "index_fields": ["text"],
+        "type": "IndexSchema"
     }
 
 class WeaviateAdapter(VectorDBInterface):

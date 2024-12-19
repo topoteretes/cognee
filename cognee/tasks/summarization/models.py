@@ -10,6 +10,7 @@ class TextSummary(DataPoint):
 
     _metadata: dict = {
         "index_fields": ["text"],
+        "type": "TextSummary"
     }
 
 
@@ -20,4 +21,5 @@ class CodeSummary(DataPoint):
 
     _metadata: dict = {
         "index_fields": ["text"],
+        "type": "CodeSummary"
     }
