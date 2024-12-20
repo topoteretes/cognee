@@ -2,9 +2,9 @@ import asyncio
 import logging
 from pathlib import Path
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.vector.embeddings import \
     get_embedding_engine
-from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
@@ -79,6 +79,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
                 task_config={"batch_size": 50}
             ),
         ]
+        
     if include_docs:
         async for result in run_tasks(non_code_tasks, repo_path):
             yield result
