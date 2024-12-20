@@ -35,7 +35,7 @@ def get_cognify_router() -> APIRouter:
                 graph_model_instance = GraphModelDynamic(**graph_model_schema)
                 print(graph_model_instance)
             else:
-                graph_model_instance = KnowledgeGraph
+                graph_model_instance = KnowledgeGraph()
 
             await cognee_cognify(payload.datasets, user, graph_model_instance)
         except Exception as error:
