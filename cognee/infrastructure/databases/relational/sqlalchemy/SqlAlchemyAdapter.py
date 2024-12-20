@@ -1,5 +1,6 @@
 import os
 from os import path
+import  logging
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
@@ -13,6 +14,9 @@ from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.data.models.Data import Data
 
 from ..ModelBase import Base
+
+
+logger = logging.getLogger(__name__)
 
 class SQLAlchemyAdapter():
     def __init__(self, connection_string: str):
@@ -142,7 +146,7 @@ class SQLAlchemyAdapter():
                         os.remove(raw_data_location_entities[0].raw_data_location)
                     else:
                         # Report bug as file should exist
-                        pass
+                        logger.error("Local file which should exist can't be found.")
 
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
