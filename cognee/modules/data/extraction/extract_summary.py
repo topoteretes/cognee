@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Type
 
@@ -10,6 +11,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import SummarizedCode
 from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 
+logger = logging.getLogger("extract_summary")
 
 async def extract_summary(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
@@ -33,7 +35,7 @@ async def extract_code_summary(content: str):
         try:
             result = await extract_summary(content, response_model=SummarizedCode)
         except (RetryError, InstructorRetryException) as e:
-            print(str(e))
+            logger.error("Failed to extract code summary, falling back to mock summary", exc_info=e)
             result = get_mock_summarized_code()
 
         return result
