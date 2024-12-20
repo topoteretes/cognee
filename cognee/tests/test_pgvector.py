@@ -26,7 +26,8 @@ async def test_local_file_deletion(data_text, file_location):
         assert os.path.isfile(data.raw_data_location), f"Data location doesn't exist: {data.raw_data_location}"
         # Test deletion of data along with local files created by cognee
         await engine.delete_data_entity(data.id)
-        assert not os.path.exists(data.raw_data_location), f"Data location exists: {data.raw_data_location}"
+        assert not os.path.exists(
+            data.raw_data_location), f"Data location still exists after deletion: {data.raw_data_location}"
 
     async with engine.get_async_session() as session:
         # Get data entry from database based on file path

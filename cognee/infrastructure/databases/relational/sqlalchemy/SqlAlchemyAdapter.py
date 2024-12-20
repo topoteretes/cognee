@@ -132,11 +132,17 @@ class SQLAlchemyAdapter():
 
             # Don't delete local file unless this is the only reference to the file in the database
             if len(raw_data_location_entities) == 1:
+
                 # delete local file only if it's created by cognee
                 from cognee.base_config import get_base_config
                 config = get_base_config()
+
                 if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
-                    os.remove(raw_data_location_entities[0].raw_data_location)
+                    if os.path.exists(raw_data_location_entities[0].raw_data_location):
+                        os.remove(raw_data_location_entities[0].raw_data_location)
+                    else:
+                        # Report bug as file should exist
+                        pass
 
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
