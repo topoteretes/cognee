@@ -1,0 +1,11 @@
+name: ruff format
+on: [ pull_request ]
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v2
+        with:
+          args: "format --check"
