@@ -1,14 +1,22 @@
+import os
 from os import path
+import  logging
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
-from sqlalchemy import text, select, MetaData, Table
+from sqlalchemy import text, select, MetaData, Table, delete
 from sqlalchemy.orm import joinedload
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.modules.data.models.Data import Data
+
 from ..ModelBase import Base
+
+
+logger = logging.getLogger(__name__)
 
 class SQLAlchemyAdapter():
     def __init__(self, connection_string: str):
@@ -86,9 +94,9 @@ class SQLAlchemyAdapter():
                 return [schema[0] for schema in result.fetchall()]
         return []
 
-    async def delete_data_by_id(self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"):
+    async def delete_entity_by_id(self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"):
         """
-        Delete data in given table based on id. Table must have an id Column.
+        Delete entity in given table based on id. Table must have an id Column.
         """
         if self.engine.dialect.name == "sqlite":
             async with self.get_async_session() as session:
@@ -106,6 +114,42 @@ class SQLAlchemyAdapter():
                 await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
                 await session.commit()
 
+
+    async def delete_data_entity(self, data_id: UUID):
+        """
+        Delete data and local files related to data if there are no references to it anymore.
+        """
+        async with self.get_async_session() as session:
+            if self.engine.dialect.name == "sqlite":
+                # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
+                # so must be enabled for each database connection/session separately.
+                await session.execute(text("PRAGMA foreign_keys = ON;"))
+
+            try:
+                data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
+            except (ValueError, NoResultFound) as e:
+                raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
+
+            # Check if other data objects point to the same raw data location
+            raw_data_location_entities = (await session.execute(
+                select(Data.raw_data_location).where(Data.raw_data_location == data_entity.raw_data_location))).all()
+
+            # Don't delete local file unless this is the only reference to the file in the database
+            if len(raw_data_location_entities) == 1:
+
+                # delete local file only if it's created by cognee
+                from cognee.base_config import get_base_config
+                config = get_base_config()
+
+                if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
+                    if os.path.exists(raw_data_location_entities[0].raw_data_location):
+                        os.remove(raw_data_location_entities[0].raw_data_location)
+                    else:
+                        # Report bug as file should exist
+                        logger.error("Local file which should exist can't be found.")
+
+            await session.execute(delete(Data).where(Data.id == data_id))
+            await session.commit()
 
     async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
         """
