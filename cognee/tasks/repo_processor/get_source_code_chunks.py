@@ -33,9 +33,15 @@ def _get_naive_subchunk_token_counts(
 
 
 def _get_subchunk_token_counts(
-        tokenizer: tiktoken.Encoding, source_code: str, max_subchunk_tokens: int = 8000
+        tokenizer: tiktoken.Encoding,
+        source_code: str,
+        max_subchunk_tokens: int = 8000,
+        depth: int = 0,
+        max_depth: int = 100
 ) -> list[tuple[str, int]]:
     """Splits source code into subchunk and counts tokens for each subchunk."""
+    if depth > max_depth:
+        return _get_naive_subchunk_token_counts(tokenizer, source_code, max_subchunk_tokens)
 
     try:
         module = parso.parse(source_code)
@@ -47,6 +53,7 @@ def _get_subchunk_token_counts(
         logger.warning("Parsed module has no children (empty or invalid source code).")
         return []
 
+    # Handle cases with only one real child and an EndMarker to prevent infinite recursion.
     if len(module.children) <= 2:
         module = module.children[0]
 
@@ -66,7 +73,9 @@ def _get_subchunk_token_counts(
             subchunk_token_counts.extend(_get_naive_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens))
             continue
 
-        subchunk_token_counts.extend(_get_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens))
+        subchunk_token_counts.extend(
+            _get_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens, depth=depth + 1, max_depth=max_depth)
+        )
 
     return subchunk_token_counts
 
