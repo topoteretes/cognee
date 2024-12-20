@@ -20,14 +20,26 @@ async def get_non_py_files(repo_path):
     if not os.path.exists(repo_path):
         return {}
 
+    IGNORED_PATTERNS = {
+        '.git', '__pycache__', '*.pyc', '*.pyo', '*.pyd',
+        'node_modules', '*.egg-info'
+    }
+
+    def should_process(path):
+        return not any(pattern in path for pattern in IGNORED_PATTERNS)
+
     non_py_files_paths = [
         os.path.join(root, file)
-        for root, _, files in os.walk(repo_path) for file in files if not file.endswith(".py")
+        for root, _, files in os.walk(repo_path) for file in files 
+        if not file.endswith(".py") and should_process(os.path.join(root, file))
     ]
     return non_py_files_paths
 
 
 async def get_data_list_for_user(_, dataset_name, user):
+    # Note: This method is meant to be used as a Task in a pipeline.
+    # By the nature of pipelines, the output of the previous Task will be passed as the first argument here,
+    # but it is not needed here, hence the "_" input.
     datasets = await get_datasets_by_name(dataset_name, user.id)
     data_documents: list[Data] = []
     for dataset in datasets:
