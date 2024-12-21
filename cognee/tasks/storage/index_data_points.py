@@ -1,3 +1,6 @@
+from litellm.exceptions import BadRequestError
+from litellm.llms.OpenAI.openai import OpenAIError
+
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
@@ -30,7 +33,10 @@ async def index_data_points(data_points: list[DataPoint]):
 
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
-        await vector_engine.index_data_points(index_name, field_name, indexable_points)
+        try:
+            await vector_engine.index_data_points(index_name, field_name, indexable_points)
+        except (OpenAIError, BadRequestError) as e:
+            print(f"Failed to index data points for {index_name}.{field_name}: {e}")
 
     return data_points
 
