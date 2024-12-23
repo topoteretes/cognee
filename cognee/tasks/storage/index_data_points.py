@@ -1,9 +1,10 @@
-from litellm.exceptions import BadRequestError
-from litellm.llms.OpenAI.openai import OpenAIError
+import logging
 
+from cognee.infrastructure.databases.exceptions.embedding_exception import EmbeddingException
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
+logger = logging.getLogger("index_data_points")
 
 async def index_data_points(data_points: list[DataPoint]):
     created_indexes = {}
@@ -35,8 +36,8 @@ async def index_data_points(data_points: list[DataPoint]):
         index_name, field_name = index_name.split(".")
         try:
             await vector_engine.index_data_points(index_name, field_name, indexable_points)
-        except (OpenAIError, BadRequestError) as e:
-            print(f"Failed to index data points for {index_name}.{field_name}: {e}")
+        except EmbeddingException as e:
+            logger.warning(f"Failed to index data points for {index_name}.{field_name}: {e}")
 
     return data_points
 
