@@ -1,5 +1,14 @@
 # cognee MCP server
 
+### Installing via Smithery
+
+To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
+
+```bash
+npx -y @smithery/cli install cognee --client claude
+```
+
+### Installing Manually
 A MCP server project
 
 Create a boilerplate server:

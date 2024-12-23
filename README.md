@@ -21,15 +21,6 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 
 ## 📦 Installation
 
-
-### Installing via Smithery
-
-To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
-
-```bash
-npx -y @smithery/cli install cognee --client claude
-```
-
 You can install Cognee using either **pip** or **poetry**.
 Support for various databases and vector stores is available through extras.
 
