@@ -1,9 +1,11 @@
 from typing import AsyncGenerator, Generator
 from uuid import NAMESPACE_OID, uuid5
-from cognee.infrastructure.engine import DataPoint
-from cognee.shared.CodeGraphEntities import CodePart, SourceCodeChunk, CodeFile
-import tiktoken
+
 import parso
+import tiktoken
+
+from cognee.infrastructure.engine import DataPoint
+from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
 
 from cognee.tasks.repo_processor import logger
 
