@@ -1,13 +1,7 @@
 # cognee MCP server
 
 
-### Installing via Smithery
 
-To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
-
-```bash
-npx -y @smithery/cli install cognee --client claude
-```
 
 ### Installing Manually
 A MCP server project
@@ -49,6 +43,15 @@ source .venv/bin/activate
 ```
 
 Then, edit the pyproject.toml in your new folder so that it includes packages from the cognee requirements. Use the pyproject.toml in your cognee library for this, but match the syntax of the automatically generated pyproject.toml so that it is compatible with uv.
+
+
+### Installing via Smithery
+
+To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
+
+```bash
+npx -y @smithery/cli install cognee --client claude
+```
 
 Define cognify tool in server.py
 Restart your Claude desktop.
