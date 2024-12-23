@@ -1,4 +1,5 @@
 # cognee
+[![smithery badge](https://smithery.ai/badge/cognee)](https://smithery.ai/server/cognee)
 [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
 [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
 [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
@@ -19,6 +20,15 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 
 
 ## 📦 Installation
+
+
+### Installing via Smithery
+
+To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
+
+```bash
+npx -y @smithery/cli install cognee --client claude
+```
 
 You can install Cognee using either **pip** or **poetry**.
 Support for various databases and vector stores is available through extras.
