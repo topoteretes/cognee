@@ -115,6 +115,10 @@ def get_source_code_chunks_from_code_part(
         model_name: str = "text-embedding-3-large"
 ) -> Generator[SourceCodeChunk, None, None]:
     """Yields source code chunks from a CodePart object, with configurable token limits and overlap."""
+    if not code_file_part.source_code:
+        logger.error(f"No source code in CodeFile {code_file_part.id}")
+        return
+
     tokenizer = tiktoken.encoding_for_model(model_name)
     max_subchunk_tokens = max(1, int(granularity * max_tokens))
     subchunk_token_counts = _get_subchunk_token_counts(tokenizer, code_file_part.source_code, max_subchunk_tokens)
