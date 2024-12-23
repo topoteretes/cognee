@@ -146,12 +146,19 @@ async def get_source_code_chunks(data_points: list[DataPoint], embedding_model="
     """Processes code graph datapoints, create SourceCodeChink datapoints."""
     # TODO: Add support for other embedding models, with max_token mapping
     for data_point in data_points:
-        yield data_point
-        if not isinstance(data_point, CodeFile):
-            continue
-        if not data_point.contains:
-            continue
-        for code_part in data_point.contains:
-            yield code_part
-            for source_code_chunk in get_source_code_chunks_from_code_part(code_part, model_name=embedding_model):
-                yield source_code_chunk
+        try:
+            yield data_point
+            if not isinstance(data_point, CodeFile):
+                continue
+            if not data_point.contains:
+                logger.warning(f"CodeFile {data_point.id} contains no code parts")
+                continue
+            for code_part in data_point.contains:
+                try:
+                    yield code_part
+                    for source_code_chunk in get_source_code_chunks_from_code_part(code_part, model_name=embedding_model):
+                        yield source_code_chunk
+                except Exception as e:
+                    logger.error(f"Error processing code part: {e}")
+        except Exception as e:
+            logger.error(f"Error processing data point: {e}")
