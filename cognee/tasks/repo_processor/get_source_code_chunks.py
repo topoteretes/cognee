@@ -143,6 +143,7 @@ def get_source_code_chunks_from_code_part(
 async def get_source_code_chunks(data_points: list[DataPoint], embedding_model="text-embedding-3-large") -> \
         AsyncGenerator[list[DataPoint], None]:
     """Processes code graph datapoints, create SourceCodeChink datapoints."""
+    # TODO: Add support for other embedding models, with max_token mapping
     for data_point in data_points:
         yield data_point
         if not isinstance(data_point, CodeFile):
