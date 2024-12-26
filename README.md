@@ -17,7 +17,9 @@ Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qn
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
-
+<div align="center">
+<img src="assets/cognee_benefits.png" alt="why cognee" width="50%" />
+</div>
 ## 📦 Installation
 
 You can install Cognee using either **pip** or **poetry**.
