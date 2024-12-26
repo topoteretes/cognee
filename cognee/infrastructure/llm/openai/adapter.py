@@ -12,7 +12,8 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.base_config import get_base_config
 
-if MonitoringTool.LANGFUSE:
+monitoring = get_base_config().monitoring_tool
+if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 
 class OpenAIAdapter(LLMInterface):
@@ -43,7 +44,7 @@ class OpenAIAdapter(LLMInterface):
         base_config = get_base_config()
 
 
-    @observe()
+    @observe(as_type='generation')
     async def acreate_structured_output(self, text_input: str, system_prompt: str,
                                         response_model: Type[BaseModel]) -> BaseModel:
 

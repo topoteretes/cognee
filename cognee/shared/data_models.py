@@ -210,7 +210,6 @@ class SummarizedClass(BaseModel):
     decorators: Optional[List[str]] = None
 
 class SummarizedCode(BaseModel):
-    file_name: str
     high_level_summary: str
     key_features: List[str]
     imports: List[str] = []
