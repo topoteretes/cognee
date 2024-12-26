@@ -1,6 +1,6 @@
 import logging
 
-from cognee.infrastructure.databases.exceptions.embedding_exception import EmbeddingException
+from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 

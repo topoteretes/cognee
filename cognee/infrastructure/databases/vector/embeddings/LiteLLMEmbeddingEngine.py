@@ -5,7 +5,7 @@ from typing import List, Optional
 import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions.embedding_exception import EmbeddingException
+from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 
 litellm.set_verbose = False
 logger = logging.getLogger("LiteLLMEmbeddingEngine")
@@ -20,12 +20,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     mock: bool
 
     def __init__(
-            self,
-            model: Optional[str] = "text-embedding-3-large",
-            dimensions: Optional[int] = 3072,
-            api_key: str = None,
-            endpoint: str = None,
-            api_version: str = None,
+        self,
+        model: Optional[str] = "text-embedding-3-large",
+        dimensions: Optional[int] = 3072,
+        api_key: str = None,
+        endpoint: str = None,
+        api_version: str = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
