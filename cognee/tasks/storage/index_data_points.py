@@ -1,6 +1,10 @@
+import logging
+
+from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
+logger = logging.getLogger("index_data_points")
 
 async def index_data_points(data_points: list[DataPoint]):
     created_indexes = {}
@@ -30,7 +34,10 @@ async def index_data_points(data_points: list[DataPoint]):
 
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
-        await vector_engine.index_data_points(index_name, field_name, indexable_points)
+        try:
+            await vector_engine.index_data_points(index_name, field_name, indexable_points)
+        except EmbeddingException as e:
+            logger.warning(f"Failed to index data points for {index_name}.{field_name}: {e}")
 
     return data_points
 
