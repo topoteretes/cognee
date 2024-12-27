@@ -37,24 +37,39 @@ source .venv/bin/activate
 4. Add the new server to your Claude config:
 
 The file should be located here: ~/Library/Application\ Support/Claude/
+You need to create claude_desktop_config.json in this folder if it doesn't exist
 
-```json
-"cognee": {
-  "command": "uv",
-  "args": [
-    "--directory",
-    "/{Absolute path to cognee directory}/cognee-mcp",
-    "run",
-    "cognee"
-  ],
-  "env": {
-    "ENV": "local",
-    "TOKENIZERS_PARALLELISM": "false",
-    "LLM_API_KEY": "add_your_api_key_here",
-  }
-}
 ```
 
+
+{
+	"mcpServers": {
+		"cognee": {
+			"command": "/Users/{user}/cognee/.venv/bin/uv",
+			"args": [
+        "--directory",
+        "/Users/{user}/cognee/cognee-mcp",
+        "run",
+        "cognee"
+      ],
+      "env": {
+        "ENV": "local",
+        "TOKENIZERS_PARALLELISM": "false",
+        "LLM_API_KEY": "sk-"
+      }
+		},
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/{user}/Desktop",
+        "/Users/{user}/Projects"
+      ]
+    }
+	}
+}
+```
 
 Restart your Claude desktop.
 
