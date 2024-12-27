@@ -12,6 +12,17 @@ A MCP server project
 
 2. Install dependencies
 
+```
+pip install uv
+```
+```
+brew install postgresql
+```
+
+```
+brew install rust
+```
+
 ```jsx
 cd cognee-mcp
 uv sync --dev --all-extras
@@ -24,6 +35,8 @@ source .venv/bin/activate
 ```
 
 4. Add the new server to your Claude config:
+
+The file should be located here: ~/Library/Application\ Support/Claude/
 
 ```json
 "cognee": {
@@ -42,8 +55,8 @@ source .venv/bin/activate
 }
 ```
 
-Then, edit the pyproject.toml in your new folder so that it includes packages from the cognee requirements. Use the pyproject.toml in your cognee library for this, but match the syntax of the automatically generated pyproject.toml so that it is compatible with uv.
 
+Restart your Claude desktop.
 
 ### Installing via Smithery
 
