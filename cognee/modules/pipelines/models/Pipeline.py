@@ -6,18 +6,19 @@ from cognee.infrastructure.databases.relational import Base
 from .PipelineTask import PipelineTask
 from .Task import Task
 
+
 class Pipeline(Base):
     __tablename__ = "pipelines"
 
-    id = Column(UUID, primary_key = True, default = uuid4)
+    id = Column(UUID, primary_key=True, default=uuid4)
 
     name = Column(String)
-    description = Column(Text, nullable = True)
+    description = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone = True), default = lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone = True), onupdate = lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     tasks = Mapped[list["Task"]] = relationship(
-        secondary = PipelineTask.__tablename__,
-        back_populates = "pipeline",
+        secondary=PipelineTask.__tablename__,
+        back_populates="pipeline",
     )

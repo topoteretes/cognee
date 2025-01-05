@@ -22,18 +22,12 @@ async def retrieve_existing_edges(
             entity_node_id = generate_node_id(node.id)
 
             if str(type_node_id) not in processed_nodes:
-                type_node_edges.append(
-                    (data_chunk.id, type_node_id, "exists_in")
-                )
+                type_node_edges.append((data_chunk.id, type_node_id, "exists_in"))
                 processed_nodes[str(type_node_id)] = True
 
             if str(entity_node_id) not in processed_nodes:
-                entity_node_edges.append(
-                    (data_chunk.id, entity_node_id, "mentioned_in")
-                )
-                type_entity_edges.append(
-                    (entity_node_id, type_node_id, "is_a")
-                )
+                entity_node_edges.append((data_chunk.id, entity_node_id, "mentioned_in"))
+                type_entity_edges.append((entity_node_id, type_node_id, "is_a"))
                 processed_nodes[str(entity_node_id)] = True
 
         graph_node_edges = [

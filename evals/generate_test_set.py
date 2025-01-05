@@ -22,7 +22,7 @@ dotenv.load_dotenv()
 
 dataset = EvaluationDataset()
 dataset.generate_goldens_from_docs(
-    document_paths=['natural_language_processing.txt', 'soldiers_home.pdf', 'trump.txt'],
+    document_paths=["natural_language_processing.txt", "soldiers_home.pdf", "trump.txt"],
     max_goldens_per_document=10,
     num_evolutions=5,
     enable_breadth_evolve=True,
@@ -44,5 +44,3 @@ from deepeval import evaluate
 
 
 # evaluate(dataset, [answer_relevancy_metric])
-
-

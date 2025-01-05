@@ -1,4 +1,5 @@
-""" FastAPI server for the Cognee API. """
+"""FastAPI server for the Cognee API."""
+
 import os
 import uvicorn
 import logging
@@ -19,14 +20,15 @@ logger = logging.getLogger(__name__)
 
 if os.getenv("ENV", "prod") == "prod":
     sentry_sdk.init(
-        dsn = os.getenv("SENTRY_REPORTING_URL"),
-        traces_sample_rate = 1.0,
-        profiles_sample_rate = 1.0,
+        dsn=os.getenv("SENTRY_REPORTING_URL"),
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
     )
 
 from contextlib import asynccontextmanager
 
 app_environment = os.getenv("ENV", "prod")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,26 +37,34 @@ async def lifespan(app: FastAPI):
     # await prune_system(metadata = True)
     # if app_environment == "local" or app_environment == "dev":
     from cognee.infrastructure.databases.relational import get_relational_engine
+
     db_engine = get_relational_engine()
     await db_engine.create_database()
 
     from cognee.modules.users.methods import get_default_user
+
     await get_default_user()
 
     yield
 
-app = FastAPI(debug = app_environment != "prod", lifespan = lifespan)
+
+app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = ["*"],
-    allow_credentials = True,
-    allow_methods = ["OPTIONS", "GET", "POST", "DELETE"],
-    allow_headers = ["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
+    allow_headers=["*"],
 )
 
-from cognee.api.v1.users.routers import get_auth_router, get_register_router,\
-    get_reset_password_router, get_verify_router, get_users_router
+from cognee.api.v1.users.routers import (
+    get_auth_router,
+    get_register_router,
+    get_reset_password_router,
+    get_verify_router,
+    get_users_router,
+)
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -66,18 +76,20 @@ from fastapi import Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
     if request.url.path == "/api/v1/auth/login":
         return JSONResponse(
-            status_code = 400,
-            content = {"detail": "LOGIN_BAD_CREDENTIALS"},
+            status_code=400,
+            content={"detail": "LOGIN_BAD_CREDENTIALS"},
         )
 
     return JSONResponse(
-        status_code = 400,
-        content = jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
+        status_code=400,
+        content=jsonable_encoder({"detail": exc.errors(), "body": exc.body}),
     )
+
 
 @app.exception_handler(CogneeApiError)
 async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
@@ -95,45 +107,41 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
-    return JSONResponse(
-        status_code=status_code, content={"detail": detail["message"]}
-    )
+    return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
 
-app.include_router(
-    get_auth_router(),
-    prefix = "/api/v1/auth",
-    tags = ["auth"]
-)
+
+app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 
 app.include_router(
     get_register_router(),
-    prefix = "/api/v1/auth",
-    tags = ["auth"],
+    prefix="/api/v1/auth",
+    tags=["auth"],
 )
 
 app.include_router(
     get_reset_password_router(),
-    prefix = "/api/v1/auth",
-    tags = ["auth"],
+    prefix="/api/v1/auth",
+    tags=["auth"],
 )
 
 app.include_router(
     get_verify_router(),
-    prefix = "/api/v1/auth",
-    tags = ["auth"],
+    prefix="/api/v1/auth",
+    tags=["auth"],
 )
 
 app.include_router(
     get_users_router(),
-    prefix = "/api/v1/users",
-    tags = ["users"],
+    prefix="/api/v1/users",
+    tags=["users"],
 )
 
 app.include_router(
     get_permissions_router(),
-    prefix = "/api/v1/permissions",
-    tags = ["permissions"],
+    prefix="/api/v1/permissions",
+    tags=["permissions"],
 )
+
 
 @app.get("/")
 async def root():
@@ -148,37 +156,19 @@ def health_check():
     """
     Health check endpoint that returns the server status.
     """
-    return Response(status_code = 200)
+    return Response(status_code=200)
 
-app.include_router(
-    get_datasets_router(),
-    prefix="/api/v1/datasets",
-    tags=["datasets"]
-)
 
-app.include_router(
-    get_add_router(),
-    prefix="/api/v1/add",
-    tags=["add"]
-)
+app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
 
-app.include_router(
-    get_cognify_router(),
-    prefix="/api/v1/cognify",
-    tags=["cognify"]
-)
+app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
-app.include_router(
-    get_search_router(),
-    prefix="/api/v1/search",
-    tags=["search"]
-)
+app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
-app.include_router(
-    get_settings_router(),
-    prefix="/api/v1/settings",
-    tags=["settings"]
-)
+app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
+
+app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
+
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     """
@@ -190,7 +180,7 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        uvicorn.run(app, host = host, port = port)
+        uvicorn.run(app, host=host, port=port)
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")
         # Here you could add any cleanup code or error recovery code.

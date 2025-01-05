@@ -16,14 +16,20 @@ from cognee.tasks.graph import query_graph_connections
 from cognee.tasks.summarization import query_summaries
 from cognee.tasks.completion import query_completion
 
+
 class SearchType(Enum):
     SUMMARIES = "SUMMARIES"
     INSIGHTS = "INSIGHTS"
     CHUNKS = "CHUNKS"
     COMPLETION = "COMPLETION"
 
-async def search(query_type: SearchType, query_text: str, user: User = None,
-                 datasets: Union[list[str], str, None] = None) -> list:
+
+async def search(
+    query_type: SearchType,
+    query_text: str,
+    user: User = None,
+    datasets: Union[list[str], str, None] = None,
+) -> list:
     # We use lists from now on for datasets
     if isinstance(datasets, str):
         datasets = [datasets]
@@ -48,9 +54,10 @@ async def search(query_type: SearchType, query_text: str, user: User = None,
         if document_id is None or document_id in own_document_ids:
             filtered_search_results.append(search_result)
 
-    await log_result(query.id, json.dumps(filtered_search_results, cls = JSONEncoder), user.id)
+    await log_result(query.id, json.dumps(filtered_search_results, cls=JSONEncoder), user.id)
 
     return filtered_search_results
+
 
 async def specific_search(query_type: SearchType, query: str, user) -> list:
     search_tasks: Dict[SearchType, Callable] = {

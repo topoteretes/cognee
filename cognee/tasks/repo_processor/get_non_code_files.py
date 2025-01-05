@@ -6,8 +6,7 @@ import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.data.methods.get_datasets_by_name import \
-    get_datasets_by_name
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
 from cognee.modules.data.models import Data
 from cognee.modules.data.operations.write_metadata import write_metadata
 from cognee.modules.ingestion.data_types import BinaryData
@@ -21,8 +20,13 @@ async def get_non_py_files(repo_path):
         return {}
 
     IGNORED_PATTERNS = {
-        '.git', '__pycache__', '*.pyc', '*.pyo', '*.pyd',
-        'node_modules', '*.egg-info'
+        ".git",
+        "__pycache__",
+        "*.pyc",
+        "*.pyo",
+        "*.pyd",
+        "node_modules",
+        "*.egg-info",
     }
 
     def should_process(path):
@@ -30,7 +34,8 @@ async def get_non_py_files(repo_path):
 
     non_py_files_paths = [
         os.path.join(root, file)
-        for root, _, files in os.walk(repo_path) for file in files 
+        for root, _, files in os.walk(repo_path)
+        for file in files
         if not file.endswith(".py") and should_process(os.path.join(root, file))
     ]
     return non_py_files_paths

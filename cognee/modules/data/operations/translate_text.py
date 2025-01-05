@@ -4,7 +4,10 @@ from cognee.exceptions import InvalidValueError
 
 logger = logging.getLogger(__name__)
 
-async def translate_text(text, source_language: str = "sr", target_language: str = "en", region_name = "eu-west-1"):
+
+async def translate_text(
+    text, source_language: str = "sr", target_language: str = "en", region_name="eu-west-1"
+):
     """
     Translate text from source language to target language using AWS Translate.
     Parameters:
@@ -26,11 +29,11 @@ async def translate_text(text, source_language: str = "sr", target_language: str
         raise InvalidValueError(message="Source and target language codes are required.")
 
     try:
-        translate = boto3.client(service_name = "translate", region_name = region_name, use_ssl = True)
+        translate = boto3.client(service_name="translate", region_name=region_name, use_ssl=True)
         result = translate.translate_text(
-            Text = text,
-            SourceLanguageCode = source_language,
-            TargetLanguageCode = target_language,
+            Text=text,
+            SourceLanguageCode=source_language,
+            TargetLanguageCode=target_language,
         )
         yield result.get("TranslatedText", "No translation found.")
 

@@ -16,9 +16,7 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
             raise EnvironmentError("Missing requred Weaviate credentials!")
 
         return WeaviateAdapter(
-            config["vector_db_url"],
-            config["vector_db_key"],
-            embedding_engine=embedding_engine
+            config["vector_db_url"], config["vector_db_key"], embedding_engine=embedding_engine
         )
 
     elif config["vector_db_provider"] == "qdrant":
@@ -30,10 +28,10 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
         return QDrantAdapter(
             url=config["vector_db_url"],
             api_key=config["vector_db_key"],
-            embedding_engine=embedding_engine
+            embedding_engine=embedding_engine,
         )
 
-    elif config['vector_db_provider'] == 'milvus':
+    elif config["vector_db_provider"] == "milvus":
         from .milvus.MilvusAdapter import MilvusAdapter
 
         if not config["vector_db_url"]:
@@ -41,10 +39,9 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
 
         return MilvusAdapter(
             url=config["vector_db_url"],
-            api_key=config['vector_db_key'],
-            embedding_engine=embedding_engine
+            api_key=config["vector_db_key"],
+            embedding_engine=embedding_engine,
         )
-
 
     elif config["vector_db_provider"] == "pgvector":
         from cognee.infrastructure.databases.relational import get_relational_config

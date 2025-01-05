@@ -16,6 +16,7 @@ monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 
+
 class OpenAIAdapter(LLMInterface):
     name = "OpenAI"
     model: str
@@ -25,13 +26,13 @@ class OpenAIAdapter(LLMInterface):
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
 
     def __init__(
-            self,
-            api_key: str,
-            endpoint: str,
-            api_version: str,
-            model: str,
-            transcription_model: str,
-            streaming: bool = False,
+        self,
+        api_key: str,
+        endpoint: str,
+        api_version: str,
+        model: str,
+        transcription_model: str,
+        streaming: bool = False,
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
         self.client = instructor.from_litellm(litellm.completion)
@@ -43,23 +44,25 @@ class OpenAIAdapter(LLMInterface):
         self.streaming = streaming
         base_config = get_base_config()
 
-
-    @observe(as_type='generation')
-    async def acreate_structured_output(self, text_input: str, system_prompt: str,
-                                        response_model: Type[BaseModel]) -> BaseModel:
-
+    @observe(as_type="generation")
+    async def acreate_structured_output(
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+    ) -> BaseModel:
         """Generate a response from a user query."""
 
         return await self.aclient.chat.completions.create(
             model=self.model,
-            messages=[{
-                "role": "user",
-                "content": f"""Use the given format to
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Use the given format to
                 extract information from the following input: {text_input}. """,
-            }, {
-                "role": "system",
-                "content": system_prompt,
-            }],
+                },
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+            ],
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
@@ -68,20 +71,24 @@ class OpenAIAdapter(LLMInterface):
         )
 
     @observe
-    def create_structured_output(self, text_input: str, system_prompt: str,
-                                 response_model: Type[BaseModel]) -> BaseModel:
+    def create_structured_output(
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+    ) -> BaseModel:
         """Generate a response from a user query."""
 
         return self.client.chat.completions.create(
             model=self.model,
-            messages=[{
-                "role": "user",
-                "content": f"""Use the given format to
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Use the given format to
                 extract information from the following input: {text_input}. """,
-            }, {
-                "role": "system",
-                "content": system_prompt,
-            }],
+                },
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+            ],
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
@@ -111,24 +118,27 @@ class OpenAIAdapter(LLMInterface):
 
     def transcribe_image(self, input) -> BaseModel:
         with open(input, "rb") as image_file:
-            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         return litellm.completion(
             model=self.model,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "What’s in this image?",
-                    }, {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{encoded_image}",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "What’s in this image?",
                         },
-                    },
-                ],
-            }],
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{encoded_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
@@ -144,5 +154,9 @@ class OpenAIAdapter(LLMInterface):
             raise InvalidValueError(message="No system prompt path provided.")
         system_prompt = read_query_prompt(system_prompt)
 
-        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n""" if system_prompt else None
+        formatted_prompt = (
+            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
+            if system_prompt
+            else None
+        )
         return formatted_prompt

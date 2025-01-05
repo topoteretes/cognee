@@ -2,7 +2,8 @@ import asyncio
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-async def query_graph_connections(query: str, exploration_levels = 1) -> list[(str, str, str)]:
+
+async def query_graph_connections(query: str, exploration_levels=1) -> list[(str, str, str)]:
     """
     Find the neighbours of a given node in the graph and return formed sentences.
 
@@ -27,8 +28,8 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
     else:
         vector_engine = get_vector_engine()
         results = await asyncio.gather(
-            vector_engine.search("entity_name", query_text = query, limit = 5),
-            vector_engine.search("entity_type_name", query_text = query, limit = 5),
+            vector_engine.search("entity_name", query_text=query, limit=5),
+            vector_engine.search("entity_type_name", query_text=query, limit=5),
         )
         results = [*results[0], *results[1]]
         relevant_results = [result for result in results if result.score < 0.5][:5]
@@ -44,7 +45,6 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
         for neighbours in node_connections_results:
             node_connections.extend(neighbours)
 
-
     unique_node_connections_map = {}
     unique_node_connections = []
     for node_connection in node_connections:
@@ -57,6 +57,5 @@ async def query_graph_connections(query: str, exploration_levels = 1) -> list[(s
             unique_node_connections_map[unique_id] = True
 
             unique_node_connections.append(node_connection)
-
 
     return unique_node_connections

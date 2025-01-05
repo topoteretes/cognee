@@ -2,8 +2,10 @@ from typing import BinaryIO
 from cognee.infrastructure.data.utils.extract_keywords import extract_keywords
 from .IngestionData import IngestionData
 
+
 def create_text_data(data: str):
     return TextData(data)
+
 
 class TextData(IngestionData):
     data: str = None
