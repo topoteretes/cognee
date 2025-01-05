@@ -38,9 +38,6 @@ class OpenAIAdapter(LLMInterface):
         self.streaming = streaming
         base_config = get_base_config()
         if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
-            # set callbacks
-            # litellm.success_callback = ["langfuse"]
-            # litellm.failure_callback = ["langfuse"]
             self.aclient.success_callback = ["langfuse"]
             self.aclient.failure_callback = ["langfuse"]
             self.client.success_callback = ["langfuse"]

@@ -19,11 +19,9 @@ class DataPoint(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
     updated_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
-    version: str = "0.1"  # Default version
-    source: Optional[str] = None  # Path to file, URL, etc.
+    version: str = "1"  # Default version
     type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
-    extra: Optional[str] = "extra"  # For additional properties
     _metadata: Optional[MetaData] = {
         "index_fields": [],
         "type": "DataPoint"
@@ -33,7 +31,6 @@ class DataPoint(BaseModel):
     class Config:
         underscore_attrs_are_private = True
 
-    @classmethod
     @classmethod
     def get_embeddable_data(self, data_point):
         if data_point._metadata and len(data_point._metadata["index_fields"]) > 0 \
@@ -56,9 +53,9 @@ class DataPoint(BaseModel):
         """Retrieve names of embeddable properties."""
         return data_point._metadata["index_fields"] or []
 
-    def update_version(self, new_version: str):
+    def update_version(self):
         """Update the version and updated_at timestamp."""
-        self.version = new_version
+        self.version += 1
         self.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
  # JSON Serialization
