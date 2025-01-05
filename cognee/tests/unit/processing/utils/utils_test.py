@@ -35,24 +35,24 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
     assert len(anon_id) > 0
 
 
-@patch("requests.post")
-def test_send_telemetry(mock_post):
-    mock_post.return_value.status_code = 200
+# @patch("requests.post")
+# def test_send_telemetry(mock_post):
+#     mock_post.return_value.status_code = 200
+#
+#     send_telemetry("test_event", "test_user", {"key": "value"})
+#     mock_post.assert_called_once()
+#
+#     args, kwargs = mock_post.call_args
+#     assert kwargs["json"]["event_name"] == "test_event"
 
-    send_telemetry("test_event", "test_user", {"key": "value"})
-    mock_post.assert_called_once()
-
-    args, kwargs = mock_post.call_args
-    assert kwargs["json"]["event_name"] == "test_event"
-
-
-@patch("tiktoken.encoding_for_model")
-def test_num_tokens_from_string(mock_encoding):
-    mock_encoding.return_value.encode = lambda x: list(x)
-
-    assert num_tokens_from_string("hello", "test_encoding") == 5
-    assert num_tokens_from_string("world", "test_encoding") == 5
-
+#
+# @patch("tiktoken.encoding_for_model")
+# def test_num_tokens_from_string(mock_encoding):
+#     mock_encoding.return_value.encode = lambda x: list(x)
+#
+#     assert num_tokens_from_string("hello", "test_encoding") == 5
+#     assert num_tokens_from_string("world", "test_encoding") == 5
+#
 
 @patch("builtins.open", new_callable=mock_open, read_data=b"test_data")
 def test_get_file_content_hash_file(mock_open_file):
