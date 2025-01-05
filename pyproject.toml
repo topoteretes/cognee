@@ -116,6 +116,11 @@ mkdocstrings = {extras = ["python"], version = "^0.26.2"}
 
 [tool.ruff] # https://beta.ruff.rs/docs/
 line-length = 100
+exclude = [
+    "migrations/",  # Ignore migrations directory
+    "notebooks/",       # Ignore notebook files
+    "build/",       # Ignore build directory
+]
 
 [tool.ruff.lint]
 ignore = ["F401"]

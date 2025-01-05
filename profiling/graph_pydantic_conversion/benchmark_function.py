@@ -27,7 +27,7 @@ def benchmark_function(func: Callable, *args, num_runs: int = 5) -> Dict[str, An
     for _ in range(num_runs):
         # Start memory tracking
         tracemalloc.start()
-        initial_memory = process.memory_info().rss
+
 
         # Measure execution time and CPU usage
         start_time = time.perf_counter()
@@ -44,7 +44,7 @@ def benchmark_function(func: Callable, *args, num_runs: int = 5) -> Dict[str, An
             start_cpu_time.user + start_cpu_time.system
         )
         current, peak = tracemalloc.get_traced_memory()
-        final_memory = process.memory_info().rss
+
 
 
         # Store results
