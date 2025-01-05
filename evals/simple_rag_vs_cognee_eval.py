@@ -1,14 +1,19 @@
 from deepeval.dataset import EvaluationDataset
 from pydantic import BaseModel
-
+import os
 
 from typing import List, Type
 from deepeval.test_case import LLMTestCase
 import dotenv
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.base_config import get_base_config
 
+import logging
+
+logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
 
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 dataset = EvaluationDataset()
 dataset.add_test_cases_from_json_file(
@@ -39,9 +44,6 @@ print(dataset.goldens)
 print(dataset)
 
 
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class AnswerModel(BaseModel):
@@ -78,9 +80,6 @@ async def run_cognify_base_rag():
     pass
 
 
-import os
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.vector import get_vector_engine
 
 
 async def cognify_search_base_rag(content: str, context: str):

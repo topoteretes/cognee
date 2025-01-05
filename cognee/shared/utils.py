@@ -8,17 +8,19 @@ import hashlib
 from datetime import datetime, timezone
 import graphistry
 import networkx as nx
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 import base64
-import networkx as nx
-from bokeh.io import output_file, save
 from bokeh.plotting import figure, from_networkx
 from bokeh.models import Circle, MultiLine, HoverTool, ColumnDataSource, Range1d
+from bokeh.plotting import output_file, show
 
+from bokeh.embed import file_html
+from bokeh.resources import CDN
+import cairosvg
+import logging
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -272,16 +274,7 @@ def extract_pos_tags(sentence):
     return pos_tags
 
 
-import networkx as nx
-from bokeh.plotting import figure, output_file, show
-from bokeh.models import Circle, MultiLine, HoverTool, Range1d
-from bokeh.io import output_notebook
-from bokeh.embed import file_html
-from bokeh.resources import CDN
-from bokeh.plotting import figure, from_networkx
-import base64
-import cairosvg
-import logging
+
 
 logging.basicConfig(level=logging.INFO)
 

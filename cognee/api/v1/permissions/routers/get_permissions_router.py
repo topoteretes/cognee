@@ -47,7 +47,7 @@ def get_permissions_router() -> APIRouter:
                     group_id=group.id, permission_id=permission_entity.id
                 )
             )
-        except IntegrityError as e:
+        except IntegrityError:
             raise EntityAlreadyExistsError(message="Group permission already exists.")
 
         await db.session.commit()
@@ -70,7 +70,7 @@ def get_permissions_router() -> APIRouter:
             # Add association directly to the association table
             stmt = insert(UserGroup).values(user_id=user_id, group_id=group_id)
             await db.session.execute(stmt)
-        except IntegrityError as e:
+        except IntegrityError:
             raise EntityAlreadyExistsError(message="User is already part of group.")
 
         await db.session.commit()

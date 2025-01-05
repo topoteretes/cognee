@@ -49,7 +49,7 @@ async def get_graph_from_model_test():
     for document_chunk in document_chunks:
         document_chunk.contains.append(
             Entity(
-                name=f"Entity",
+                name="Entity",
                 is_type=EntityType(
                     name="Type 1",
                 ),

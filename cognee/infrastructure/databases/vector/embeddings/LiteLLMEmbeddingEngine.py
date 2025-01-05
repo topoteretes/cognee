@@ -87,7 +87,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         except litellm.exceptions.RateLimitError:
             if self.retry_count >= self.MAX_RETRIES:
-                raise Exception(f"Rate limit exceeded and no more retries left.")
+                raise Exception("Rate limit exceeded and no more retries left.")
 
             await exponential_backoff(self.retry_count)
 

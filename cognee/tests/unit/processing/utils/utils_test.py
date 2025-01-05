@@ -102,8 +102,6 @@ def test_prepare_nodes():
     assert len(nodes_df) == 1
 
 
-from unittest.mock import DEFAULT
-
 
 def test_create_cognee_style_network_with_logo():
     import networkx as nx

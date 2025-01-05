@@ -1,5 +1,6 @@
 from typing import AsyncGenerator
 from fastapi import Depends
+from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_users.db import SQLAlchemyUserDatabase
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -16,6 +17,6 @@ async def get_user_db(session: AsyncSession = Depends(get_async_session)):
     yield SQLAlchemyUserDatabase(session, User)
 
 
-from contextlib import asynccontextmanager
+
 
 get_user_db_context = asynccontextmanager(get_user_db)
