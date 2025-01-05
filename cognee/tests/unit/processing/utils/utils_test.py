@@ -54,6 +54,7 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
 #     assert num_tokens_from_string("world", "test_encoding") == 5
 #
 
+
 @patch("builtins.open", new_callable=mock_open, read_data=b"test_data")
 def test_get_file_content_hash_file(mock_open_file):
     import hashlib
