@@ -49,7 +49,7 @@ async def search(
 
     for search_result in search_results:
         document_id = search_result["document_id"] if "document_id" in search_result else None
-        document_id = UUID(document_id) if type(document_id) == str else document_id
+        document_id = UUID(document_id) if isinstance(document_id, str) else document_id
 
         if document_id is None or document_id in own_document_ids:
             filtered_search_results.append(search_result)

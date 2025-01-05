@@ -17,6 +17,4 @@ async def get_user_db(session: AsyncSession = Depends(get_async_session)):
     yield SQLAlchemyUserDatabase(session, User)
 
 
-
-
 get_user_db_context = asynccontextmanager(get_user_db)

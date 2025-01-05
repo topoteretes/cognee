@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import Depends, Request
 from fastapi_users import BaseUserManager, UUIDIDMixin, models
 from fastapi_users.db import SQLAlchemyUserDatabase
-
+from contextlib import asynccontextmanager
 from .get_user_db import get_user_db
 from .models import User
 from .methods import get_user
@@ -49,7 +49,5 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db)):
     yield UserManager(user_db)
 
-
-from contextlib import asynccontextmanager
 
 get_user_manager_context = asynccontextmanager(get_user_manager)

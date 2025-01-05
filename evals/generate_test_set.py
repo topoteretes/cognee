@@ -3,6 +3,10 @@ from deepeval.synthesizer import Synthesizer
 import dotenv
 from deepeval.test_case import LLMTestCase
 
+# import pytest
+# from deepeval import assert_test
+from deepeval.metrics import AnswerRelevancyMetric
+
 dotenv.load_dotenv()
 
 # synthesizer = Synthesizer()
@@ -31,11 +35,6 @@ dataset.generate_goldens_from_docs(
 
 print(dataset.goldens)
 print(dataset)
-
-
-# import pytest
-# from deepeval import assert_test
-from deepeval.metrics import AnswerRelevancyMetric
 
 
 answer_relevancy_metric = AnswerRelevancyMetric(threshold=0.5)

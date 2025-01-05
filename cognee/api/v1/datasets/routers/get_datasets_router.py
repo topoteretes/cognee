@@ -107,7 +107,8 @@ def get_datasets_router() -> APIRouter:
                 status_code=200,
                 content=str(graph_url),
             )
-        except:
+        except Exception as error:
+            print(error)
             return JSONResponse(
                 status_code=409,
                 content="Graphistry credentials are not set. Please set them in your .env file.",

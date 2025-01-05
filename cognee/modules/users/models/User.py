@@ -5,6 +5,7 @@ from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from .Principal import Principal
 from .UserGroup import UserGroup
 from .Group import Group
+from fastapi_users import schemas
 
 
 class User(SQLAlchemyBaseUserTableUUID, Principal):
@@ -23,7 +24,6 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 
 
 # Keep these schemas in sync with User model
-from fastapi_users import schemas
 
 
 class UserRead(schemas.BaseUser[uuid_UUID]):

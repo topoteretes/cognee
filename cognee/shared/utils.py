@@ -274,8 +274,6 @@ def extract_pos_tags(sentence):
     return pos_tags
 
 
-
-
 logging.basicConfig(level=logging.INFO)
 
 

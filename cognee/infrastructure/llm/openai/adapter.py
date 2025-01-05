@@ -43,7 +43,6 @@ class OpenAIAdapter(LLMInterface):
         self.api_version = api_version
         self.streaming = streaming
 
-
     @observe(as_type="generation")
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]

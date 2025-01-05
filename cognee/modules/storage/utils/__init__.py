@@ -2,6 +2,7 @@ import json
 from uuid import UUID
 from datetime import datetime
 from pydantic_core import PydanticUndefined
+from pydantic import create_model
 
 from cognee.infrastructure.engine import DataPoint
 
@@ -14,9 +15,6 @@ class JSONEncoder(json.JSONEncoder):
             # if the obj is uuid, we simply return the value of uuid
             return str(obj)
         return json.JSONEncoder.default(self, obj)
-
-
-from pydantic import create_model
 
 
 def copy_model(model: DataPoint, include_fields: dict = {}, exclude_fields: list = []):

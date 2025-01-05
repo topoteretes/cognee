@@ -266,7 +266,8 @@ class NetworkXAdapter(GraphDBInterface):
                     for node in graph_data["nodes"]:
                         try:
                             node["id"] = UUID(node["id"])
-                        except:
+                        except Exception as e:
+                            print(e)
                             pass
                         if "updated_at" in node:
                             node["updated_at"] = datetime.strptime(
@@ -282,7 +283,8 @@ class NetworkXAdapter(GraphDBInterface):
                             edge["target"] = target_id
                             edge["source_node_id"] = source_id
                             edge["target_node_id"] = target_id
-                        except:
+                        except Exception as e:
+                            print(e)
                             pass
 
                         if "updated_at" in edge:

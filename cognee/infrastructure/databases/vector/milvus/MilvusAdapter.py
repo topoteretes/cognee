@@ -32,7 +32,7 @@ class MilvusAdapter(VectorDBInterface):
 
         self.embedding_engine = embedding_engine
 
-    def get_milvus_client(self) -> "MilvusClient":
+    def get_milvus_client(self):
         from pymilvus import MilvusClient
 
         if self.api_key:

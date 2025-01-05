@@ -46,7 +46,7 @@ async def cognify(
         # If no datasets are provided, cognify all existing datasets.
         datasets = existing_datasets
 
-    if type(datasets[0]) == str:
+    if isinstance(datasets[0], str):
         datasets = await get_datasets_by_name(datasets, user.id)
 
     existing_datasets_map = {

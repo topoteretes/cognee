@@ -102,7 +102,6 @@ def test_prepare_nodes():
     assert len(nodes_df) == 1
 
 
-
 def test_create_cognee_style_network_with_logo():
     import networkx as nx
     from unittest.mock import patch
@@ -117,29 +116,23 @@ def test_create_cognee_style_network_with_logo():
     # Convert the graph to a tuple format for serialization
     graph_tuple = graph_to_tuple(graph)
 
-    print(graph_tuple)
+    original_open = open
 
-    # Define the output filename
-    output_filename = "test_network.html"
+    def mock_open_read_side_effect(*args, **kwargs):
+        if "cognee-logo.png" in args[0]:
+            return BytesIO(b"mock_png_data")
+        return original_open(*args, **kwargs)
 
-    with patch("bokeh.plotting.from_networkx") as mock_from_networkx:
-        original_open = open
+    with patch("builtins.open", side_effect=mock_open_read_side_effect):
+        result = create_cognee_style_network_with_logo(
+            graph_tuple,
+            title="Test Network",
+            node_attribute="group",
+            layout_func=nx.spring_layout,
+            layout_scale=3.0,
+            logo_alpha=0.5,
+        )
 
-        def mock_open_read_side_effect(*args, **kwargs):
-            if "cognee-logo.png" in args[0]:
-                return BytesIO(b"mock_png_data")
-            return original_open(*args, **kwargs)
-
-        with patch("builtins.open", side_effect=mock_open_read_side_effect):
-            result = create_cognee_style_network_with_logo(
-                graph_tuple,
-                title="Test Network",
-                node_attribute="group",
-                layout_func=nx.spring_layout,
-                layout_scale=3.0,
-                logo_alpha=0.5,
-            )
-
-        assert result is not None
-        assert isinstance(result, str)
-        assert len(result) > 0
+    assert result is not None
+    assert isinstance(result, str)
+    assert len(result) > 0

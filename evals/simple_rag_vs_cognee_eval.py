@@ -44,8 +44,6 @@ print(dataset.goldens)
 print(dataset)
 
 
-
-
 class AnswerModel(BaseModel):
     response: str
 
@@ -76,10 +74,7 @@ async def run_cognify_base_rag():
     await add("data://test_datasets", "initial_test")
 
     graph = await cognify("initial_test")
-
-    pass
-
-
+    return graph
 
 
 async def cognify_search_base_rag(content: str, context: str):

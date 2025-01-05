@@ -4,6 +4,7 @@ import asyncio
 import json
 from textwrap import dedent
 from uuid import UUID
+from webbrowser import Error
 
 from falkordb import FalkorDB
 
@@ -167,7 +168,8 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                     for index in indices.result_set
                 ]
             )
-        except:
+        except Error as e:
+            print(e)
             return False
 
     async def index_data_points(

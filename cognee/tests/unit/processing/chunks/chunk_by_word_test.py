@@ -35,6 +35,4 @@ def test_chunk_by_word_splits(input_text):
     chunks = np.array(list(chunk_by_word(input_text)))
     space_test = np.array([" " not in chunk[0].strip() for chunk in chunks])
 
-    assert np.all(
-        space_test
-    ), f"These chunks contain spaces within them: {chunks[space_test == False]}"
+    assert np.all(space_test), f"These chunks contain spaces within them: {chunks[~space_test]}"
