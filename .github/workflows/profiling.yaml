@@ -82,50 +82,50 @@ jobs:
         poetry run pyinstrument --renderer json -o base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
 
     # Run profiler on head branch
-    - name: Run profiler on head branch
-      env:
-        HEAD_SHA: ${{ env.HEAD_SHA }}
-      run: |
-        echo "Profiling the head branch for code_graph_pipeline.py"
-        echo "Checking out head SHA: $HEAD_SHA"
-        git checkout $HEAD_SHA
-        echo "This is the working directory: $PWD"
-        # Ensure the script is executable
-        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
-        # Run Scalene
-        poetry run pyinstrument --renderer json -o head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
-
-    # Compare profiling results
-    - name: Compare profiling results
-      run: |
-        python -c '
-        import json
-        try:
-            with open("base_results.json") as f:
-                base = json.load(f)
-            with open("head_results.json") as f:
-                head = json.load(f)
-            cpu_diff = head.get("total_cpu_samples_python", 0) - base.get("total_cpu_samples_python", 0)
-            memory_diff = head.get("malloc_samples", 0) - base.get("malloc_samples", 0)
-            results = [
-                f"CPU Usage Difference: {cpu_diff}",
-                f"Memory Usage Difference: {memory_diff} bytes"
-            ]
-            with open("profiling_diff.txt", "w") as f:
-                f.write("\\n".join(results) + "\\n")
-            print("\\n".join(results))  # Print results to terminal
-        except Exception as e:
-            error_message = f"Error comparing profiling results: {e}"
-            with open("profiling_diff.txt", "w") as f:
-                f.write(error_message + "\\n")
-            print(error_message)  # Print error to terminal
-            '
-
-    - name: Upload profiling diff artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: profiling-diff
-        path: profiling_diff.txt
+#    - name: Run profiler on head branch
+#      env:
+#        HEAD_SHA: ${{ env.HEAD_SHA }}
+#      run: |
+#        echo "Profiling the head branch for code_graph_pipeline.py"
+#        echo "Checking out head SHA: $HEAD_SHA"
+#        git checkout $HEAD_SHA
+#        echo "This is the working directory: $PWD"
+#        # Ensure the script is executable
+#        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
+#        # Run Scalene
+#        poetry run pyinstrument --renderer json -o head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+#
+#    # Compare profiling results
+#    - name: Compare profiling results
+#      run: |
+#        python -c '
+#        import json
+#        try:
+#            with open("base_results.json") as f:
+#                base = json.load(f)
+#            with open("head_results.json") as f:
+#                head = json.load(f)
+#            cpu_diff = head.get("total_cpu_samples_python", 0) - base.get("total_cpu_samples_python", 0)
+#            memory_diff = head.get("malloc_samples", 0) - base.get("malloc_samples", 0)
+#            results = [
+#                f"CPU Usage Difference: {cpu_diff}",
+#                f"Memory Usage Difference: {memory_diff} bytes"
+#            ]
+#            with open("profiling_diff.txt", "w") as f:
+#                f.write("\\n".join(results) + "\\n")
+#            print("\\n".join(results))  # Print results to terminal
+#        except Exception as e:
+#            error_message = f"Error comparing profiling results: {e}"
+#            with open("profiling_diff.txt", "w") as f:
+#                f.write(error_message + "\\n")
+#            print(error_message)  # Print error to terminal
+#            '
+#
+#    - name: Upload profiling diff artifact
+#      uses: actions/upload-artifact@v3
+#      with:
+#        name: profiling-diff
+#        path: profiling_diff.txt
 
     # Post results to the pull request
 #    - name: Post profiling results to PR
