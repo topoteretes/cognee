@@ -7,9 +7,25 @@ import sentry_sdk
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-
+from cognee.api.v1.permissions.routers import get_permissions_router
+from cognee.api.v1.settings.routers import get_settings_router
+from cognee.api.v1.datasets.routers import get_datasets_router
+from cognee.api.v1.cognify.routers import get_cognify_router
+from cognee.api.v1.search.routers import get_search_router
+from cognee.api.v1.add.routers import get_add_router
+from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from cognee.exceptions import CogneeApiError
 from traceback import format_exc
+from cognee.api.v1.users.routers import (
+    get_auth_router,
+    get_register_router,
+    get_reset_password_router,
+    get_verify_router,
+    get_users_router,
+)
+from contextlib import asynccontextmanager
 
 # Set up logging
 logging.basicConfig(
@@ -25,7 +41,6 @@ if os.getenv("ENV", "prod") == "prod":
         profiles_sample_rate=1.0,
     )
 
-from contextlib import asynccontextmanager
 
 app_environment = os.getenv("ENV", "prod")
 
@@ -58,23 +73,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from cognee.api.v1.users.routers import (
-    get_auth_router,
-    get_register_router,
-    get_reset_password_router,
-    get_verify_router,
-    get_users_router,
-)
-from cognee.api.v1.permissions.routers import get_permissions_router
-from cognee.api.v1.settings.routers import get_settings_router
-from cognee.api.v1.datasets.routers import get_datasets_router
-from cognee.api.v1.cognify.routers import get_cognify_router
-from cognee.api.v1.search.routers import get_search_router
-from cognee.api.v1.add.routers import get_add_router
-
-from fastapi import Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
 
 
 @app.exception_handler(RequestValidationError)

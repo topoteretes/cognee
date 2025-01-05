@@ -217,7 +217,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
 
     async def retrieve(self, data_point_ids: list[UUID]):
         result = self.query(
-            f"MATCH (node) WHERE node.id IN $node_ids RETURN node",
+            "MATCH (node) WHERE node.id IN $node_ids RETURN node",
             {
                 "node_ids": [str(data_point) for data_point in data_point_ids],
             },
@@ -343,7 +343,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         return self.query(
-            f"MATCH (node) WHERE node.id IN $node_ids DETACH DELETE node",
+            "MATCH (node) WHERE node.id IN $node_ids DETACH DELETE node",
             {
                 "node_ids": [str(data_point) for data_point in data_point_ids],
             },

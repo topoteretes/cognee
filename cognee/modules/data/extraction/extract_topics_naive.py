@@ -51,7 +51,7 @@ def remove_stop_words(text: str):
 
     stop_words = set(stopwords.words("english"))
     text = text.split()
-    text = [word for word in text if not word in stop_words]
+    text = [word for word in text if word not in stop_words]
     return " ".join(text)
 
 

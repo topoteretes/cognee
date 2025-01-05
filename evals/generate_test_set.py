@@ -33,14 +33,14 @@ print(dataset.goldens)
 print(dataset)
 
 
-import pytest
-from deepeval import assert_test
+# import pytest
+# from deepeval import assert_test
 from deepeval.metrics import AnswerRelevancyMetric
 
 
 answer_relevancy_metric = AnswerRelevancyMetric(threshold=0.5)
 
-from deepeval import evaluate
+# from deepeval import evaluate
 
 
 # evaluate(dataset, [answer_relevancy_metric])

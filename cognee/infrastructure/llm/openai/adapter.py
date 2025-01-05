@@ -42,7 +42,7 @@ class OpenAIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.api_version = api_version
         self.streaming = streaming
-        base_config = get_base_config()
+
 
     @observe(as_type="generation")
     async def acreate_structured_output(

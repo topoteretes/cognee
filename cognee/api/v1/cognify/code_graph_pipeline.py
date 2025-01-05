@@ -21,12 +21,12 @@ from cognee.tasks.repo_processor import (
 )
 from cognee.tasks.repo_processor.get_source_code_chunks import get_source_code_chunks
 from cognee.tasks.storage import add_data_points
+from cognee.tasks.summarization import summarize_code, summarize_text
 
 monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 
-from cognee.tasks.summarization import summarize_code, summarize_text
 
 logger = logging.getLogger("code_graph_pipeline")
 update_status_lock = asyncio.Lock()
