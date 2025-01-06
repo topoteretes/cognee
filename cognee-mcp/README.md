@@ -1,57 +1,85 @@
 # cognee MCP server
 
+
+
+
+### Installing Manually
 A MCP server project
+=======
+1. Clone the [cognee](www.github.com/topoteretes/cognee) repo
 
-Create a boilerplate server:
 
-```jsx
-uvx create-mcp-server
+
+2. Install dependencies
+
+```
+pip install uv
+```
+```
+brew install postgresql
 ```
 
-1. The command will ask you to name your server, e.g. mcp_cognee
-
-
-2. Answer “Y” to connect with Claude
-Then run
+```
+brew install rust
+```
 
 ```jsx
-cd mcp_cognee
+cd cognee-mcp
 uv sync --dev --all-extras
 ```
 
-Activate the venv with
+3. Activate the venv with
 
 ```jsx
 source .venv/bin/activate
 ```
 
-This should already add the new server to your Claude config, but if not, add these lines manually:
+4. Add the new server to your Claude config:
+
+The file should be located here: ~/Library/Application\ Support/Claude/
+You need to create claude_desktop_config.json in this folder if it doesn't exist
 
 ```
-"mcpcognee": {
-      "command": "uv",
-      "args": [
+
+
+{
+	"mcpServers": {
+		"cognee": {
+			"command": "/Users/{user}/cognee/.venv/bin/uv",
+			"args": [
         "--directory",
-        "/Users/your_username/mcp/mcp_cognee",
+        "/Users/{user}/cognee/cognee-mcp",
         "run",
-        "mcpcognee"
+        "cognee"
       ],
       "env": {
         "ENV": "local",
         "TOKENIZERS_PARALLELISM": "false",
-        "LLM_API_KEY": "add_your_api_key_here",
-        "GRAPH_DATABASE_PROVIDER": "neo4j",
-        "GRAPH_DATABASE_URL": "bolt://localhost:7687",
-        "GRAPH_DATABASE_USERNAME": "add_username_here",
-        "GRAPH_DATABASE_PASSWORD": "add_pwd_here",
-        "VECTOR_DB_PROVIDER": "lancedb",
-        "DB_PROVIDER": "sqlite",
-        "DB_NAME": "postgres"
+        "LLM_API_KEY": "sk-"
       }
+		},
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/{user}/Desktop",
+        "/Users/{user}/Projects"
+      ]
     }
+	}
+}
 ```
 
-Then, edit the pyproject.toml in your new folder so that it includes packages from the cognee requirements. Use the pyproject.toml in your cognee library for this, but match the syntax of the automatically generated pyproject.toml so that it is compatible with uv.
+Restart your Claude desktop.
+
+### Installing via Smithery
+
+To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
+
+```bash
+npx -y @smithery/cli install cognee --client claude
+```
 
 Define cognify tool in server.py
 Restart your Claude desktop.

@@ -71,7 +71,7 @@ async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list, Non
         path = repo_path,
     )
 
-    yield repo
+    yield [repo]
 
     with ProcessPoolExecutor(max_workers = 12) as executor:
         loop = asyncio.get_event_loop()
@@ -90,10 +90,11 @@ async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list, Non
 
         results = await asyncio.gather(*tasks)
 
+        code_files = []
         for (file_path, metadata), dependencies in zip(py_files_dict.items(), results):
             source_code = metadata.get("source_code")
 
-            yield CodeFile(
+            code_files.append(CodeFile(
                 id = uuid5(NAMESPACE_OID, file_path),
                 source_code = source_code,
                 extracted_id = file_path,
@@ -106,4 +107,6 @@ async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list, Non
                         source_code = py_files_dict.get(dependency, {}).get("source_code"),
                     ) for dependency in dependencies
                 ] if dependencies else None,
-            )
+            ))
+
+        yield code_files
