@@ -4,6 +4,8 @@ from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
 from .api.v1.prune import prune
 from .api.v1.search import SearchType, get_search_history, search
+from .api.v1.visualize import visualize
+from .shared.utils import *
 
 # Pipelines
 from .modules import pipelines

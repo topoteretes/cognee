@@ -277,7 +277,7 @@ def extract_pos_tags(sentence):
 logging.basicConfig(level=logging.INFO)
 
 
-def convert_to_serializable_graph(G):
+async def convert_to_serializable_graph(G):
     """
     Convert a graph into a serializable format with stringified node and edge attributes.
     """
@@ -289,7 +289,6 @@ def convert_to_serializable_graph(G):
     networkx_graph.add_edges_from(edges)
 
     new_G = nx.MultiDiGraph() if isinstance(G, nx.MultiDiGraph) else nx.Graph()
-    print(new_G)
     for node, data in new_G.nodes(data=True):
         serializable_data = {k: str(v) for k, v in data.items()}
         new_G.add_node(str(node), **serializable_data)
@@ -366,7 +365,7 @@ def style_and_render_graph(p, G, layout_positions, node_attribute, node_colors, 
     return graph_renderer
 
 
-def create_cognee_style_network_with_logo(
+async def create_cognee_style_network_with_logo(
     G,
     output_filename="cognee_network_with_logo.html",
     title="Cognee-Style Network",
@@ -374,12 +373,14 @@ def create_cognee_style_network_with_logo(
     layout_func=nx.spring_layout,
     layout_scale=3.0,
     logo_alpha=0.1,
+    bokeh_object = False,
 ):
     """
     Create a Cognee-inspired network visualization with an embedded logo.
     """
     logging.info("Converting graph to serializable format...")
-    G = convert_to_serializable_graph(G)
+    G = await convert_to_serializable_graph(G)
+
 
     logging.info("Generating layout positions...")
     layout_positions = generate_layout_positions(G, layout_func, layout_scale)
@@ -423,12 +424,24 @@ def create_cognee_style_network_with_logo(
     )
     p.add_tools(hover_tool)
 
+
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
     with open(output_filename, "w") as f:
         f.write(html_content)
+    from bokeh.io import export_png
+    from IPython.display import Image, display
 
     logging.info("Visualization complete.")
+    png_filename = output_filename.replace(".html", ".png")
+    export_png(p, filename=png_filename)
+    logging.info(f"Saved PNG image to {png_filename}")
+
+    # Display the PNG image as a popup
+    display(Image(png_filename))
+
+    if bokeh_object:
+        return p
     return html_content
 
 
@@ -442,6 +455,8 @@ def graph_to_tuple(graph):
     nodes = list(graph.nodes(data=True))  # Get nodes with attributes
     edges = list(graph.edges(data=True))  # Get edges with attributes
     return (nodes, edges)
+
+
 
 
 # ---------------- Example Usage ----------------

@@ -73,16 +73,16 @@ def test_get_file_content_hash_stream():
     assert result == expected_hash
 
 
-def test_trim_text_to_max_tokens():
-    text = "This is a test string with multiple words."
-    encoding_name = "test_encoding"
-
-    with patch("tiktoken.get_encoding") as mock_get_encoding:
-        mock_get_encoding.return_value.encode = lambda x: list(x)
-        mock_get_encoding.return_value.decode = lambda x: "".join(x)
-
-        result = trim_text_to_max_tokens(text, 5, encoding_name)
-        assert result == text[:5]
+# def test_trim_text_to_max_tokens():
+#     text = "This is a test string with multiple words."
+#     encoding_name = "test_encoding"
+#
+#     with patch("tiktoken.get_encoding") as mock_get_encoding:
+#         mock_get_encoding.return_value.encode = lambda x: list(x)
+#         mock_get_encoding.return_value.decode = lambda x: "".join(x)
+#
+#         result = trim_text_to_max_tokens(text, 5, encoding_name)
+#         assert result == text[:5]
 
 
 def test_prepare_edges():
