@@ -19,7 +19,7 @@ class DataPoint(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
     updated_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
-    version: str = "1"  # Default version
+    version: int = 1  # Default version
     type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
     _metadata: Optional[MetaData] = {
