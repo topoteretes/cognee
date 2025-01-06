@@ -8,7 +8,7 @@ from cognee.modules.data.exceptions import UnstructuredLibraryImportError
 class UnstructuredDocument(Document):
     type: str = "unstructured"
 
-    def read(self, chunk_size: int):
+    def read(self, chunk_size: int, chunker = str) -> str:
         def get_text():
             try:
                 from unstructured.partition.auto import partition
