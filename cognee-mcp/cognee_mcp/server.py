@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import asyncio
 from contextlib import redirect_stderr, redirect_stdout
 
 import cognee
@@ -9,15 +10,17 @@ from cognee.api.v1.search import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
-from pydantic import AnyUrl, BaseModel
 
-server = Server("mcpcognee")
+server = Server("cognee-mcp")
 
 
 def node_to_string(node):
-    keys_to_keep = ["chunk_index", "topological_rank", "cut_type", "id", "text"]
-    keyset = set(keys_to_keep) & node.keys()
-    return "Node(" + " ".join([key + ": " + str(node[key]) + "," for key in keyset]) + ")"
+    # keys_to_keep = ["chunk_index", "topological_rank", "cut_type", "id", "text"]
+    # keyset = set(keys_to_keep) & node.keys()
+    # return "Node(" + " ".join([key + ": " + str(node[key]) + "," for key in keyset]) + ")"
+    node_data = ", ".join([f"{key}: \"{value}\"" for key, value in node.items() if key in ["id", "name"]])
+
+    return f"Node({node_data})"
 
 
 def retrieved_edges_to_string(search_results):
@@ -49,60 +52,107 @@ async def handle_list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name="Cognify_and_search",
-            description="Build knowledge graph from the input text and search in it.",
-            inputSchema={
+            name = "cognify",
+            description = "Build knowledge graph from the input text.",
+            inputSchema = {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string"},
-                    "search_query": {"type": "string"},
                     "graph_model_file": {"type": "string"},
                     "graph_model_name": {"type": "string"},
                 },
-                "required": ["text", "search_query"],
+                "required": ["text"],
             },
-        )
+        ),
+        types.Tool(
+            name = "search",
+            description = "Search the knowledge graph.",
+            inputSchema = {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name = "prune",
+            description = "Reset the knowledge graph.",
+            inputSchema = {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+            },
+        ),
     ]
 
 
 @server.call_tool()
 async def handle_call_tool(
-        name: str, arguments: dict | None
+    name: str,
+    arguments: dict | None
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """
     Handle tool execution requests.
     Tools can modify server state and notify clients of changes.
     """
-    if name == "Cognify_and_search":
+    if name == "cognify":
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
-                await cognee.prune.prune_data()
-                await cognee.prune.prune_system(metadata=True)
-
                 if not arguments:
                     raise ValueError("Missing arguments")
 
                 text = arguments.get("text")
-                search_query = arguments.get("search_query")
+
                 if ("graph_model_file" in arguments) and ("graph_model_name" in arguments):
                     model_file = arguments.get("graph_model_file")
                     model_name = arguments.get("graph_model_name")
+
                     graph_model = load_class(model_file, model_name)
                 else:
                     graph_model = KnowledgeGraph
 
                 await cognee.add(text)
-                await cognee.cognify(graph_model=graph_model)
+
+                await cognee.cognify(graph_model = graph_model)
+
+                return [
+                    types.TextContent(
+                        type = "text",
+                        text = "Ingested",
+                    )
+                ]
+    elif name == "search":
+        with open(os.devnull, "w") as fnull:
+            with redirect_stdout(fnull), redirect_stderr(fnull):
+                if not arguments:
+                    raise ValueError("Missing arguments")
+
+                search_query = arguments.get("query")
+
                 search_results = await cognee.search(
-                    SearchType.INSIGHTS, query_text=search_query
+                    SearchType.INSIGHTS, query_text = search_query
                 )
 
                 results = retrieved_edges_to_string(search_results)
 
                 return [
                     types.TextContent(
-                        type="text",
-                        text=results,
+                        type = "text",
+                        text = results,
+                    )
+                ]
+    elif name == "prune":
+        with open(os.devnull, "w") as fnull:
+            with redirect_stdout(fnull), redirect_stderr(fnull):
+                await cognee.prune.prune_data()
+                await cognee.prune.prune_system(metadata=True)
+
+                return [
+                    types.TextContent(
+                        type = "text",
+                        text = "Pruned",
                     )
                 ]
     else:
@@ -116,11 +166,15 @@ async def main():
             read_stream,
             write_stream,
             InitializationOptions(
-                server_name="mcpcognee",
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
+                server_name = "cognee-mcp",
+                server_version = "0.1.0",
+                capabilities = server.get_capabilities(
+                    notification_options = NotificationOptions(),
+                    experimental_capabilities = {},
                 ),
             ),
         )
+
+# This is needed if you'd like to connect to a custom client
+if __name__ == "__main__":
+    asyncio.run(main())
