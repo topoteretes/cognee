@@ -4,12 +4,12 @@ import logging
 
 
 
-async def visualize_graph(bokeh_object):
+async def visualize_graph(label:str="name"):
     """ """
     graph_engine = await get_graph_engine()
     graph_data = await graph_engine.get_graph_data()
     logging.info(graph_data)
 
-    graph = await create_cognee_style_network_with_logo(graph_data, bokeh_object=bokeh_object)
+    graph = await create_cognee_style_network_with_logo(graph_data, label=label)
 
     return graph

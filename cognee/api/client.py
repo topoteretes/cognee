@@ -24,6 +24,7 @@ from cognee.api.v1.users.routers import (
     get_reset_password_router,
     get_verify_router,
     get_users_router,
+    get_visualize_router
 )
 from contextlib import asynccontextmanager
 
@@ -165,6 +166,8 @@ app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognif
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
+
+app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
