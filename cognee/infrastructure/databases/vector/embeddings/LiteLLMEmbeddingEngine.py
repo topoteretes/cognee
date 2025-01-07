@@ -10,62 +10,78 @@ from cognee.infrastructure.databases.exceptions.EmbeddingException import Embedd
 litellm.set_verbose = False
 logger = logging.getLogger("LiteLLMEmbeddingEngine")
 
-
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
-    api_key: str
-    endpoint: str
-    api_version: str
-    model: str
-    dimensions: int
-    mock: bool
+    MAX_RETRIES = 3
+    
+    PROVIDER_CONFIGS = {
+        "openai": {
+            "model": "text-embedding-3-large",
+            "dimensions": 3072,
+            "api_base": "https://api.openai.com/v1"
+        },
+        "gemini": {
+            "model": "text-embedding-004",
+            "dimensions": 768,
+            "api_base": "https://generativelanguage.googleapis.com/v1beta"
+        }
+    }
 
     def __init__(
         self,
-        model: Optional[str] = "text-embedding-3-large",
-        dimensions: Optional[int] = 3072,
+        provider: str = "openai",
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None,
         api_key: str = None,
         endpoint: str = None,
         api_version: str = None,
     ):
+        self.provider = provider.lower()
+        provider_config = self.PROVIDER_CONFIGS.get(self.provider)
+        if not provider_config:
+            raise ValueError(f"Unsupported provider: {provider}")
+
+        self.model = model or provider_config["model"]
+        self.dimensions = dimensions or provider_config["dimensions"]
         self.api_key = api_key
-        self.endpoint = endpoint
+        self.endpoint = endpoint or provider_config["api_base"]
         self.api_version = api_version
-        self.model = model
-        self.dimensions = dimensions
+        self.retry_count = 0
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    MAX_RETRIES = 5
-    retry_count = 0
+    async def exponential_backoff(self, attempt: int) -> None:
+        wait_time = min(10 * (2 ** attempt), 60)  # Max 60 seconds
+        await asyncio.sleep(wait_time)
 
     async def embed_text(self, text: List[str]) -> List[List[float]]:
-        async def exponential_backoff(attempt):
-            wait_time = min(10 * (2 ** attempt), 60)  # Max 60 seconds
-            await asyncio.sleep(wait_time)
-
         try:
             if self.mock:
                 response = {
                     "data": [{"embedding": [0.0] * self.dimensions} for _ in text]
                 }
-
-                self.retry_count = 0
-
                 return [data["embedding"] for data in response["data"]]
             else:
+                # Configure model name based on provider
+                if self.provider == "gemini":
+                    model_name = f"gemini/{self.model}"
+                    # For Gemini, we need to ensure we're using their specific endpoint format
+                    api_base = f"{self.endpoint}/models/{self.model}:embedContent"
+                else:
+                    model_name = self.model
+                    api_base = self.endpoint
+
                 response = await litellm.aembedding(
-                    self.model,
+                    model=model_name,
                     input=text,
                     api_key=self.api_key,
-                    api_base=self.endpoint,
+                    api_base=api_base,
                     api_version=self.api_version
                 )
 
-                self.retry_count = 0
-
+                self.retry_count = 0  # Reset retry count on successful call
                 return [data["embedding"] for data in response.data]
 
         except litellm.exceptions.ContextWindowExceededError as error:
@@ -91,14 +107,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             if self.retry_count >= self.MAX_RETRIES:
                 raise Exception(f"Rate limit exceeded and no more retries left.")
 
-            await exponential_backoff(self.retry_count)
-
+            await self.exponential_backoff(self.retry_count)
             self.retry_count += 1
-
             return await self.embed_text(text)
 
-        except (litellm.exceptions.BadRequestError, litellm.llms.OpenAI.openai.OpenAIError):
-            raise EmbeddingException("Failed to index data points.")
+        except (litellm.exceptions.BadRequestError, 
+                litellm.exceptions.NotFoundError,
+                litellm.llms.OpenAI.openai.OpenAIError) as e:
+            logger.error(f"Embedding error with provider {self.provider}: {str(e)}")
+            raise EmbeddingException(f"Failed to index data points using {self.provider} provider with model {self.model}")
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
