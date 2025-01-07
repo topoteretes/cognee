@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.engine import DataPoint
@@ -13,5 +14,5 @@ class Document(DataPoint):
         "type": "Document"
     }
 
-    def read(self, chunk_size: int, chunker = str) -> str:
+    def read(self, chunk_size: int, embedding_model: Optional[str], max_tokens: Optional[int], chunker = str) -> str:
         pass

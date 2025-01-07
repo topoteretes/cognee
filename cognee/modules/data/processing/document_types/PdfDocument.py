@@ -1,11 +1,15 @@
+from typing import Optional
+
 from pypdf import PdfReader
-from .Document import Document
+
 from .ChunkerMapping import ChunkerConfig
+from .Document import Document
+
 
 class PdfDocument(Document):
     type: str = "pdf"
 
-    def read(self, chunk_size: int, chunker: str):
+    def read(self, chunk_size: int, chunker: str, embedding_model:Optional[str], max_tokens: Optional[int]):
         file = PdfReader(self.raw_data_location)
 
         def get_text():
@@ -14,7 +18,7 @@ class PdfDocument(Document):
                 yield page_text
 
         chunker_func = ChunkerConfig.get_chunker(chunker)
-        chunker = chunker_func(self, chunk_size = chunk_size, get_text = get_text)
+        chunker = chunker_func(self, chunk_size = chunk_size, get_text = get_text, embedding_model=embedding_model, max_tokens=max_tokens)
 
         yield from chunker.read()
 
