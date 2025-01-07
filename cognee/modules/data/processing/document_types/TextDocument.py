@@ -1,10 +1,13 @@
-from .Document import Document
+from typing import Optional
+
 from .ChunkerMapping import ChunkerConfig
+from .Document import Document
+
 
 class TextDocument(Document):
     type: str = "text"
 
-    def read(self, chunk_size: int, chunker: str):
+    def read(self, chunk_size: int, chunker: str, embedding_model:Optional[str], max_tokens: Optional[int]):
         def get_text():
             with open(self.raw_data_location, mode = "r", encoding = "utf-8") as file:
                 while True:
@@ -17,6 +20,6 @@ class TextDocument(Document):
 
         chunker_func = ChunkerConfig.get_chunker(chunker)
 
-        chunker = chunker_func(self, chunk_size = chunk_size, get_text = get_text)
+        chunker = chunker_func(self, chunk_size = chunk_size, get_text = get_text, embedding_model=embedding_model, max_tokens=max_tokens)
 
         yield from chunker.read()
