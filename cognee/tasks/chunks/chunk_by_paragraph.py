@@ -29,6 +29,8 @@ def chunk_by_paragraph(
     for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
         # Check if this sentence would exceed length limit
         if embedding_model:
+            if embedding_model.startswith("azure/"):
+                embedding_model = embedding_model.split("/")[-1]
             tokenizer = tiktoken.encoding_for_model(embedding_model)
             token_count = len(tokenizer.encode(sentence))
         else:
