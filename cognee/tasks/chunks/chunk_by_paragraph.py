@@ -23,6 +23,8 @@ def chunk_by_paragraph(
     paragraph_ids = []
     last_cut_type = None
     current_token_count = 0
+    if not max_tokens:
+        max_tokens = float("inf")
     
     for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
         # Check if this sentence would exceed length limit
