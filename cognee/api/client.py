@@ -43,7 +43,6 @@ if os.getenv("ENV", "prod") == "prod":
     )
 
 
-
 app_environment = os.getenv("ENV", "prod")
 
 
