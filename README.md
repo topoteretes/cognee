@@ -17,6 +17,9 @@ Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qn
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
 
+<div align="center">
+<img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
+</div>
 
 ## 📦 Installation
 
@@ -259,11 +262,7 @@ pip install cognee
 
 ## Vector & Graph Databases Implementation State
 
-<style>
-  table {
-    width: 100%;
-  }
-</style>
+
 
 | Name     | Type               | Current state     | Known Issues |
 |----------|--------------------|-------------------|--------------|
