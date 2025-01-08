@@ -49,6 +49,7 @@ jobs:
       - name: Execute Python Example
         env:
           ENV: 'dev'
+          PYTHONFAULTHANDLER: 1
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
