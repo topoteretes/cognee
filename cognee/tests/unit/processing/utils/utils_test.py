@@ -133,7 +133,6 @@ async def test_create_cognee_style_network_with_logo():
             logo_alpha=0.5,
         )
 
-    print(result)
     assert result is not None
     assert isinstance(result, str)
     assert len(result) > 0
