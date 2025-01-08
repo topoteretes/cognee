@@ -14,5 +14,5 @@ class Document(DataPoint):
         "type": "Document"
     }
 
-    def read(self, chunk_size: int, embedding_model: Optional[str], max_tokens: Optional[int], chunker = str) -> str:
+    def read(self, chunk_size: int, max_tokens: Optional[int], chunker = str) -> str:
         pass

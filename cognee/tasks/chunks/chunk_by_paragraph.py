@@ -3,12 +3,13 @@ from uuid import NAMESPACE_OID, uuid5
 
 import tiktoken
 
+from cognee.infrastructure.databases.vector import get_vector_engine
+
 from .chunk_by_sentence import chunk_by_sentence
 
 
 def chunk_by_paragraph(
         data: str, 
-        embedding_model: Optional[str], 
         max_tokens: Optional[Union[int, float]], 
         paragraph_length: int = 1024, 
         batch_paragraphs: bool = True
@@ -26,16 +27,16 @@ def chunk_by_paragraph(
     if not max_tokens:
         max_tokens = float("inf")
     
+    vector_engine = get_vector_engine()
+    embedding_model = vector_engine.embedding_engine.model
+
     for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(data, maximum_length=paragraph_length):
         # Check if this sentence would exceed length limit
-        if embedding_model:
-            if embedding_model.startswith("azure/"):
-                embedding_model = embedding_model.split("/")[-1]
-            tokenizer = tiktoken.encoding_for_model(embedding_model)
-            token_count = len(tokenizer.encode(sentence))
-        else:
-            token_count = 0
-
+        
+        embedding_model = embedding_model.split("/")[-1]
+        tokenizer = tiktoken.encoding_for_model(embedding_model)
+        token_count = len(tokenizer.encode(sentence))
+    
         if current_word_count > 0 and (current_word_count + word_count > paragraph_length or current_token_count + token_count > max_tokens):
             # Yield current chunk
             chunk_dict = {

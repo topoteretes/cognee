@@ -10,7 +10,7 @@ from .Document import Document
 class UnstructuredDocument(Document):
     type: str = "unstructured"
 
-    def read(self, chunk_size: int, chunker: str, embedding_model:Optional[str], max_tokens: Optional[int]) -> str:
+    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int]) -> str:
         def get_text():
             try:
                 from unstructured.partition.auto import partition
@@ -29,6 +29,6 @@ class UnstructuredDocument(Document):
 
                 yield text
 
-        chunker = TextChunker(self, chunk_size = chunk_size, get_text = get_text, embedding_model=embedding_model, max_tokens=max_tokens)
+        chunker = TextChunker(self, chunk_size = chunk_size, get_text = get_text, max_tokens=max_tokens)
 
         yield from chunker.read()
