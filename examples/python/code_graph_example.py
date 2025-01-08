@@ -1,7 +1,9 @@
 import argparse
 import asyncio
+import logging
 
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
+from cognee.shared.utils import setup_logging
 
 
 async def main(repo_path, include_docs):
@@ -43,6 +45,8 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
+    setup_logging(logging.ERROR)
+
     import os
 
     args = parse_args()
