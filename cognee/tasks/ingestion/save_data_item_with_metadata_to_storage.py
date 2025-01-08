@@ -7,7 +7,6 @@ from cognee.modules.ingestion import save_data_to_file
 async def save_data_item_with_metadata_to_storage(
     data_item: Union[BinaryIO, str, Any], dataset_name: str
 ) -> str:
-
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
@@ -16,9 +15,7 @@ async def save_data_item_with_metadata_to_storage(
 
     # data is a file object coming from upload.
     elif hasattr(data_item, "file"):
-        file_path = save_data_to_file(
-            data_item.file, filename=data_item.filename
-        )
+        file_path = save_data_to_file(data_item.file, filename=data_item.filename)
 
     elif isinstance(data_item, str):
         # data is a file path

@@ -13,6 +13,7 @@ class MetaData(TypedDict):
     index_fields: list[str]
 
 
+
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
     __tablename__ = "data_point"
@@ -22,10 +23,7 @@ class DataPoint(BaseModel):
     version: int = 1  # Default version
     type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
-    _metadata: Optional[MetaData] = {
-        "index_fields": [],
-        "type": "DataPoint"
-    }
+    _metadata: Optional[MetaData] = {"index_fields": [], "type": "DataPoint"}
 
     # Override the Pydantic configuration
     class Config:
@@ -33,8 +31,11 @@ class DataPoint(BaseModel):
 
     @classmethod
     def get_embeddable_data(self, data_point):
-        if data_point._metadata and len(data_point._metadata["index_fields"]) > 0 \
-            and hasattr(data_point, data_point._metadata["index_fields"][0]):
+        if (
+            data_point._metadata
+            and len(data_point._metadata["index_fields"]) > 0
+            and hasattr(data_point, data_point._metadata["index_fields"][0])
+        ):
             attribute = getattr(data_point, data_point._metadata["index_fields"][0])
 
             if isinstance(attribute, str):
@@ -45,11 +46,16 @@ class DataPoint(BaseModel):
     def get_embeddable_properties(self, data_point):
         """Retrieve all embeddable properties."""
         if data_point._metadata and len(data_point._metadata["index_fields"]) > 0:
-            return [getattr(data_point, field, None) for field in data_point._metadata["index_fields"]]
+
+            return [
+                getattr(data_point, field, None) for field in data_point._metadata["index_fields"]
+            ]
+
         return []
 
     @classmethod
     def get_embeddable_property_names(self, data_point):
+
         """Retrieve names of embeddable properties."""
         return data_point._metadata["index_fields"] or []
 
@@ -87,3 +93,4 @@ class DataPoint(BaseModel):
     def from_dict(cls, data: Dict[str, Any]) -> "DataPoint":
         """Deserialize model from a dictionary."""
         return cls.model_validate(data)
+

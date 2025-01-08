@@ -2,8 +2,10 @@ from typing import BinaryIO
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
 from .IngestionData import IngestionData
 
+
 def create_binary_data(data: BinaryIO):
     return BinaryData(data)
+
 
 class BinaryData(IngestionData):
     name: str = None

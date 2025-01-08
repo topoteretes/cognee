@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.relational import Base
 from .DatasetData import DatasetData
 from .Metadata import Metadata
 
+
 class Data(Base):
     __tablename__ = "data"
 
@@ -20,12 +21,8 @@ class Data(Base):
     raw_data_location = Column(String)
     owner_id = Column(UUID, index=True)
     content_hash = Column(String)
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
-    updated_at = Column(
-        DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     datasets = relationship(
         "Dataset",
@@ -41,7 +38,6 @@ class Data(Base):
         lazy="noload",
         cascade="all, delete",
     )
-
 
     def to_json(self) -> dict:
         return {

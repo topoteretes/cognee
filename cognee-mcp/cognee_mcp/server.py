@@ -18,7 +18,9 @@ def node_to_string(node):
     # keys_to_keep = ["chunk_index", "topological_rank", "cut_type", "id", "text"]
     # keyset = set(keys_to_keep) & node.keys()
     # return "Node(" + " ".join([key + ": " + str(node[key]) + "," for key in keyset]) + ")"
-    node_data = ", ".join([f"{key}: \"{value}\"" for key, value in node.items() if key in ["id", "name"]])
+    node_data = ", ".join(
+        [f'{key}: "{value}"' for key, value in node.items() if key in ["id", "name"]]
+    )
 
     return f"Node({node_data})"
 
@@ -52,9 +54,9 @@ async def handle_list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name = "cognify",
-            description = "Build knowledge graph from the input text.",
-            inputSchema = {
+            name="cognify",
+            description="Build knowledge graph from the input text.",
+            inputSchema={
                 "type": "object",
                 "properties": {
                     "text": {"type": "string"},
@@ -65,9 +67,9 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name = "search",
-            description = "Search the knowledge graph.",
-            inputSchema = {
+            name="search",
+            description="Search the knowledge graph.",
+            inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
@@ -76,9 +78,9 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name = "prune",
-            description = "Reset the knowledge graph.",
-            inputSchema = {
+            name="prune",
+            description="Reset the knowledge graph.",
+            inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
@@ -90,8 +92,7 @@ async def handle_list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def handle_call_tool(
-    name: str,
-    arguments: dict | None
+    name: str, arguments: dict | None
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """
     Handle tool execution requests.
@@ -115,12 +116,12 @@ async def handle_call_tool(
 
                 await cognee.add(text)
 
-                await cognee.cognify(graph_model = graph_model)
+                await cognee.cognify(graph_model=graph_model)
 
                 return [
                     types.TextContent(
-                        type = "text",
-                        text = "Ingested",
+                        type="text",
+                        text="Ingested",
                     )
                 ]
     elif name == "search":
@@ -131,16 +132,14 @@ async def handle_call_tool(
 
                 search_query = arguments.get("query")
 
-                search_results = await cognee.search(
-                    SearchType.INSIGHTS, query_text = search_query
-                )
+                search_results = await cognee.search(SearchType.INSIGHTS, query_text=search_query)
 
                 results = retrieved_edges_to_string(search_results)
 
                 return [
                     types.TextContent(
-                        type = "text",
-                        text = results,
+                        type="text",
+                        text=results,
                     )
                 ]
     elif name == "prune":
@@ -151,8 +150,8 @@ async def handle_call_tool(
 
                 return [
                     types.TextContent(
-                        type = "text",
-                        text = "Pruned",
+                        type="text",
+                        text="Pruned",
                     )
                 ]
     else:
@@ -166,14 +165,15 @@ async def main():
             read_stream,
             write_stream,
             InitializationOptions(
-                server_name = "cognee-mcp",
-                server_version = "0.1.0",
-                capabilities = server.get_capabilities(
-                    notification_options = NotificationOptions(),
-                    experimental_capabilities = {},
+                server_name="cognee-mcp",
+                server_version="0.1.0",
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
                 ),
             ),
         )
+
 
 # This is needed if you'd like to connect to a custom client
 if __name__ == "__main__":

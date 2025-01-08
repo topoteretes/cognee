@@ -11,16 +11,15 @@ import ujson as json
 
 
 def normalize_answer(s):
-
     def remove_articles(text):
-        return re.sub(r'\b(a|an|the)\b', ' ', text)
+        return re.sub(r"\b(a|an|the)\b", " ", text)
 
     def white_space_fix(text):
-        return ' '.join(text.split())
+        return " ".join(text.split())
 
     def remove_punc(text):
         exclude = set(string.punctuation)
-        return ''.join(ch for ch in text if ch not in exclude)
+        return "".join(ch for ch in text if ch not in exclude)
 
     def lower(text):
         return text.lower()
@@ -34,9 +33,15 @@ def f1_score(prediction, ground_truth):
 
     ZERO_METRIC = (0, 0, 0)
 
-    if normalized_prediction in ['yes', 'no', 'noanswer'] and normalized_prediction != normalized_ground_truth:
+    if (
+        normalized_prediction in ["yes", "no", "noanswer"]
+        and normalized_prediction != normalized_ground_truth
+    ):
         return ZERO_METRIC
-    if normalized_ground_truth in ['yes', 'no', 'noanswer'] and normalized_prediction != normalized_ground_truth:
+    if (
+        normalized_ground_truth in ["yes", "no", "noanswer"]
+        and normalized_prediction != normalized_ground_truth
+    ):
         return ZERO_METRIC
 
     prediction_tokens = normalized_prediction.split()
@@ -52,16 +57,18 @@ def f1_score(prediction, ground_truth):
 
 
 def exact_match_score(prediction, ground_truth):
-    return (normalize_answer(prediction) == normalize_answer(ground_truth))
+    return normalize_answer(prediction) == normalize_answer(ground_truth)
+
 
 def update_answer(metrics, prediction, gold):
     em = exact_match_score(prediction, gold)
     f1, prec, recall = f1_score(prediction, gold)
-    metrics['em'] += float(em)
-    metrics['f1'] += f1
-    metrics['prec'] += prec
-    metrics['recall'] += recall
+    metrics["em"] += float(em)
+    metrics["f1"] += f1
+    metrics["prec"] += prec
+    metrics["recall"] += recall
     return em, prec, recall
+
 
 def update_sp(metrics, prediction, gold):
     cur_sp_pred = set(map(tuple, prediction))
@@ -79,8 +86,8 @@ def update_sp(metrics, prediction, gold):
     recall = 1.0 * tp / (tp + fn) if tp + fn > 0 else 0.0
     f1 = 2 * prec * recall / (prec + recall) if prec + recall > 0 else 0.0
     em = 1.0 if fp + fn == 0 else 0.0
-    metrics['sp_em'] += em
-    metrics['sp_f1'] += f1
-    metrics['sp_prec'] += prec
-    metrics['sp_recall'] += recall
+    metrics["sp_em"] += em
+    metrics["sp_f1"] += f1
+    metrics["sp_prec"] += prec
+    metrics["sp_recall"] += recall
     return em, prec, recall

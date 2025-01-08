@@ -31,9 +31,7 @@ async def pipeline(data_queue):
     results = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
     index = 0
     async for result in tasks_run:
-        assert (
-            result == results[index]
-        ), f"at {index = }: {result = } != {results[index] = }"
+        assert result == results[index], f"at {index = }: {result = } != {results[index] = }"
         index += 1
 
 

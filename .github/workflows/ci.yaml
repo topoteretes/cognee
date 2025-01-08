@@ -9,7 +9,7 @@ jobs:
 
   build_docker:
     name: Build Cognee Backend Docker App Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out Cognee code
         uses: actions/checkout@v3

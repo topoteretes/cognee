@@ -15,9 +15,9 @@ def download_github_repo(instance, output_dir):
     Returns:
         str: Path to the downloaded repository.
     """
-    repo_owner_repo = instance['repo']
-    base_commit = instance['base_commit']
-    instance_id = instance['instance_id']
+    repo_owner_repo = instance["repo"]
+    base_commit = instance["base_commit"]
+    instance_id = instance["instance_id"]
 
     repo_url = f"https://github.com/{repo_owner_repo}.git"
 
@@ -29,7 +29,6 @@ def download_github_repo(instance, output_dir):
         Repo.clone_from(repo_url, repo_path)
     else:
         print(f"Repository already exists at {repo_path}.")
-
 
     repo = Repo(repo_path)
     repo.git.checkout(base_commit)
@@ -69,4 +68,4 @@ def retrieved_edges_to_string(retrieved_edges):
         relationship_type = edge.attributes["relationship_type"]
         edge_str = f"{node_to_string(edge.node1)} {relationship_type} {node_to_string(edge.node2)}"
         edge_strings.append(edge_str)
-    return "\n".join(edge_strings)  
+    return "\n".join(edge_strings)

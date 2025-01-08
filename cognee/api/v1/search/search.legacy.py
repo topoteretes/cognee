@@ -1,4 +1,5 @@
-""" This module contains the search function that is used to search for nodes in the graph."""
+"""This module contains the search function that is used to search for nodes in the graph."""
+
 import asyncio
 from enum import Enum
 from typing import Dict, Any, Callable, List
@@ -16,6 +17,7 @@ from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 
+
 class SearchType(Enum):
     ADJACENT = "ADJACENT"
     TRAVERSE = "TRAVERSE"
@@ -23,7 +25,7 @@ class SearchType(Enum):
     SUMMARY = "SUMMARY"
     SUMMARY_CLASSIFICATION = "SUMMARY_CLASSIFICATION"
     NODE_CLASSIFICATION = "NODE_CLASSIFICATION"
-    DOCUMENT_CLASSIFICATION = "DOCUMENT_CLASSIFICATION",
+    DOCUMENT_CLASSIFICATION = ("DOCUMENT_CLASSIFICATION",)
     CYPHER = "CYPHER"
 
     @staticmethod
@@ -33,12 +35,13 @@ class SearchType(Enum):
         except KeyError as error:
             raise ValueError(f"{name} is not a valid SearchType") from error
 
+
 class SearchParameters(BaseModel):
     search_type: SearchType
     params: Dict[str, Any]
 
     @field_validator("search_type", mode="before")
-    def convert_string_to_enum(cls, value): # pylint: disable=no-self-argument
+    def convert_string_to_enum(cls, value):  # pylint: disable=no-self-argument
         if isinstance(value, str):
             return SearchType.from_str(value)
         return value
@@ -52,7 +55,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
         raise UserNotFoundError
 
     own_document_ids = await get_document_ids_for_user(user.id)
-    search_params = SearchParameters(search_type = search_type, params = params)
+    search_params = SearchParameters(search_type=search_type, params=params)
     search_results = await specific_search([search_params], user)
 
     from uuid import UUID
@@ -61,7 +64,7 @@ async def search(search_type: str, params: Dict[str, Any], user: User = None) ->
 
     for search_result in search_results:
         document_id = search_result["document_id"] if "document_id" in search_result else None
-        document_id = UUID(document_id) if type(document_id) == str else document_id
+        document_id = UUID(document_id) if isinstance(document_id, str) else document_id
 
         if document_id is None or document_id in own_document_ids:
             filtered_search_results.append(search_result)

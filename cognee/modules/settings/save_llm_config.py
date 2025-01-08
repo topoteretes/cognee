@@ -1,10 +1,12 @@
 from pydantic import BaseModel
 from cognee.infrastructure.llm import get_llm_config
 
+
 class LLMConfig(BaseModel):
     api_key: str
     model: str
     provider: str
+
 
 async def save_llm_config(new_llm_config: LLMConfig):
     llm_config = get_llm_config()

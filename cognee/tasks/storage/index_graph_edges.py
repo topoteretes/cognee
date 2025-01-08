@@ -8,25 +8,25 @@ from cognee.modules.graph.models.EdgeType import EdgeType
 
 async def index_graph_edges():
     """
-        Indexes graph edges by creating and managing vector indexes for relationship types.
+    Indexes graph edges by creating and managing vector indexes for relationship types.
 
-        This function retrieves edge data from the graph engine, counts distinct relationship
-        types, and creates `EdgeType` pydantic objects. It ensures that vector indexes are created for
-        the `relationship_name` field.
+    This function retrieves edge data from the graph engine, counts distinct relationship
+    types, and creates `EdgeType` pydantic objects. It ensures that vector indexes are created for
+    the `relationship_name` field.
 
-        Steps:
-        1. Initialize the vector engine and graph engine.
-        2. Retrieve graph edge data and count relationship types (`relationship_name`).
-        3. Create vector indexes for `relationship_name` if they don't exist.
-        4. Transform the counted relationships into `EdgeType` objects.
-        5. Index the transformed data points in the vector engine.
+    Steps:
+    1. Initialize the vector engine and graph engine.
+    2. Retrieve graph edge data and count relationship types (`relationship_name`).
+    3. Create vector indexes for `relationship_name` if they don't exist.
+    4. Transform the counted relationships into `EdgeType` objects.
+    5. Index the transformed data points in the vector engine.
 
-        Raises:
-            RuntimeError: If initialization of the vector engine or graph engine fails.
+    Raises:
+        RuntimeError: If initialization of the vector engine or graph engine fails.
 
-        Returns:
-            None
-        """
+    Returns:
+        None
+    """
     try:
         created_indexes = {}
         index_points = {}
@@ -40,9 +40,10 @@ async def index_graph_edges():
     _, edges_data = await graph_engine.get_graph_data()
 
     edge_types = Counter(
-        item.get('relationship_name')
+        item.get("relationship_name")
         for edge in edges_data
-        for item in edge if isinstance(item, dict) and 'relationship_name' in item
+        for item in edge
+        if isinstance(item, dict) and "relationship_name" in item
     )
 
     for text, count in edge_types.items():

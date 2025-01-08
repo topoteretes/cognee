@@ -1,10 +1,11 @@
 """Initial migration
 
 Revision ID: 8057ae7329c2
-Revises: 
+Revises:
 Create Date: 2024-10-02 12:55:20.989372
 
 """
+
 from typing import Sequence, Union
 from sqlalchemy.util import await_only
 from cognee.infrastructure.databases.relational import get_relational_engine
