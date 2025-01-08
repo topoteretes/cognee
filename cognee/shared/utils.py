@@ -365,6 +365,7 @@ def style_and_render_graph(p, G, layout_positions, node_attribute, node_colors, 
 
     from bokeh.embed import file_html
     from bokeh.resources import CDN
+
     graph_renderer = from_networkx(G, layout_positions)
     node_radii = [0.02 + 0.1 * centrality[node] for node in G.nodes()]
     graph_renderer.node_renderer.data_source.data["radius"] = node_radii
@@ -404,6 +405,7 @@ async def create_cognee_style_network_with_logo(
 
     from bokeh.embed import file_html
     from bokeh.resources import CDN
+
     logging.info("Converting graph to serializable format...")
     G = await convert_to_serializable_graph(G)
 
