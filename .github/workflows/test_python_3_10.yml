@@ -4,8 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
     types: [labeled, synchronize]
-    branches:
-      - '**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -16,11 +14,9 @@ env:
   ENV: 'dev'
 
 jobs:
-
   run_common:
     name: test
     runs-on: ubuntu-latest
-    if:  ${{ github.event.label.name == 'run-checks' }}
     strategy:
       fail-fast: false
     defaults:
