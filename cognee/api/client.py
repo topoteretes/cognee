@@ -24,7 +24,7 @@ from cognee.api.v1.users.routers import (
     get_reset_password_router,
     get_verify_router,
     get_users_router,
-    get_visualize_router
+    get_visualize_router,
 )
 from contextlib import asynccontextmanager
 

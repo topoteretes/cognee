@@ -8,6 +8,7 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.config import get_llm_config
 import litellm
 
+
 class GenericAPIAdapter(LLMInterface):
     """Adapter for Generic API LLM provider API"""
 
@@ -27,8 +28,7 @@ class GenericAPIAdapter(LLMInterface):
             self.aclient = instructor.from_litellm(litellm.acompletion)
 
         else:
-            self.aclient =  instructor.from_litellm(litellm.acompletion)
-
+            self.aclient = instructor.from_litellm(litellm.acompletion)
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
@@ -49,8 +49,6 @@ class GenericAPIAdapter(LLMInterface):
                 },
             ],
             max_retries=5,
-            api_base = self.endpoint,
-            response_model=response_model
+            api_base=self.endpoint,
+            response_model=response_model,
         )
-
-

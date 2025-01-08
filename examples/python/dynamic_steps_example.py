@@ -191,7 +191,7 @@ async def main(enable_steps):
         print(format_triplets(results))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     setup_logging(logging.ERROR)
 
     rebuild_kg = True

@@ -110,7 +110,7 @@ async def run_cognify_pipeline(
                 summarization_model=cognee_config.summarization_model,
                 task_config={"batch_size": 10},
             ),
-            Task(add_data_points, only_root = True, task_config = { "batch_size": 10 }),
+            Task(add_data_points, only_root=True, task_config={"batch_size": 10}),
         ]
 
         pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")

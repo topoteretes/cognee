@@ -305,7 +305,6 @@ async def convert_to_serializable_graph(G):
     return new_G
 
 
-
 def generate_layout_positions(G, layout_func, layout_scale):
     """
     Generate layout positions for the graph using the specified layout function.
@@ -381,14 +380,13 @@ async def create_cognee_style_network_with_logo(
     layout_func=nx.spring_layout,
     layout_scale=3.0,
     logo_alpha=0.1,
-    bokeh_object = False,
+    bokeh_object=False,
 ):
     """
     Create a Cognee-inspired network visualization with an embedded logo.
     """
     logging.info("Converting graph to serializable format...")
     G = await convert_to_serializable_graph(G)
-
 
     logging.info("Generating layout positions...")
     layout_positions = generate_layout_positions(G, layout_func, layout_scale)
@@ -420,7 +418,6 @@ async def create_cognee_style_network_with_logo(
     embed_logo(p, layout_scale, logo_alpha, "bottom_right")
     embed_logo(p, layout_scale, logo_alpha, "top_left")
 
-
     logging.info("Styling and rendering graph...")
     style_and_render_graph(p, G, layout_positions, label, node_colors, centrality)
 
@@ -434,15 +431,12 @@ async def create_cognee_style_network_with_logo(
     )
     p.add_tools(hover_tool)
 
-
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
     with open(output_filename, "w") as f:
         f.write(html_content)
 
     logging.info("Visualization complete.")
-
-
 
     if bokeh_object:
         return p
@@ -461,9 +455,8 @@ def graph_to_tuple(graph):
     return (nodes, edges)
 
 
-
 def setup_logging(log_level=logging.INFO):
-    """ This method sets up the logging configuration. """
+    """This method sets up the logging configuration."""
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s\n")
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
@@ -498,12 +491,17 @@ if __name__ == "__main__":
 
     import asyncio
 
-    output_html = asyncio.run(create_cognee_style_network_with_logo(G,        output_filename="example_network.html",
-        title="Example Cognee Network",
-        node_attribute="group",  # Attribute to use for coloring nodes
-        layout_func=nx.spring_layout,  # Layout function
-        layout_scale=3.0,  # Scale for the layout
-        logo_alpha=0.2, ))
+    output_html = asyncio.run(
+        create_cognee_style_network_with_logo(
+            G,
+            output_filename="example_network.html",
+            title="Example Cognee Network",
+            node_attribute="group",  # Attribute to use for coloring nodes
+            layout_func=nx.spring_layout,  # Layout function
+            layout_scale=3.0,  # Scale for the layout
+            logo_alpha=0.2,
+        )
+    )
 
     # Call the function
     # output_html = await create_cognee_style_network_with_logo(

@@ -20,7 +20,7 @@ async def add_data_points(data_points: list[DataPoint], only_root=False):
                 added_nodes=added_nodes,
                 added_edges=added_edges,
                 visited_properties=visited_properties,
-                only_root = only_root,
+                only_root=only_root,
             )
             for data_point in data_points
         ]

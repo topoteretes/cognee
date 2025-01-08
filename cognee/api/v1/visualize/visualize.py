@@ -3,8 +3,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 import logging
 
 
-
-async def visualize_graph(label:str="name"):
+async def visualize_graph(label: str = "name"):
     """ """
     graph_engine = await get_graph_engine()
     graph_data = await graph_engine.get_graph_data()

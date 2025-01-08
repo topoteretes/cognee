@@ -102,6 +102,7 @@ def test_prepare_nodes():
     assert isinstance(nodes_df, pd.DataFrame)
     assert len(nodes_df) == 1
 
+
 @pytest.mark.asyncio
 async def test_create_cognee_style_network_with_logo():
     import networkx as nx
