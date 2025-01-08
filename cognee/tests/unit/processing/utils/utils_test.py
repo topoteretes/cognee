@@ -102,8 +102,8 @@ def test_prepare_nodes():
     assert isinstance(nodes_df, pd.DataFrame)
     assert len(nodes_df) == 1
 
-
-def test_create_cognee_style_network_with_logo():
+@pytest.mark.asyncio
+async def test_create_cognee_style_network_with_logo():
     import networkx as nx
     from unittest.mock import patch
     from io import BytesIO
@@ -125,15 +125,15 @@ def test_create_cognee_style_network_with_logo():
         return original_open(*args, **kwargs)
 
     with patch("builtins.open", side_effect=mock_open_read_side_effect):
-        result = create_cognee_style_network_with_logo(
+        result = await create_cognee_style_network_with_logo(
             graph_tuple,
             title="Test Network",
-            node_attribute="group",
             layout_func=nx.spring_layout,
             layout_scale=3.0,
             logo_alpha=0.5,
         )
 
+    print(result)
     assert result is not None
     assert isinstance(result, str)
     assert len(result) > 0
