@@ -18,7 +18,7 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9.0,<3.12"
+python = ">=3.9.0,<3.13"
 openai = "1.52.0"
 pydantic = "2.8.2"
 python-dotenv = "1.0.1"
