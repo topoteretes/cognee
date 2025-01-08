@@ -750,7 +750,7 @@ files = [
 name = "chardet"
 version = "5.2.0"
 description = "Universal encoding detector for Python 3"
-optional = false
+optional = true
 python-versions = ">=3.7"
 files = [
     {file = "chardet-5.2.0-py3-none-any.whl", hash = "sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970"},
@@ -1105,25 +1105,6 @@ python-versions = "*"
 files = [
     {file = "csscompressor-0.9.5.tar.gz", hash = "sha256:afa22badbcf3120a4f392e4d22f9fff485c044a1feda4a950ecc5eba9dd31a05"},
 ]
-
-[[package]]
-name = "cssselect2"
-version = "0.7.0"
-description = "CSS selectors for Python ElementTree"
-optional = false
-python-versions = ">=3.7"
-files = [
-    {file = "cssselect2-0.7.0-py3-none-any.whl", hash = "sha256:fd23a65bfd444595913f02fc71f6b286c29261e354c41d722ca7a261a49b5969"},
-    {file = "cssselect2-0.7.0.tar.gz", hash = "sha256:1ccd984dab89fc68955043aca4e1b03e0cf29cad9880f6e28e3ba7a74b14aa5a"},
-]
-
-[package.dependencies]
-tinycss2 = "*"
-webencodings = "*"
-
-[package.extras]
-doc = ["sphinx", "sphinx_rtd_theme"]
-test = ["flake8", "isort", "pytest"]
 
 [[package]]
 name = "cycler"
@@ -3574,7 +3555,7 @@ wrapt = "*"
 name = "lxml"
 version = "5.3.0"
 description = "Powerful and Pythonic XML processing library combining libxml2/libxslt with the ElementTree API."
-optional = false
+optional = true
 python-versions = ">=3.6"
 files = [
     {file = "lxml-5.3.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:dd36439be765e2dde7660212b5275641edbc813e7b24668831a5c8ac91180656"},
@@ -5007,8 +4988,8 @@ files = [
 [package.dependencies]
 numpy = [
     {version = ">=1.22.4", markers = "python_version < \"3.11\""},
-    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
     {version = ">=1.23.2", markers = "python_version == \"3.11\""},
+    {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -5695,26 +5676,6 @@ files = [
 test = ["cffi", "hypothesis", "pandas", "pytest", "pytz"]
 
 [[package]]
-name = "pycairo"
-version = "1.27.0"
-description = "Python interface for cairo"
-optional = false
-python-versions = ">=3.9"
-files = [
-    {file = "pycairo-1.27.0-cp310-cp310-win32.whl", hash = "sha256:e20f431244634cf244ab6b4c3a2e540e65746eed1324573cf291981c3e65fc05"},
-    {file = "pycairo-1.27.0-cp310-cp310-win_amd64.whl", hash = "sha256:03bf570e3919901572987bc69237b648fe0de242439980be3e606b396e3318c9"},
-    {file = "pycairo-1.27.0-cp311-cp311-win32.whl", hash = "sha256:9a9b79f92a434dae65c34c830bb9abdbd92654195e73d52663cbe45af1ad14b2"},
-    {file = "pycairo-1.27.0-cp311-cp311-win_amd64.whl", hash = "sha256:d40a6d80b15dacb3672dc454df4bc4ab3988c6b3f36353b24a255dc59a1c8aea"},
-    {file = "pycairo-1.27.0-cp312-cp312-win32.whl", hash = "sha256:e2239b9bb6c05edae5f3be97128e85147a155465e644f4d98ea0ceac7afc04ee"},
-    {file = "pycairo-1.27.0-cp312-cp312-win_amd64.whl", hash = "sha256:27cb4d3a80e3b9990af552818515a8e466e0317063a6e61585533f1a86f1b7d5"},
-    {file = "pycairo-1.27.0-cp313-cp313-win32.whl", hash = "sha256:01505c138a313df2469f812405963532fc2511fb9bca9bdc8e0ab94c55d1ced8"},
-    {file = "pycairo-1.27.0-cp313-cp313-win_amd64.whl", hash = "sha256:b0349d744c068b6644ae23da6ada111c8a8a7e323b56cbce3707cba5bdb474cc"},
-    {file = "pycairo-1.27.0-cp39-cp39-win32.whl", hash = "sha256:f9ca8430751f1fdcd3f072377560c9e15608b9a42d61375469db853566993c9b"},
-    {file = "pycairo-1.27.0-cp39-cp39-win_amd64.whl", hash = "sha256:1b1321652a6e27c4de3069709b1cae22aed2707fd8c5e889c04a95669228af2a"},
-    {file = "pycairo-1.27.0.tar.gz", hash = "sha256:5cb21e7a00a2afcafea7f14390235be33497a2cce53a98a19389492a60628430"},
-]
-
-[[package]]
 name = "pycparser"
 version = "2.22"
 description = "C parser in Python"
@@ -5943,8 +5904,8 @@ astroid = ">=3.3.8,<=3.4.0-dev0"
 colorama = {version = ">=0.4.5", markers = "sys_platform == \"win32\""}
 dill = [
     {version = ">=0.2", markers = "python_version < \"3.11\""},
-    {version = ">=0.3.7", markers = "python_version >= \"3.12\""},
     {version = ">=0.3.6", markers = "python_version >= \"3.11\" and python_version < \"3.12\""},
+    {version = ">=0.3.7", markers = "python_version >= \"3.12\""},
 ]
 isort = ">=4.2.5,<5.13.0 || >5.13.0,<6"
 mccabe = ">=0.6,<0.8"
@@ -6757,26 +6718,6 @@ files = [
     {file = "regex-2024.11.6-cp39-cp39-win_amd64.whl", hash = "sha256:b2837718570f95dd41675328e111345f9b7095d821bac435aac173ac80b19983"},
     {file = "regex-2024.11.6.tar.gz", hash = "sha256:7ab159b063c52a0333c884e4679f8d7a85112ee3078fe3d9004b2dd875585519"},
 ]
-
-[[package]]
-name = "reportlab"
-version = "4.2.5"
-description = "The Reportlab Toolkit"
-optional = false
-python-versions = "<4,>=3.7"
-files = [
-    {file = "reportlab-4.2.5-py3-none-any.whl", hash = "sha256:eb2745525a982d9880babb991619e97ac3f661fae30571b7d50387026ca765ee"},
-    {file = "reportlab-4.2.5.tar.gz", hash = "sha256:5cf35b8fd609b68080ac7bbb0ae1e376104f7d5f7b2d3914c7adc63f2593941f"},
-]
-
-[package.dependencies]
-chardet = "*"
-pillow = ">=9.0.0"
-
-[package.extras]
-accel = ["rl-accel (>=0.9.0,<1.1)"]
-pycairo = ["freetype-py (>=2.3.0,<2.4)", "rlPyCairo (>=0.2.0,<1)"]
-renderpm = ["rl-renderPM (>=4.0.3,<4.1)"]
 
 [[package]]
 name = "requests"
@@ -7613,22 +7554,6 @@ anyio = ">=3.4.0,<5"
 full = ["httpx (>=0.22.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.7)", "pyyaml"]
 
 [[package]]
-name = "svglib"
-version = "1.5.1"
-description = "A pure-Python library for reading and converting SVG"
-optional = false
-python-versions = ">=3.7"
-files = [
-    {file = "svglib-1.5.1.tar.gz", hash = "sha256:3ae765d3a9409ee60c0fb4d24c2deb6a80617aa927054f5bcd7fc98f0695e587"},
-]
-
-[package.dependencies]
-cssselect2 = ">=0.2.0"
-lxml = "*"
-reportlab = "*"
-tinycss2 = ">=0.6.0"
-
-[[package]]
 name = "tabulate"
 version = "0.9.0"
 description = "Pretty-print tabular data"
@@ -7745,7 +7670,7 @@ blobfile = ["blobfile (>=2)"]
 name = "tinycss2"
 version = "1.4.0"
 description = "A tiny CSS parser"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "tinycss2-1.4.0-py3-none-any.whl", hash = "sha256:3a49cf47b7675da0b15d0c6e1df8df4ebd96e9394bb905a5775adb0d884c5289"},
@@ -8426,7 +8351,7 @@ files = [
 name = "webencodings"
 version = "0.5.1"
 description = "Character encoding aliases for legacy web content"
-optional = false
+optional = true
 python-versions = "*"
 files = [
     {file = "webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78"},
@@ -8850,4 +8775,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10.0,<3.13"
-content-hash = "348f721bb03cb8be660853c3a00011df2a8e8d58f8173e2f3926e96c50c936de"
+content-hash = "6c1a7d6284b7cd7ce47110149f9796fc8d91efe7bef496edd92a706f2319b3d5"
