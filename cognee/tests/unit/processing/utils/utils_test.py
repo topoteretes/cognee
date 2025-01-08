@@ -123,8 +123,8 @@ async def test_create_cognee_style_network_with_logo():
         title="Test Network",
         layout_func=nx.spring_layout,
         layout_scale=3.0,
-        logo_alpha=0.5,)
-
+        logo_alpha=0.5,
+    )
 
     assert result is not None
     assert isinstance(result, str)
