@@ -21,6 +21,7 @@ from bokeh.embed import file_html
 from bokeh.resources import CDN
 import cairosvg
 import logging
+import sys
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -460,6 +461,18 @@ def graph_to_tuple(graph):
     return (nodes, edges)
 
 
+
+def setup_logging(log_level=logging.INFO):
+    """ This method sets up the logging configuration. """
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s\n")
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(log_level)
+
+    logging.basicConfig(
+        level=log_level,
+        handlers=[stream_handler],
+    )
 
 
 # ---------------- Example Usage ----------------

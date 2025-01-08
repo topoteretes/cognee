@@ -1,7 +1,9 @@
 import cognee
 import asyncio
+import logging
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.brute_force_triplet_search import format_triplets
+from cognee.shared.utils import setup_logging
 
 job_1 = """
 CV 1: Relevant
@@ -189,7 +191,9 @@ async def main(enable_steps):
         print(format_triplets(results))
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    setup_logging(logging.ERROR)
+
     rebuild_kg = True
     retrieve = True
     steps_to_enable = {
