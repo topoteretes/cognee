@@ -731,7 +731,7 @@ files = [
 name = "chardet"
 version = "5.2.0"
 description = "Universal encoding detector for Python 3"
-optional = false
+optional = true
 python-versions = ">=3.7"
 files = [
     {file = "chardet-5.2.0-py3-none-any.whl", hash = "sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970"},
@@ -1097,25 +1097,6 @@ python-versions = "*"
 files = [
     {file = "csscompressor-0.9.5.tar.gz", hash = "sha256:afa22badbcf3120a4f392e4d22f9fff485c044a1feda4a950ecc5eba9dd31a05"},
 ]
-
-[[package]]
-name = "cssselect2"
-version = "0.7.0"
-description = "CSS selectors for Python ElementTree"
-optional = false
-python-versions = ">=3.7"
-files = [
-    {file = "cssselect2-0.7.0-py3-none-any.whl", hash = "sha256:fd23a65bfd444595913f02fc71f6b286c29261e354c41d722ca7a261a49b5969"},
-    {file = "cssselect2-0.7.0.tar.gz", hash = "sha256:1ccd984dab89fc68955043aca4e1b03e0cf29cad9880f6e28e3ba7a74b14aa5a"},
-]
-
-[package.dependencies]
-tinycss2 = "*"
-webencodings = "*"
-
-[package.extras]
-doc = ["sphinx", "sphinx_rtd_theme"]
-test = ["flake8", "isort", "pytest"]
 
 [[package]]
 name = "cycler"
@@ -3608,7 +3589,7 @@ wrapt = "*"
 name = "lxml"
 version = "5.3.0"
 description = "Powerful and Pythonic XML processing library combining libxml2/libxslt with the ElementTree API."
-optional = false
+optional = true
 python-versions = ">=3.6"
 files = [
     {file = "lxml-5.3.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:dd36439be765e2dde7660212b5275641edbc813e7b24668831a5c8ac91180656"},
@@ -6773,26 +6754,6 @@ files = [
 ]
 
 [[package]]
-name = "reportlab"
-version = "4.2.5"
-description = "The Reportlab Toolkit"
-optional = false
-python-versions = "<4,>=3.7"
-files = [
-    {file = "reportlab-4.2.5-py3-none-any.whl", hash = "sha256:eb2745525a982d9880babb991619e97ac3f661fae30571b7d50387026ca765ee"},
-    {file = "reportlab-4.2.5.tar.gz", hash = "sha256:5cf35b8fd609b68080ac7bbb0ae1e376104f7d5f7b2d3914c7adc63f2593941f"},
-]
-
-[package.dependencies]
-chardet = "*"
-pillow = ">=9.0.0"
-
-[package.extras]
-accel = ["rl-accel (>=0.9.0,<1.1)"]
-pycairo = ["freetype-py (>=2.3.0,<2.4)", "rlPyCairo (>=0.2.0,<1)"]
-renderpm = ["rl-renderPM (>=4.0.3,<4.1)"]
-
-[[package]]
 name = "requests"
 version = "2.32.3"
 description = "Python HTTP for Humans."
@@ -7605,22 +7566,6 @@ typing-extensions = {version = ">=3.10.0", markers = "python_version < \"3.10\""
 full = ["httpx (>=0.22.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.7)", "pyyaml"]
 
 [[package]]
-name = "svglib"
-version = "1.5.1"
-description = "A pure-Python library for reading and converting SVG"
-optional = false
-python-versions = ">=3.7"
-files = [
-    {file = "svglib-1.5.1.tar.gz", hash = "sha256:3ae765d3a9409ee60c0fb4d24c2deb6a80617aa927054f5bcd7fc98f0695e587"},
-]
-
-[package.dependencies]
-cssselect2 = ">=0.2.0"
-lxml = "*"
-reportlab = "*"
-tinycss2 = ">=0.6.0"
-
-[[package]]
 name = "tabulate"
 version = "0.9.0"
 description = "Pretty-print tabular data"
@@ -7737,7 +7682,7 @@ blobfile = ["blobfile (>=2)"]
 name = "tinycss2"
 version = "1.4.0"
 description = "A tiny CSS parser"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "tinycss2-1.4.0-py3-none-any.whl", hash = "sha256:3a49cf47b7675da0b15d0c6e1df8df4ebd96e9394bb905a5775adb0d884c5289"},
@@ -8434,7 +8379,7 @@ files = [
 name = "webencodings"
 version = "0.5.1"
 description = "Character encoding aliases for legacy web content"
-optional = false
+optional = true
 python-versions = "*"
 files = [
     {file = "webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78"},
@@ -8847,4 +8792,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9.0,<3.13"
-content-hash = "95cbd8458353c3a295043dd9d999ed89c0bf891ca2d71ed7f653011b5bc77199"
+content-hash = "249e1aeb01eed172f8ab88b3a51c2f8800a31c853c29a516f253e024b2be1b37"
