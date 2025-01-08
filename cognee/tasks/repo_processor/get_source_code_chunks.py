@@ -5,6 +5,7 @@ from uuid import NAMESPACE_OID, uuid5
 import parso
 import tiktoken
 
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
 
@@ -115,13 +116,15 @@ def get_source_code_chunks_from_code_part(
         max_tokens: int = 8192,
         overlap: float = 0.25,
         granularity: float = 0.1,
-        model_name: str = "text-embedding-3-large"
 ) -> Generator[SourceCodeChunk, None, None]:
     """Yields source code chunks from a CodePart object, with configurable token limits and overlap."""
     if not code_file_part.source_code:
         logger.error(f"No source code in CodeFile {code_file_part.id}")
         return
 
+    vector_engine = get_vector_engine()
+    embedding_model = vector_engine.embedding_engine.model
+    model_name = embedding_model.split("/")[-1]
     tokenizer = tiktoken.encoding_for_model(model_name)
     max_subchunk_tokens = max(1, int(granularity * max_tokens))
     subchunk_token_counts = _get_subchunk_token_counts(tokenizer, code_file_part.source_code, max_subchunk_tokens)
@@ -141,7 +144,7 @@ def get_source_code_chunks_from_code_part(
         previous_chunk = current_chunk
 
 
-async def get_source_code_chunks(data_points: list[DataPoint], embedding_model="text-embedding-3-large") -> \
+async def get_source_code_chunks(data_points: list[DataPoint]) -> \
         AsyncGenerator[list[DataPoint], None]:
     """Processes code graph datapoints, create SourceCodeChink datapoints."""
     # TODO: Add support for other embedding models, with max_token mapping
@@ -156,7 +159,7 @@ async def get_source_code_chunks(data_points: list[DataPoint], embedding_model="
             for code_part in data_point.contains:
                 try:
                     yield code_part
-                    for source_code_chunk in get_source_code_chunks_from_code_part(code_part, model_name=embedding_model):
+                    for source_code_chunk in get_source_code_chunks_from_code_part(code_part):
                         yield source_code_chunk
                 except Exception as e:
                     logger.error(f"Error processing code part: {e}")
