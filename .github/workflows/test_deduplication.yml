@@ -17,7 +17,6 @@ jobs:
   run_deduplication_test:
     name: test
     runs-on: ubuntu-latest
-    if:  ${{ github.event.label.name == 'run-checks' }}
     defaults:
       run:
         shell: bash

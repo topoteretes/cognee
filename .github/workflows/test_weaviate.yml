@@ -18,8 +18,6 @@ jobs:
   run_weaviate_integration_test:
     name: test
     runs-on: ubuntu-latest
-    if:  ${{ github.event.label.name == 'run-checks' }}
-
     defaults:
       run:
         shell: bash

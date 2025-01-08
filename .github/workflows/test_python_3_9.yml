@@ -18,7 +18,6 @@ jobs:
   run_common:
     name: test
     runs-on: ubuntu-latest
-    if:  ${{ github.event.label.name == 'run-checks' }}
     strategy:
       fail-fast: false
     defaults:
