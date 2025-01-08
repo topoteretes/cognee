@@ -5,7 +5,7 @@ from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_fr
 from .index_data_points import index_data_points
 
 
-async def add_data_points(data_points: list[DataPoint]):
+async def add_data_points(data_points: list[DataPoint], only_root = False):
     nodes = []
     edges = []
 
@@ -19,6 +19,7 @@ async def add_data_points(data_points: list[DataPoint]):
             added_nodes = added_nodes,
             added_edges = added_edges,
             visited_properties = visited_properties,
+            only_root = only_root,
         ) for data_point in data_points
     ])
 
