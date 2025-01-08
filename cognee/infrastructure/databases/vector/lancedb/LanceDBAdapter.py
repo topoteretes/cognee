@@ -42,12 +42,45 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
+        self.connection = None
+        self.required_collections = ["entity_name", "entity_type_name"]  # Add required collections
+        asyncio.create_task(self._initialize())
 
+    async def _initialize(self):
+        """Initialize the adapter and ensure collections exist"""
+        await self.get_connection()
+        await self.ensure_collections()
+
+    async def ensure_collections(self):
+            """Ensure all required collections exist with correct dimensions"""
+            for collection_name in self.required_collections:
+                if not await self.has_collection(collection_name):
+                    await self.create_collection(collection_name, self.get_data_point_schema(IndexSchema))
+                    print(f"Created collection {collection_name}")
+    
     async def get_connection(self):
         if self.connection is None:
             self.connection = await lancedb.connect_async(self.url, api_key = self.api_key)
 
         return self.connection
+    
+    async def ensure_collection_dimensions(self):
+        """Ensure all collections have correct vector dimensions"""
+        connection = await self.get_connection()
+        collection_names = await connection.table_names()
+        vector_size = self.embedding_engine.get_vector_size()
+        
+        for name in collection_names:
+            collection = await connection.open_table(name)
+            schema = await collection.schema()
+            vector_field = next((field for field in schema if field.name == "vector"), None)
+            
+            if vector_field and vector_field.type.list_size != vector_size:
+                print(f"Vector dimension mismatch in collection {name}: has {vector_field.type.list_size}, but embedding engine uses {vector_size}")
+                await connection.drop_table(name)
+                print(f"Dropped collection {name} due to dimension mismatch")
+                await self.create_collection(name, self.get_data_point_schema(IndexSchema))
+                print(f"Recreated collection {name} with correct dimensions")
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         return await self.embedding_engine.embed_text(data)
@@ -183,12 +216,17 @@ class LanceDBAdapter(VectorDBInterface):
 
         connection = await self.get_connection()
         collection = await connection.open_table(collection_name)
-
+        
         results = await collection.vector_search(query_vector).limit(limit).to_pandas()
-
         result_values = list(results.to_dict("index").values())
 
-        normalized_values = normalize_distances(result_values)
+        if not result_values:
+            return []  # Handle empty results case
+
+        if normalized:
+            normalized_values = normalize_distances(result_values)
+        else:
+            normalized_values = [result["_distance"] for result in result_values]
 
         return [ScoredResult(
             id = UUID(result["id"]),
@@ -235,9 +273,19 @@ class LanceDBAdapter(VectorDBInterface):
         ])
 
     async def prune(self):
-        # Clean up the database if it was set up as temporary
+        """Clean up the database"""
+        if self.connection:
+            connection = await self.get_connection()
+            collection_names = await connection.table_names()
+            
+            for name in collection_names:
+                await connection.drop_table(name)
+                print(f"Dropped collection {name}")
+            
+            self.connection = None
+        
         if self.url.startswith("/"):
-            LocalStorage.remove_all(self.url) # Remove the temporary directory and files inside
+            LocalStorage.remove_all(self.url)
 
     def get_data_point_schema(self, model_type):
         return copy_model(

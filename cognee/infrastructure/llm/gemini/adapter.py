@@ -1,10 +1,14 @@
 from typing import Type
 from pydantic import BaseModel
 import json
-import re
-from litellm import acompletion
+import logging
+from litellm import acompletion, JSONSchemaValidationError
+
+logger = logging.getLogger(__name__)
 
 class GeminiAdapter:
+    MAX_TOKENS = 8192
+    
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
         self.model = model
@@ -15,110 +19,111 @@ class GeminiAdapter:
         system_prompt: str,
         response_model: Type[BaseModel]
     ) -> BaseModel:
-        json_system_prompt = f"""{system_prompt}
-        IMPORTANT: Respond only with a JSON object in the following format:
-        {{
-            "summary": "Brief summary of the content",
-            "description": "Detailed description of the content",
-            "nodes": [
-                {{
-                    "id": "string",
-                    "label": "string"
-                }}
-            ],
-            "edges": [
-                {{
-                    "source": "string",
-                    "target": "string",
-                    "relation": "string"
-                }}
-            ]
-        }}"""
-
-        messages = [
-            {"role": "system", "content": json_system_prompt},
-            {"role": "user", "content": text_input}
-        ]
-
         try:
-            response = await acompletion(
-                model=f"gemini/{self.model}",
-                messages=messages,
-                api_key=self.api_key,
-                max_retries=5
-            )
+            # Define the JSON schema for validation
+            response_schema = {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "description": {"type": "string"},
+                    "nodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "type": {"type": "string"},
+                                "description": {"type": "string"},
+                                "id": {"type": "string"},
+                                "label": {"type": "string"}
+                            },
+                            "required": ["name", "type", "description", "id", "label"]
+                        }
+                    },
+                    "edges": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source_node_id": {"type": "string"},
+                                "target_node_id": {"type": "string"},
+                                "relationship_name": {"type": "string"}
+                            },
+                            "required": ["source_node_id", "target_node_id", "relationship_name"]
+                        }
+                    }
+                },
+                "required": ["summary", "description", "nodes", "edges"]
+            }
 
-            # Extract the JSON string from the response
-            if not response.choices or not response.choices[0].message.content:
-                raise ValueError("No content in model response")
-                
-            json_str = response.choices[0].message.content
-            
-            # Remove markdown formatting if present
-            if "```json" in json_str:
-                json_str = json_str.split("```json")[1].split("```")[0].strip()
-            elif "```" in json_str:
-                json_str = json_str.split("```")[1].split("```")[0].strip()
+            # Create a simplified system prompt
+            simplified_prompt = f"""
+{system_prompt}
 
-            # Clean and sanitize the JSON string
-            # Remove control characters and normalize newlines
-            json_str = self._sanitize_json(json_str)
+IMPORTANT: Your response must be a valid JSON object with these required fields:
+1. summary: A brief summary
+2. description: A detailed description
+3. nodes: Array of nodes with name, type, description, id, and label
+4. edges: Array of edges with source_node_id, target_node_id, and relationship_name
 
-            try:
-                # Parse JSON into dict
-                data = json.loads(json_str)
-                
-                # Handle case where response is a list
-                if isinstance(data, list):
-                    data = data[0]
-                
-                # Transform the data to match expected format
-                transformed_data = {
-                    "summary": data.get("summary", "No summary provided"),
-                    "description": data.get("description", "No description provided"),
-                    "nodes": [
-                        {
-                            "name": node["id"],
-                            "type": node["label"],
-                            "description": f"A {node['label'].lower()} in the knowledge graph",
-                            "id": node["id"]
-                        } for node in data.get("nodes", [])
-                    ],
-                    "edges": [
-                        {
-                            "source_node_id": edge["source"],
-                            "target_node_id": edge["target"],
-                            "relationship_name": edge["relation"]
-                        } for edge in data.get("edges", [])
-                    ]
-                }
-                
-                # Create instance of response model from transformed data
-                return response_model(**transformed_data)
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to parse model response into {response_model.__name__}: {str(e)}\n"
-                    f"Response was: {json_str}\n"
-                    f"Transformed data was: {transformed_data if 'transformed_data' in locals() else 'Not created'}"
-                )
+Example structure:
+{{
+  "summary": "Brief summary",
+  "description": "Detailed description",
+  "nodes": [
+    {{
+      "name": "Example Node",
+      "type": "Concept",
+      "description": "Node description",
+      "id": "example-id",
+      "label": "Concept"
+    }}
+  ],
+  "edges": [
+    {{
+      "source_node_id": "source-id",
+      "target_node_id": "target-id",
+      "relationship_name": "relates_to"
+    }}
+  ]
+}}"""
+
+            messages = [
+                {"role": "system", "content": simplified_prompt},
+                {"role": "user", "content": text_input}
+            ]
+
+            # Attempt completion with retries
+            for attempt in range(3):
+                try:
+                    response = await acompletion(
+                        model=f"gemini/{self.model}",
+                        messages=messages,
+                        api_key=self.api_key,
+                        max_tokens=self.MAX_TOKENS,
+                        temperature=0.1,
+                        response_format={
+                            "type": "json_object",
+                            "schema": response_schema
+                        }
+                    )
+                    
+                    if response.choices and response.choices[0].message.content:
+                        content = response.choices[0].message.content
+                        return response_model.model_validate_json(content)
+                    
+                except Exception as e:
+                    if attempt == 2:  # Last attempt
+                        raise
+                    logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                    continue
+
+            raise ValueError("Failed to get valid response after retries")
+
+        except JSONSchemaValidationError as e:
+            logger.error(f"Schema validation failed: {str(e)}")
+            logger.debug(f"Raw response: {e.raw_response}")
+            raise ValueError(f"Response failed schema validation: {str(e)}")
         except Exception as e:
-            raise ValueError(f"Failed to extract content from model response: {str(e)}\nFull response was: {response}")
-
-    def _sanitize_json(self, json_str: str) -> str:
-        """Sanitize JSON string by removing control characters and normalizing newlines."""
-        # Remove control characters except newlines and tabs
-        json_str = ''.join(char for char in json_str if char >= ' ' or char in '\n\t')
-        
-        # Normalize newlines
-        json_str = json_str.replace('\r\n', '\n').replace('\r', '\n')
-        
-        # Remove any non-ASCII characters
-        json_str = json_str.encode('ascii', 'ignore').decode()
-        
-        # Remove any Chinese characters (like 对话式)
-        json_str = re.sub(r'[\u4e00-\u9fff]+', '', json_str)
-        
-        # Normalize whitespace
-        json_str = re.sub(r'\s+', ' ', json_str)
-        
-        return json_str
+            logger.error(f"Error in structured output generation: {str(e)}")
+            raise ValueError(f"Failed to generate structured output: {str(e)}")
