@@ -16,8 +16,10 @@ from cognee.modules.pipelines.models import PipelineRunStatus
 
 logger = logging.getLogger(__name__)
 
+
 class ErrorResponseDTO(BaseModel):
     message: str
+
 
 class DatasetDTO(OutDTO):
     id: UUID
@@ -25,6 +27,7 @@ class DatasetDTO(OutDTO):
     created_at: datetime
     updated_at: Optional[datetime] = None
     owner_id: UUID
+
 
 class DataDTO(OutDTO):
     id: UUID
@@ -35,6 +38,7 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
 
+
 def get_datasets_router() -> APIRouter:
     router = APIRouter()
 
@@ -42,46 +46,51 @@ def get_datasets_router() -> APIRouter:
     async def get_datasets(user: User = Depends(get_authenticated_user)):
         try:
             from cognee.modules.data.methods import get_datasets
+
             datasets = await get_datasets(user.id)
 
             return datasets
         except Exception as error:
             logger.error(f"Error retrieving datasets: {str(error)}")
-            raise HTTPException(status_code=500, detail=f"Error retrieving datasets: {str(error)}") from error
+            raise HTTPException(
+                status_code=500, detail=f"Error retrieving datasets: {str(error)}"
+            ) from error
 
-    @router.delete("/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}})
+    @router.delete(
+        "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
+    )
     async def delete_dataset(dataset_id: str, user: User = Depends(get_authenticated_user)):
         from cognee.modules.data.methods import get_dataset, delete_dataset
 
         dataset = await get_dataset(user.id, dataset_id)
 
         if dataset is None:
-            raise EntityNotFoundError(
-                message=f"Dataset ({dataset_id}) not found."
-            )
+            raise EntityNotFoundError(message=f"Dataset ({dataset_id}) not found.")
 
         await delete_dataset(dataset)
 
-    @router.delete("/{dataset_id}/data/{data_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}})
-    async def delete_data(dataset_id: str, data_id: str, user: User = Depends(get_authenticated_user)):
+    @router.delete(
+        "/{dataset_id}/data/{data_id}",
+        response_model=None,
+        responses={404: {"model": ErrorResponseDTO}},
+    )
+    async def delete_data(
+        dataset_id: str, data_id: str, user: User = Depends(get_authenticated_user)
+    ):
         from cognee.modules.data.methods import get_data, delete_data
         from cognee.modules.data.methods import get_dataset
 
         # Check if user has permission to access dataset and data by trying to get the dataset
         dataset = await get_dataset(user.id, dataset_id)
 
-        #TODO: Handle situation differently if user doesn't have permission to access data?
+        # TODO: Handle situation differently if user doesn't have permission to access data?
         if dataset is None:
-            raise EntityNotFoundError(
-                message=f"Dataset ({dataset_id}) not found."
-            )
+            raise EntityNotFoundError(message=f"Dataset ({dataset_id}) not found.")
 
         data = await get_data(user.id, data_id)
 
         if data is None:
-            raise EntityNotFoundError(
-                message=f"Data ({data_id}) not found."
-            )
+            raise EntityNotFoundError(message=f"Data ({data_id}) not found.")
 
         await delete_data(data)
 
@@ -98,14 +107,18 @@ def get_datasets_router() -> APIRouter:
                 status_code=200,
                 content=str(graph_url),
             )
-        except:
+        except Exception as error:
+            print(error)
             return JSONResponse(
                 status_code=409,
                 content="Graphistry credentials are not set. Please set them in your .env file.",
             )
 
-    @router.get("/{dataset_id}/data", response_model=list[DataDTO],
-             responses={404: {"model": ErrorResponseDTO}})
+    @router.get(
+        "/{dataset_id}/data",
+        response_model=list[DataDTO],
+        responses={404: {"model": ErrorResponseDTO}},
+    )
     async def get_dataset_data(dataset_id: str, user: User = Depends(get_authenticated_user)):
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 
@@ -125,8 +138,10 @@ def get_datasets_router() -> APIRouter:
         return dataset_data
 
     @router.get("/status", response_model=dict[str, PipelineRunStatus])
-    async def get_dataset_status(datasets: Annotated[List[str], Query(alias="dataset")] = None,
-                                 user: User = Depends(get_authenticated_user)):
+    async def get_dataset_status(
+        datasets: Annotated[List[str], Query(alias="dataset")] = None,
+        user: User = Depends(get_authenticated_user),
+    ):
         from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
         try:
@@ -134,13 +149,12 @@ def get_datasets_router() -> APIRouter:
 
             return datasets_statuses
         except Exception as error:
-            return JSONResponse(
-                status_code=409,
-                content={"error": str(error)}
-            )
+            return JSONResponse(status_code=409, content={"error": str(error)})
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
-    async def get_raw_data(dataset_id: str, data_id: str, user: User = Depends(get_authenticated_user)):
+    async def get_raw_data(
+        dataset_id: str, data_id: str, user: User = Depends(get_authenticated_user)
+    ):
         from cognee.modules.data.methods import get_data
         from cognee.modules.data.methods import get_dataset, get_dataset_data
 
@@ -148,10 +162,7 @@ def get_datasets_router() -> APIRouter:
 
         if dataset is None:
             return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": f"Dataset ({dataset_id}) not found."
-                }
+                status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )
 
         dataset_data = await get_dataset_data(dataset.id)
@@ -163,12 +174,16 @@ def get_datasets_router() -> APIRouter:
 
         # Check if matching_data contains an element
         if len(matching_data) == 0:
-            raise EntityNotFoundError(message= f"Data ({data_id}) not found in dataset ({dataset_id}).")
+            raise EntityNotFoundError(
+                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
+            )
 
         data = await get_data(user.id, data_id)
 
         if data is None:
-            raise EntityNotFoundError(message=f"Data ({data_id}) not found in dataset ({dataset_id}).")
+            raise EntityNotFoundError(
+                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
+            )
 
         return data.raw_data_location
 

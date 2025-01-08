@@ -6,6 +6,7 @@ from nltk.corpus import stopwords, wordnet
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 
+
 def extract_topics(text: str):
     sentences = sent_tokenize(text)
 
@@ -18,24 +19,19 @@ def extract_topics(text: str):
     lemmatizer = WordNetLemmatizer()
     base_notation_sentences = [lemmatizer.lemmatize(sentence) for sentence in sentences]
 
-    tf_vectorizer = TfidfVectorizer(tokenizer = word_tokenize, token_pattern = None)
+    tf_vectorizer = TfidfVectorizer(tokenizer=word_tokenize, token_pattern=None)
     transformed_corpus = tf_vectorizer.fit_transform(base_notation_sentences)
 
-    svd = TruncatedSVD(n_components = 10)
+    svd = TruncatedSVD(n_components=10)
     svd_corpus = svd.fit(transformed_corpus)
 
-    feature_scores = dict(
-        zip(
-            tf_vectorizer.vocabulary_,
-            svd_corpus.components_[0]
-        )
-    )
+    feature_scores = dict(zip(tf_vectorizer.vocabulary_, svd_corpus.components_[0]))
 
     topics = sorted(
         feature_scores,
         # key = feature_scores.get,
-        key = lambda x: transformed_corpus[0, tf_vectorizer.vocabulary_[x]],
-        reverse = True,
+        key=lambda x: transformed_corpus[0, tf_vectorizer.vocabulary_[x]],
+        reverse=True,
     )[:10]
 
     return topics
@@ -44,6 +40,7 @@ def extract_topics(text: str):
 def clean_text(text: str):
     text = re.sub(r"[ \t]{2,}|[\n\r]", " ", text.lower())
     return re.sub(r"[`\"'.,;!?…]", "", text).strip()
+
 
 def remove_stop_words(text: str):
     try:
@@ -54,7 +51,7 @@ def remove_stop_words(text: str):
 
     stop_words = set(stopwords.words("english"))
     text = text.split()
-    text = [word for word in text if not word in stop_words]
+    text = [word for word in text if word not in stop_words]
     return " ".join(text)
 
 

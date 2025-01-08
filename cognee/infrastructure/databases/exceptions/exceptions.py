@@ -1,6 +1,7 @@
 from cognee.exceptions import CogneeApiError
 from fastapi import status
 
+
 class EntityNotFoundError(CogneeApiError):
     """Database returns nothing"""
 

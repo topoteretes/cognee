@@ -17,10 +17,7 @@ logger = logging.getLogger("MilvusAdapter")
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {
-        "index_fields": ["text"],
-        "type": "IndexSchema"
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
 
 
 class MilvusAdapter(VectorDBInterface):
@@ -35,8 +32,9 @@ class MilvusAdapter(VectorDBInterface):
 
         self.embedding_engine = embedding_engine
 
-    def get_milvus_client(self) -> "MilvusClient":
+    def get_milvus_client(self):
         from pymilvus import MilvusClient
+
         if self.api_key:
             client = MilvusClient(uri=self.url, token=self.api_key)
         else:
@@ -54,11 +52,12 @@ class MilvusAdapter(VectorDBInterface):
         return await future
 
     async def create_collection(
-            self,
-            collection_name: str,
-            payload_schema=None,
+        self,
+        collection_name: str,
+        payload_schema=None,
     ):
         from pymilvus import DataType, MilvusException
+
         client = self.get_milvus_client()
         if client.has_collection(collection_name=collection_name):
             logger.info(f"Collection '{collection_name}' already exists.")
@@ -74,34 +73,18 @@ class MilvusAdapter(VectorDBInterface):
             )
 
             schema.add_field(
-                field_name="id",
-                datatype=DataType.VARCHAR,
-                is_primary=True,
-                max_length=36
+                field_name="id", datatype=DataType.VARCHAR, is_primary=True, max_length=36
             )
 
-            schema.add_field(
-                field_name="vector",
-                datatype=DataType.FLOAT_VECTOR,
-                dim=dimension
-            )
+            schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=dimension)
 
-            schema.add_field(
-                field_name="text",
-                datatype=DataType.VARCHAR,
-                max_length=60535
-            )
+            schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=60535)
 
             index_params = client.prepare_index_params()
-            index_params.add_index(
-                field_name="vector",
-                metric_type="COSINE"
-            )
+            index_params.add_index(field_name="vector", metric_type="COSINE")
 
             client.create_collection(
-                collection_name=collection_name,
-                schema=schema,
-                index_params=index_params
+                collection_name=collection_name, schema=schema, index_params=index_params
             )
 
             client.load_collection(collection_name)
@@ -112,12 +95,9 @@ class MilvusAdapter(VectorDBInterface):
             logger.error(f"Error creating collection '{collection_name}': {str(e)}")
             raise e
 
-    async def create_data_points(
-            self,
-            collection_name: str,
-            data_points: List[DataPoint]
-    ):
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         from pymilvus import MilvusException
+
         client = self.get_milvus_client()
         data_vectors = await self.embed_data(
             [data_point.get_embeddable_data(data_point) for data_point in data_points]
@@ -133,22 +113,23 @@ class MilvusAdapter(VectorDBInterface):
         ]
 
         try:
-            result = client.insert(
-                collection_name=collection_name,
-                data=insert_data
-            )
+            result = client.insert(collection_name=collection_name, data=insert_data)
             logger.info(
                 f"Inserted {result.get('insert_count', 0)} data points into collection '{collection_name}'."
             )
             return result
         except MilvusException as e:
-            logger.error(f"Error inserting data points into collection '{collection_name}': {str(e)}")
+            logger.error(
+                f"Error inserting data points into collection '{collection_name}': {str(e)}"
+            )
             raise e
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
-    async def index_data_points(self, index_name: str, index_property_name: str, data_points: List[DataPoint]):
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+    ):
         formatted_data_points = [
             IndexSchema(
                 id=data_point.id,
@@ -161,6 +142,7 @@ class MilvusAdapter(VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         from pymilvus import MilvusException
+
         client = self.get_milvus_client()
         try:
             filter_expression = f"""id in [{", ".join(f'"{id}"' for id in data_point_ids)}]"""
@@ -172,18 +154,21 @@ class MilvusAdapter(VectorDBInterface):
             )
             return results
         except MilvusException as e:
-            logger.error(f"Error retrieving data points from collection '{collection_name}': {str(e)}")
+            logger.error(
+                f"Error retrieving data points from collection '{collection_name}': {str(e)}"
+            )
             raise e
 
     async def search(
-            self,
-            collection_name: str,
-            query_text: Optional[str] = None,
-            query_vector: Optional[List[float]] = None,
-            limit: int = 5,
-            with_vector: bool = False,
+        self,
+        collection_name: str,
+        query_text: Optional[str] = None,
+        query_vector: Optional[List[float]] = None,
+        limit: int = 5,
+        with_vector: bool = False,
     ):
         from pymilvus import MilvusException
+
         client = self.get_milvus_client()
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
@@ -218,32 +203,40 @@ class MilvusAdapter(VectorDBInterface):
             logger.error(f"Error during search in collection '{collection_name}': {str(e)}")
             raise e
 
-    async def batch_search(self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False):
+    async def batch_search(
+        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+    ):
         query_vectors = await self.embed_data(query_texts)
 
         return await asyncio.gather(
-            *[self.search(collection_name=collection_name,
-                          query_vector=query_vector,
-                          limit=limit,
-                          with_vector=with_vectors,
-            ) for query_vector in query_vectors]
+            *[
+                self.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=limit,
+                    with_vector=with_vectors,
+                )
+                for query_vector in query_vectors
+            ]
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         from pymilvus import MilvusException
+
         client = self.get_milvus_client()
         try:
             filter_expression = f"""id in [{", ".join(f'"{id}"' for id in data_point_ids)}]"""
 
-            delete_result = client.delete(
-                collection_name=collection_name,
-                filter=filter_expression
-            )
+            delete_result = client.delete(collection_name=collection_name, filter=filter_expression)
 
-            logger.info(f"Deleted data points with IDs {data_point_ids} from collection '{collection_name}'.")
+            logger.info(
+                f"Deleted data points with IDs {data_point_ids} from collection '{collection_name}'."
+            )
             return delete_result
         except MilvusException as e:
-            logger.error(f"Error deleting data points from collection '{collection_name}': {str(e)}")
+            logger.error(
+                f"Error deleting data points from collection '{collection_name}': {str(e)}"
+            )
             raise e
 
     async def prune(self):

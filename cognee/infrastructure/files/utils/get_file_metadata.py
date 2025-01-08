@@ -11,6 +11,7 @@ class FileMetadata(TypedDict):
     extension: str
     content_hash: str
 
+
 def get_file_metadata(file: BinaryIO) -> FileMetadata:
     """Get metadata from a file"""
     file.seek(0)
@@ -23,9 +24,9 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
     file_name = file_path.split("/")[-1].split(".")[0] if file_path else None
 
     return FileMetadata(
-        name = file_name,
-        file_path = file_path,
-        mime_type = file_type.mime,
-        extension = file_type.extension,
-        content_hash = content_hash,
+        name=file_name,
+        file_path=file_path,
+        mime_type=file_type.mime,
+        extension=file_type.extension,
+        content_hash=content_hash,
     )

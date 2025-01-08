@@ -9,9 +9,11 @@ class ChunkingConfig(Dict):
     vector_db_key: str
     vector_db_provider: str
 
+
 def create_chunking_engine(config: ChunkingConfig):
     if config["chunk_engine"] == ChunkEngine.LANGCHAIN_ENGINE:
         from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
+
         return LangchainChunkEngine(
             chunk_size=config["chunk_size"],
             chunk_overlap=config["chunk_overlap"],

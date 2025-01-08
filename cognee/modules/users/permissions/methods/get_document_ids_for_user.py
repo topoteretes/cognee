@@ -10,38 +10,42 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
 
     async with db_engine.get_async_session() as session:
         async with session.begin():
-            document_ids = (await session.scalars(
-                select(Resource.resource_id)
-                .join(ACL.resources)
-                .join(ACL.permission)
-                .where(
-                    ACL.principal_id == user_id,
-                    Permission.name == "read",
+            document_ids = (
+                await session.scalars(
+                    select(Resource.resource_id)
+                    .join(ACL.resources)
+                    .join(ACL.permission)
+                    .where(
+                        ACL.principal_id == user_id,
+                        Permission.name == "read",
+                    )
                 )
-            )).all()
+            ).all()
 
             if datasets:
                 documents_ids_in_dataset = set()
                 # If datasets are specified filter out documents that aren't part of the specified datasets
                 for dataset in datasets:
                     # Find dataset id for dataset element
-                    dataset_id = (await session.scalars(
-                        select(Dataset.id)
-                        .where(
-                            Dataset.name == dataset,
-                            Dataset.owner_id == user_id,
+                    dataset_id = (
+                        await session.scalars(
+                            select(Dataset.id).where(
+                                Dataset.name == dataset,
+                                Dataset.owner_id == user_id,
+                            )
                         )
-                    )).one_or_none()
+                    ).one_or_none()
 
                     # Check which documents are connected to this dataset
                     for document_id in document_ids:
-                        data_id = (await session.scalars(
-                            select(DatasetData.data_id)
-                            .where(
-                                DatasetData.dataset_id == dataset_id,
-                                DatasetData.data_id == document_id,
+                        data_id = (
+                            await session.scalars(
+                                select(DatasetData.data_id).where(
+                                    DatasetData.dataset_id == dataset_id,
+                                    DatasetData.data_id == document_id,
+                                )
                             )
-                        )).one_or_none()
+                        ).one_or_none()
 
                         # If document is related to dataset added it to return value
                         if data_id:

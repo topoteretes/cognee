@@ -1,4 +1,5 @@
 """Factory function to get the appropriate graph client based on the graph type."""
+
 from functools import lru_cache
 
 from .config import get_graph_config
@@ -26,7 +27,11 @@ def create_graph_engine() -> GraphDBInterface:
     config = get_graph_config()
 
     if config.graph_database_provider == "neo4j":
-        if not (config.graph_database_url and config.graph_database_username and config.graph_database_password):
+        if not (
+            config.graph_database_url
+            and config.graph_database_username
+            and config.graph_database_password
+        ):
             raise EnvironmentError("Missing required Neo4j credentials.")
 
         from .neo4j_driver.adapter import Neo4jAdapter
@@ -34,7 +39,7 @@ def create_graph_engine() -> GraphDBInterface:
         return Neo4jAdapter(
             graph_database_url=config.graph_database_url,
             graph_database_username=config.graph_database_username,
-            graph_database_password=config.graph_database_password
+            graph_database_password=config.graph_database_password,
         )
 
     elif config.graph_database_provider == "falkordb":
@@ -53,6 +58,7 @@ def create_graph_engine() -> GraphDBInterface:
         )
 
     from .networkx.adapter import NetworkXAdapter
+
     graph_client = NetworkXAdapter(filename=config.graph_file_path)
 
     return graph_client

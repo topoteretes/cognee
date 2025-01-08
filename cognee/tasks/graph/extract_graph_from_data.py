@@ -13,9 +13,7 @@ from cognee.modules.graph.utils import (
 from cognee.tasks.storage import add_data_points
 
 
-async def extract_graph_from_data(
-    data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]
-):
+async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]):
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )

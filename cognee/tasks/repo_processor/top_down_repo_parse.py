@@ -14,6 +14,7 @@ _NODE_TYPE_MAP = {
     "simple_stmt": "var_def",
 }
 
+
 def _create_object_dict(name_node, type_name=None):
     return {
         "name": name_node.value,
@@ -32,7 +33,11 @@ def _parse_node(node):
     if node.type == "async_stmt" and len(node.children) > 1:
         function_node = node.children[1]
         if function_node.type == "funcdef":
-            return [_create_object_dict(function_node.name, type_name=_NODE_TYPE_MAP.get(function_node.type))]
+            return [
+                _create_object_dict(
+                    function_node.name, type_name=_NODE_TYPE_MAP.get(function_node.type)
+                )
+            ]
     if node.type == "simple_stmt":
         # TODO: Handle multi-level/nested unpacking variable definitions in the future
         expr_child = node.children[0]
@@ -48,7 +53,6 @@ def _parse_node(node):
             if target.type == "name"
         ]
     return []
-
 
 
 def extract_importable_objects_with_positions_from_source_code(source_code):
@@ -82,13 +86,11 @@ def extract_importable_objects_with_positions(file_path):
     return extract_importable_objects_with_positions_from_source_code(source_code)
 
 
-
 def find_entity_usages(script, line, column):
     """
     Return a list of files in the repo where the entity at module_path:line,column is used.
     """
     usages = set()
-
 
     try:
         inferred = script.infer(line, column)
@@ -103,9 +105,13 @@ def find_entity_usages(script, line, column):
     logger.debug(f"Inferred entity: {inferred[0].name}, type: {inferred[0].type}")
 
     try:
-        references = script.get_references(line=line, column=column, scope="project", include_builtins=False)
+        references = script.get_references(
+            line=line, column=column, scope="project", include_builtins=False
+        )
     except Exception as e:
-        logger.error(f"Error retrieving references for entity at {script.path}:{line},{column}: {e}")
+        logger.error(
+            f"Error retrieving references for entity at {script.path}:{line},{column}: {e}"
+        )
         references = []
 
     for ref in references:
@@ -114,6 +120,7 @@ def find_entity_usages(script, line, column):
             logger.info(f"Entity used in: {ref.module_path}")
 
     return list(usages)
+
 
 def parse_file_with_references(project, file_path):
     """Parse a file to extract object names and their references within a project."""
@@ -152,7 +159,7 @@ def parse_repo(repo_path):
         logger.error(f"Error creating Jedi project for repository at {repo_path}: {e}")
         return {}
 
-    EXCLUDE_DIRS = {'venv', '.git', '__pycache__', 'build'}
+    EXCLUDE_DIRS = {"venv", ".git", "__pycache__", "build"}
 
     python_files = [
         os.path.join(directory, file)
@@ -168,4 +175,3 @@ def parse_repo(repo_path):
     }
 
     return results
-

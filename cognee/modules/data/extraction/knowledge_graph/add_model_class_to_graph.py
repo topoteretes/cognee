@@ -2,6 +2,7 @@ from typing import Type, Optional, get_args, get_origin
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
+
 async def add_model_class_to_graph(
     model_class: Type[BaseModel],
     graph: GraphDBInterface,
@@ -13,7 +14,7 @@ async def add_model_class_to_graph(
     if await graph.extract_node(model_name):
         return
 
-    await graph.add_node(model_name, dict(type = "model"))
+    await graph.add_node(model_name, dict(type="model"))
 
     if parent and relationship:
         await graph.add_edge(
@@ -21,9 +22,9 @@ async def add_model_class_to_graph(
             model_name,
             relationship,
             dict(
-                relationship_name = relationship,
-                source_node_id = parent,
-                target_node_id = model_name,
+                relationship_name=relationship,
+                source_node_id=parent,
+                target_node_id=model_name,
             ),
         )
 
@@ -36,7 +37,7 @@ async def add_model_class_to_graph(
 
         if hasattr(field_type, "model_fields"):  # Check if field type is a Pydantic model
             await add_model_class_to_graph(field_type, graph, model_name, field_name)
-        elif get_origin(field.annotation) == list:
+        elif isinstance(get_origin(field.annotation), list):
             list_types = get_args(field_type)
             for item_type in list_types:
                 await add_model_class_to_graph(item_type, graph, model_name, field_name)
@@ -45,26 +46,26 @@ async def add_model_class_to_graph(
             if hasattr(item_type, "model_fields"):
                 await add_model_class_to_graph(item_type, graph, model_name, field_name)
             else:
-                await graph.add_node(str(item_type), dict(type = "value"))
+                await graph.add_node(str(item_type), dict(type="value"))
                 await graph.add_edge(
                     model_name,
                     str(item_type),
                     field_name,
                     dict(
-                        relationship_name = field_name,
-                        source_node_id = model_name,
-                        target_node_id = str(item_type),
+                        relationship_name=field_name,
+                        source_node_id=model_name,
+                        target_node_id=str(item_type),
                     ),
                 )
         else:
-            await graph.add_node(str(field_type), dict(type = "value"))
+            await graph.add_node(str(field_type), dict(type="value"))
             await graph.add_edge(
                 model_name,
                 str(field_type),
                 field_name,
                 dict(
-                    relationship_name = field_name,
-                    source_node_id = model_name,
-                    target_node_id = str(field_type),
+                    relationship_name=field_name,
+                    source_node_id=model_name,
+                    target_node_id=str(field_type),
                 ),
             )
