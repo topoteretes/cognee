@@ -7,7 +7,7 @@ on:
 
 jobs:
   docker-build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout repository
@@ -32,7 +32,7 @@ jobs:
       run: |
         IMAGE_NAME=cognee/cognee
         TAG_VERSION="${BRANCH_NAME}-${COMMIT_SHA}"
-        
+
         echo "Building image: ${IMAGE_NAME}:${TAG_VERSION}"
         docker buildx build \
           --platform linux/amd64,linux/arm64 \

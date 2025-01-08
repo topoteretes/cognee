@@ -15,7 +15,7 @@ env:
 jobs:
   run_neo4j_integration_test:
     name: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     defaults:
       run:
