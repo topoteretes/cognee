@@ -13,12 +13,7 @@ import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 import base64
-from bokeh.plotting import figure, from_networkx
-from bokeh.models import Circle, MultiLine, HoverTool, ColumnDataSource, Range1d
-from bokeh.plotting import output_file, show
 
-from bokeh.embed import file_html
-from bokeh.resources import CDN
 
 import logging
 import sys
@@ -364,6 +359,12 @@ def style_and_render_graph(p, G, layout_positions, node_attribute, node_colors, 
     """
     Apply styling and render the graph into the plot.
     """
+    from bokeh.plotting import figure, from_networkx
+    from bokeh.models import Circle, MultiLine, HoverTool, ColumnDataSource, Range1d
+    from bokeh.plotting import output_file, show
+
+    from bokeh.embed import file_html
+    from bokeh.resources import CDN
     graph_renderer = from_networkx(G, layout_positions)
     node_radii = [0.02 + 0.1 * centrality[node] for node in G.nodes()]
     graph_renderer.node_renderer.data_source.data["radius"] = node_radii
@@ -397,6 +398,12 @@ async def create_cognee_style_network_with_logo(
     """
     Create a Cognee-inspired network visualization with an embedded logo.
     """
+    from bokeh.plotting import figure, from_networkx
+    from bokeh.models import Circle, MultiLine, HoverTool, ColumnDataSource, Range1d
+    from bokeh.plotting import output_file, show
+
+    from bokeh.embed import file_html
+    from bokeh.resources import CDN
     logging.info("Converting graph to serializable format...")
     G = await convert_to_serializable_graph(G)
 
