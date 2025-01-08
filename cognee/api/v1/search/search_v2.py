@@ -15,12 +15,14 @@ from cognee.tasks.chunks import query_chunks
 from cognee.tasks.graph import query_graph_connections
 from cognee.tasks.summarization import query_summaries
 from cognee.tasks.completion import query_completion
+from cognee.tasks.completion import graph_query_completion
 
 class SearchType(Enum):
     SUMMARIES = "SUMMARIES"
     INSIGHTS = "INSIGHTS"
     CHUNKS = "CHUNKS"
     COMPLETION = "COMPLETION"
+    GRAPH_COMPLETION = "GRAPH_COMPLETION"
 
 async def search(query_type: SearchType, query_text: str, user: User = None,
                  datasets: Union[list[str], str, None] = None) -> list:
@@ -58,6 +60,7 @@ async def specific_search(query_type: SearchType, query: str, user) -> list:
         SearchType.INSIGHTS: query_graph_connections,
         SearchType.CHUNKS: query_chunks,
         SearchType.COMPLETION: query_completion,
+        SearchType.GRAPH_COMPLETION: graph_query_completion
     }
 
     search_task = search_tasks.get(query_type)

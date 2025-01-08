@@ -1,8 +1,8 @@
 import cognee
 import asyncio
 import logging
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.brute_force_triplet_search import format_triplets
+
+from cognee.api.v1.search import SearchType
 from cognee.shared.utils import setup_logging
 
 job_1 = """
@@ -184,11 +184,13 @@ async def main(enable_steps):
 
     # Step 4: Query insights
     if enable_steps.get("retriever"):
-        results = await brute_force_triplet_search('Who has the most experience with graphic design?')
-        print(format_triplets(results))
+        search_results = await cognee.search(
+            SearchType.GRAPH_COMPLETION, query_text='Who has experience in design tools?'
+        )
+        print(search_results)
 
 if __name__ == '__main__':
-    setup_logging(logging.ERROR)
+    setup_logging(logging.INFO)
 
     rebuild_kg = True
     retrieve = True
