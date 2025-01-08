@@ -25,18 +25,6 @@ def parse_args():
         help="Whether or not to process non-code files"
     )
     parser.add_argument(
-        "--mock_embedding",
-        type=lambda x: x.lower() in ("true", "1"), 
-        default=True,
-        help="Whether or not to mock embedding and code summary"
-    )
-    parser.add_argument(
-        "--mock_code_summary",
-        type=lambda x: x.lower() in ("true", "1"),
-        default=True, 
-        help="Whether or not to mock code summary"
-    )
-    parser.add_argument(
         "--time",
         type=lambda x: x.lower() in ("true", "1"),
         default=True,
@@ -47,17 +35,7 @@ def parse_args():
 if __name__ == "__main__":
     setup_logging(logging.ERROR)
 
-    import os
-
     args = parse_args()
-    
-    if args.mock_embedding:
-        os.environ["MOCK_EMBEDDING"] = "true"
-        print("Mocking embedding.")
-    
-    if args.mock_code_summary:
-        os.environ["MOCK_CODE_SUMMARY"] = "true"
-        print("Mocking code summary.")
     
     if args.time:
         import time
