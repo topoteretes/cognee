@@ -118,21 +118,13 @@ async def test_create_cognee_style_network_with_logo():
     # Convert the graph to a tuple format for serialization
     graph_tuple = graph_to_tuple(graph)
 
-    original_open = open
+    result = await create_cognee_style_network_with_logo(
+        graph_tuple,
+        title="Test Network",
+        layout_func=nx.spring_layout,
+        layout_scale=3.0,
+        logo_alpha=0.5,)
 
-    def mock_open_read_side_effect(*args, **kwargs):
-        if "cognee-logo.png" in args[0]:
-            return BytesIO(b"mock_png_data")
-        return original_open(*args, **kwargs)
-
-    with patch("builtins.open", side_effect=mock_open_read_side_effect):
-        result = await create_cognee_style_network_with_logo(
-            graph_tuple,
-            title="Test Network",
-            layout_func=nx.spring_layout,
-            layout_scale=3.0,
-            logo_alpha=0.5,
-        )
 
     assert result is not None
     assert isinstance(result, str)
