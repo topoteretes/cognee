@@ -5,11 +5,11 @@ from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
 
 
-def retrieved_edges_to_string(retrieved_edges):
+def retrieved_edges_to_string(retrieved_edges: list) -> str:
     edge_strings = []
     for edge in retrieved_edges:
-        node1_string = edge.node1.attributes["text"] or edge.node1.attributes.get("name")
-        node2_string = edge.node2.attributes["text"] or edge.node2.attributes.get("name")
+        node1_string = edge.node1.attributes.get("text") or edge.node1.attributes.get("name")
+        node2_string = edge.node2.attributes.get("text") or edge.node2.attributes.get("name")
         edge_string = edge.attributes["relationship_type"]
         edge_str = f"{node1_string} -- {edge_string} -- {node2_string}"
         edge_strings.append(edge_str)
