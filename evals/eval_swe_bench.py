@@ -48,14 +48,7 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
     retrieved_edges = await brute_force_triplet_search(
         problem_statement,
         top_k=3,
-        collections=[
-            "code_summary_text",
-            "data_point_name",
-            "document_chunk_text",
-            "entity_name",
-            "entity_type_name",
-            "sourcecodechunk_source_code",
-        ],
+        collections=["code_summary_text"],
     )
 
     retrieved_edges_str = retrieved_edges_to_string(retrieved_edges)
