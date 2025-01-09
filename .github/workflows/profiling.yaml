@@ -68,32 +68,32 @@ jobs:
         echo "HEAD_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
 
     # Run profiler on the base branch
-#    - name: Run profiler on base branch
-#      env:
-#        BASE_SHA: ${{ env.BASE_SHA }}
-#      run: |
-#        echo "Profiling the base branch for code_graph_pipeline.py"
-#        echo "Checking out base SHA: $BASE_SHA"
-#        git checkout $BASE_SHA
-#        echo "This is the working directory: $PWD"
-#        # Ensure the script is executable
-#        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
-#        # Run Scalene
-#        poetry run pyinstrument --renderer json -o base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
-
-    # Run profiler on head branch
-    - name: Run profiler on head branch
+    - name: Run profiler on base branch
       env:
-        HEAD_SHA: ${{ env.HEAD_SHA }}
+        BASE_SHA: ${{ env.BASE_SHA }}
       run: |
-        echo "Profiling the head branch for code_graph_pipeline.py"
-        echo "Checking out head SHA: $HEAD_SHA"
-        git checkout $HEAD_SHA
+        echo "Profiling the base branch for code_graph_pipeline.py"
+        echo "Checking out base SHA: $BASE_SHA"
+        git checkout $BASE_SHA
         echo "This is the working directory: $PWD"
         # Ensure the script is executable
         chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
         # Run Scalene
-        poetry run pyinstrument --renderer json -o head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+        poetry run pyinstrument --renderer json -o base_results.json cognee/api/v1/cognify/code_graph_pipeline.py
+
+    # Run profiler on head branch
+#    - name: Run profiler on head branch
+#      env:
+#        HEAD_SHA: ${{ env.HEAD_SHA }}
+#      run: |
+#        echo "Profiling the head branch for code_graph_pipeline.py"
+#        echo "Checking out head SHA: $HEAD_SHA"
+#        git checkout $HEAD_SHA
+#        echo "This is the working directory: $PWD"
+#        # Ensure the script is executable
+#        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
+#        # Run Scalene
+#        poetry run pyinstrument --renderer json -o head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
 
 #    # Compare profiling results
 #    - name: Compare profiling results
