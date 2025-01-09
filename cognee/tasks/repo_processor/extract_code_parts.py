@@ -1,7 +1,9 @@
 from typing import Dict, List
 import parso
 
-from cognee.tasks.repo_processor import logger
+import logging
+
+logger = logging.getLogger("task:repo_processor")
 
 
 def _extract_parts_from_module(module, parts_dict: Dict[str, List[str]]) -> Dict[str, List[str]]:
