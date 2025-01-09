@@ -71,7 +71,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
             Task(ingest_data_with_metadata, dataset_name="repo_docs", user=user),
             Task(get_data_list_for_user, dataset_name="repo_docs", user=user),
             Task(classify_documents),
-            Task(extract_chunks_from_documents, max_tokens=8192),
+            Task(extract_chunks_from_documents, max_tokens=cognee_config.max_tokens),
             Task(
                 extract_graph_from_data, graph_model=KnowledgeGraph, task_config={"batch_size": 50}
             ),
