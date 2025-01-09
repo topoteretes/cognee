@@ -8,10 +8,7 @@ class Document(DataPoint):
     raw_data_location: str
     metadata_id: UUID
     mime_type: str
-    _metadata: dict = {
-        "index_fields": ["name"],
-        "type": "Document"
-    }
+    _metadata: dict = {"index_fields": ["name"], "type": "Document"}
 
-    def read(self, chunk_size: int, chunker = str) -> str:
+    def read(self, chunk_size: int, chunker=str) -> str:
         pass

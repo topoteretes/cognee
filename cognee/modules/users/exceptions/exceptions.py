@@ -28,9 +28,9 @@ class UserNotFoundError(CogneeApiError):
 
 class PermissionDeniedError(CogneeApiError):
     def __init__(
-            self,
-            message: str = "User does not have permission on documents.",
-            name: str = "PermissionDeniedError",
-            status_code=status.HTTP_403_FORBIDDEN,
+        self,
+        message: str = "User does not have permission on documents.",
+        name: str = "PermissionDeniedError",
+        status_code=status.HTTP_403_FORBIDDEN,
     ):
         super().__init__(message, name, status_code)

@@ -15,5 +15,3 @@ async def get_metadata(metadata_id: UUID) -> Metadata:
         metadata = await session.get(Metadata, metadata_id)
 
         return metadata
-    
-

@@ -10,18 +10,18 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
-from cognee.modules.pipelines.operations.get_pipeline_status import \
-    get_pipeline_status
-from cognee.modules.pipelines.operations.log_pipeline_status import \
-    log_pipeline_status
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.utils import send_telemetry
-from cognee.tasks.documents import (check_permissions_on_documents,
-                                    classify_documents,
-                                    extract_chunks_from_documents)
+from cognee.tasks.documents import (
+    check_permissions_on_documents,
+    classify_documents,
+    extract_chunks_from_documents,
+)
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
@@ -31,7 +31,12 @@ logger = logging.getLogger("cognify.v2")
 
 update_status_lock = asyncio.Lock()
 
-async def cognify(datasets: Union[str, list[str]] = None, user: User = None, graph_model: BaseModel = KnowledgeGraph):
+
+async def cognify(
+    datasets: Union[str, list[str]] = None,
+    user: User = None,
+    graph_model: BaseModel = KnowledgeGraph,
+):
     if user is None:
         user = await get_default_user()
 
@@ -41,7 +46,7 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None, gra
         # If no datasets are provided, cognify all existing datasets.
         datasets = existing_datasets
 
-    if type(datasets[0]) == str:
+    if isinstance(datasets[0], str):
         datasets = await get_datasets_by_name(datasets, user.id)
 
     existing_datasets_map = {
@@ -59,8 +64,10 @@ async def cognify(datasets: Union[str, list[str]] = None, user: User = None, gra
     return await asyncio.gather(*awaitables)
 
 
-async def run_cognify_pipeline(dataset: Dataset, user: User, graph_model: BaseModel = KnowledgeGraph):
-    data_documents: list[Data] = await get_dataset_data(dataset_id = dataset.id)
+async def run_cognify_pipeline(
+    dataset: Dataset, user: User, graph_model: BaseModel = KnowledgeGraph
+):
+    data_documents: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
     document_ids_str = [str(document.id) for document in data_documents]
 
@@ -69,32 +76,41 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, graph_model: BaseMo
 
     send_telemetry("cognee.cognify EXECUTION STARTED", user.id)
 
-    #async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
+    # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
     task_status = await get_pipeline_status([dataset_id])
 
-    if dataset_id in task_status and task_status[dataset_id] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
+    if (
+        dataset_id in task_status
+        and task_status[dataset_id] == PipelineRunStatus.DATASET_PROCESSING_STARTED
+    ):
         logger.info("Dataset %s is already being processed.", dataset_name)
         return
 
-    await log_pipeline_status(dataset_id, PipelineRunStatus.DATASET_PROCESSING_STARTED, {
-        "dataset_name": dataset_name,
-        "files": document_ids_str,
-    })
+    await log_pipeline_status(
+        dataset_id,
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        {
+            "dataset_name": dataset_name,
+            "files": document_ids_str,
+        },
+    )
 
     try:
         cognee_config = get_cognify_config()
 
         tasks = [
             Task(classify_documents),
-            Task(check_permissions_on_documents, user = user, permissions = ["write"]),
-            Task(extract_chunks_from_documents), # Extract text chunks based on the document type.
-            Task(extract_graph_from_data, graph_model = graph_model, task_config = { "batch_size": 10 }), # Generate knowledge graphs from the document chunks.
+            Task(check_permissions_on_documents, user=user, permissions=["write"]),
+            Task(extract_chunks_from_documents),  # Extract text chunks based on the document type.
+            Task(
+                extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
+            ),  # Generate knowledge graphs from the document chunks.
             Task(
                 summarize_text,
-                summarization_model = cognee_config.summarization_model,
-                task_config = { "batch_size": 10 }
+                summarization_model=cognee_config.summarization_model,
+                task_config={"batch_size": 10},
             ),
-            Task(add_data_points, task_config = { "batch_size": 10 }),
+            Task(add_data_points, only_root=True, task_config={"batch_size": 10}),
         ]
 
         pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")
@@ -106,17 +122,25 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, graph_model: BaseMo
 
         send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
 
-        await log_pipeline_status(dataset_id, PipelineRunStatus.DATASET_PROCESSING_COMPLETED, {
-            "dataset_name": dataset_name,
-            "files": document_ids_str,
-        })
+        await log_pipeline_status(
+            dataset_id,
+            PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+            {
+                "dataset_name": dataset_name,
+                "files": document_ids_str,
+            },
+        )
     except Exception as error:
         send_telemetry("cognee.cognify EXECUTION ERRORED", user.id)
 
-        await log_pipeline_status(dataset_id, PipelineRunStatus.DATASET_PROCESSING_ERRORED, {
-            "dataset_name": dataset_name,
-            "files": document_ids_str,
-        })
+        await log_pipeline_status(
+            dataset_id,
+            PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+            {
+                "dataset_name": dataset_name,
+                "files": document_ids_str,
+            },
+        )
         raise error
 
 

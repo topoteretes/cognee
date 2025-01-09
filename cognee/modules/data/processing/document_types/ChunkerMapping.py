@@ -1,9 +1,8 @@
 from cognee.modules.chunking.TextChunker import TextChunker
 
+
 class ChunkerConfig:
-    chunker_mapping = {
-        "text_chunker": TextChunker
-    }
+    chunker_mapping = {"text_chunker": TextChunker}
 
     @classmethod
     def get_chunker(cls, chunker_name: str):

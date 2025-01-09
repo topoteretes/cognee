@@ -9,4 +9,3 @@ async def create_db_and_tables():
     if vector_config.vector_db_provider == "pgvector":
         async with vector_engine.engine.begin() as connection:
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-

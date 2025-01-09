@@ -15,15 +15,9 @@ class DummyLLMAdapter(LLMInterface):
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
-
-        if (
-            str(response_model)
-            == "<class 'cognee.shared.data_models.SummarizedContent'>"
-        ):
+        if str(response_model) == "<class 'cognee.shared.data_models.SummarizedContent'>":
             return dummy_summarize_content(text_input)
-        elif (
-            str(response_model) == "<class 'cognee.shared.data_models.KnowledgeGraph'>"
-        ):
+        elif str(response_model) == "<class 'cognee.shared.data_models.KnowledgeGraph'>":
             return dummy_extract_knowledge_graph(text_input, self.nlp)
         else:
             raise Exception(

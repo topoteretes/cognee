@@ -3,6 +3,7 @@ from typing import List, Dict, Union
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
+
 class CogneeAbstractGraph(ABC):
     """
     Abstract base class for representing a graph structure.
@@ -30,6 +31,8 @@ class CogneeAbstractGraph(ABC):
         pass
 
     @abstractmethod
-    async def project_graph_from_db(self, adapter: GraphDBInterface, directed: bool, dimension: int) -> None:
+    async def project_graph_from_db(
+        self, adapter: GraphDBInterface, directed: bool, dimension: int
+    ) -> None:
         """Project the graph structure from a database using the provided adapter."""
         pass
