@@ -1,18 +1,18 @@
-""" LLM Interface """
+"""LLM Interface"""
 
 from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
 from cognee.infrastructure.llm.prompts import read_query_prompt
 
+
 class LLMInterface(Protocol):
-    """ LLM Interface """
+    """LLM Interface"""
 
     @abstractmethod
-    async def acreate_structured_output(self,
-                                        text_input: str,
-                                        system_prompt: str,
-                                        response_model: Type[BaseModel]) -> BaseModel:
+    async def acreate_structured_output(
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+    ) -> BaseModel:
         """To get structured output, import/call this function"""
         raise NotImplementedError
 

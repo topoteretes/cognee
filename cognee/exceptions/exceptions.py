@@ -3,6 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class CogneeApiError(Exception):
     """Base exception class"""
 
@@ -36,19 +37,19 @@ class ServiceError(CogneeApiError):
 
 class InvalidValueError(CogneeApiError):
     def __init__(
-            self,
-            message: str = "Invalid Value.",
-            name: str = "InvalidValueError",
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        self,
+        message: str = "Invalid Value.",
+        name: str = "InvalidValueError",
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
 
 
 class InvalidAttributeError(CogneeApiError):
     def __init__(
-            self,
-            message: str = "Invalid attribute.",
-            name: str = "InvalidAttributeError",
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        self,
+        message: str = "Invalid attribute.",
+        name: str = "InvalidAttributeError",
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)

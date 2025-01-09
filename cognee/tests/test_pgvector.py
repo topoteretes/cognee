@@ -10,6 +10,7 @@ from cognee.modules.users.methods import get_default_user
 
 logging.basicConfig(level=logging.DEBUG)
 
+
 async def test_local_file_deletion(data_text, file_location):
     from sqlalchemy import select
     import hashlib
@@ -23,40 +24,51 @@ async def test_local_file_deletion(data_text, file_location):
         data_hash = hashlib.md5(encoded_text).hexdigest()
         # Get data entry from database based on hash contents
         data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
-        assert os.path.isfile(data.raw_data_location), f"Data location doesn't exist: {data.raw_data_location}"
+        assert os.path.isfile(
+            data.raw_data_location
+        ), f"Data location doesn't exist: {data.raw_data_location}"
         # Test deletion of data along with local files created by cognee
         await engine.delete_data_entity(data.id)
         assert not os.path.exists(
-            data.raw_data_location), f"Data location still exists after deletion: {data.raw_data_location}"
+            data.raw_data_location
+        ), f"Data location still exists after deletion: {data.raw_data_location}"
 
     async with engine.get_async_session() as session:
         # Get data entry from database based on file path
-        data = (await session.scalars(select(Data).where(Data.raw_data_location == file_location))).one()
-        assert os.path.isfile(data.raw_data_location), f"Data location doesn't exist: {data.raw_data_location}"
+        data = (
+            await session.scalars(select(Data).where(Data.raw_data_location == file_location))
+        ).one()
+        assert os.path.isfile(
+            data.raw_data_location
+        ), f"Data location doesn't exist: {data.raw_data_location}"
         # Test local files not created by cognee won't get deleted
         await engine.delete_data_entity(data.id)
-        assert os.path.exists(data.raw_data_location), f"Data location doesn't exists: {data.raw_data_location}"
+        assert os.path.exists(
+            data.raw_data_location
+        ), f"Data location doesn't exists: {data.raw_data_location}"
+
 
 async def test_getting_of_documents(dataset_name_1):
     # Test getting of documents for search per dataset
     from cognee.modules.users.permissions.methods import get_document_ids_for_user
+
     user = await get_default_user()
     document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
-    assert len(document_ids) == 1, f"Number of expected documents doesn't match {len(document_ids)} != 1"
+    assert (
+        len(document_ids) == 1
+    ), f"Number of expected documents doesn't match {len(document_ids)} != 1"
 
     # Test getting of documents for search when no dataset is provided
     user = await get_default_user()
     document_ids = await get_document_ids_for_user(user.id)
-    assert len(document_ids) == 2, f"Number of expected documents doesn't match {len(document_ids)} != 2"
+    assert (
+        len(document_ids) == 2
+    ), f"Number of expected documents doesn't match {len(document_ids)} != 2"
 
 
 async def main():
     cognee.config.set_vector_db_config(
-        {
-            "vector_db_url": "",
-            "vector_db_key": "", 
-            "vector_db_provider": "pgvector"
-        }
+        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
     )
     cognee.config.set_relational_db_config(
         {
@@ -84,7 +96,7 @@ async def main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata = True)
+    await cognee.prune.prune_system(metadata=True)
 
     dataset_name_1 = "natural_language"
     dataset_name_2 = "quantum"
@@ -114,19 +126,21 @@ async def main():
     random_node = (await vector_engine.search("entity_name", "Quantum computer"))[0]
     random_node_name = random_node.payload["text"]
 
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text = random_node_name)
+    search_results = await cognee.search(SearchType.INSIGHTS, query_text=random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, query_text = random_node_name, datasets=[dataset_name_2])
+    search_results = await cognee.search(
+        SearchType.CHUNKS, query_text=random_node_name, datasets=[dataset_name_2]
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.SUMMARIES, query_text = random_node_name)
+    search_results = await cognee.search(SearchType.SUMMARIES, query_text=random_node_name)
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\n\nExtracted summaries are:\n")
     for result in search_results:
@@ -135,7 +149,7 @@ async def main():
     history = await cognee.get_search_history()
     assert len(history) == 6, "Search history is not correct."
 
-    results = await brute_force_triplet_search('What is a quantum computer?')
+    results = await brute_force_triplet_search("What is a quantum computer?")
     assert len(results) > 0
 
     await test_local_file_deletion(text, explanation_file_path)
@@ -146,6 +160,7 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
     assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
+
 
 if __name__ == "__main__":
     import asyncio

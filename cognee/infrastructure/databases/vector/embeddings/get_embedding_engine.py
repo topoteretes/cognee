@@ -3,6 +3,7 @@ from cognee.infrastructure.llm.config import get_llm_config
 from .EmbeddingEngine import EmbeddingEngine
 from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 
+
 def get_embedding_engine() -> EmbeddingEngine:
     config = get_embedding_config()
     llm_config = get_llm_config()

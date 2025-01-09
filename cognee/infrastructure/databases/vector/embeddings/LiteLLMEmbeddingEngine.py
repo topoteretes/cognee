@@ -57,6 +57,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         await asyncio.sleep(wait_time)
 
     async def embed_text(self, text: List[str]) -> List[List[float]]:
+        async def exponential_backoff(attempt):
+            wait_time = min(10 * (2**attempt), 60)  # Max 60 seconds
+            await asyncio.sleep(wait_time)
+
         try:
             if self.mock:
                 response = {
@@ -77,8 +81,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     model=model_name,
                     input=text,
                     api_key=self.api_key,
-                    api_base=api_base,
-                    api_version=self.api_version
+                    api_base=self.endpoint,
+                    api_version=self.api_version,
                 )
 
                 self.retry_count = 0  # Reset retry count on successful call
@@ -89,7 +93,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 if len(text) == 1:
                     parts = [text]
                 else:
-                    parts = [text[0:math.ceil(len(text) / 2)], text[math.ceil(len(text) / 2):]]
+                    parts = [text[0 : math.ceil(len(text) / 2)], text[math.ceil(len(text) / 2) :]]
 
                 parts_futures = [self.embed_text(part) for part in parts]
                 embeddings = await asyncio.gather(*parts_futures)
@@ -105,7 +109,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         except litellm.exceptions.RateLimitError:
             if self.retry_count >= self.MAX_RETRIES:
-                raise Exception(f"Rate limit exceeded and no more retries left.")
+                raise Exception("Rate limit exceeded and no more retries left.")
 
             await self.exponential_backoff(self.retry_count)
             self.retry_count += 1

@@ -8,7 +8,9 @@ from cognee.modules.graph.utils import get_graph_from_model, convert_node_to_dat
 from cognee.infrastructure.databases.graph import get_graph_engine
 
 
-def topologically_sort_subgraph(subgraph_node_to_indegree: Dict[str, int], graph: nx.DiGraph) -> List[str]:
+def topologically_sort_subgraph(
+    subgraph_node_to_indegree: Dict[str, int], graph: nx.DiGraph
+) -> List[str]:
     """Performs a topological sort on a subgraph based on node indegrees."""
     results = []
     remaining_nodes = subgraph_node_to_indegree.copy()
@@ -33,13 +35,8 @@ def topologically_sort(graph: nx.DiGraph) -> List[str]:
     topological_order = []
 
     for subgraph in subgraphs:
-        node_to_indegree = {
-            node: len(list(subgraph.successors(node)))
-            for node in subgraph.nodes
-        }
-        topological_order.extend(
-            topologically_sort_subgraph(node_to_indegree, subgraph)
-        )
+        node_to_indegree = {node: len(list(subgraph.successors(node))) for node in subgraph.nodes}
+        topological_order.extend(topologically_sort_subgraph(node_to_indegree, subgraph))
 
     return topological_order
 
@@ -62,7 +59,7 @@ async def node_enrich_and_connect(
     graph_engine = await get_graph_engine()
 
     for desc_id in node_descendants:
-        if desc_id not in topological_order[:topological_rank + 1]:
+        if desc_id not in topological_order[: topological_rank + 1]:
             continue
 
         desc = None
@@ -83,7 +80,9 @@ async def node_enrich_and_connect(
     node.depends_directly_on.extend(new_connections)
 
 
-async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerator[list[DataPoint], None]:
+async def enrich_dependency_graph(
+    data_points: list[DataPoint],
+) -> AsyncGenerator[list[DataPoint], None]:
     """Enriches the graph with topological ranks and 'depends_on' edges."""
     nodes = []
     edges = []
@@ -94,9 +93,9 @@ async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerato
     for data_point in data_points:
         graph_nodes, graph_edges = await get_graph_from_model(
             data_point,
-            added_nodes = added_nodes,
-            added_edges = added_edges,
-            visited_properties = visited_properties,
+            added_nodes=added_nodes,
+            added_edges=added_edges,
+            visited_properties=visited_properties,
         )
         nodes.extend(graph_nodes)
         edges.extend(graph_edges)
@@ -122,7 +121,7 @@ async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerato
     data_points_map = {data_point.id: data_point for data_point in data_points}
     # data_points_futures = []
 
-    for data_point in tqdm(data_points, desc = "Enriching dependency graph", unit = "data_point"):
+    for data_point in tqdm(data_points, desc="Enriching dependency graph", unit="data_point"):
         if data_point.id not in node_rank_map:
             continue
 
@@ -131,7 +130,7 @@ async def enrich_dependency_graph(data_points: list[DataPoint]) -> AsyncGenerato
             await node_enrich_and_connect(graph, topological_order, data_point, data_points_map)
 
         yield data_point
-    
+
     # await asyncio.gather(*data_points_futures)
 
     # return data_points
