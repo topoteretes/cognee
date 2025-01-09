@@ -186,11 +186,12 @@ async def main(enable_steps):
     # Step 4: Query insights
     if enable_steps.get("retriever"):
         search_results = await cognee.search(
-            SearchType.GRAPH_COMPLETION, query_text='Who has experience in design tools?'
+            SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
         )
         print(search_results)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     setup_logging(logging.INFO)
 
     rebuild_kg = True

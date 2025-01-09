@@ -67,7 +67,7 @@ async def specific_search(query_type: SearchType, query: str, user) -> list:
         SearchType.INSIGHTS: query_graph_connections,
         SearchType.CHUNKS: query_chunks,
         SearchType.COMPLETION: query_completion,
-        SearchType.GRAPH_COMPLETION: graph_query_completion
+        SearchType.GRAPH_COMPLETION: graph_query_completion,
     }
 
     search_task = search_tasks.get(query_type)

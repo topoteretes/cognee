@@ -8,12 +8,13 @@ from cognee.modules.retrieval.brute_force_triplet_search import brute_force_trip
 def retrieved_edges_to_string(retrieved_edges):
     edge_strings = []
     for edge in retrieved_edges:
-        node1_string = edge.node1.attributes['text'] or edge.node1.attributes.get('name')
-        node2_string = edge.node2.attributes['text'] or edge.node2.attributes.get('name')
-        edge_string = edge.attributes['relationship_type']
+        node1_string = edge.node1.attributes["text"] or edge.node1.attributes.get("name")
+        node2_string = edge.node2.attributes["text"] or edge.node2.attributes.get("name")
+        edge_string = edge.attributes["relationship_type"]
         edge_str = f"{node1_string} -- {edge_string} -- {node2_string}"
         edge_strings.append(edge_str)
     return "\n---\n".join(edge_strings)
+
 
 async def graph_query_completion(query: str) -> list:
     """
