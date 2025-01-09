@@ -5,7 +5,9 @@ from uuid import NAMESPACE_OID, uuid5
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart
 from cognee.tasks.repo_processor.extract_code_parts import extract_code_parts
-from cognee.tasks.repo_processor import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _add_code_parts_nodes_and_edges(code_file: CodeFile, part_type, code_parts) -> None:
