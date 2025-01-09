@@ -14,7 +14,4 @@ class DocumentChunk(DataPoint):
     is_part_of: Document
     contains: List[Entity] = None
 
-    _metadata: dict = {
-        "index_fields": ["text"],
-        "type": "DocumentChunk"
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "DocumentChunk"}

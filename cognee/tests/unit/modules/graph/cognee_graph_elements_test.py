@@ -9,7 +9,7 @@ def test_node_initialization():
     """Test that a Node is initialized correctly."""
     node = Node("node1", {"attr1": "value1"}, dimension=2)
     assert node.id == "node1"
-    assert node.attributes == {"attr1": "value1", 'vector_distance': np.inf}
+    assert node.attributes == {"attr1": "value1", "vector_distance": np.inf}
     assert len(node.status) == 2
     assert np.all(node.status == 1)
 
@@ -96,7 +96,7 @@ def test_edge_initialization():
     edge = Edge(node1, node2, {"weight": 10}, directed=False, dimension=2)
     assert edge.node1 == node1
     assert edge.node2 == node2
-    assert edge.attributes == {'vector_distance': np.inf,"weight": 10}
+    assert edge.attributes == {"vector_distance": np.inf, "weight": 10}
     assert edge.directed is False
     assert len(edge.status) == 2
     assert np.all(edge.status == 1)

@@ -1,4 +1,4 @@
-""" This module contains the OntologyEngine class which is responsible for adding graph ontology from a JSON or CSV file. """
+"""This module contains the OntologyEngine class which is responsible for adding graph ontology from a JSON or CSV file."""
 
 import csv
 import json
@@ -20,7 +20,9 @@ from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_en
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
-from cognee.modules.data.extraction.knowledge_graph.add_model_class_to_graph import add_model_class_to_graph
+from cognee.modules.data.extraction.knowledge_graph.add_model_class_to_graph import (
+    add_model_class_to_graph,
+)
 from cognee.tasks.graph.models import NodeModel, GraphOntology
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.engine.utils import generate_node_id, generate_node_name
@@ -39,20 +41,26 @@ async def extract_ontology(content: str, response_model: Type[BaseModel]):
 
 
 class OntologyEngine:
-    async def flatten_model(self, model: NodeModel, parent_id: Optional[str] = None) -> Dict[str, Any]:
+    async def flatten_model(
+        self, model: NodeModel, parent_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Flatten the model to a dictionary."""
         result = model.dict()
         result["parent_id"] = parent_id
         if model.default_relationship:
-            result.update({
-                "relationship_type": model.default_relationship.type,
-                "relationship_source": model.default_relationship.source,
-                "relationship_target": model.default_relationship.target
-            })
+            result.update(
+                {
+                    "relationship_type": model.default_relationship.type,
+                    "relationship_source": model.default_relationship.source,
+                    "relationship_target": model.default_relationship.target,
+                }
+            )
         return result
 
-    async def recursive_flatten(self, items: Union[List[Dict[str, Any]], Dict[str, Any]], parent_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Recursively flatten the items.  """
+    async def recursive_flatten(
+        self, items: Union[List[Dict[str, Any]], Dict[str, Any]], parent_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Recursively flatten the items."""
         flat_list = []
 
         if isinstance(items, list):
@@ -80,8 +88,10 @@ class OntologyEngine:
             else:
                 raise IngestionError(message="Unsupported file format")
         except Exception as e:
-            raise IngestionError(message=f"Failed to load data from {file_path}: {e}",
-                                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+            raise IngestionError(
+                message=f"Failed to load data from {file_path}: {e}",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
 
     async def add_graph_ontology(self, file_path: str = None, documents: list = None):
         """Add graph ontology from a JSON or CSV file or infer from documents content."""
@@ -109,31 +119,43 @@ class OntologyEngine:
                             initial_chunks_and_ids.append({base_file.id: chunks_with_ids})
 
                     except FileTypeException:
-                        logger.warning("File (%s) has an unknown file type. We are skipping it.", file["id"])
-
+                        logger.warning(
+                            "File (%s) has an unknown file type. We are skipping it.", file["id"]
+                        )
 
             ontology = await extract_ontology(str(initial_chunks_and_ids), GraphOntology)
             graph_client = await get_graph_engine()
 
-            await graph_client.add_nodes([(node.id, dict(
-                uuid = generate_node_id(node.id),
-                name = generate_node_name(node.name),
-                type = generate_node_id(node.id),
-                description = node.description,
-                updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            )) for node in ontology.nodes])
+            await graph_client.add_nodes(
+                [
+                    (
+                        node.id,
+                        dict(
+                            uuid=generate_node_id(node.id),
+                            name=generate_node_name(node.name),
+                            type=generate_node_id(node.id),
+                            description=node.description,
+                            updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                        ),
+                    )
+                    for node in ontology.nodes
+                ]
+            )
 
-            await graph_client.add_edges((
-                generate_node_id(edge.source_id),
-                generate_node_id(edge.target_id),
-                edge.relationship_type,
-                dict(
-                    source_node_id = generate_node_id(edge.source_id),
-                    target_node_id = generate_node_id(edge.target_id),
-                    relationship_name = edge.relationship_type,
-                    updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                ),
-            ) for edge in ontology.edges)
+            await graph_client.add_edges(
+                (
+                    generate_node_id(edge.source_id),
+                    generate_node_id(edge.target_id),
+                    edge.relationship_type,
+                    dict(
+                        source_node_id=generate_node_id(edge.source_id),
+                        target_node_id=generate_node_id(edge.target_id),
+                        relationship_name=edge.relationship_type,
+                        updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    ),
+                )
+                for edge in ontology.edges
+            )
 
         else:
             dataset_level_information = documents[0][1]
@@ -152,17 +174,23 @@ class OntologyEngine:
                     if node_id in valid_ids:
                         await graph_client.add_node(node_id, node_data)
                     if node_id not in valid_ids:
-                        raise EntityNotFoundError(message=f"Node ID {node_id} not found in the dataset")
-                    if pd.notna(row.get("relationship_source")) and pd.notna(row.get("relationship_target")):
+                        raise EntityNotFoundError(
+                            message=f"Node ID {node_id} not found in the dataset"
+                        )
+                    if pd.notna(row.get("relationship_source")) and pd.notna(
+                        row.get("relationship_target")
+                    ):
                         await graph_client.add_edge(
                             row["relationship_source"],
                             row["relationship_target"],
                             relationship_name=row["relationship_type"],
-                            edge_properties = {
+                            edge_properties={
                                 "source_node_id": row["relationship_source"],
                                 "target_node_id": row["relationship_target"],
                                 "relationship_name": row["relationship_type"],
-                                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                                "updated_at": datetime.now(timezone.utc).strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                ),
                             },
                         )
 
@@ -171,10 +199,10 @@ class OntologyEngine:
                 raise RuntimeError(f"Failed to add graph ontology from {file_path}: {e}") from e
 
 
-async def infer_data_ontology(documents, ontology_model = KnowledgeGraph, root_node_id = None):
+async def infer_data_ontology(documents, ontology_model=KnowledgeGraph, root_node_id=None):
     if ontology_model == KnowledgeGraph:
         ontology_engine = OntologyEngine()
-        root_node_id = await ontology_engine.add_graph_ontology(documents = documents)
+        root_node_id = await ontology_engine.add_graph_ontology(documents=documents)
     else:
         graph_engine = await get_graph_engine()
         await add_model_class_to_graph(ontology_model, graph_engine)

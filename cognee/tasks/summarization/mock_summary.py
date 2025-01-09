@@ -1,5 +1,6 @@
 from cognee.shared.data_models import SummarizedCode, SummarizedClass, SummarizedFunction
 
+
 def get_mock_summarized_code() -> SummarizedCode:
     return SummarizedCode(
         file_name="mock_file.py",

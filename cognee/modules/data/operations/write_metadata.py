@@ -11,11 +11,12 @@ from cognee.infrastructure.files.utils.get_file_metadata import FileMetadata
 from ..models.Metadata import Metadata
 
 
-async def write_metadata(data_item: Union[BinaryIO, str, Any], data_id: UUID, file_metadata: FileMetadata) -> UUID:
+async def write_metadata(
+    data_item: Union[BinaryIO, str, Any], data_id: UUID, file_metadata: FileMetadata
+) -> UUID:
     metadata_dict = get_metadata_dict(data_item, file_metadata)
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-
         metadata = (
             await session.execute(select(Metadata).filter(Metadata.data_id == data_id))
         ).scalar_one_or_none()
@@ -29,12 +30,11 @@ async def write_metadata(data_item: Union[BinaryIO, str, Any], data_id: UUID, fi
                 id=data_id,
                 metadata_repr=json.dumps(metadata_dict),
                 metadata_source=parse_type(type(data_item)),
-                data_id=data_id
+                data_id=data_id,
             )
             session.add(metadata)
 
         await session.commit()
-
 
 
 def parse_type(type_: Any) -> str:
@@ -46,11 +46,13 @@ def parse_type(type_: Any) -> str:
         raise Exception(f"type: {type_} could not be parsed")
 
 
-def get_metadata_dict(data_item: Union[BinaryIO, str, Any], file_metadata: FileMetadata) -> dict[str, Any]:
+def get_metadata_dict(
+    data_item: Union[BinaryIO, str, Any], file_metadata: FileMetadata
+) -> dict[str, Any]:
     if isinstance(data_item, str):
-        return(file_metadata)
+        return file_metadata
     elif isinstance(data_item, BinaryIO):
-        return(file_metadata)
+        return file_metadata
     elif hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
         return {**file_metadata, **data_item.dict()}
     else:

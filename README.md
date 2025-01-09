@@ -20,6 +20,7 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 <div align="center">
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
 </div>
+
 ## 📦 Installation
 
 You can install Cognee using either **pip** or **poetry**.
@@ -261,11 +262,7 @@ pip install cognee
 
 ## Vector & Graph Databases Implementation State
 
-<style>
-  table {
-    width: 100%;
-  }
-</style>
+
 
 | Name     | Type               | Current state     | Known Issues |
 |----------|--------------------|-------------------|--------------|

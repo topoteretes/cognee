@@ -10,10 +10,7 @@ class TextSummary(DataPoint):
     text: str
     made_from: DocumentChunk
 
-    _metadata: dict = {
-        "index_fields": ["text"],
-        "type": "TextSummary"
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "TextSummary"}
 
 
 class CodeSummary(DataPoint):
@@ -21,7 +18,4 @@ class CodeSummary(DataPoint):
     text: str
     summarizes: Union[CodeFile, CodePart, SourceCodeChunk]
 
-    _metadata: dict = {
-        "index_fields": ["text"],
-        "type": "CodeSummary"
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "CodeSummary"}

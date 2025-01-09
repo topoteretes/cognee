@@ -17,8 +17,7 @@ jobs:
 
   run_pgvector_integration_test:
     name: test
-    runs-on: ubuntu-latest
-    if:  ${{ github.event.label.name == 'run-checks' }}
+    runs-on: ubuntu-22.04
     defaults:
       run:
         shell: bash
@@ -47,7 +46,7 @@ jobs:
           python-version: '3.11.x'
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1.3.2
+        uses: snok/install-poetry@v1.4.1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true

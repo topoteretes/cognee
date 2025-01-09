@@ -1,4 +1,4 @@
-""" This module contains the configuration for the graph database. """
+"""This module contains the configuration for the graph database."""
 
 import os
 from functools import lru_cache
@@ -15,8 +15,7 @@ class GraphConfig(BaseSettings):
     graph_database_password: str = ""
     graph_database_port: int = 123
     graph_file_path: str = os.path.join(
-        os.path.join(get_absolute_path(".cognee_system"), "databases"),
-        graph_filename
+        os.path.join(get_absolute_path(".cognee_system"), "databases"), graph_filename
     )
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph

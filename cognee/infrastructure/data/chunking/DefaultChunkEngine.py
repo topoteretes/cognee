@@ -1,4 +1,5 @@
-""" Chunking strategies for splitting text into smaller parts."""
+"""Chunking strategies for splitting text into smaller parts."""
+
 from __future__ import annotations
 import re
 from cognee.shared.data_models import ChunkStrategy
@@ -6,17 +7,15 @@ from cognee.shared.data_models import ChunkStrategy
 
 # /Users/vasa/Projects/cognee/cognee/infrastructure/data/chunking/DefaultChunkEngine.py
 
-class DefaultChunkEngine():
+
+class DefaultChunkEngine:
     def __init__(self, chunk_strategy=None, chunk_size=None, chunk_overlap=None):
         self.chunk_strategy = chunk_strategy
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-
     @staticmethod
-    def _split_text_with_regex(
-        text: str, separator: str, keep_separator: bool
-    ) -> list[str]:
+    def _split_text_with_regex(text: str, separator: str, keep_separator: bool) -> list[str]:
         # Now that we have the separator, split the text
         if separator:
             if keep_separator:
@@ -32,13 +31,12 @@ class DefaultChunkEngine():
             splits = list(text)
         return [s for s in splits if s != ""]
 
-
-
-    def chunk_data(self,
-        chunk_strategy = None,
-        source_data = None,
-        chunk_size = None,
-        chunk_overlap = None,
+    def chunk_data(
+        self,
+        chunk_strategy=None,
+        source_data=None,
+        chunk_size=None,
+        chunk_overlap=None,
     ):
         """
         Chunk data based on the specified strategy.
@@ -54,44 +52,47 @@ class DefaultChunkEngine():
         """
 
         if self.chunk_strategy == ChunkStrategy.PARAGRAPH:
-            chunked_data, chunk_number = self.chunk_data_by_paragraph(source_data,chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+            chunked_data, chunk_number = self.chunk_data_by_paragraph(
+                source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+            )
         elif self.chunk_strategy == ChunkStrategy.SENTENCE:
-            chunked_data, chunk_number = self.chunk_by_sentence(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
+            chunked_data, chunk_number = self.chunk_by_sentence(
+                source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+            )
         elif self.chunk_strategy == ChunkStrategy.EXACT:
-            chunked_data, chunk_number = self.chunk_data_exact(source_data, chunk_size = self.chunk_size, chunk_overlap=self.chunk_overlap)
+            chunked_data, chunk_number = self.chunk_data_exact(
+                source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+            )
         else:
             chunked_data, chunk_number = "Invalid chunk strategy.", [0, "Invalid chunk strategy."]
 
-
         return chunked_data, chunk_number
-
-
 
     def chunk_data_exact(self, data_chunks, chunk_size, chunk_overlap):
         data = "".join(data_chunks)
         chunks = []
         for i in range(0, len(data), chunk_size - chunk_overlap):
-            chunks.append(data[i:i + chunk_size])
+            chunks.append(data[i : i + chunk_size])
         numbered_chunks = []
         for i, chunk in enumerate(chunks):
             numbered_chunk = [i + 1, chunk]
             numbered_chunks.append(numbered_chunk)
         return chunks, numbered_chunks
 
-
-
     def chunk_by_sentence(self, data_chunks, chunk_size, chunk_overlap):
         # Split by periods, question marks, exclamation marks, and ellipses
         data = "".join(data_chunks)
 
         # The regular expression is used to find series of charaters that end with one the following chaacters (. ! ? ...)
-        sentence_endings = r'(?<=[.!?…]) +'
+        sentence_endings = r"(?<=[.!?…]) +"
         sentences = re.split(sentence_endings, data)
 
         sentence_chunks = []
         for sentence in sentences:
             if len(sentence) > chunk_size:
-                chunks = self.chunk_data_exact(data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+                chunks = self.chunk_data_exact(
+                    data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap
+                )
                 sentence_chunks.extend(chunks)
             else:
                 sentence_chunks.append(sentence)
@@ -102,9 +103,7 @@ class DefaultChunkEngine():
             numbered_chunks.append(numbered_chunk)
         return sentence_chunks, numbered_chunks
 
-
-
-    def chunk_data_by_paragraph(self, data_chunks, chunk_size, chunk_overlap, bound = 0.75):
+    def chunk_data_by_paragraph(self, data_chunks, chunk_size, chunk_overlap, bound=0.75):
         data = "".join(data_chunks)
         total_length = len(data)
         chunks = []
