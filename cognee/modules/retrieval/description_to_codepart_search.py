@@ -10,7 +10,7 @@ from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
 
-async def code_description_to_code_part_search(query: str, user: User = None, top_k=2) -> list:
+async def code_description_to_code_part_search(query: str, user: User = None, top_k=5) -> list:
     if user is None:
         user = await get_default_user()
 
@@ -55,21 +55,23 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
     )
 
     try:
-        results = await vector_engine.search("code_summary_text", query_text=query, limit=top_k)
-        if not results:
+        code_summaries = await vector_engine.search(
+            "code_summary_text", query_text=query, limit=top_k
+        )
+        if not code_summaries:
             logging.warning("No results found for query: '%s' by user: %s", query, user.id)
             return []
 
         memory_fragment = CogneeGraph()
         await memory_fragment.project_graph_from_db(
             graph_engine,
-            node_properties_to_project=["id", "type", "text", "source_code"],
+            node_properties_to_project=["id", "type", "text", "source_code", "pydantic_type"],
             edge_properties_to_project=["relationship_name"],
         )
 
         code_pieces_to_return = set()
 
-        for node in results:
+        for node in code_summaries:
             node_id = str(node.id)
             node_to_search_from = memory_fragment.get_node(node_id)
 
@@ -78,9 +80,16 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
                 continue
 
             for code_file in node_to_search_from.get_skeleton_neighbours():
-                for code_file_edge in code_file.get_skeleton_edges():
-                    if code_file_edge.get_attribute("relationship_name") == "contains":
-                        code_pieces_to_return.add(code_file_edge.get_destination_node())
+                if code_file.get_attribute("pydantic_type") == "SourceCodeChunk":
+                    for code_file_edge in code_file.get_skeleton_edges():
+                        if code_file_edge.get_attribute("relationship_name") == "code_chunk_of":
+                            code_pieces_to_return.add(code_file_edge.get_destination_node())
+                elif code_file.get_attribute("pydantic_type") == "CodePart":
+                    code_pieces_to_return.add(code_file)
+                elif code_file.get_attribute("pydantic_type") == "CodeFile":
+                    for code_file_edge in code_file.get_skeleton_edges():
+                        if code_file_edge.get_attribute("relationship_name") == "contains":
+                            code_pieces_to_return.add(code_file_edge.get_destination_node())
 
         logging.info(
             "Search completed for user: %s, query: '%s'. Found %d code pieces.",
@@ -89,7 +98,11 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
             len(code_pieces_to_return),
         )
 
-        return list(code_pieces_to_return)
+        context = ""
+        for code_piece in code_pieces_to_return:
+            context = context + code_piece.get_attribute("source_code")
+
+        return context
 
     except Exception as exec_error:
         logging.error(
