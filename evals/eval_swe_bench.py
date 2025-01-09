@@ -34,9 +34,8 @@ def check_install_package(package_name):
 
 async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
     repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")
-    pipeline = await run_code_graph_pipeline(repo_path)
 
-    async for result in pipeline:
+    async for result in run_code_graph_pipeline(repo_path, include_docs=True):
         print(result)
 
     print("Here we have the repo under the repo_path")
@@ -47,7 +46,16 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
     retrieved_edges = await brute_force_triplet_search(
-        problem_statement, top_k=3, collections=["data_point_source_code", "data_point_text"]
+        problem_statement,
+        top_k=3,
+        collections=[
+            "code_summary_text",
+            "data_point_name",
+            "document_chunk_text",
+            "entity_name",
+            "entity_type_name",
+            "sourcecodechunk_source_code",
+        ],
     )
 
     retrieved_edges_str = retrieved_edges_to_string(retrieved_edges)
