@@ -139,9 +139,6 @@ Example structure:
             logger.error(f"Schema validation failed: {str(e)}")
             logger.debug(f"Raw response: {e.raw_response}")
             raise ValueError(f"Response failed schema validation: {str(e)}")
-        except litellm.exceptions.OpenAIError as e:
-            logger.error(f"API error in structured output generation: {str(e)}")
-            raise ValueError(f"Failed to generate structured output: {str(e)}")
         except Exception as e:
             logger.error(f"Error in structured output generation: {str(e)}")
             raise ValueError(f"Failed to generate structured output: {str(e)}")
