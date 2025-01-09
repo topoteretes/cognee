@@ -185,5 +185,3 @@ node_modules/
 
 # Evals
 SWE-bench_testsample/
-test_gemini.py
-test.py
