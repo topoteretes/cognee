@@ -10,7 +10,7 @@ from .Document import Document
 class UnstructuredDocument(Document):
     type: str = "unstructured"
 
-    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int]) -> str:
+    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int] = None) -> str:
         def get_text():
             try:
                 from unstructured.partition.auto import partition

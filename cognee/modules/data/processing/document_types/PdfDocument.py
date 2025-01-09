@@ -9,7 +9,7 @@ from .Document import Document
 class PdfDocument(Document):
     type: str = "pdf"
 
-    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int]):
+    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int] = None):
         file = PdfReader(self.raw_data_location)
 
         def get_text():

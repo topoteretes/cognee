@@ -13,7 +13,7 @@ class AudioDocument(Document):
         result = get_llm_client().create_transcript(self.raw_data_location)
         return result.text
 
-    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int]):
+    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int] = None):
         # Transcribe the audio file
 
         text = self.create_transcript()
