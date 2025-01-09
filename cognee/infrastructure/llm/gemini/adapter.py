@@ -2,9 +2,11 @@ from typing import Type, Optional
 from pydantic import BaseModel
 import json
 import logging
-from litellm import acompletion, JSONSchemaValidationError
 import litellm
+import asyncio
 from litellm import acompletion, JSONSchemaValidationError
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -120,11 +122,16 @@ Example structure:
                         content = response.choices[0].message.content
                         return response_model.model_validate_json(content)
                     
-                except (litellm.exceptions.OpenAIError, litellm.exceptions.BadRequestError) as e:
+                except litellm.exceptions.OpenAIError as e:
                     if attempt == 2:
                         raise
-                    logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                    backoff_time = (2 ** attempt) * 1
+                    logger.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {backoff_time}s")
+                    await asyncio.sleep(backoff_time)
                     continue
+                except litellm.exceptions.BadRequestError as e:
+                    logger.error(f"Bad request error: {str(e)}")
+                    raise ValueError(f"Invalid request: {str(e)}")
 
             raise ValueError("Failed to get valid response after retries")
 
