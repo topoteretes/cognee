@@ -70,17 +70,17 @@ async def main():
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
     )
-    # cognee.config.set_relational_db_config(
-    #     {
-    #         "db_path": "",
-    #         "db_name": "cognee_db",
-    #         "db_host": "127.0.0.1",
-    #         "db_port": "5432",
-    #         "db_username": "cognee",
-    #         "db_password": "cognee",
-    #         "db_provider": "postgres",
-    #     }
-    # )
+    cognee.config.set_relational_db_config(
+        {
+            "db_path": "",
+            "db_name": "cognee_db",
+            "db_host": "127.0.0.1",
+            "db_port": "5432",
+            "db_username": "cognee",
+            "db_password": "cognee",
+            # "db_provider": "postgres",
+        }
+    )
 
     data_directory_path = str(
         pathlib.Path(
