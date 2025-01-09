@@ -1,7 +1,9 @@
-from typing import Type
+from typing import Type, Optional
 from pydantic import BaseModel
 import json
 import logging
+from litellm import acompletion, JSONSchemaValidationError
+import litellm
 from litellm import acompletion, JSONSchemaValidationError
 
 logger = logging.getLogger(__name__)
@@ -9,9 +11,18 @@ logger = logging.getLogger(__name__)
 class GeminiAdapter:
     MAX_TOKENS = 8192
     
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, 
+        api_key: str, 
+        model: str,
+        endpoint: Optional[str] = None,
+        api_version: Optional[str] = None,
+        streaming: bool = False
+    ) -> None:
         self.api_key = api_key
         self.model = model
+        self.endpoint = endpoint
+        self.api_version = api_version
+        self.streaming = streaming
 
     async def acreate_structured_output(
         self,
@@ -20,7 +31,6 @@ class GeminiAdapter:
         response_model: Type[BaseModel]
     ) -> BaseModel:
         try:
-            # Define the JSON schema for validation
             response_schema = {
                 "type": "object",
                 "properties": {
@@ -56,7 +66,6 @@ class GeminiAdapter:
                 "required": ["summary", "description", "nodes", "edges"]
             }
 
-            # Create a simplified system prompt
             simplified_prompt = f"""
 {system_prompt}
 
@@ -93,7 +102,6 @@ Example structure:
                 {"role": "user", "content": text_input}
             ]
 
-            # Attempt completion with retries
             for attempt in range(3):
                 try:
                     response = await acompletion(
@@ -112,8 +120,8 @@ Example structure:
                         content = response.choices[0].message.content
                         return response_model.model_validate_json(content)
                     
-                except Exception as e:
-                    if attempt == 2:  # Last attempt
+                except (litellm.exceptions.OpenAIError, litellm.exceptions.BadRequestError) as e:
+                    if attempt == 2:
                         raise
                     logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
                     continue
@@ -124,6 +132,9 @@ Example structure:
             logger.error(f"Schema validation failed: {str(e)}")
             logger.debug(f"Raw response: {e.raw_response}")
             raise ValueError(f"Response failed schema validation: {str(e)}")
+        except litellm.exceptions.OpenAIError as e:
+            logger.error(f"API error in structured output generation: {str(e)}")
+            raise ValueError(f"Failed to generate structured output: {str(e)}")
         except Exception as e:
             logger.error(f"Error in structured output generation: {str(e)}")
             raise ValueError(f"Failed to generate structured output: {str(e)}")

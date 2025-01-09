@@ -13,7 +13,7 @@ def get_embedding_engine() -> EmbeddingEngine:
     provider_config = LiteLLMEmbeddingEngine.PROVIDER_CONFIGS.get(provider, {})
 
     # Build engine arguments
-    engine_args = {
+    engine_args: dict[str, str | int] = {
         "provider": provider,
         "api_key": config.embedding_api_key or llm_config.llm_api_key,
     }

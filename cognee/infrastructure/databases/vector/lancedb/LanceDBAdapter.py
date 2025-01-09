@@ -2,6 +2,7 @@ import asyncio
 from typing import Generic, List, Optional, TypeVar, get_type_hints
 from uuid import UUID
 
+import logging
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
@@ -253,16 +254,13 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         collection_names = await connection.table_names()
         
-        # Delete all collections
         for collection_name in collection_names:
             collection = await connection.open_table(collection_name)
-            # Delete all records in the collection
             await collection.delete("id IS NOT NULL")
-            # Drop the collection itself
             await connection.drop_table(collection_name)
         
-        # Clean up the database if it was set up as temporary
         if self.url.startswith("/"):
+            logging.info(f"Cleaning up temporary storage at {self.url}")
             LocalStorage.remove_all(self.url)
 
     def get_data_point_schema(self, model_type):

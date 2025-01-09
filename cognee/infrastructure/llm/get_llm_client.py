@@ -12,7 +12,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
-    GEMINI="gemini"
+    GEMINI= "gemini"
 
 
 def get_llm_client():
@@ -68,7 +68,10 @@ def get_llm_client():
         from .gemini.adapter import GeminiAdapter
         return GeminiAdapter(
             api_key=llm_config.llm_api_key,
-            model=llm_config.llm_model
+            model=llm_config.llm_model,
+            endpoint=llm_config.llm_endpoint,
+            api_version=llm_config.llm_api_version,
+            streaming=llm_config.llm_streaming
         )
 
     else:
