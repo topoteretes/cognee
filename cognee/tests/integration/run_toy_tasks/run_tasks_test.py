@@ -33,9 +33,7 @@ async def run_and_check_tasks():
     results = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
     index = 0
     async for result in pipeline:
-        assert (
-            result == results[index]
-        ), f"at {index = }: {result = } != {results[index] = }"
+        assert result == results[index], f"at {index = }: {result = } != {results[index] = }"
         index += 1
 
 

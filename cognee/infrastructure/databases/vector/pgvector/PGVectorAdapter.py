@@ -22,13 +22,10 @@ from .serialize_data import serialize_data
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {
-        "index_fields": ["text"],
-        "type": "IndexSchema"
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
-
     def __init__(
         self,
         connection_string: str,
@@ -44,6 +41,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
         from pgvector.sqlalchemy import Vector
+
         self.Vector = Vector
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
@@ -71,9 +69,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 __tablename__ = collection_name
                 __table_args__ = {"extend_existing": True}
                 # PGVector requires one column to be the primary key
-                primary_key: Mapped[int] = mapped_column(
-                    primary_key=True, autoincrement=True
-                )
+                primary_key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
                 id: Mapped[data_point_types["id"]]
                 payload = Column(JSON)
                 vector = Column(self.Vector(vector_size))
@@ -89,14 +85,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                     )
 
-    async def create_data_points(
-        self, collection_name: str, data_points: List[DataPoint]
-    ):
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
-                collection_name = collection_name,
-                payload_schema = type(data_points[0]),
+                collection_name=collection_name,
+                payload_schema=type(data_points[0]),
             )
 
         data_vectors = await self.embed_data(
@@ -109,9 +103,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             __tablename__ = collection_name
             __table_args__ = {"extend_existing": True}
             # PGVector requires one column to be the primary key
-            primary_key: Mapped[int] = mapped_column(
-                primary_key=True, autoincrement=True
-            )
+            primary_key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
             id: Mapped[data_point_types["id"]]
             payload = Column(JSON)
             vector = Column(self.Vector(vector_size))
@@ -123,9 +115,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         pgvector_data_points = [
             PGVectorDataPoint(
-                id = data_point.id,
-                vector = data_vectors[data_index],
-                payload = serialize_data(data_point.model_dump()),
+                id=data_point.id,
+                vector=data_vectors[data_index],
+                payload=serialize_data(data_point.model_dump()),
             )
             for (data_index, data_point) in enumerate(data_points)
         ]
@@ -137,13 +129,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
-    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
-        await self.create_data_points(f"{index_name}_{index_property_name}", [
-            IndexSchema(
-                id = data_point.id,
-                text = DataPoint.get_embeddable_data(data_point),
-            ) for data_point in data_points
-        ])
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+    ):
+        await self.create_data_points(
+            f"{index_name}_{index_property_name}",
+            [
+                IndexSchema(
+                    id=data_point.id,
+                    text=DataPoint.get_embeddable_data(data_point),
+                )
+                for data_point in data_points
+            ],
+        )
 
     async def get_table(self, collection_name: str) -> Table:
         """
@@ -171,20 +169,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             results = results.all()
 
             return [
-                ScoredResult(
-                    id = UUID(result.id),
-                    payload = result.payload,
-                    score = 0
-                ) for result in results
+                ScoredResult(id=UUID(result.id), payload=result.payload, score=0)
+                for result in results
             ]
 
     async def get_distance_from_collection_elements(
-            self,
-            collection_name: str,
-            query_text: str = None,
-            query_vector: List[float] = None,
-            with_vector: bool = False
-    )-> List[ScoredResult]:
+        self,
+        collection_name: str,
+        query_text: str = None,
+        query_vector: List[float] = None,
+        with_vector: bool = False,
+    ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
 
@@ -200,11 +195,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             closest_items = await session.execute(
                 select(
                     PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                        "similarity"
-                    ),
-                )
-                .order_by("similarity")
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+                ).order_by("similarity")
             )
 
         vector_list = []
@@ -216,11 +208,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(
-                id = UUID(str(row.id)),
-                payload = row.payload,
-                score = row.similarity
-            ) for row in vector_list
+            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
+            for row in vector_list
         ]
 
     async def search(
@@ -248,9 +237,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             closest_items = await session.execute(
                 select(
                     PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                        "similarity"
-                    ),
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
                 )
                 .order_by("similarity")
                 .limit(limit)
@@ -265,11 +252,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(
-                id = UUID(str(row.id)),
-                payload = row.payload,
-                score = row.similarity
-            ) for row in vector_list
+            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
+            for row in vector_list
         ]
 
     async def batch_search(

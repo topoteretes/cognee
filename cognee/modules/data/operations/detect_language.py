@@ -2,6 +2,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 async def detect_language(text: str):
     """
     Detect the language of the given text and return its ISO 639-1 language code.
@@ -14,6 +15,7 @@ async def detect_language(text: str):
     """
 
     from langdetect import detect, LangDetectException
+
     # Trim the text to the first 100 characters
     trimmed_text = text[:100]
 

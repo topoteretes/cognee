@@ -1,7 +1,10 @@
 import os
 from typing import List, Union, BinaryIO
 
-async def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True):
+
+async def resolve_data_directories(
+    data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True
+):
     """
     Resolves directories by replacing them with their contained files.
 
@@ -28,10 +31,14 @@ async def resolve_data_directories(data: Union[BinaryIO, List[BinaryIO], str, Li
                 else:
                     # Add all files (not subdirectories) in the directory
                     resolved_data.extend(
-                        [os.path.join(item, f) for f in os.listdir(item) if os.path.isfile(os.path.join(item, f))]
+                        [
+                            os.path.join(item, f)
+                            for f in os.listdir(item)
+                            if os.path.isfile(os.path.join(item, f))
+                        ]
                     )
-            else: # If it's a file or text add it directly
+            else:  # If it's a file or text add it directly
                 resolved_data.append(item)
-        else: # If it's not a string add it directly
+        else:  # If it's not a string add it directly
             resolved_data.append(item)
     return resolved_data

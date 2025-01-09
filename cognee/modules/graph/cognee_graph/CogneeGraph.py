@@ -52,7 +52,7 @@ class CogneeGraph(CogneeAbstractGraph):
         else:
             raise EntityNotFoundError(message=f"Node with id {node_id} does not exist.")
 
-    def get_edges(self)-> List[Edge]:
+    def get_edges(self) -> List[Edge]:
         return self.edges
 
     async def project_graph_from_db(
@@ -60,12 +60,11 @@ class CogneeGraph(CogneeAbstractGraph):
         adapter: Union[GraphDBInterface],
         node_properties_to_project: List[str],
         edge_properties_to_project: List[str],
-        directed = True,
-        node_dimension = 1,
-        edge_dimension = 1,
-        memory_fragment_filter = [],
+        directed=True,
+        node_dimension=1,
+        edge_dimension=1,
+        memory_fragment_filter=[],
     ) -> None:
-
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidValueError(message="Dimensions must be positive integers")
 
@@ -73,7 +72,9 @@ class CogneeGraph(CogneeAbstractGraph):
             if len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await adapter.get_graph_data()
             else:
-                nodes_data, edges_data = await adapter.get_filtered_graph_data(attribute_filters = memory_fragment_filter)
+                nodes_data, edges_data = await adapter.get_filtered_graph_data(
+                    attribute_filters=memory_fragment_filter
+                )
 
             if not nodes_data:
                 raise EntityNotFoundError(message="No node data retrieved from the database.")
@@ -88,17 +89,27 @@ class CogneeGraph(CogneeAbstractGraph):
                 source_node = self.get_node(str(source_id))
                 target_node = self.get_node(str(target_id))
                 if source_node and target_node:
-                    edge_attributes = {key: properties.get(key) for key in edge_properties_to_project}
-                    edge_attributes['relationship_type'] = relationship_type
+                    edge_attributes = {
+                        key: properties.get(key) for key in edge_properties_to_project
+                    }
+                    edge_attributes["relationship_type"] = relationship_type
 
-                    edge = Edge(source_node, target_node, attributes=edge_attributes, directed=directed, dimension=edge_dimension)
+                    edge = Edge(
+                        source_node,
+                        target_node,
+                        attributes=edge_attributes,
+                        directed=directed,
+                        dimension=edge_dimension,
+                    )
                     self.add_edge(edge)
 
                     source_node.add_skeleton_edge(edge)
                     target_node.add_skeleton_edge(edge)
 
                 else:
-                    raise EntityNotFoundError(message=f"Edge references nonexistent nodes: {source_id} -> {target_id}")
+                    raise EntityNotFoundError(
+                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    )
 
         except (ValueError, TypeError) as e:
             print(f"Error projecting graph: {e}")
@@ -110,13 +121,15 @@ class CogneeGraph(CogneeAbstractGraph):
             for scored_result in scored_results:
                 node_id = str(scored_result.id)
                 score = scored_result.score
-                node =self.get_node(node_id)
+                node = self.get_node(node_id)
                 if node:
                     node.add_attribute("vector_distance", score)
                 else:
                     print(f"Node with id {node_id} not found in the graph.")
 
-    async def map_vector_distances_to_graph_edges(self, vector_engine, query) -> None: # :TODO: When we calculate edge embeddings in vector db change this similarly to node mapping
+    async def map_vector_distances_to_graph_edges(
+        self, vector_engine, query
+    ) -> None:  # :TODO: When we calculate edge embeddings in vector db change this similarly to node mapping
         try:
             # Step 1: Generate the query embedding
             query_vector = await vector_engine.embed_data([query])
@@ -127,7 +140,7 @@ class CogneeGraph(CogneeAbstractGraph):
             # Step 2: Collect all unique relationship types
             unique_relationship_types = set()
             for edge in self.edges:
-                relationship_type = edge.attributes.get('relationship_type')
+                relationship_type = edge.attributes.get("relationship_type")
                 if relationship_type:
                     unique_relationship_types.add(relationship_type)
 
@@ -137,12 +150,14 @@ class CogneeGraph(CogneeAbstractGraph):
 
             # Step 4: Map relationship types to their embeddings and calculate distances
             embedding_map = {}
-            for relationship_type, embedding in zip(unique_relationship_types, relationship_type_embeddings):
+            for relationship_type, embedding in zip(
+                unique_relationship_types, relationship_type_embeddings
+            ):
                 edge_vector = np.array(embedding)
 
                 # Calculate cosine similarity
                 similarity = np.dot(query_vector, edge_vector) / (
-                        np.linalg.norm(query_vector) * np.linalg.norm(edge_vector)
+                    np.linalg.norm(query_vector) * np.linalg.norm(edge_vector)
                 )
                 distance = 1 - similarity
 
@@ -151,7 +166,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
             # Step 4: Assign precomputed distances to edges
             for edge in self.edges:
-                relationship_type = edge.attributes.get('relationship_type')
+                relationship_type = edge.attributes.get("relationship_type")
                 if not relationship_type or relationship_type not in embedding_map:
                     print(f"Edge {edge} has an unknown or missing relationship type.")
                     continue
@@ -161,7 +176,6 @@ class CogneeGraph(CogneeAbstractGraph):
 
         except Exception as ex:
             print(f"Error mapping vector distances to edges: {ex}")
-
 
     async def calculate_top_triplet_importances(self, k: int) -> List:
         min_heap = []
@@ -179,6 +193,4 @@ class CogneeGraph(CogneeAbstractGraph):
             if len(min_heap) > k:
                 heapq.heappop(min_heap)
 
-
         return [edge for _, _, edge in sorted(min_heap)]
-

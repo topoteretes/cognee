@@ -25,7 +25,7 @@ RUN pip install poetry
 RUN poetry config virtualenvs.create false
 
 # Install the dependencies
-RUN poetry install --all-extras --no-root --no-dev
+RUN poetry install --all-extras --no-root --without dev
 
 
 # Set the PYTHONPATH environment variable to include the /app directory

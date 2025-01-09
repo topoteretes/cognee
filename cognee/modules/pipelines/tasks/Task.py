@@ -1,6 +1,7 @@
 from typing import Union, Callable, Any, Coroutine, Generator, AsyncGenerator
 
-class Task():
+
+class Task:
     executable: Union[
         Callable[..., Any],
         Callable[..., Coroutine[Any, Any, Any]],
@@ -12,12 +13,9 @@ class Task():
     }
     default_params: dict[str, Any] = {}
 
-    def __init__(self, executable, *args, task_config = None, **kwargs):
+    def __init__(self, executable, *args, task_config=None, **kwargs):
         self.executable = executable
-        self.default_params = {
-            "args": args,
-            "kwargs": kwargs
-        }
+        self.default_params = {"args": args, "kwargs": kwargs}
 
         if task_config is not None:
             self.task_config = task_config
@@ -27,6 +25,6 @@ class Task():
 
     def run(self, *args, **kwargs):
         combined_args = args + self.default_params["args"]
-        combined_kwargs = { **self.default_params["kwargs"], **kwargs }
+        combined_kwargs = {**self.default_params["kwargs"], **kwargs}
 
         return self.executable(*combined_args, **combined_kwargs)
