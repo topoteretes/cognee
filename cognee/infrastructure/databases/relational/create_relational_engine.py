@@ -11,7 +11,7 @@ def create_relational_engine(
     db_provider: str,
 ):
     if db_provider == "sqlite":
-        connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
+        connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}?mode=rwc"
 
     if db_provider == "postgres":
         connection_string = (
