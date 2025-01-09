@@ -15,6 +15,7 @@ def get_all_subclasses(cls):
 
     return subclasses
 
+
 def find_subclass_by_name(cls, name):
     for subclass in get_all_subclasses(cls):
         if subclass.__name__ == name:

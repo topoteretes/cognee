@@ -10,17 +10,23 @@ logging.basicConfig(level=logging.DEBUG)
 async def main():
     cognee.config.set_vector_db_provider("milvus")
     data_directory_path = str(
-        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_milvus")).resolve())
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_milvus")
+        ).resolve()
+    )
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(
-        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_milvus")).resolve())
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_milvus")
+        ).resolve()
+    )
     cognee.config.system_root_directory(cognee_directory_path)
 
     cognee.config.set_vector_db_config(
         {
             "vector_db_url": os.path.join(cognee_directory_path, "databases/milvus.db"),
             "vector_db_key": "",
-            "vector_db_provider": "milvus"
+            "vector_db_provider": "milvus",
         }
     )
 
@@ -29,7 +35,9 @@ async def main():
 
     dataset_name = "cs_explanations"
 
-    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+    explanation_file_path = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
+    )
     await cognee.add([explanation_file_path], dataset_name)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
@@ -45,6 +53,7 @@ async def main():
     await cognee.cognify([dataset_name])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
+
     vector_engine = get_vector_engine()
     random_node = (await vector_engine.search("entity_name", "Quantum computer"))[0]
     random_node_name = random_node.payload["text"]
@@ -81,4 +90,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

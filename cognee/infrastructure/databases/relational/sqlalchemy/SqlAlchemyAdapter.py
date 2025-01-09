@@ -1,6 +1,6 @@
 import os
 from os import path
-import  logging
+import logging
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
@@ -18,7 +18,8 @@ from ..ModelBase import Base
 
 logger = logging.getLogger(__name__)
 
-class SQLAlchemyAdapter():
+
+class SQLAlchemyAdapter:
     def __init__(self, connection_string: str):
         self.db_path: str = None
         self.db_uri: str = connection_string
@@ -58,17 +59,23 @@ class SQLAlchemyAdapter():
         fields_query_parts = [f"{item['name']} {item['type']}" for item in table_config]
         async with self.engine.begin() as connection:
             await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
-            await connection.execute(text(f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"))
+            await connection.execute(
+                text(
+                    f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"
+                )
+            )
             await connection.close()
 
-    async def delete_table(self, table_name: str,  schema_name: Optional[str] = "public"):
+    async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
                 # SQLite doesn’t support schema namespaces and the CASCADE keyword.
                 # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
                 await connection.execute(text(f"DROP TABLE IF EXISTS {table_name};"))
             else:
-                await connection.execute(text(f"DROP TABLE IF EXISTS {schema_name}.{table_name} CASCADE;"))
+                await connection.execute(
+                    text(f"DROP TABLE IF EXISTS {schema_name}.{table_name} CASCADE;")
+                )
 
     async def insert_data(self, schema_name: str, table_name: str, data: list[dict]):
         columns = ", ".join(data[0].keys())
@@ -94,7 +101,9 @@ class SQLAlchemyAdapter():
                 return [schema[0] for schema in result.fetchall()]
         return []
 
-    async def delete_entity_by_id(self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"):
+    async def delete_entity_by_id(
+        self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"
+    ):
         """
         Delete entity in given table based on id. Table must have an id Column.
         """
@@ -114,7 +123,6 @@ class SQLAlchemyAdapter():
                 await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
                 await session.commit()
 
-
     async def delete_data_entity(self, data_id: UUID):
         """
         Delete data and local files related to data if there are no references to it anymore.
@@ -131,14 +139,19 @@ class SQLAlchemyAdapter():
                 raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
 
             # Check if other data objects point to the same raw data location
-            raw_data_location_entities = (await session.execute(
-                select(Data.raw_data_location).where(Data.raw_data_location == data_entity.raw_data_location))).all()
+            raw_data_location_entities = (
+                await session.execute(
+                    select(Data.raw_data_location).where(
+                        Data.raw_data_location == data_entity.raw_data_location
+                    )
+                )
+            ).all()
 
             # Don't delete local file unless this is the only reference to the file in the database
             if len(raw_data_location_entities) == 1:
-
                 # delete local file only if it's created by cognee
                 from cognee.base_config import get_base_config
+
                 config = get_base_config()
 
                 if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
@@ -198,15 +211,18 @@ class SQLAlchemyAdapter():
                     metadata.clear()
         return table_names
 
-
     async def get_data(self, table_name: str, filters: dict = None):
         async with self.engine.begin() as connection:
             query = f"SELECT * FROM {table_name}"
             if filters:
-                filter_conditions = " AND ".join([
-                    f"{key} IN ({', '.join([f':{key}{i}' for i in range(len(value))])})" if isinstance(value, list)
-                    else f"{key} = :{key}" for key, value in filters.items()
-                ])
+                filter_conditions = " AND ".join(
+                    [
+                        f"{key} IN ({', '.join([f':{key}{i}' for i in range(len(value))])})"
+                        if isinstance(value, list)
+                        else f"{key} = :{key}"
+                        for key, value in filters.items()
+                    ]
+                )
                 query += f" WHERE {filter_conditions};"
                 query = text(query)
                 results = await connection.execute(query, filters)
@@ -252,7 +268,6 @@ class SQLAlchemyAdapter():
             except Exception as e:
                 print(f"Error dropping database tables: {e}")
 
-
     async def create_database(self):
         if self.engine.dialect.name == "sqlite":
             from cognee.infrastructure.files.storage import LocalStorage
@@ -263,7 +278,6 @@ class SQLAlchemyAdapter():
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:
                 await connection.run_sync(Base.metadata.create_all)
-
 
     async def delete_database(self):
         try:
@@ -281,7 +295,9 @@ class SQLAlchemyAdapter():
                         # Load the schema information into the MetaData object
                         await connection.run_sync(metadata.reflect, schema=schema_name)
                         for table in metadata.sorted_tables:
-                            drop_table_query = text(f"DROP TABLE IF EXISTS {schema_name}.{table.name} CASCADE")
+                            drop_table_query = text(
+                                f"DROP TABLE IF EXISTS {schema_name}.{table.name} CASCADE"
+                            )
                             await connection.execute(drop_table_query)
                         metadata.clear()
         except Exception as e:

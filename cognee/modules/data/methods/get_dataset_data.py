@@ -3,6 +3,7 @@ from sqlalchemy import select
 from cognee.modules.data.models import Data, Dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 
+
 async def get_dataset_data(dataset_id: UUID) -> list[Data]:
     db_engine = get_relational_engine()
 

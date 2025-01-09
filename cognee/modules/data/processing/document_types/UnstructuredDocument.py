@@ -29,6 +29,6 @@ class UnstructuredDocument(Document):
 
                 yield text
 
-        chunker = TextChunker(self, chunk_size = chunk_size, get_text = get_text, max_tokens=max_tokens)
+        chunker = TextChunker(self, chunk_size=chunk_size, get_text=get_text, max_tokens=max_tokens)
 
         yield from chunker.read()

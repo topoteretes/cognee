@@ -1,4 +1,6 @@
-from cognee.infrastructure.databases.relational.user_authentication.users import authenticate_user_method
+from cognee.infrastructure.databases.relational.user_authentication.users import (
+    authenticate_user_method,
+)
 
 
 async def authenticate_user(email: str, password: str):
@@ -11,6 +13,7 @@ async def authenticate_user(email: str, password: str):
 
 if __name__ == "__main__":
     import asyncio
+
     # Define an example user
     example_email = "example@example.com"
     example_password = "securepassword123"

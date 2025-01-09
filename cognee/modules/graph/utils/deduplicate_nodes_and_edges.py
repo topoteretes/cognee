@@ -1,5 +1,6 @@
 from cognee.infrastructure.engine import DataPoint
 
+
 def deduplicate_nodes_and_edges(nodes: list[DataPoint], edges: list[dict]):
     added_entities = {}
     final_nodes = []

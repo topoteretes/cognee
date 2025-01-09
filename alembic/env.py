@@ -4,8 +4,9 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
+from cognee.infrastructure.databases.relational import Base
 from alembic import context
+from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,7 +21,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from cognee.infrastructure.databases.relational import Base
+
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
@@ -83,12 +84,11 @@ def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
 
 
-from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
-
 db_engine = get_relational_engine()
 
 if db_engine.engine.dialect.name == "sqlite":
     from cognee.infrastructure.files.storage import LocalStorage
+
     db_config = get_relational_config()
     LocalStorage.ensure_directory_exists(db_config.db_path)
 

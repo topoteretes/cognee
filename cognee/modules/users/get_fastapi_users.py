@@ -6,6 +6,7 @@ from .authentication.get_auth_backend import get_auth_backend
 from .get_user_manager import get_user_manager
 from .models.User import User
 
+
 @lru_cache
 def get_fastapi_users():
     auth_backend = get_auth_backend()

@@ -7,19 +7,30 @@ from cognee.modules.retrieval.brute_force_triplet_search import brute_force_trip
 
 logging.basicConfig(level=logging.DEBUG)
 
+
 async def main():
     cognee.config.set_vector_db_provider("weaviate")
-    data_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_weaviate")).resolve())
+    data_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_weaviate")
+        ).resolve()
+    )
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_weaviate")).resolve())
+    cognee_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_weaviate")
+        ).resolve()
+    )
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata = True)
+    await cognee.prune.prune_system(metadata=True)
 
     dataset_name = "cs_explanations"
 
-    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt")
+    explanation_file_path = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
+    )
     await cognee.add([explanation_file_path], dataset_name)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
@@ -35,23 +46,24 @@ async def main():
     await cognee.cognify([dataset_name])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
+
     vector_engine = get_vector_engine()
     random_node = (await vector_engine.search("entity_name", "Quantum computer"))[0]
     random_node_name = random_node.payload["text"]
 
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text = random_node_name)
+    search_results = await cognee.search(SearchType.INSIGHTS, query_text=random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, query_text = random_node_name)
+    search_results = await cognee.search(SearchType.CHUNKS, query_text=random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.SUMMARIES, query_text = random_node_name)
+    search_results = await cognee.search(SearchType.SUMMARIES, query_text=random_node_name)
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\nExtracted summaries are:\n")
     for result in search_results:
@@ -60,16 +72,18 @@ async def main():
     history = await cognee.get_search_history()
     assert len(history) == 6, "Search history is not correct."
 
-    results = await brute_force_triplet_search('What is a quantum computer?')
+    results = await brute_force_triplet_search("What is a quantum computer?")
     assert len(results) > 0
 
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    collections =  get_vector_engine().client.collections.list_all()
+    collections = get_vector_engine().client.collections.list_all()
     assert len(collections) == 0, "Weaviate vector database is not empty"
+
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

@@ -8,7 +8,4 @@ class Entity(DataPoint):
     is_a: EntityType
     description: str
 
-    _metadata: dict = {
-        "index_fields": ["name"],
-        "type": "Entity"
-    }
+    _metadata: dict = {"index_fields": ["name"], "type": "Entity"}

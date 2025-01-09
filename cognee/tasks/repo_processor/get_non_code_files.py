@@ -6,8 +6,7 @@ import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.data.methods.get_datasets_by_name import \
-    get_datasets_by_name
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
 from cognee.modules.data.models import Data
 from cognee.modules.data.operations.write_metadata import write_metadata
 from cognee.modules.ingestion.data_types import BinaryData
@@ -21,35 +20,119 @@ async def get_non_py_files(repo_path):
         return {}
 
     IGNORED_PATTERNS = {
-        '.git', '__pycache__', '*.pyc', '*.pyo', '*.pyd',
-        'node_modules', '*.egg-info'
+        ".git",
+        "__pycache__",
+        "*.pyc",
+        "*.pyo",
+        "*.pyd",
+        "node_modules",
+        "*.egg-info",
     }
 
     ALLOWED_EXTENSIONS = {
-        '.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.yml', '.html', 
-        '.css', '.js', '.ts', '.jsx', '.tsx', '.sql', '.log', '.ini', 
-        '.toml', '.properties', '.sh', '.bash', '.dockerfile', '.gitignore', 
-        '.gitattributes', '.makefile', '.pyproject', '.requirements', 
-        '.env', '.pdf', '.doc', '.docx', '.dot', '.dotx', '.rtf', 
-        '.wps', '.wpd', '.odt', '.ott', '.ottx', '.txt', '.wp', 
-        '.sdw', '.sdx', '.docm', '.dotm', 
+        ".txt",
+        ".md",
+        ".csv",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".html",
+        ".css",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".sql",
+        ".log",
+        ".ini",
+        ".toml",
+        ".properties",
+        ".sh",
+        ".bash",
+        ".dockerfile",
+        ".gitignore",
+        ".gitattributes",
+        ".makefile",
+        ".pyproject",
+        ".requirements",
+        ".env",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".dot",
+        ".dotx",
+        ".rtf",
+        ".wps",
+        ".wpd",
+        ".odt",
+        ".ott",
+        ".ottx",
+        ".txt",
+        ".wp",
+        ".sdw",
+        ".sdx",
+        ".docm",
+        ".dotm",
         # Additional extensions for other programming languages
-        '.java', '.c', '.cpp', '.h', '.cs', '.go', '.php', '.rb', 
-        '.swift', '.pl', '.lua', '.rs', '.scala', '.kt', '.sh', 
-        '.sql', '.v', '.asm', '.pas', '.d', '.ml', '.clj', '.cljs', 
-        '.erl', '.ex', '.exs', '.f', '.fs', '.r', '.pyi', 
-        '.pdb', '.ipynb', '.rmd', '.cabal', '.hs', '.nim', 
-        '.vhdl', '.verilog', '.svelte', '.html', '.css', '.scss', 
-        '.less', '.json5', '.yaml', '.yml'
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".cs",
+        ".go",
+        ".php",
+        ".rb",
+        ".swift",
+        ".pl",
+        ".lua",
+        ".rs",
+        ".scala",
+        ".kt",
+        ".sh",
+        ".sql",
+        ".v",
+        ".asm",
+        ".pas",
+        ".d",
+        ".ml",
+        ".clj",
+        ".cljs",
+        ".erl",
+        ".ex",
+        ".exs",
+        ".f",
+        ".fs",
+        ".r",
+        ".pyi",
+        ".pdb",
+        ".ipynb",
+        ".rmd",
+        ".cabal",
+        ".hs",
+        ".nim",
+        ".vhdl",
+        ".verilog",
+        ".svelte",
+        ".html",
+        ".css",
+        ".scss",
+        ".less",
+        ".json5",
+        ".yaml",
+        ".yml",
     }
 
     def should_process(path):
         _, ext = os.path.splitext(path)
-        return ext in ALLOWED_EXTENSIONS and not any(pattern in path for pattern in IGNORED_PATTERNS)
+        return ext in ALLOWED_EXTENSIONS and not any(
+            pattern in path for pattern in IGNORED_PATTERNS
+        )
 
     non_py_files_paths = [
         os.path.join(root, file)
-        for root, _, files in os.walk(repo_path) for file in files 
+        for root, _, files in os.walk(repo_path)
+        for file in files
         if not file.endswith(".py") and should_process(os.path.join(root, file))
     ]
     return non_py_files_paths

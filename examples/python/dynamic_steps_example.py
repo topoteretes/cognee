@@ -160,6 +160,7 @@ CRM Software: Salesforce, Zoho
 Negotiation and Relationship Building
 """
 
+
 async def main(enable_steps):
     # Step 1: Reset data and system state
     if enable_steps.get("prune_data"):
@@ -184,10 +185,13 @@ async def main(enable_steps):
 
     # Step 4: Query insights
     if enable_steps.get("retriever"):
-        results = await brute_force_triplet_search('Who has the most experience with graphic design?')
+        results = await brute_force_triplet_search(
+            "Who has the most experience with graphic design?"
+        )
         print(format_triplets(results))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     setup_logging(logging.ERROR)
 
     rebuild_kg = True
@@ -197,7 +201,7 @@ if __name__ == '__main__':
         "prune_system": rebuild_kg,
         "add_text": rebuild_kg,
         "cognify": rebuild_kg,
-        "retriever": retrieve
+        "retriever": retrieve,
     }
 
     asyncio.run(main(steps_to_enable))
