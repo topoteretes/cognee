@@ -160,6 +160,7 @@ CRM Software: Salesforce, Zoho
 Negotiation and Relationship Building
 """
 
+
 async def main(enable_steps):
     # Step 1: Reset data and system state
     if enable_steps.get("prune_data"):
@@ -199,7 +200,7 @@ if __name__ == '__main__':
         "prune_system": rebuild_kg,
         "add_text": rebuild_kg,
         "cognify": rebuild_kg,
-        "retriever": retrieve
+        "retriever": retrieve,
     }
 
     asyncio.run(main(steps_to_enable))

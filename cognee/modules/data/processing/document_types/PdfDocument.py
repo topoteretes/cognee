@@ -2,6 +2,7 @@ from pypdf import PdfReader
 from .Document import Document
 from .ChunkerMapping import ChunkerConfig
 
+
 class PdfDocument(Document):
     type: str = "pdf"
 
@@ -14,7 +15,7 @@ class PdfDocument(Document):
                 yield page_text
 
         chunker_func = ChunkerConfig.get_chunker(chunker)
-        chunker = chunker_func(self, chunk_size = chunk_size, get_text = get_text)
+        chunker = chunker_func(self, chunk_size=chunk_size, get_text=get_text)
 
         yield from chunker.read()
 

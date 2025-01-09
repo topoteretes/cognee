@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
+
 def serialize_data(data):
     """Recursively convert datetime objects in dictionaries/lists to ISO format."""
     if isinstance(data, dict):

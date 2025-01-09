@@ -25,13 +25,16 @@ TEST_TEXT = """
 
 
 def test_AudioDocument():
-
     document = AudioDocument(
-        id=uuid.uuid4(), name="audio-dummy-test", raw_data_location="", metadata_id=uuid.uuid4(), mime_type="",
+        id=uuid.uuid4(),
+        name="audio-dummy-test",
+        raw_data_location="",
+        metadata_id=uuid.uuid4(),
+        mime_type="",
     )
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
         for ground_truth, paragraph_data in zip(
-            GROUND_TRUTH, document.read(chunk_size=64, chunker='text_chunker')
+            GROUND_TRUTH, document.read(chunk_size=64, chunker="text_chunker")
         ):
             assert (
                 ground_truth["word_count"] == paragraph_data.word_count

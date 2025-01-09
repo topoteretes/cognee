@@ -3,6 +3,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ..get_user_manager import get_user_manager_context
 from ..get_user_db import get_user_db_context
 
+
 async def delete_user(email: str):
     try:
         relational_engine = get_relational_engine()

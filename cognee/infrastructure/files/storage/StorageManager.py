@@ -1,5 +1,6 @@
 from typing import Protocol, BinaryIO
 
+
 class Storage(Protocol):
     def store(self, file_path: str, data: bytes):
         pass
@@ -11,10 +12,11 @@ class Storage(Protocol):
     def remove(file_path: str):
         pass
 
-class StorageManager():
+
+class StorageManager:
     storage: Storage = None
 
-    def __init__ (self, storage: Storage):
+    def __init__(self, storage: Storage):
         self.storage = storage
 
     def store(self, file_path: str, data: BinaryIO):

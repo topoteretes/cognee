@@ -1,6 +1,7 @@
 from typing import Union, BinaryIO
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 
+
 def save_data_to_storage(data: Union[BinaryIO, str], dataset_name) -> list[str]:
     if not isinstance(data, list):
         # Convert data to a list as we work with lists further down.

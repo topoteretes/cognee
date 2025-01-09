@@ -11,20 +11,16 @@ class Variable(DataPoint):
     default_value: Optional[str] = None
     data_type: str
 
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "Variable"
-    }
+    _metadata = {"index_fields": ["name"], "type": "Variable"}
+
 
 class Operator(DataPoint):
     id: str
     name: str
     description: str
     return_type: str
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "Operator"
-    }
+    _metadata = {"index_fields": ["name"], "type": "Operator"}
+
 
 class Class(DataPoint):
     id: str
@@ -34,10 +30,8 @@ class Class(DataPoint):
     extended_from_class: Optional["Class"] = None
     has_methods: List["Function"]
 
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "Class"
-    }
+    _metadata = {"index_fields": ["name"], "type": "Class"}
+
 
 class ClassInstance(DataPoint):
     id: str
@@ -47,10 +41,8 @@ class ClassInstance(DataPoint):
     instantiated_by: Union["Function"]
     instantiation_arguments: List[Variable]
 
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "ClassInstance"
-    }
+    _metadata = {"index_fields": ["name"], "type": "ClassInstance"}
+
 
 class Function(DataPoint):
     id: str
@@ -60,20 +52,16 @@ class Function(DataPoint):
     return_type: str
     is_static: Optional[bool] = False
 
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "Function"
-    }
+    _metadata = {"index_fields": ["name"], "type": "Function"}
+
 
 class FunctionCall(DataPoint):
     id: str
     called_by: Union[Function, Literal["main"]]
     function_called: Function
     function_arguments: List[Any]
-    _metadata = {
-        "index_fields": [],
-        "type": "FunctionCall"
-    }
+    _metadata = {"index_fields": [], "type": "FunctionCall"}
+
 
 class Expression(DataPoint):
     id: str
@@ -81,29 +69,27 @@ class Expression(DataPoint):
     description: str
     expression: str
     members: List[Union[Variable, Function, Operator, "Expression"]]
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "Expression"
-    }
+    _metadata = {"index_fields": ["name"], "type": "Expression"}
+
 
 class SourceCodeGraph(DataPoint):
     id: str
     name: str
     description: str
     language: str
-    nodes: List[Union[
-        Class,
-        ClassInstance,
-        Function,
-        FunctionCall,
-        Variable,
-        Operator,
-        Expression,
-    ]]
-    _metadata = {
-        "index_fields": ["name"],
-        "type": "SourceCodeGraph"
-    }
+    nodes: List[
+        Union[
+            Class,
+            ClassInstance,
+            Function,
+            FunctionCall,
+            Variable,
+            Operator,
+            Expression,
+        ]
+    ]
+    _metadata = {"index_fields": ["name"], "type": "SourceCodeGraph"}
+
 
 Class.model_rebuild()
 ClassInstance.model_rebuild()

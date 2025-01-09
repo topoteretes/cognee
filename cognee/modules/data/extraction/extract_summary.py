@@ -13,14 +13,16 @@ from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 
 logger = logging.getLogger("extract_summary")
 
+
 async def extract_summary(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
 
     system_prompt = read_query_prompt("summarize_content.txt")
 
     llm_output = await llm_client.acreate_structured_output(content, system_prompt, response_model)
- 
+
     return llm_output
+
 
 async def extract_code_summary(content: str):
     enable_mocking = os.getenv("MOCK_CODE_SUMMARY", "false")

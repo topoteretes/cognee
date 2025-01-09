@@ -7,23 +7,23 @@ from cognee.modules.users.methods import get_authenticated_user
 from fastapi import Depends
 from cognee.shared.data_models import KnowledgeGraph
 
+
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
     graph_model: Optional[BaseModel] = KnowledgeGraph
+
 
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/", response_model=None)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
-        """ This endpoint is responsible for the cognitive processing of the content."""
+        """This endpoint is responsible for the cognitive processing of the content."""
         from cognee.api.v1.cognify.cognify_v2 import cognify as cognee_cognify
+
         try:
             await cognee_cognify(payload.datasets, user, payload.graph_model)
         except Exception as error:
-            return JSONResponse(
-                status_code=409,
-                content={"error": str(error)}
-            )
+            return JSONResponse(status_code=409, content={"error": str(error)})
 
     return router

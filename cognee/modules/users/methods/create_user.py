@@ -4,6 +4,7 @@ from ..get_user_manager import get_user_manager_context
 from ..get_user_db import get_user_db_context
 from ..models.User import UserCreate
 
+
 async def create_user(
     email: str,
     password: str,
@@ -20,11 +21,11 @@ async def create_user(
                 async with get_user_manager_context(user_db) as user_manager:
                     user = await user_manager.create(
                         UserCreate(
-                            email = email,
-                            password = password,
-                            is_superuser = is_superuser,
-                            is_active = is_active,
-                            is_verified = is_verified,
+                            email=email,
+                            password=password,
+                            is_superuser=is_superuser,
+                            is_active=is_active,
+                            is_verified=is_verified,
                         )
                     )
 
