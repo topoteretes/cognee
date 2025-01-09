@@ -4,7 +4,9 @@ import jedi
 import parso
 from tqdm import tqdm
 
-from . import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 _NODE_TYPE_MAP = {
     "funcdef": "func_def",
