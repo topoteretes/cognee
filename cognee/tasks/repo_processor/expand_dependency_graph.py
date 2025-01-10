@@ -10,7 +10,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 def _add_code_parts_nodes_and_edges(code_file: CodeFile, part_type, code_parts) -> None:
     """Add code part nodes and edges for a specific part type."""
     if not code_parts:
