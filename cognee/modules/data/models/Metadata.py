@@ -14,13 +14,8 @@ class Metadata(Base):
     metadata_repr = Column(String)
     metadata_source = Column(String)
 
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
-    updated_at = Column(
-        DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
-    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
-    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"), primary_key = False)
+    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"), primary_key=False)
     data = relationship("Data", back_populates="metadata_relationship")
-

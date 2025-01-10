@@ -1,7 +1,9 @@
 import cognee
 import asyncio
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.brute_force_triplet_search import format_triplets
+import logging
+
+from cognee.api.v1.search import SearchType
+from cognee.shared.utils import setup_logging
 
 job_1 = """
 CV 1: Relevant
@@ -158,6 +160,7 @@ CRM Software: Salesforce, Zoho
 Negotiation and Relationship Building
 """
 
+
 async def main(enable_steps):
     # Step 1: Reset data and system state
     if enable_steps.get("prune_data"):
@@ -182,10 +185,15 @@ async def main(enable_steps):
 
     # Step 4: Query insights
     if enable_steps.get("retriever"):
-        results = await brute_force_triplet_search('Who has the most experience with graphic design?')
-        print(format_triplets(results))
+        search_results = await cognee.search(
+            SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
+        )
+        print(search_results)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
+    setup_logging(logging.INFO)
+
     rebuild_kg = True
     retrieve = True
     steps_to_enable = {
@@ -193,7 +201,7 @@ if __name__ == '__main__':
         "prune_system": rebuild_kg,
         "add_text": rebuild_kg,
         "cognify": rebuild_kg,
-        "retriever": retrieve
+        "retriever": retrieve,
     }
 
     asyncio.run(main(steps_to_enable))

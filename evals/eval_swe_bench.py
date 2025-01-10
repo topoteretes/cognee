@@ -7,19 +7,13 @@ from pathlib import Path
 from swebench.harness.utils import load_swebench_dataset
 from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 
+from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.modules.pipelines import Task, run_tasks
-from cognee.modules.retrieval.brute_force_triplet_search import \
-    brute_force_triplet_search
-# from cognee.shared.data_models import SummarizedContent
-from cognee.shared.utils import render_graph
-from cognee.tasks.repo_processor import (enrich_dependency_graph,
-                                         expand_dependency_graph,
-                                         get_repo_file_dependencies)
-from cognee.tasks.storage import add_data_points
-# from cognee.tasks.summarization import summarize_code
+from cognee.modules.retrieval.description_to_codepart_search import (
+    code_description_to_code_part_search,
+)
 from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
@@ -33,67 +27,35 @@ def check_install_package(package_name):
         return True
     except ImportError:
         try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", package_name]
-            )
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
             return True
         except subprocess.CalledProcessError:
             return False
 
 
-async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
-    import os
-    import pathlib
-    import cognee
-    from cognee.infrastructure.databases.relational import create_db_and_tables
-
-    file_path = Path(__file__).parent
-    data_directory_path = str(pathlib.Path(os.path.join(file_path, ".data_storage/code_graph")).resolve())
-    cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(pathlib.Path(os.path.join(file_path, ".cognee_system/code_graph")).resolve())
-    cognee.config.system_root_directory(cognee_directory_path)
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata = True)
-
-    await create_db_and_tables()
-
-    # repo_path = download_github_repo(instance, '../RAW_GIT_REPOS')
-    
-    repo_path = '/Users/borisarzentar/Projects/graphrag'
-    
-    tasks = [
-        Task(get_repo_file_dependencies),
-        Task(enrich_dependency_graph, task_config = { "batch_size": 50 }),
-        Task(expand_dependency_graph, task_config = { "batch_size": 50 }),
-        Task(add_data_points, task_config = { "batch_size": 50 }),
-        # Task(summarize_code, summarization_model = SummarizedContent),
-    ]
-
-    pipeline = run_tasks(tasks, repo_path, "cognify_code_pipeline")
-
-    async for result in pipeline:
-        print(result)
-
-    print('Here we have the repo under the repo_path')
-
-    await render_graph(None, include_labels = True, include_nodes = True)
-
-    problem_statement = instance['problem_statement']
+async def generate_patch_with_cognee(instance):
+    repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")
+    include_docs = True
+    problem_statement = instance["problem_statement"]
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
-    retrieved_edges = await brute_force_triplet_search(problem_statement, top_k = 3, collections = ["data_point_source_code", "data_point_text"])
-    
-    retrieved_edges_str = retrieved_edges_to_string(retrieved_edges)
+    async for result in run_code_graph_pipeline(repo_path, include_docs=include_docs):
+        print(result)
 
-    prompt = "\n".join([
-        problem_statement,
-        "<patch>",
-        PATCH_EXAMPLE,
-        "</patch>",
-        "These are the retrieved edges:",
-        retrieved_edges_str
-    ])
+    retrieved_codeparts = await code_description_to_code_part_search(
+        problem_statement, include_docs=include_docs
+    )
+
+    prompt = "\n".join(
+        [
+            problem_statement,
+            "<patch>",
+            PATCH_EXAMPLE,
+            "</patch>",
+            "This is the additional context to solve the problem (description from documentation together with codeparts):",
+            retrieved_codeparts,
+        ]
+    )
 
     llm_client = get_llm_client()
     answer_prediction = await llm_client.acreate_structured_output(
@@ -117,8 +79,6 @@ async def generate_patch_without_cognee(instance, llm_client):
 
 
 async def get_preds(dataset, with_cognee=True):
-    llm_client = get_llm_client()
-
     if with_cognee:
         model_name = "with_cognee"
         pred_func = generate_patch_with_cognee
@@ -126,28 +86,25 @@ async def get_preds(dataset, with_cognee=True):
         model_name = "without_cognee"
         pred_func = generate_patch_without_cognee
 
-    futures = [
-        (instance["instance_id"], pred_func(instance, llm_client))
-        for instance in dataset
-    ]
-    model_patches = await asyncio.gather(*[x[1] for x in futures])
+    preds = []
 
-    preds = [
-        {
-            "instance_id": instance_id,
-            "model_patch": model_patch,
-            "model_name_or_path": model_name,
-        }
-        for (instance_id, _), model_patch in zip(futures, model_patches)
-    ]
+    for instance in dataset:
+        instance_id = instance["instance_id"]
+        model_patch = await pred_func(instance)  # Sequentially await the async function
+        preds.append(
+            {
+                "instance_id": instance_id,
+                "model_patch": model_patch,
+                "model_name_or_path": model_name,
+            }
+        )
 
     return preds
 
 
 async def main():
-    parser = argparse.ArgumentParser(
-        description="Run LLM predictions on SWE-bench dataset")
-    parser.add_argument('--cognee_off', action='store_true')
+    parser = argparse.ArgumentParser(description="Run LLM predictions on SWE-bench dataset")
+    parser.add_argument("--cognee_off", action="store_true")
     parser.add_argument("--max_workers", type=int, required=True)
     args = parser.parse_args()
 
@@ -155,23 +112,22 @@ async def main():
         check_install_package(dependency)
 
     if args.cognee_off:
-        dataset_name = 'princeton-nlp/SWE-bench_Lite_bm25_13K'
-        dataset = load_swebench_dataset(dataset_name, split='test')
+        dataset_name = "princeton-nlp/SWE-bench_Lite_bm25_13K"
+        dataset = load_swebench_dataset(dataset_name, split="test")
         predictions_path = "preds_nocognee.json"
         if not Path(predictions_path).exists():
             preds = await get_preds(dataset, with_cognee=False)
             with open(predictions_path, "w") as file:
                 json.dump(preds, file)
     else:
-        dataset_name = 'princeton-nlp/SWE-bench_Lite'
-        swe_dataset = load_swebench_dataset(
-            dataset_name, split='test')[:1]
+        dataset_name = "princeton-nlp/SWE-bench_Lite"
+        swe_dataset = load_swebench_dataset(dataset_name, split="test")[:1]
         predictions_path = "preds.json"
         preds = await get_preds(swe_dataset, with_cognee=not args.cognee_off)
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
 
-
+    """ This part is for the evaluation
     subprocess.run(
         [
             "python",
@@ -189,6 +145,7 @@ async def main():
             "test_run",
         ]
     )
+    """
 
 
 if __name__ == "__main__":

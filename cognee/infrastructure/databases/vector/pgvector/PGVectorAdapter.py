@@ -1,44 +1,31 @@
 import asyncio
-from uuid import UUID
 from typing import List, Optional, get_type_hints
+from uuid import UUID
+
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import JSON, Column, Table, select, delete
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
 
-from .serialize_data import serialize_data
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-from ..utils import normalize_distances
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ...relational.ModelBase import Base
+from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..utils import normalize_distances
+from ..vector_db_interface import VectorDBInterface
+from .serialize_data import serialize_data
+
 
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {
-        "index_fields": ["text"]
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
 
-def singleton(class_):
-    # Note: Using this singleton as a decorator to a class removes
-    # the option to use class methods for that class
-    instances = {}
 
-    def getinstance(*args, **kwargs):
-        if class_ not in instances:
-            instances[class_] = class_(*args, **kwargs)
-        return instances[class_]
-
-    return getinstance
-
-@singleton
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
-
     def __init__(
         self,
         connection_string: str,
@@ -51,15 +38,23 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.engine = create_async_engine(self.db_uri)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
+        # Has to be imported at class level
+        # Functions reading tables from database need to know what a Vector column type is
+        from pgvector.sqlalchemy import Vector
+
+        self.Vector = Vector
+
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
         async with self.engine.begin() as connection:
-            # Load the schema information into the MetaData object
-            await connection.run_sync(Base.metadata.reflect)
+            # Create a MetaData instance to load table information
+            metadata = MetaData()
+            # Load table information from schema into MetaData
+            await connection.run_sync(metadata.reflect)
 
-            if collection_name in Base.metadata.tables:
+            if collection_name in metadata.tables:
                 return True
             else:
                 return False
@@ -70,17 +65,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         if not await self.has_collection(collection_name):
 
-            from pgvector.sqlalchemy import Vector
             class PGVectorDataPoint(Base):
                 __tablename__ = collection_name
                 __table_args__ = {"extend_existing": True}
                 # PGVector requires one column to be the primary key
-                primary_key: Mapped[int] = mapped_column(
-                    primary_key=True, autoincrement=True
-                )
+                primary_key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
                 id: Mapped[data_point_types["id"]]
                 payload = Column(JSON)
-                vector = Column(Vector(vector_size))
+                vector = Column(self.Vector(vector_size))
 
                 def __init__(self, id, payload, vector):
                     self.id = id
@@ -93,13 +85,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                     )
 
-    async def create_data_points(
-        self, collection_name: str, data_points: List[DataPoint]
-    ):
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
-                collection_name = collection_name,
-                payload_schema = type(data_points[0]),
+                collection_name=collection_name,
+                payload_schema=type(data_points[0]),
             )
 
         data_vectors = await self.embed_data(
@@ -108,17 +99,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         vector_size = self.embedding_engine.get_vector_size()
 
-        from pgvector.sqlalchemy import Vector
         class PGVectorDataPoint(Base):
             __tablename__ = collection_name
             __table_args__ = {"extend_existing": True}
             # PGVector requires one column to be the primary key
-            primary_key: Mapped[int] = mapped_column(
-                primary_key=True, autoincrement=True
-            )
-            id: Mapped[type(data_points[0].id)]
+            primary_key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+            id: Mapped[data_point_types["id"]]
             payload = Column(JSON)
-            vector = Column(Vector(vector_size))
+            vector = Column(self.Vector(vector_size))
 
             def __init__(self, id, payload, vector):
                 self.id = id
@@ -127,9 +115,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         pgvector_data_points = [
             PGVectorDataPoint(
-                id = data_point.id,
-                vector = data_vectors[data_index],
-                payload = serialize_data(data_point.model_dump()),
+                id=data_point.id,
+                vector=data_vectors[data_index],
+                payload=serialize_data(data_point.model_dump()),
             )
             for (data_index, data_point) in enumerate(data_points)
         ]
@@ -141,13 +129,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
-    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
-        await self.create_data_points(f"{index_name}_{index_property_name}", [
-            IndexSchema(
-                id = data_point.id,
-                text = DataPoint.get_embeddable_data(data_point),
-            ) for data_point in data_points
-        ])
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+    ):
+        await self.create_data_points(
+            f"{index_name}_{index_property_name}",
+            [
+                IndexSchema(
+                    id=data_point.id,
+                    text=DataPoint.get_embeddable_data(data_point),
+                )
+                for data_point in data_points
+            ],
+        )
 
     async def get_table(self, collection_name: str) -> Table:
         """
@@ -155,10 +149,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with an async engine.
         """
         async with self.engine.begin() as connection:
-            # Load the schema information into the MetaData object
-            await connection.run_sync(Base.metadata.reflect)
-            if collection_name in Base.metadata.tables:
-                return Base.metadata.tables[collection_name]
+            # Create a MetaData instance to load table information
+            metadata = MetaData()
+            # Load table information from schema into MetaData
+            await connection.run_sync(metadata.reflect)
+            if collection_name in metadata.tables:
+                return metadata.tables[collection_name]
             else:
                 raise EntityNotFoundError(message=f"Table '{collection_name}' not found.")
 
@@ -173,20 +169,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             results = results.all()
 
             return [
-                ScoredResult(
-                    id = UUID(result.id),
-                    payload = result.payload,
-                    score = 0
-                ) for result in results
+                ScoredResult(id=UUID(result.id), payload=result.payload, score=0)
+                for result in results
             ]
 
     async def get_distance_from_collection_elements(
-            self,
-            collection_name: str,
-            query_text: str = None,
-            query_vector: List[float] = None,
-            with_vector: bool = False
-    )-> List[ScoredResult]:
+        self,
+        collection_name: str,
+        query_text: str = None,
+        query_vector: List[float] = None,
+        with_vector: bool = False,
+    ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
 
@@ -202,11 +195,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             closest_items = await session.execute(
                 select(
                     PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                        "similarity"
-                    ),
-                )
-                .order_by("similarity")
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+                ).order_by("similarity")
             )
 
         vector_list = []
@@ -218,11 +208,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(
-                id = UUID(str(row.id)),
-                payload = row.payload,
-                score = row.similarity
-            ) for row in vector_list
+            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
+            for row in vector_list
         ]
 
     async def search(
@@ -250,9 +237,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             closest_items = await session.execute(
                 select(
                     PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                        "similarity"
-                    ),
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
                 )
                 .order_by("similarity")
                 .limit(limit)
@@ -267,11 +252,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(
-                id = UUID(str(row.id)),
-                payload = row.payload,
-                score = row.similarity
-            ) for row in vector_list
+            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
+            for row in vector_list
         ]
 
     async def batch_search(

@@ -1,4 +1,5 @@
-""" This module is used to set the configuration of the system."""
+"""This module is used to set the configuration of the system."""
+
 import os
 from cognee.base_config import get_base_config
 from cognee.exceptions import InvalidValueError, InvalidAttributeError
@@ -10,7 +11,8 @@ from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.infrastructure.files.storage import LocalStorage
 
-class config():
+
+class config:
     @staticmethod
     def system_root_directory(system_root_directory: str):
         databases_directory_path = os.path.join(system_root_directory, "databases")
@@ -39,12 +41,12 @@ class config():
     @staticmethod
     def set_classification_model(classification_model: object):
         cognify_config = get_cognify_config()
-        cognify_config.classification_model =  classification_model
+        cognify_config.classification_model = classification_model
 
     @staticmethod
     def set_summarization_model(summarization_model: object):
         cognify_config = get_cognify_config()
-        cognify_config.summarization_model=summarization_model
+        cognify_config.summarization_model = summarization_model
 
     @staticmethod
     def set_graph_model(graph_model: object):
@@ -79,14 +81,16 @@ class config():
     @staticmethod
     def set_llm_config(config_dict: dict):
         """
-            Updates the llm config with values from config_dict.
+        Updates the llm config with values from config_dict.
         """
         llm_config = get_llm_config()
         for key, value in config_dict.items():
             if hasattr(llm_config, key):
                 object.__setattr__(llm_config, key, value)
             else:
-                raise InvalidAttributeError(message=f"'{key}' is not a valid attribute of the config.")
+                raise InvalidAttributeError(
+                    message=f"'{key}' is not a valid attribute of the config."
+                )
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -108,7 +112,6 @@ class config():
         chunk_config = get_chunk_config()
         chunk_config.chunk_size = chunk_size
 
-
     @staticmethod
     def set_vector_db_provider(vector_db_provider: str):
         vector_db_config = get_vectordb_config()
@@ -117,32 +120,47 @@ class config():
     @staticmethod
     def set_relational_db_config(config_dict: dict):
         """
-            Updates the relational db config with values from config_dict.
+        Updates the relational db config with values from config_dict.
         """
         relational_db_config = get_relational_config()
         for key, value in config_dict.items():
             if hasattr(relational_db_config, key):
                 object.__setattr__(relational_db_config, key, value)
             else:
-                raise InvalidAttributeError(message=f"'{key}' is not a valid attribute of the config.")
+                raise InvalidAttributeError(
+                    message=f"'{key}' is not a valid attribute of the config."
+                )
+
+    @staticmethod
+    def set_graph_db_config(config_dict: dict) -> None:
+        """
+        Updates the graph db config with values from config_dict.
+        """
+        graph_db_config = get_graph_config()
+        for key, value in config_dict.items():
+            if hasattr(graph_db_config, key):
+                object.__setattr__(graph_db_config, key, value)
+            else:
+                raise AttributeError(message=f"'{key}' is not a valid attribute of the config.")
 
     @staticmethod
     def set_vector_db_config(config_dict: dict):
         """
-            Updates the vector db config with values from config_dict.
+        Updates the vector db config with values from config_dict.
         """
         vector_db_config = get_vectordb_config()
         for key, value in config_dict.items():
             if hasattr(vector_db_config, key):
                 object.__setattr__(vector_db_config, key, value)
             else:
-                raise InvalidAttributeError(message=f"'{key}' is not a valid attribute of the config.")
+                raise InvalidAttributeError(
+                    message=f"'{key}' is not a valid attribute of the config."
+                )
 
     @staticmethod
     def set_vector_db_key(db_key: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_key = db_key
-
 
     @staticmethod
     def set_vector_db_url(db_url: str):
@@ -154,7 +172,9 @@ class config():
         base_config = get_base_config()
 
         if "username" not in graphistry_config or "password" not in graphistry_config:
-            raise InvalidValueError(message="graphistry_config dictionary must contain 'username' and 'password' keys.")
+            raise InvalidValueError(
+                message="graphistry_config dictionary must contain 'username' and 'password' keys."
+            )
 
         base_config.graphistry_username = graphistry_config.get("username")
         base_config.graphistry_password = graphistry_config.get("password")

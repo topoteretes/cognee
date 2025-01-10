@@ -2,7 +2,7 @@ from cognee.infrastructure.engine import DataPoint
 
 
 def convert_node_to_data_point(node_data: dict) -> DataPoint:
-    subclass = find_subclass_by_name(DataPoint, node_data["type"])
+    subclass = find_subclass_by_name(DataPoint, node_data._metadata["type"])
 
     return subclass(**node_data)
 
@@ -14,6 +14,7 @@ def get_all_subclasses(cls):
         subclasses.extend(get_all_subclasses(subclass))  # Recursively get subclasses
 
     return subclasses
+
 
 def find_subclass_by_name(cls, name):
     for subclass in get_all_subclasses(cls):

@@ -5,18 +5,19 @@ from uuid import UUID
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
-from ..vector_db_interface import VectorDBInterface
-from ..models.ScoredResult import ScoredResult
+
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 
 logger = logging.getLogger("WeaviateAdapter")
+
 
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {
-        "index_fields": ["text"]
-    }
+    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+
 
 class WeaviateAdapter(VectorDBInterface):
     name = "Weaviate"
@@ -34,9 +35,9 @@ class WeaviateAdapter(VectorDBInterface):
         self.embedding_engine = embedding_engine
 
         self.client = weaviate.connect_to_wcs(
-            cluster_url = url,
-            auth_credentials = weaviate.auth.AuthApiKey(api_key),
-            additional_config = wvc.init.AdditionalConfig(timeout = wvc.init.Timeout(init=30))
+            cluster_url=url,
+            auth_credentials=weaviate.auth.AuthApiKey(api_key),
+            additional_config=wvc.init.AdditionalConfig(timeout=wvc.init.Timeout(init=30)),
         )
 
     async def embed_data(self, data: List[str]) -> List[float]:
@@ -52,7 +53,7 @@ class WeaviateAdapter(VectorDBInterface):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema = None,
+        payload_schema=None,
     ):
         import weaviate.classes.config as wvcc
 
@@ -61,14 +62,12 @@ class WeaviateAdapter(VectorDBInterface):
         if not self.client.collections.exists(collection_name):
             future.set_result(
                 self.client.collections.create(
-                    name = collection_name,
-                    properties = [
+                    name=collection_name,
+                    properties=[
                         wvcc.Property(
-                            name = "text",
-                            data_type = wvcc.DataType.TEXT,
-                            skip_vectorization = True
+                            name="text", data_type=wvcc.DataType.TEXT, skip_vectorization=True
                         )
-                    ]
+                    ],
                 )
             )
         else:
@@ -94,11 +93,7 @@ class WeaviateAdapter(VectorDBInterface):
                 properties["uuid"] = str(data_point.id)
                 del properties["id"]
 
-            return DataObject(
-                uuid = data_point.id,
-                properties = properties,
-                vector = vector
-            )
+            return DataObject(uuid=data_point.id, properties=properties, vector=vector)
 
         data_points = [convert_to_weaviate_data_points(data_point) for data_point in data_points]
 
@@ -109,26 +104,26 @@ class WeaviateAdapter(VectorDBInterface):
                 with collection.batch.dynamic() as batch:
                     for data_point in data_points:
                         batch.add_object(
-                            uuid = data_point.uuid,
-                            vector = data_point.vector,
-                            properties = data_point.properties,
-                            references = data_point.references,
+                            uuid=data_point.uuid,
+                            vector=data_point.vector,
+                            properties=data_point.properties,
+                            references=data_point.references,
                         )
             else:
                 data_point: DataObject = data_points[0]
                 if collection.data.exists(data_point.uuid):
                     return collection.data.update(
-                        uuid = data_point.uuid,
-                        vector = data_point.vector,
-                        properties = data_point.properties,
-                        references = data_point.references,
+                        uuid=data_point.uuid,
+                        vector=data_point.vector,
+                        properties=data_point.properties,
+                        references=data_point.references,
                     )
                 else:
                     return collection.data.insert(
-                        uuid = data_point.uuid,
-                        vector = data_point.vector,
-                        properties = data_point.properties,
-                        references = data_point.references,
+                        uuid=data_point.uuid,
+                        vector=data_point.vector,
+                        properties=data_point.properties,
+                        references=data_point.references,
                     )
         except Exception as error:
             logger.error("Error creating data points: %s", str(error))
@@ -137,20 +132,27 @@ class WeaviateAdapter(VectorDBInterface):
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
-    async def index_data_points(self, index_name: str, index_property_name: str, data_points: list[DataPoint]):
-        await self.create_data_points(f"{index_name}_{index_property_name}", [
-            IndexSchema(
-                id = data_point.id,
-                text = DataPoint.get_embeddable_data(data_point),
-            ) for data_point in data_points
-        ])
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+    ):
+        await self.create_data_points(
+            f"{index_name}_{index_property_name}",
+            [
+                IndexSchema(
+                    id=data_point.id,
+                    text=DataPoint.get_embeddable_data(data_point),
+                )
+                for data_point in data_points
+            ],
+        )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         from weaviate.classes.query import Filter
+
         future = asyncio.Future()
 
         data_points = self.get_collection(collection_name).query.fetch_objects(
-            filters = Filter.by_id().contains_any(data_point_ids)
+            filters=Filter.by_id().contains_any(data_point_ids)
         )
 
         for data_point in data_points.objects:
@@ -163,11 +165,11 @@ class WeaviateAdapter(VectorDBInterface):
         return await future
 
     async def get_distance_from_collection_elements(
-            self,
-            collection_name: str,
-            query_text: str = None,
-            query_vector: List[float] = None,
-            with_vector: bool = False
+        self,
+        collection_name: str,
+        query_text: str = None,
+        query_vector: List[float] = None,
+        with_vector: bool = False,
     ) -> List[ScoredResult]:
         import weaviate.classes as wvc
 
@@ -188,17 +190,18 @@ class WeaviateAdapter(VectorDBInterface):
             ScoredResult(
                 id=UUID(str(result.uuid)),
                 payload=result.properties,
-                score=1 - float(result.metadata.score)
-            ) for result in search_result.objects
+                score=1 - float(result.metadata.score),
+            )
+            for result in search_result.objects
         ]
 
     async def search(
-            self,
-            collection_name: str,
-            query_text: Optional[str] = None,
-            query_vector: Optional[List[float]] = None,
-            limit: int = None,
-            with_vector: bool = False
+        self,
+        collection_name: str,
+        query_text: Optional[str] = None,
+        query_vector: Optional[List[float]] = None,
+        limit: int = None,
+        with_vector: bool = False,
     ):
         import weaviate.classes as wvc
 
@@ -209,33 +212,41 @@ class WeaviateAdapter(VectorDBInterface):
             query_vector = (await self.embed_data([query_text]))[0]
 
         search_result = self.get_collection(collection_name).query.hybrid(
-            query = None,
-            vector = query_vector,
-            limit = limit,
-            include_vector = with_vector,
-            return_metadata = wvc.query.MetadataQuery(score=True),
+            query=None,
+            vector=query_vector,
+            limit=limit,
+            include_vector=with_vector,
+            return_metadata=wvc.query.MetadataQuery(score=True),
         )
 
         return [
             ScoredResult(
-                id = UUID(str(result.uuid)),
-                payload = result.properties,
-                score = 1 - float(result.metadata.score)
-            ) for result in search_result.objects
+                id=UUID(str(result.uuid)),
+                payload=result.properties,
+                score=1 - float(result.metadata.score),
+            )
+            for result in search_result.objects
         ]
 
-    async def batch_search(self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False):
+    async def batch_search(
+        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+    ):
         def query_search(query_vector):
-            return self.search(collection_name, query_vector=query_vector, limit=limit, with_vector=with_vectors)
+            return self.search(
+                collection_name, query_vector=query_vector, limit=limit, with_vector=with_vectors
+            )
 
-        return [await query_search(query_vector) for query_vector in await self.embed_data(query_texts)]
-        
+        return [
+            await query_search(query_vector) for query_vector in await self.embed_data(query_texts)
+        ]
+
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         from weaviate.classes.query import Filter
+
         future = asyncio.Future()
 
         result = self.get_collection(collection_name).data.delete_many(
-            filters = Filter.by_id().contains_any(data_point_ids)
+            filters=Filter.by_id().contains_any(data_point_ids)
         )
         future.set_result(result)
 

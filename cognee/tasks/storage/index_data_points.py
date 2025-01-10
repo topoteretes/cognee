@@ -1,5 +1,11 @@
+import logging
+
+from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
+
+logger = logging.getLogger("index_data_points")
+
 
 async def index_data_points(data_points: list[DataPoint]):
     created_indexes = {}
@@ -29,11 +35,17 @@ async def index_data_points(data_points: list[DataPoint]):
 
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
-        await vector_engine.index_data_points(index_name, field_name, indexable_points)
+        try:
+            await vector_engine.index_data_points(index_name, field_name, indexable_points)
+        except EmbeddingException as e:
+            logger.warning(f"Failed to index data points for {index_name}.{field_name}: {e}")
 
     return data_points
 
-async def get_data_points_from_model(data_point: DataPoint, added_data_points = None, visited_properties = None) -> list[DataPoint]:
+
+async def get_data_points_from_model(
+    data_point: DataPoint, added_data_points=None, visited_properties=None
+) -> list[DataPoint]:
     data_points = []
     added_data_points = added_data_points or {}
     visited_properties = visited_properties or {}
@@ -47,14 +59,20 @@ async def get_data_points_from_model(data_point: DataPoint, added_data_points = 
 
             visited_properties[property_key] = True
 
-            new_data_points = await get_data_points_from_model(field_value, added_data_points, visited_properties)
+            new_data_points = await get_data_points_from_model(
+                field_value, added_data_points, visited_properties
+            )
 
             for new_point in new_data_points:
                 if str(new_point.id) not in added_data_points:
                     added_data_points[str(new_point.id)] = True
                     data_points.append(new_point)
 
-        if isinstance(field_value, list) and len(field_value) > 0 and isinstance(field_value[0], DataPoint):
+        if (
+            isinstance(field_value, list)
+            and len(field_value) > 0
+            and isinstance(field_value[0], DataPoint)
+        ):
             for field_value_item in field_value:
                 property_key = f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
 
@@ -62,33 +80,38 @@ async def get_data_points_from_model(data_point: DataPoint, added_data_points = 
                     return []
 
                 visited_properties[property_key] = True
-              
-                new_data_points = await get_data_points_from_model(field_value_item, added_data_points, visited_properties)
+
+                new_data_points = await get_data_points_from_model(
+                    field_value_item, added_data_points, visited_properties
+                )
 
                 for new_point in new_data_points:
                     if str(new_point.id) not in added_data_points:
                         added_data_points[str(new_point.id)] = True
                         data_points.append(new_point)
 
-    if (str(data_point.id) not in added_data_points):
+    if str(data_point.id) not in added_data_points:
         data_points.append(data_point)
 
     return data_points
 
 
 if __name__ == "__main__":
+
     class Car(DataPoint):
         model: str
         color: str
-  
+        _metadata = {"index_fields": ["name"], "type": "Car"}
+
     class Person(DataPoint):
         name: str
         age: int
         owns_car: list[Car]
+        _metadata = {"index_fields": ["name"], "type": "Person"}
 
-    car1 = Car(model = "Tesla Model S", color = "Blue")
-    car2 = Car(model = "Toyota Camry", color = "Red")
-    person = Person(name = "John", age = 30, owns_car = [car1, car2])
+    car1 = Car(model="Tesla Model S", color="Blue")
+    car2 = Car(model="Toyota Camry", color="Red")
+    person = Person(name="John", age=30, owns_car=[car1, car2])
 
     data_points = get_data_points_from_model(person)
 

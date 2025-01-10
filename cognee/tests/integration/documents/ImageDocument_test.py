@@ -14,21 +14,23 @@ The commotion has attracted an audience: a murder of crows has gathered in the l
 
 
 def test_ImageDocument():
-
     document = ImageDocument(
-        id=uuid.uuid4(), name="image-dummy-test", raw_data_location="", metadata_id=uuid.uuid4(), mime_type="",
+        id=uuid.uuid4(),
+        name="image-dummy-test",
+        raw_data_location="",
+        metadata_id=uuid.uuid4(),
+        mime_type="",
     )
     with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
-
         for ground_truth, paragraph_data in zip(
-            GROUND_TRUTH, document.read(chunk_size=64)
+            GROUND_TRUTH, document.read(chunk_size=64, chunker="text_chunker")
         ):
-            assert (
-                ground_truth["word_count"] == paragraph_data.word_count
-            ), f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
-            assert ground_truth["len_text"] == len(
-                paragraph_data.text
-            ), f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
-            assert (
-                ground_truth["cut_type"] == paragraph_data.cut_type
-            ), f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
+            assert ground_truth["word_count"] == paragraph_data.word_count, (
+                f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
+            )
+            assert ground_truth["len_text"] == len(paragraph_data.text), (
+                f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
+            )
+            assert ground_truth["cut_type"] == paragraph_data.cut_type, (
+                f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
+            )

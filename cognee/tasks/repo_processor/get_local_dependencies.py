@@ -9,8 +9,9 @@ import aiofiles
 import jedi
 import parso
 from parso.tree import BaseNode
+import logging
 
-from cognee.tasks.repo_processor import logger
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -29,15 +30,15 @@ def _get_code_entities(node: parso.tree.NodeOrLeaf) -> List[Dict[str, any]]:
     """
     code_entity_list = []
 
-    if not hasattr(node, 'children'):
+    if not hasattr(node, "children"):
         return code_entity_list
 
-    name_nodes = (child for child in node.children if child.type == 'name')
+    name_nodes = (child for child in node.children if child.type == "name")
     for name_node in name_nodes:
         code_entity = {
-            'name': name_node.value,
-            'line': name_node.start_pos[0],
-            'column': name_node.start_pos[1]
+            "name": name_node.value,
+            "line": name_node.start_pos[0],
+            "column": name_node.start_pos[1],
         }
         code_entity_list.append(code_entity)
 
@@ -97,7 +98,9 @@ async def _extract_dependencies(script_path: str) -> List[str]:
     return sorted(str_paths)
 
 
-async def get_local_script_dependencies(script_path: str, repo_path: Optional[str] = None) -> List[str]:
+async def get_local_script_dependencies(
+    script_path: str, repo_path: Optional[str] = None
+) -> List[str]:
     """
     Extract and return a list of unique module paths that the script depends on.
     """
@@ -117,7 +120,9 @@ async def get_local_script_dependencies(script_path: str, repo_path: Optional[st
         return await _extract_dependencies(script_path)
 
     if not script_path.is_relative_to(repo_path):
-        logger.warning(f"Script {script_path} not in repo {repo_path}. Proceeding without repo_path.")
+        logger.warning(
+            f"Script {script_path} not in repo {repo_path}. Proceeding without repo_path."
+        )
         return await _extract_dependencies(script_path)
 
     with add_sys_path(str(repo_path)):

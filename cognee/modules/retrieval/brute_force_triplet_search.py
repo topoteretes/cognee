@@ -12,6 +12,7 @@ from cognee.shared.utils import send_telemetry
 
 def format_triplets(edges):
     print("\n\n\n")
+
     def filter_attributes(obj, attributes):
         """Helper function to filter out non-None properties, including nested dicts."""
         result = {}
@@ -20,7 +21,9 @@ def format_triplets(edges):
             if value is not None:
                 # If the value is a dict, extract relevant keys from it
                 if isinstance(value, dict):
-                    nested_values = {k: v for k, v in value.items() if k in attributes and v is not None}
+                    nested_values = {
+                        k: v for k, v in value.items() if k in attributes and v is not None
+                    }
                     result[attr] = nested_values
                 else:
                     result[attr] = value
@@ -40,17 +43,15 @@ def format_triplets(edges):
         edge_info = {key: value for key, value in edge_attributes.items() if value is not None}
 
         # Create the formatted triplet
-        triplet = (
-            f"Node1: {node1_info}\n"
-            f"Edge: {edge_info}\n"
-            f"Node2: {node2_info}\n\n\n"
-        )
+        triplet = f"Node1: {node1_info}\nEdge: {edge_info}\nNode2: {node2_info}\n\n\n"
         triplets.append(triplet)
 
     return "".join(triplets)
 
 
-async def brute_force_triplet_search(query: str, user: User = None, top_k = 5, collections = None) -> list:
+async def brute_force_triplet_search(
+    query: str, user: User = None, top_k=5, collections=None
+) -> list:
     if user is None:
         user = await get_default_user()
 
@@ -61,7 +62,9 @@ async def brute_force_triplet_search(query: str, user: User = None, top_k = 5, c
     return retrieved_results
 
 
-def delete_duplicated_vector_db_elements(collections, results): #:TODO: This is just for now to fix vector db duplicates
+def delete_duplicated_vector_db_elements(
+    collections, results
+):  #:TODO: This is just for now to fix vector db duplicates
     results_dict = {}
     for collection, results in zip(collections, results):
         seen_ids = set()
@@ -78,22 +81,19 @@ def delete_duplicated_vector_db_elements(collections, results): #:TODO: This is 
 
 
 async def brute_force_search(
-        query: str,
-        user: User,
-        top_k: int,
-        collections: List[str] = None
+    query: str, user: User, top_k: int, collections: List[str] = None
 ) -> list:
     """
-        Performs a brute force search to retrieve the top triplets from the graph.
+    Performs a brute force search to retrieve the top triplets from the graph.
 
-        Args:
-            query (str): The search query.
-            user (User): The user performing the search.
-            top_k (int): The number of top results to retrieve.
-            collections (Optional[List[str]]): List of collections to query. Defaults to predefined collections.
+    Args:
+        query (str): The search query.
+        user (User): The user performing the search.
+        top_k (int): The number of top results to retrieve.
+        collections (Optional[List[str]]): List of collections to query. Defaults to predefined collections.
 
-        Returns:
-            list: The top triplet results.
+    Returns:
+        list: The top triplet results.
     """
     if not query or not isinstance(query, str):
         raise ValueError("The query must be a non-empty string.")
@@ -101,7 +101,12 @@ async def brute_force_search(
         raise ValueError("top_k must be a positive integer.")
 
     if collections is None:
-        collections = ["entity_name", "text_summary_text", "entity_type_name", "document_chunk_text"]
+        collections = [
+            "entity_name",
+            "text_summary_text",
+            "entity_type_name",
+            "document_chunk_text",
+        ]
 
     try:
         vector_engine = get_vector_engine()
@@ -114,7 +119,10 @@ async def brute_force_search(
 
     try:
         results = await asyncio.gather(
-            *[vector_engine.get_distance_from_collection_elements(collection, query_text=query) for collection in collections]
+            *[
+                vector_engine.get_distance_from_collection_elements(collection, query_text=query)
+                for collection in collections
+            ]
         )
 
         ############################################# :TODO: Change when vector db does not contain duplicates
@@ -124,13 +132,11 @@ async def brute_force_search(
 
         memory_fragment = CogneeGraph()
 
-        await memory_fragment.project_graph_from_db(graph_engine,
-                                              node_properties_to_project=['id',
-                                                                          'description',
-                                                                          'name',
-                                                                          'type',
-                                                                          'text'],
-                                              edge_properties_to_project=['relationship_name'])
+        await memory_fragment.project_graph_from_db(
+            graph_engine,
+            node_properties_to_project=["id", "description", "name", "type", "text"],
+            edge_properties_to_project=["relationship_name"],
+        )
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
 
@@ -145,6 +151,8 @@ async def brute_force_search(
         return results
 
     except Exception as e:
-        logging.error("Error during brute force search for user: %s, query: %s. Error: %s", user.id, query, e)
+        logging.error(
+            "Error during brute force search for user: %s, query: %s. Error: %s", user.id, query, e
+        )
         send_telemetry("cognee.brute_force_triplet_search EXECUTION FAILED", user.id)
         raise RuntimeError("An error occurred during brute force search") from e

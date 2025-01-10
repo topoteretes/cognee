@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 
 logging.basicConfig(level=logging.DEBUG)
 
+
 async def test_deduplication():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -29,7 +30,9 @@ async def test_deduplication():
 
     result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
-    assert result[0]["name"] == "Natural_language_processing_copy", "Result name does not match expected value."
+    assert result[0]["name"] == "Natural_language_processing_copy", (
+        "Result name does not match expected value."
+    )
 
     result = await relational_engine.get_all_data_from_table("datasets")
     assert len(result) == 2, "Unexpected number of datasets found."
@@ -58,15 +61,15 @@ async def test_deduplication():
 
     result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
-    assert hashlib.md5(text.encode('utf-8')).hexdigest() in result[0]["name"], "Content hash is not a part of file name."
+    assert hashlib.md5(text.encode("utf-8")).hexdigest() in result[0]["name"], (
+        "Content hash is not a part of file name."
+    )
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
     # Test deduplication of image files
-    explanation_file_path = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/example.png"
-    )
+    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/example.png")
     explanation_file_path2 = os.path.join(
         pathlib.Path(__file__).parent, "test_data/example_copy.png"
     )
@@ -100,11 +103,7 @@ async def test_deduplication():
 
 async def test_deduplication_postgres():
     cognee.config.set_vector_db_config(
-        {
-            "vector_db_url": "",
-            "vector_db_key": "",
-            "vector_db_provider": "pgvector"
-        }
+        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
     )
     cognee.config.set_relational_db_config(
         {
@@ -119,13 +118,10 @@ async def test_deduplication_postgres():
 
     await test_deduplication()
 
+
 async def test_deduplication_sqlite():
     cognee.config.set_vector_db_config(
-        {
-            "vector_db_url": "",
-            "vector_db_key": "",
-            "vector_db_provider": "lancedb"
-        }
+        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "lancedb"}
     )
     cognee.config.set_relational_db_config(
         {
@@ -137,7 +133,6 @@ async def test_deduplication_sqlite():
 
 
 async def main():
-
     data_directory_path = str(
         pathlib.Path(
             os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_deduplication")
@@ -153,6 +148,7 @@ async def main():
 
     await test_deduplication_postgres()
     await test_deduplication_sqlite()
+
 
 if __name__ == "__main__":
     import asyncio
