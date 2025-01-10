@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import tiktoken
 import nltk
 import base64
-
+import time
 
 import logging
 import sys
@@ -396,6 +396,7 @@ async def create_cognee_style_network_with_logo(
 
     from bokeh.embed import file_html
     from bokeh.resources import CDN
+    from bokeh.io import export_png
 
     logging.info("Converting graph to serializable format...")
     G = await convert_to_serializable_graph(G)
@@ -442,6 +443,14 @@ async def create_cognee_style_network_with_logo(
         ],
     )
     p.add_tools(hover_tool)
+
+    # Get the latest Unix timestamp as an integer
+    timestamp = int(time.time())
+
+    # Construct your filename
+    filename = f"{timestamp}.png"
+
+    export_png(p, filename=filename)
 
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
