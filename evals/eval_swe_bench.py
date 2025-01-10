@@ -14,6 +14,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.retrieval.description_to_codepart_search import (
     code_description_to_code_part_search,
 )
+from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
 def check_install_package(package_name):
@@ -33,12 +34,11 @@ def check_install_package(package_name):
 
 
 async def generate_patch_with_cognee(instance):
-    """repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")"""
+    repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")
     include_docs = True
     problem_statement = instance["problem_statement"]
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
-    repo_path = "/Users/laszlohajdu/Documents/GitHub/graph_rag/"
     async for result in run_code_graph_pipeline(repo_path, include_docs=include_docs):
         print(result)
 
