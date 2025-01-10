@@ -49,16 +49,18 @@ Third paragraph is cut and is missing the dot at the end""",
 
 def run_chunking_test(test_text, expected_chunks):
     chunks = []
-    for chunk_data in chunk_by_paragraph(test_text, 12, batch_paragraphs=False):
+    for chunk_data in chunk_by_paragraph(
+        data=test_text, paragraph_length=12, batch_paragraphs=False
+    ):
         chunks.append(chunk_data)
 
     assert len(chunks) == 3
 
     for expected_chunks_item, chunk in zip(expected_chunks, chunks):
         for key in ["text", "word_count", "cut_type"]:
-            assert (
-                chunk[key] == expected_chunks_item[key]
-            ), f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
+            assert chunk[key] == expected_chunks_item[key], (
+                f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
+            )
 
 
 def test_chunking_whole_text():

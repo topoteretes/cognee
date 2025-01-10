@@ -11,8 +11,9 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
-from cognee.shared.utils import render_graph
+from cognee.modules.retrieval.description_to_codepart_search import (
+    code_description_to_code_part_search,
+)
 from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
@@ -32,25 +33,18 @@ def check_install_package(package_name):
             return False
 
 
-async def generate_patch_with_cognee(instance, llm_client, search_type=SearchType.CHUNKS):
+async def generate_patch_with_cognee(instance):
     repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")
-    pipeline = await run_code_graph_pipeline(repo_path)
-
-    async for result in pipeline:
-        print(result)
-
-    print("Here we have the repo under the repo_path")
-
-    await render_graph(None, include_labels=True, include_nodes=True)
-
+    include_docs = True
     problem_statement = instance["problem_statement"]
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
-    retrieved_edges = await brute_force_triplet_search(
-        problem_statement, top_k=3, collections=["data_point_source_code", "data_point_text"]
-    )
+    async for result in run_code_graph_pipeline(repo_path, include_docs=include_docs):
+        print(result)
 
-    retrieved_edges_str = retrieved_edges_to_string(retrieved_edges)
+    retrieved_codeparts = await code_description_to_code_part_search(
+        problem_statement, include_docs=include_docs
+    )
 
     prompt = "\n".join(
         [
@@ -58,8 +52,8 @@ async def generate_patch_with_cognee(instance, llm_client, search_type=SearchTyp
             "<patch>",
             PATCH_EXAMPLE,
             "</patch>",
-            "These are the retrieved edges:",
-            retrieved_edges_str,
+            "This is the additional context to solve the problem (description from documentation together with codeparts):",
+            retrieved_codeparts,
         ]
     )
 
@@ -85,8 +79,6 @@ async def generate_patch_without_cognee(instance, llm_client):
 
 
 async def get_preds(dataset, with_cognee=True):
-    llm_client = get_llm_client()
-
     if with_cognee:
         model_name = "with_cognee"
         pred_func = generate_patch_with_cognee
@@ -94,17 +86,18 @@ async def get_preds(dataset, with_cognee=True):
         model_name = "without_cognee"
         pred_func = generate_patch_without_cognee
 
-    futures = [(instance["instance_id"], pred_func(instance, llm_client)) for instance in dataset]
-    model_patches = await asyncio.gather(*[x[1] for x in futures])
+    preds = []
 
-    preds = [
-        {
-            "instance_id": instance_id,
-            "model_patch": model_patch,
-            "model_name_or_path": model_name,
-        }
-        for (instance_id, _), model_patch in zip(futures, model_patches)
-    ]
+    for instance in dataset:
+        instance_id = instance["instance_id"]
+        model_patch = await pred_func(instance)  # Sequentially await the async function
+        preds.append(
+            {
+                "instance_id": instance_id,
+                "model_patch": model_patch,
+                "model_name_or_path": model_name,
+            }
+        )
 
     return preds
 
@@ -134,6 +127,7 @@ async def main():
         with open(predictions_path, "w") as file:
             json.dump(preds, file)
 
+    """ This part is for the evaluation
     subprocess.run(
         [
             "python",
@@ -151,6 +145,7 @@ async def main():
             "test_run",
         ]
     )
+    """
 
 
 if __name__ == "__main__":
