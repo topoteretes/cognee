@@ -27,7 +27,11 @@ def test_chunk_by_paragraph_isomorphism(input_text, paragraph_length, batch_para
     list(product(list(INPUT_TEXTS.values()), paragraph_lengths, batch_paragraphs_vals)),
 )
 def test_paragraph_chunk_length(input_text, paragraph_length, batch_paragraphs):
-    chunks = list(chunk_by_paragraph(input_text, paragraph_length, batch_paragraphs))
+    chunks = list(
+        chunk_by_paragraph(
+            data=input_text, paragraph_length=paragraph_length, batch_paragraphs=batch_paragraphs
+        )
+    )
 
     chunk_lengths = np.array([len(list(chunk_by_word(chunk["text"]))) for chunk in chunks])
 
@@ -42,7 +46,9 @@ def test_paragraph_chunk_length(input_text, paragraph_length, batch_paragraphs):
     list(product(list(INPUT_TEXTS.values()), paragraph_lengths, batch_paragraphs_vals)),
 )
 def test_chunk_by_paragraph_chunk_numbering(input_text, paragraph_length, batch_paragraphs):
-    chunks = chunk_by_paragraph(input_text, paragraph_length, batch_paragraphs)
+    chunks = chunk_by_paragraph(
+        data=input_text, paragraph_length=paragraph_length, batch_paragraphs=batch_paragraphs
+    )
     chunk_indices = np.array([chunk["chunk_index"] for chunk in chunks])
     assert np.all(
         chunk_indices == np.arange(len(chunk_indices))
