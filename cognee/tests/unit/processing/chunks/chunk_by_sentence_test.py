@@ -16,9 +16,9 @@ maximum_length_vals = [None, 8, 64]
 def test_chunk_by_sentence_isomorphism(input_text, maximum_length):
     chunks = chunk_by_sentence(input_text, maximum_length)
     reconstructed_text = "".join([chunk[1] for chunk in chunks])
-    assert (
-        reconstructed_text == input_text
-    ), f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
+    assert reconstructed_text == input_text, (
+        f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
+    )
 
 
 @pytest.mark.parametrize(
@@ -36,6 +36,6 @@ def test_paragraph_chunk_length(input_text, maximum_length):
     chunk_lengths = np.array([len(list(chunk_by_word(chunk[1]))) for chunk in chunks])
 
     larger_chunks = chunk_lengths[chunk_lengths > maximum_length]
-    assert np.all(
-        chunk_lengths <= maximum_length
-    ), f"{maximum_length = }: {larger_chunks} are too large"
+    assert np.all(chunk_lengths <= maximum_length), (
+        f"{maximum_length = }: {larger_chunks} are too large"
+    )
