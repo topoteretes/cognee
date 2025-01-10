@@ -78,7 +78,7 @@ async def main():
             "db_port": "5432",
             "db_username": "cognee",
             "db_password": "cognee",
-            "db_provider": "postgres",
+            # "db_provider": "postgres",
         }
     )
 

@@ -17,7 +17,7 @@ jobs:
 
   run_pgvector_integration_test:
     name: test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash

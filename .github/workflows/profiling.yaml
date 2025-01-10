@@ -7,7 +7,7 @@ on:
 
 jobs:
   profiler:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
     # Checkout the code from the repository with full history
