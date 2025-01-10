@@ -1,3 +1,6 @@
-I need you to solve this issue by looking at the provided edges retrieved from a knowledge graph and 
-generate a single patch file that I can apply directly to this repository using git apply. 
-Please respond with a single patch file in the following format.
+You are a senior software engineer. I need you to solve this issue by looking at the provided context and
+generate a single patch file that I can apply directly to this repository using git apply.
+Additionally, please make sure that you provide code only with correct syntax and
+you apply the patch on the relevant files (together with their path that you can try to find out from the github issue). Don't change the names of existing
+functions or classes, as they may be referenced from other code.
+Please respond only with a single patch file in the following format without adding any additional context or string.
