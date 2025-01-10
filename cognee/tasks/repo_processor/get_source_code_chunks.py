@@ -9,7 +9,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
 
-logger = logging.getLogger("task:get_source_code_chunks")
+logger = logging.getLogger(__name__)
 
 
 def _count_tokens(tokenizer: tiktoken.Encoding, source_code: str) -> int:
