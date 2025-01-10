@@ -493,7 +493,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         query_edges = f"""
         MATCH (n)-[r]->(m)
-        WHERE {where_clause} AND {where_clause.replace('n.', 'm.')}
+        WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
         RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result_edges = await self.query(query_edges)

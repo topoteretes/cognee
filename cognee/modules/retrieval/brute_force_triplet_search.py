@@ -43,7 +43,7 @@ def format_triplets(edges):
         edge_info = {key: value for key, value in edge_attributes.items() if value is not None}
 
         # Create the formatted triplet
-        triplet = f"Node1: {node1_info}\n" f"Edge: {edge_info}\n" f"Node2: {node2_info}\n\n\n"
+        triplet = f"Node1: {node1_info}\nEdge: {edge_info}\nNode2: {node2_info}\n\n\n"
         triplets.append(triplet)
 
     return "".join(triplets)

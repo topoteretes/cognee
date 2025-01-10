@@ -75,8 +75,7 @@ async def code_description_to_code_part(
 
             llm_client = get_llm_client()
             context_from_documents = await llm_client.acreate_structured_output(
-                text_input=f"The retrieved context from documents"
-                f" is {concatenated_descriptions}.",
+                text_input=f"The retrieved context from documents is {concatenated_descriptions}.",
                 system_prompt="You are a Senior Software Engineer, summarize the context from documents"
                 f" in a way that it is gonna be provided next to codeparts as context"
                 f" while trying to solve this github issue connected to the project: {query}]",

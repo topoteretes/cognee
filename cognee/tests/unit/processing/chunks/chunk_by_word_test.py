@@ -17,9 +17,9 @@ from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS
 def test_chunk_by_word_isomorphism(input_text):
     chunks = chunk_by_word(input_text)
     reconstructed_text = "".join([chunk[0] for chunk in chunks])
-    assert (
-        reconstructed_text == input_text
-    ), f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
+    assert reconstructed_text == input_text, (
+        f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
+    )
 
 
 @pytest.mark.parametrize(
