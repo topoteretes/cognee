@@ -13,6 +13,7 @@ class ModelName(Enum):
     openai = "openai"
     ollama = "ollama"
     anthropic = "anthropic"
+    gemini = "gemini"
 
 
 class LLMConfig(BaseModel):
@@ -71,6 +72,10 @@ def get_settings() -> SettingsDict:
         {
             "value": "anthropic",
             "label": "Anthropic",
+        },
+        {
+            "value": "gemini",
+            "label": "Gemini",
         },
     ]
 
@@ -134,6 +139,12 @@ def get_settings() -> SettingsDict:
                         {
                             "value": "Claude 3 Haiku",
                             "label": "Claude 3 Haiku",
+                        },
+                    ],
+                    "gemini": [
+                        {
+                            "value": "gemini-2.0-flash-exp",
+                            "label": "Gemini 2.0 Flash",
                         },
                     ],
                 },
