@@ -14,8 +14,6 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.retrieval.description_to_codepart_search import (
     code_description_to_code_part_search,
 )
-from cognee.shared.utils import render_graph
-from evals.eval_utils import download_github_repo, retrieved_edges_to_string
 
 
 def check_install_package(package_name):
@@ -36,14 +34,17 @@ def check_install_package(package_name):
 
 async def generate_patch_with_cognee(instance):
     """repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")"""
+    include_docs = True
     problem_statement = instance["problem_statement"]
     instructions = read_query_prompt("patch_gen_kg_instructions.txt")
 
-    repo_path = "/Users/laszlohajdu/Documents/GitHub/test/"
-    async for result in run_code_graph_pipeline(repo_path, include_docs=False):
+    repo_path = "/Users/laszlohajdu/Documents/GitHub/graph_rag/"
+    async for result in run_code_graph_pipeline(repo_path, include_docs=include_docs):
         print(result)
 
-    retrieved_codeparts = await code_description_to_code_part_search(problem_statement)
+    retrieved_codeparts = await code_description_to_code_part_search(
+        problem_statement, include_docs=include_docs
+    )
 
     prompt = "\n".join(
         [
@@ -51,7 +52,7 @@ async def generate_patch_with_cognee(instance):
             "<patch>",
             PATCH_EXAMPLE,
             "</patch>",
-            "These are the retrieved edges:",
+            "This is the additional context to solve the problem (description from documentation together with codeparts):",
             retrieved_codeparts,
         ]
     )

@@ -8,20 +8,27 @@ from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
+from cognee.api.v1.search import SearchType
+from cognee.api.v1.search.search_v2 import search
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 
-async def code_description_to_code_part_search(query: str, user: User = None, top_k=5) -> list:
+async def code_description_to_code_part_search(
+    query: str, include_docs=False, user: User = None, top_k=5
+) -> list:
     if user is None:
         user = await get_default_user()
 
     if user is None:
         raise PermissionError("No user found in the system. Please create a user.")
 
-    retrieved_codeparts = await code_description_to_code_part(query, user, top_k)
+    retrieved_codeparts = await code_description_to_code_part(query, user, top_k, include_docs)
     return retrieved_codeparts
 
 
-async def code_description_to_code_part(query: str, user: User, top_k: int) -> List[str]:
+async def code_description_to_code_part(
+    query: str, user: User, top_k: int, include_docs: bool
+) -> List[str]:
     """
     Maps a code description query to relevant code parts using a CodeGraph pipeline.
 
@@ -29,6 +36,7 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
         query (str): The search query describing the code parts.
         user (User): The user performing the search.
         top_k (int): Number of codegraph descriptions to match ( num of corresponding codeparts will be higher)
+        include_docs(bool): Boolean showing whether we have the docs in the graph or not
 
     Returns:
         Set[str]: A set of unique code parts matching the query.
@@ -37,6 +45,7 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
         ValueError: If arguments are invalid.
         RuntimeError: If an unexpected error occurs during execution.
     """
+    print(include_docs)
     if not query or not isinstance(query, str):
         raise ValueError("The query must be a non-empty string.")
     if top_k <= 0 or not isinstance(top_k, int):
@@ -55,6 +64,26 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
     )
 
     try:
+        if include_docs:
+            search_results = await search(SearchType.INSIGHTS, query_text=query)
+
+            concatenated_descriptions = " ".join(
+                obj["description"]
+                for tpl in search_results
+                for obj in tpl
+                if isinstance(obj, dict) and "description" in obj
+            )
+
+            llm_client = get_llm_client()
+            context_from_documents = await llm_client.acreate_structured_output(
+                text_input=f"The retrieved context from documents"
+                f" is {concatenated_descriptions}.",
+                system_prompt="You are a Senior Software Engineer, summarize the context from documents"
+                f" in a way that it is gonna be provided next to codeparts as context"
+                f" while trying to solve this github issue connected to the project: {query}]",
+                response_model=str,
+            )
+
         code_summaries = await vector_engine.search(
             "code_summary_text", query_text=query, limit=top_k
         )
@@ -101,6 +130,9 @@ async def code_description_to_code_part(query: str, user: User, top_k: int) -> L
         context = ""
         for code_piece in code_pieces_to_return:
             context = context + code_piece.get_attribute("source_code")
+
+        if include_docs:
+            context = context_from_documents + context
 
         return context
 
