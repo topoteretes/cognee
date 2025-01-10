@@ -71,32 +71,32 @@ def test_UnstructuredDocument():
     for paragraph_data in pptx_document.read(chunk_size=1024, chunker="text_chunker"):
         assert 19 == paragraph_data.word_count, f" 19 != {paragraph_data.word_count = }"
         assert 104 == len(paragraph_data.text), f" 104 != {len(paragraph_data.text) = }"
-        assert (
-            "sentence_cut" == paragraph_data.cut_type
-        ), f" sentence_cut != {paragraph_data.cut_type = }"
+        assert "sentence_cut" == paragraph_data.cut_type, (
+            f" sentence_cut != {paragraph_data.cut_type = }"
+        )
 
     # Test DOCX
     for paragraph_data in docx_document.read(chunk_size=1024, chunker="text_chunker"):
         assert 16 == paragraph_data.word_count, f" 16 != {paragraph_data.word_count = }"
         assert 145 == len(paragraph_data.text), f" 145 != {len(paragraph_data.text) = }"
-        assert (
-            "sentence_end" == paragraph_data.cut_type
-        ), f" sentence_end != {paragraph_data.cut_type = }"
+        assert "sentence_end" == paragraph_data.cut_type, (
+            f" sentence_end != {paragraph_data.cut_type = }"
+        )
 
     # TEST CSV
     for paragraph_data in csv_document.read(chunk_size=1024, chunker="text_chunker"):
         assert 15 == paragraph_data.word_count, f" 15 != {paragraph_data.word_count = }"
-        assert (
-            "A A A A A A A A A,A A A A A A,A A" == paragraph_data.text
-        ), f"Read text doesn't match expected text: {paragraph_data.text}"
-        assert (
-            "sentence_cut" == paragraph_data.cut_type
-        ), f" sentence_cut != {paragraph_data.cut_type = }"
+        assert "A A A A A A A A A,A A A A A A,A A" == paragraph_data.text, (
+            f"Read text doesn't match expected text: {paragraph_data.text}"
+        )
+        assert "sentence_cut" == paragraph_data.cut_type, (
+            f" sentence_cut != {paragraph_data.cut_type = }"
+        )
 
     # Test XLSX
     for paragraph_data in xlsx_document.read(chunk_size=1024, chunker="text_chunker"):
         assert 36 == paragraph_data.word_count, f" 36 != {paragraph_data.word_count = }"
         assert 171 == len(paragraph_data.text), f" 171 != {len(paragraph_data.text) = }"
-        assert (
-            "sentence_cut" == paragraph_data.cut_type
-        ), f" sentence_cut != {paragraph_data.cut_type = }"
+        assert "sentence_cut" == paragraph_data.cut_type, (
+            f" sentence_cut != {paragraph_data.cut_type = }"
+        )
