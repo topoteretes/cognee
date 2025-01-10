@@ -16,6 +16,7 @@ class BaseConfig(BaseSettings):
     langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+
     def to_dict(self) -> dict:
         return {
             "data_root_directory": self.data_root_directory,

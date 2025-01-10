@@ -12,6 +12,7 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.base_config import get_base_config
 
+
 monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
@@ -43,10 +44,20 @@ class OpenAIAdapter(LLMInterface):
         self.api_version = api_version
         self.streaming = streaming
 
-    @observe(as_type="generation")
-    async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
-    ) -> BaseModel:
+        base_config = get_base_config()
+
+        if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
+            self.aclient.success_callback = ["langfuse"]
+            self.aclient.failure_callback = ["langfuse"]
+            self.client.success_callback = ["langfuse"]
+            self.client.failure_callback = ["langfuse"]
+
+
+
+    @observe(as_type='generation')
+    async def acreate_structured_output(self, text_input: str, system_prompt: str,
+                                        response_model: Type[BaseModel]) -> BaseModel:
+
         """Generate a response from a user query."""
 
         return await self.aclient.chat.completions.create(
