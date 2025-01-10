@@ -3,7 +3,7 @@ import parso
 
 import logging
 
-logger = logging.getLogger("task:repo_processor")
+logger = logging.getLogger(__name__)
 
 
 def _extract_parts_from_module(module, parts_dict: Dict[str, List[str]]) -> Dict[str, List[str]]:

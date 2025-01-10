@@ -12,7 +12,7 @@ from parso.tree import BaseNode
 
 import logging
 
-logger = logging.getLogger("task:repo_processor")
+logger = logging.getLogger(__name__)
 
 
 @contextmanager

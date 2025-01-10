@@ -94,7 +94,7 @@ jobs:
 #        chmod +x cognee/api/v1/cognify/code_graph_pipeline.py
 #        # Run Scalene
 #        poetry run pyinstrument --renderer json -o head_results.json cognee/api/v1/cognify/code_graph_pipeline.py
-#
+
 #    # Compare profiling results
 #    - name: Compare profiling results
 #      run: |
