@@ -95,7 +95,6 @@ deepeval = ["deepeval"]
 posthog = ["posthog"]
 falkordb = ["falkordb"]
 groq = ["groq"]
-langfuse = ["langfuse"]
 milvus = ["pymilvus"]
 docs = ["unstructured"]
 
