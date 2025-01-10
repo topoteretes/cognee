@@ -27,7 +27,7 @@ async def code_description_to_code_part_search(
 
 
 async def code_description_to_code_part(
-    query: str, user: User, top_k: int, include_docs: bool
+    query: str, user: User, top_k: int, include_docs: bool = False
 ) -> List[str]:
     """
     Maps a code description query to relevant code parts using a CodeGraph pipeline.
@@ -45,7 +45,6 @@ async def code_description_to_code_part(
         ValueError: If arguments are invalid.
         RuntimeError: If an unexpected error occurs during execution.
     """
-    print(include_docs)
     if not query or not isinstance(query, str):
         raise ValueError("The query must be a non-empty string.")
     if top_k <= 0 or not isinstance(top_k, int):
@@ -94,7 +93,13 @@ async def code_description_to_code_part(
         memory_fragment = CogneeGraph()
         await memory_fragment.project_graph_from_db(
             graph_engine,
-            node_properties_to_project=["id", "type", "text", "source_code", "pydantic_type"],
+            node_properties_to_project=[
+                "id",
+                "type",
+                "text",
+                "source_code",
+                "pydantic_type",
+            ],
             edge_properties_to_project=["relationship_name"],
         )
 
