@@ -116,4 +116,4 @@ if __name__ == "__main__":
     avg_score = asyncio.run(
         eval_on_QA_dataset(args.dataset, answer_provider, args.num_samples, args.metric_name)
     )
-    print(f"Average {args.metric}: {avg_score}")
+    print(f"Average {args.metric_name}: {avg_score}")
