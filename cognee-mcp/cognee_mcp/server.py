@@ -103,6 +103,9 @@ async def handle_list_tools() -> list[types.Tool]:
 
 
 def get_freshest_png(directory: str) -> Image.Image:
+    if not os.path.exists(directory):
+        raise FileNotFoundError(f"Directory {directory} does not exist")
+
     # List all files in 'directory' that end with .png
     files = [f for f in os.listdir(directory) if f.endswith(".png")]
     if not files:
@@ -110,14 +113,20 @@ def get_freshest_png(directory: str) -> Image.Image:
 
     # Sort by integer value of the filename (minus the '.png')
     # Example filename: 1673185134.png -> integer 1673185134
-    files_sorted = sorted(files, key=lambda x: int(x.replace(".png", "")))
+    try:
+        files_sorted = sorted(files, key=lambda x: int(x.replace(".png", "")))
+    except ValueError as e:
+        raise ValueError("Invalid PNG filename format. Expected timestamp format.") from e
 
     # The "freshest" file has the largest timestamp
     freshest_filename = files_sorted[-1]
     freshest_path = os.path.join(directory, freshest_filename)
 
     # Open the image with PIL and return the PIL Image object
-    return Image.open(freshest_path)
+    try:
+        return Image.open(freshest_path)
+    except (IOError, OSError) as e:
+        raise IOError(f"Failed to open PNG file {freshest_path}") from e
 
 @server.call_tool()
 async def handle_call_tool(
