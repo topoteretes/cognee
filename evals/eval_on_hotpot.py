@@ -12,6 +12,7 @@ from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from evals.qa_dataset_utils import load_qa_dataset
+from evals.qa_metrics_utils import get_metric
 
 
 async def answer_without_cognee(instance):
@@ -78,9 +79,10 @@ async def eval_answers(instances, answers, eval_metric):
 
 
 async def eval_on_QA_dataset(
-    dataset_name_or_filename: str, answer_provider, num_samples, eval_metric
+    dataset_name_or_filename: str, answer_provider, num_samples, eval_metric_name
 ):
     dataset = load_qa_dataset(dataset_name_or_filename)
+    eval_metric = get_metric(eval_metric_name)
 
     instances = dataset if not num_samples else dataset[:num_samples]
     answers = []
@@ -102,23 +104,9 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, help="Which dataset to evaluate on")
     parser.add_argument("--with_cognee", action="store_true")
     parser.add_argument("--num_samples", type=int, default=500)
-    parser.add_argument(
-        "--metric",
-        type=str,
-        default="correctness_metric",
-        help="Valid options are Deepeval metrics (e.g. AnswerRelevancyMetric) \
-                              and metrics defined in evals/deepeval_metrics.py, e.g. f1_score_metric",
-    )
+    parser.add_argument("--metric_name", type=str, default="Correctness")
 
     args = parser.parse_args()
-
-    try:
-        metric_cls = getattr(deepeval.metrics, args.metric)
-        metric = metric_cls()
-    except AttributeError:
-        metric = getattr(evals.deepeval_metrics, args.metric)
-        if isinstance(metric, type):
-            metric = metric()
 
     if args.with_cognee:
         answer_provider = answer_with_cognee
@@ -126,6 +114,6 @@ if __name__ == "__main__":
         answer_provider = answer_without_cognee
 
     avg_score = asyncio.run(
-        eval_on_QA_dataset(args.dataset, answer_provider, args.num_samples, metric)
+        eval_on_QA_dataset(args.dataset, answer_provider, args.num_samples, args.metric_name)
     )
     print(f"Average {args.metric}: {avg_score}")
