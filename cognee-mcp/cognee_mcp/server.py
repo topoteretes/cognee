@@ -196,10 +196,12 @@ async def handle_call_tool(
     elif name == "visualize":
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
-                """Create a thumbnail from an image"""
-                await cognee.visualize
-                img = get_freshest_png(".")
-                return types.Image(data=img.tobytes(), format="png")
+                try:
+                    await cognee.visualize
+                    img = get_freshest_png(".")
+                    return types.Image(data=img.tobytes(), format="png")
+                except (FileNotFoundError, IOError, ValueError) as e:
+                    raise ValueError(f"Failed to create visualization: {str(e)}")
     else:
         raise ValueError(f"Unknown tool: {name}")
 
