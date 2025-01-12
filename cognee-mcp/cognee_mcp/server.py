@@ -197,7 +197,7 @@ async def handle_call_tool(
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 try:
-                    await cognee.visualize
+                    await cognee.visualize()
                     img = get_freshest_png(".")
                     return types.Image(data=img.tobytes(), format="png")
                 except (FileNotFoundError, IOError, ValueError) as e:
