@@ -231,6 +231,7 @@ class SummarizedContent(BaseModel):
 
     summary: str
     description: str
+    pydantic_type: str = "SummarizedContent"
 
 
 class SummarizedFunction(BaseModel):
@@ -239,6 +240,7 @@ class SummarizedFunction(BaseModel):
     inputs: Optional[List[str]] = None
     outputs: Optional[List[str]] = None
     decorators: Optional[List[str]] = None
+    pydantic_type: str = "SummarizedFunction"
 
 
 class SummarizedClass(BaseModel):
@@ -246,6 +248,7 @@ class SummarizedClass(BaseModel):
     description: str
     methods: Optional[List[SummarizedFunction]] = None
     decorators: Optional[List[str]] = None
+    pydantic_type: str = "SummarizedClass"
 
 
 class SummarizedCode(BaseModel):
@@ -256,6 +259,7 @@ class SummarizedCode(BaseModel):
     classes: List[SummarizedClass] = []
     functions: List[SummarizedFunction] = []
     workflow_description: Optional[str] = None
+    pydantic_type: str = "SummarizedCode"
 
 
 class GraphDBType(Enum):

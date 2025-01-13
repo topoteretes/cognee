@@ -1,6 +1,5 @@
 from typing import Dict, List
 import parso
-
 import logging
 
 logger = logging.getLogger(__name__)

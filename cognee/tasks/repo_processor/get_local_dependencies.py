@@ -9,7 +9,6 @@ import aiofiles
 import jedi
 import parso
 from parso.tree import BaseNode
-
 import logging
 
 logger = logging.getLogger(__name__)

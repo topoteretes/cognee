@@ -17,5 +17,6 @@ class CodeSummary(DataPoint):
     __tablename__ = "code_summary"
     text: str
     summarizes: Union[CodeFile, CodePart, SourceCodeChunk]
+    pydantic_type: str = "CodeSummary"
 
     _metadata: dict = {"index_fields": ["text"], "type": "CodeSummary"}
