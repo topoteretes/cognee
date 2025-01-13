@@ -11,7 +11,7 @@ import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
 import tiktoken
-import nltk
+
 import base64
 import time
 
@@ -243,31 +243,9 @@ async def render_graph(
 #     return df.replace([np.inf, -np.inf, np.nan], None)
 
 
-def get_entities(tagged_tokens):
-    nltk.download("maxent_ne_chunker", quiet=True)
-    from nltk.chunk import ne_chunk
-
-    return ne_chunk(tagged_tokens)
 
 
-def extract_pos_tags(sentence):
-    """Extract Part-of-Speech (POS) tags for words in a sentence."""
 
-    # Ensure that the necessary NLTK resources are downloaded
-    nltk.download("words", quiet=True)
-    nltk.download("punkt", quiet=True)
-    nltk.download("averaged_perceptron_tagger", quiet=True)
-
-    from nltk.tag import pos_tag
-    from nltk.tokenize import word_tokenize
-
-    # Tokenize the sentence into words
-    tokens = word_tokenize(sentence)
-
-    # Tag each word with its corresponding POS tag
-    pos_tags = pos_tag(tokens)
-
-    return pos_tags
 
 
 logging.basicConfig(level=logging.INFO)
@@ -450,12 +428,14 @@ async def create_cognee_style_network_with_logo(
     # Construct your filename
     filename = f"{timestamp}.png"
 
-    export_png(p, filename=filename)
+
 
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
     with open(output_filename, "w") as f:
         f.write(html_content)
+
+
 
     logging.info("Visualization complete.")
 
@@ -517,7 +497,7 @@ if __name__ == "__main__":
             G,
             output_filename="example_network.html",
             title="Example Cognee Network",
-            node_attribute="group",  # Attribute to use for coloring nodes
+            label="group",  # Attribute to use for coloring nodes
             layout_func=nx.spring_layout,  # Layout function
             layout_scale=3.0,  # Scale for the layout
             logo_alpha=0.2,
