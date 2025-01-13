@@ -10,21 +10,19 @@ class PromptfooComprehensiveness:
         self.wrapper = PromptfooWrapper(promptfoo_path="/opt/homebrew/bin/promptfoo")
         self.threshold = threshold
 
-    async def measure(self, instances):
-        with open(os.path.join(os.getcwd(), "evals/promptfooconfig.yaml"), "r") as file:
+    async def measure(self, instances, context_provider):
+        with open(os.path.join(os.getcwd(), "evals/promptfoo_config_template.yaml"), "r") as file:
             config = yaml.safe_load(file)
 
-        # creating config file
+        # Fill config file with test cases
         tests = []
         for instance in instances:
-            from evals.eval_on_hotpot import get_context_with_cognee
-
-            context = await get_context_with_cognee(instance)
+            context = await context_provider(instance)
             test = {
                 "vars": {
                     "name": instance["question"][:15],
                     "question": instance["question"],
-                    "context": str(context),
+                    "context": context,
                 }
             }
             tests.append(test)

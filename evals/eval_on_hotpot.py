@@ -13,23 +13,6 @@ from evals.qa_dataset_utils import load_qa_dataset
 from evals.qa_metrics_utils import get_metric
 
 
-async def answer_without_cognee(instance):
-    args = {
-        "question": instance["question"],
-        "context": instance["context"],
-    }
-    user_prompt = render_prompt("context_for_question.txt", args)
-    system_prompt = read_query_prompt("answer_hotpot_question.txt")
-
-    llm_client = get_llm_client()
-    answer_prediction = await llm_client.acreate_structured_output(
-        text_input=user_prompt,
-        system_prompt=system_prompt,
-        response_model=str,
-    )
-    return answer_prediction
-
-
 async def get_context_with_cognee(instance):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -43,14 +26,22 @@ async def get_context_with_cognee(instance):
         SearchType.SUMMARIES, query_text=instance["question"]
     )
     search_results = search_results + search_results_second
-    return search_results
+
+    search_results_str = "\n".join([context_item["text"] for context_item in search_results])
+
+    return search_results_str
 
 
-async def answer_with_cognee(instance):
-    search_results = get_context_with_cognee(instance)
+async def get_context_without_cognee(instance):
+    return instance["context"]
+
+
+async def answer_qa_instance(instance, context_provider):
+    context = context_provider(instance)
+
     args = {
         "question": instance["question"],
-        "context": search_results,
+        "context": context,
     }
     user_prompt = render_prompt("context_for_question.txt", args)
     system_prompt = read_query_prompt("answer_hotpot_using_cognee_search.txt")
@@ -81,7 +72,7 @@ async def eval_answers(instances, answers, eval_metric):
 
 
 async def eval_on_QA_dataset(
-    dataset_name_or_filename: str, answer_provider, num_samples, eval_metric_name
+    dataset_name_or_filename: str, context_provider, num_samples, eval_metric_name
 ):
     dataset = load_qa_dataset(dataset_name_or_filename)
 
@@ -89,11 +80,11 @@ async def eval_on_QA_dataset(
     instances = dataset if not num_samples else dataset[:num_samples]
 
     if eval_metric_name.startswith("promptfoo"):
-        return await eval_metric.measure(instances)
+        return await eval_metric.measure(instances, context_provider)
 
     answers = []
     for instance in tqdm(instances, desc="Getting answers"):
-        answer = await answer_provider(instance)
+        answer = await answer_qa_instance(instance, context_provider)
         answers.append(answer)
 
     eval_results = await eval_answers(instances, answers, eval_metric)
@@ -115,11 +106,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.with_cognee:
-        answer_provider = answer_with_cognee
+        context_provider = get_context_with_cognee
     else:
-        answer_provider = answer_without_cognee
+        context_provider = get_context_without_cognee
 
     avg_score = asyncio.run(
-        eval_on_QA_dataset(args.dataset, answer_provider, args.num_samples, args.metric_name)
+        eval_on_QA_dataset(args.dataset, context_provider, args.num_samples, args.metric_name)
     )
     print(f"Average {args.metric_name}: {avg_score}")
