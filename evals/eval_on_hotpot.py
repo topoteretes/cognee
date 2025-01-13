@@ -1,13 +1,11 @@
 import argparse
 import asyncio
 import statistics
-import deepeval.metrics
 from deepeval.dataset import EvaluationDataset
 from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
 
 import cognee
-import evals.deepeval_metrics
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
@@ -32,7 +30,7 @@ async def answer_without_cognee(instance):
     return answer_prediction
 
 
-async def answer_with_cognee(instance):
+async def get_context_with_cognee(instance):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -45,7 +43,11 @@ async def answer_with_cognee(instance):
         SearchType.SUMMARIES, query_text=instance["question"]
     )
     search_results = search_results + search_results_second
+    return search_results
 
+
+async def answer_with_cognee(instance):
+    search_results = get_context_with_cognee(instance)
     args = {
         "question": instance["question"],
         "context": search_results,
@@ -82,9 +84,13 @@ async def eval_on_QA_dataset(
     dataset_name_or_filename: str, answer_provider, num_samples, eval_metric_name
 ):
     dataset = load_qa_dataset(dataset_name_or_filename)
-    eval_metric = get_metric(eval_metric_name)
 
+    eval_metric = get_metric(eval_metric_name)
     instances = dataset if not num_samples else dataset[:num_samples]
+
+    if eval_metric_name.startswith("promptfoo"):
+        return await eval_metric.measure(instances)
+
     answers = []
     for instance in tqdm(instances, desc="Getting answers"):
         answer = await answer_provider(instance)

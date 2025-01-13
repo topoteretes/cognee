@@ -1,0 +1,10 @@
+[
+    {
+      "role": "system",
+      "content": "Answer the question using the provided context. Be as brief as possible. Each entry in the context is tuple of length 3, representing an edge of a knowledge graph with its two nodes.."
+    },
+    {
+      "role": "user",
+      "content": "The question is: `{{ question }}` \n And here is the context: `{{ context }}`"
+    }
+]
