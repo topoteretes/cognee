@@ -52,5 +52,9 @@ class GraphDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_model_independent_graph_data(self):
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_graph_data(self):
         raise NotImplementedError
