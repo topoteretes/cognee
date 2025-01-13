@@ -16,7 +16,7 @@ env:
 jobs:
   run_common:
     name: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
     defaults:
