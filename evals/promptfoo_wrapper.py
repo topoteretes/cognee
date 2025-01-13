@@ -133,6 +133,9 @@ class PromptfooWrapper:
         filename = "benchmark_results"
 
         filename = os.path.join(os.getcwd(), f"{filename}.json")
+        # Create an empty JSON file
+        with open(filename, "w") as file:
+            json.dump({}, file)
 
         cmd = [self.promptfoo_path, "eval"]
         if prompt_file:

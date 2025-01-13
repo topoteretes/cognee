@@ -2,14 +2,13 @@ from deepeval.metrics import BaseMetric, GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 
 from evals.official_hotpot_metrics import exact_match_score, f1_score
+from cognee.infrastructure.llm.prompts.llm_judge_prompts import llm_judge_prompts
 
 correctness_metric = GEval(
     name="Correctness",
     model="gpt-4o-mini",
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.EXPECTED_OUTPUT],
-    evaluation_steps=[
-        "Determine whether the actual output is factually correct based on the expected output."
-    ],
+    evaluation_steps=[llm_judge_prompts["correctness"]],
 )
 
 comprehensiveness_metric = GEval(
@@ -20,9 +19,7 @@ comprehensiveness_metric = GEval(
         LLMTestCaseParams.ACTUAL_OUTPUT,
         LLMTestCaseParams.EXPECTED_OUTPUT,
     ],
-    evaluation_steps=[
-        "Determine how much detail the answer provides to cover all the aspects and details of the question."
-    ],
+    evaluation_steps=[llm_judge_prompts["comprehensiveness"]],
 )
 
 diversity_metric = GEval(
@@ -33,9 +30,7 @@ diversity_metric = GEval(
         LLMTestCaseParams.ACTUAL_OUTPUT,
         LLMTestCaseParams.EXPECTED_OUTPUT,
     ],
-    evaluation_steps=[
-        "Determine how varied and rich the answer is in providing different perspectives and insights on the question."
-    ],
+    evaluation_steps=[llm_judge_prompts["diversity"]],
 )
 
 empowerment_metric = GEval(
@@ -46,9 +41,18 @@ empowerment_metric = GEval(
         LLMTestCaseParams.ACTUAL_OUTPUT,
         LLMTestCaseParams.EXPECTED_OUTPUT,
     ],
-    evaluation_steps=[
-        "Determine how well the answer helps the reader understand and make informed judgements about the topic."
+    evaluation_steps=[llm_judge_prompts["empowerment"]],
+)
+
+directness_metric = GEval(
+    name="Directness",
+    model="gpt-4o-mini",
+    evaluation_params=[
+        LLMTestCaseParams.INPUT,
+        LLMTestCaseParams.ACTUAL_OUTPUT,
+        LLMTestCaseParams.EXPECTED_OUTPUT,
     ],
+    evaluation_steps=[llm_judge_prompts["directness"]],
 )
 
 

@@ -5,14 +5,16 @@ import yaml
 import json
 
 
-class PromptfooComprehensiveness:
-    def __init__(self, threshold: float = 0.5):
+class PromptfooMetric:
+    def __init__(self, judge_prompt):
         self.wrapper = PromptfooWrapper(promptfoo_path="/opt/homebrew/bin/promptfoo")
-        self.threshold = threshold
+        self.judge_prompt = judge_prompt
 
     async def measure(self, instances, context_provider):
         with open(os.path.join(os.getcwd(), "evals/promptfoo_config_template.yaml"), "r") as file:
             config = yaml.safe_load(file)
+
+        config["defaultTest"] = [{"assert": {"type": "llm_rubric", "value": self.judge_prompt}}]
 
         # Fill config file with test cases
         tests = []
@@ -47,5 +49,4 @@ class PromptfooComprehensiveness:
 
         self.score = results["results"]["prompts"][0]["metrics"]["score"]
 
-        self.success = self.score >= self.threshold
         return self.score
