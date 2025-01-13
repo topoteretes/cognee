@@ -468,16 +468,20 @@ def graph_to_tuple(graph):
 
 
 def setup_logging(log_level=logging.INFO):
-    """This method sets up the logging configuration."""
+    """Sets up the logging configuration."""
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s\n")
+
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
     stream_handler.setLevel(log_level)
 
-    logging.basicConfig(
-        level=log_level,
-        handlers=[stream_handler],
-    )
+    root_logger = logging.getLogger()
+
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    root_logger.addHandler(stream_handler)
+    root_logger.setLevel(log_level)
 
 
 # ---------------- Example Usage ----------------
