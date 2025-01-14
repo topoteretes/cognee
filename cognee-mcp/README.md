@@ -37,7 +37,11 @@ source .venv/bin/activate
 4. Add the new server to your Claude config:
 
 The file should be located here: ~/Library/Application\ Support/Claude/
+```
+cd ~/Library/Application\ Support/Claude/
+```
 You need to create claude_desktop_config.json in this folder if it doesn't exist
+Make sure to add your paths and LLM API key to the file bellow
 
 ```
 
@@ -90,5 +94,10 @@ To use debugger, run:
 npx @modelcontextprotocol/inspector uv --directory /Users/name/folder run cognee
 ```
 
-To reset the installation
-uv sync --dev --all-extras --reinstall 
+To apply new changes while development you do:
+
+1. Poetry lock in cognee folder
+2. uv sync --dev --all-extras --reinstall 
+3. npx @modelcontextprotocol/inspector uv --directory /Users/vasilije/cognee/cognee-mcp run cognee
+
+
