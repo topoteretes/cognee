@@ -4,13 +4,15 @@ import statistics
 from deepeval.dataset import EvaluationDataset
 from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
-
+import logging
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from evals.qa_dataset_utils import load_qa_dataset
 from evals.qa_metrics_utils import get_metric
+
+logger = logging.getLogger(__name__)
 
 
 async def get_context_with_cognee(instance):
@@ -56,7 +58,7 @@ async def answer_qa_instance(instance, context_provider):
     return answer_prediction
 
 
-async def eval_answers(instances, answers, eval_metric):
+async def deepeval_answers(instances, answers, eval_metric):
     test_cases = []
 
     for instance, answer in zip(instances, answers):
@@ -71,6 +73,20 @@ async def eval_answers(instances, answers, eval_metric):
     return eval_results
 
 
+async def deepeval_on_instances(instances, context_provider, eval_metric):
+    answers = []
+    for instance in tqdm(instances, desc="Getting answers"):
+        answer = await answer_qa_instance(instance, context_provider)
+        answers.append(answer)
+
+    eval_results = await deepeval_answers(instances, answers, eval_metric)
+    avg_score = statistics.mean(
+        [result.metrics_data[0].score for result in eval_results.test_results]
+    )
+
+    return avg_score
+
+
 async def eval_on_QA_dataset(
     dataset_name_or_filename: str, context_provider, num_samples, eval_metric_name
 ):
@@ -81,18 +97,8 @@ async def eval_on_QA_dataset(
 
     if eval_metric_name.startswith("promptfoo"):
         return await eval_metric.measure(instances, context_provider)
-
-    answers = []
-    for instance in tqdm(instances, desc="Getting answers"):
-        answer = await answer_qa_instance(instance, context_provider)
-        answers.append(answer)
-
-    eval_results = await eval_answers(instances, answers, eval_metric)
-    avg_score = statistics.mean(
-        [result.metrics_data[0].score for result in eval_results.test_results]
-    )
-
-    return avg_score
+    else:
+        return await deepeval_on_instances(instances, context_provider, eval_metric)
 
 
 if __name__ == "__main__":
@@ -113,4 +119,4 @@ if __name__ == "__main__":
     avg_score = asyncio.run(
         eval_on_QA_dataset(args.dataset, context_provider, args.num_samples, args.metric_name)
     )
-    print(f"Average {args.metric_name}: {avg_score}")
+    logger.info(f"Average {args.metric_name}: {avg_score}")
