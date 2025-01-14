@@ -42,6 +42,10 @@ cd ~/Library/Application\ Support/Claude/
 ```
 You need to create claude_desktop_config.json in this folder if it doesn't exist
 Make sure to add your paths and LLM API key to the file bellow
+Use your editor of choice, for example Nano:
+```
+nano claude_desktop_config.json
+```
 
 ```
 
