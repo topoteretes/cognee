@@ -1,13 +1,14 @@
 from evals.promptfoo_wrapper import PromptfooWrapper
 import os
-from deepeval.test_case import LLMTestCase
 import yaml
 import json
+import shutil
 
 
 class PromptfooMetric:
     def __init__(self, judge_prompt):
-        self.wrapper = PromptfooWrapper(promptfoo_path="/opt/homebrew/bin/promptfoo")
+        promptfoo_path = shutil.which("promptfoo")
+        self.wrapper = PromptfooWrapper(promptfoo_path=promptfoo_path)
         self.judge_prompt = judge_prompt
 
     async def measure(self, instances, context_provider):
