@@ -192,7 +192,7 @@ async def main(enable_steps):
 
 
 if __name__ == "__main__":
-    setup_logging(logging.INFO)
+    setup_logging(logging.ERROR)
 
     rebuild_kg = True
     retrieve = True

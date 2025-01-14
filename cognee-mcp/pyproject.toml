@@ -3,7 +3,8 @@ name = "cognee-mcp"
 version = "0.1.0"
 description = "A MCP server project"
 readme = "README.md"
-requires-python = ">=3.11.0"
+requires-python = ">=3.10"
+
 dependencies = [
     "mcp>=1.1.1",
     "openai==1.59.4",
