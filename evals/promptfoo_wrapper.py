@@ -114,7 +114,7 @@ class PromptfooWrapper:
         out_format: str = "json",
         extra_args: Optional[List[str]] = None,
         binary_output: bool = False,
-    ) -> List[Dict]:
+    ) -> Dict:
         """
         Run the `promptfoo eval` command with the provided parameters and return parsed results.
 

@@ -37,7 +37,7 @@ async def get_context_without_cognee(instance):
 
 
 async def answer_qa_instance(instance, context_provider):
-    context = context_provider(instance)
+    context = await context_provider(instance)
 
     args = {
         "question": instance["question"],
@@ -98,7 +98,7 @@ async def eval_on_QA_dataset(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--dataset", type=str, help="Which dataset to evaluate on")
+    parser.add_argument("--dataset", type=str, required=True, help="Which dataset to evaluate on")
     parser.add_argument("--with_cognee", action="store_true")
     parser.add_argument("--num_samples", type=int, default=500)
     parser.add_argument("--metric_name", type=str, default="Correctness")
