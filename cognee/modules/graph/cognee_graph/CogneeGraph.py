@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 import heapq
-from graphistry import edges
+import asyncio
 
 
 class CogneeGraph(CogneeAbstractGraph):
@@ -127,51 +127,25 @@ class CogneeGraph(CogneeAbstractGraph):
                 else:
                     print(f"Node with id {node_id} not found in the graph.")
 
-    async def map_vector_distances_to_graph_edges(
-        self, vector_engine, query
-    ) -> None:  # :TODO: When we calculate edge embeddings in vector db change this similarly to node mapping
+    async def map_vector_distances_to_graph_edges(self, vector_engine, query) -> None:
         try:
-            # Step 1: Generate the query embedding
             query_vector = await vector_engine.embed_data([query])
             query_vector = query_vector[0]
             if query_vector is None or len(query_vector) == 0:
                 raise ValueError("Failed to generate query embedding.")
 
-            # Step 2: Collect all unique relationship types
-            unique_relationship_types = set()
-            for edge in self.edges:
-                relationship_type = edge.attributes.get("relationship_type")
-                if relationship_type:
-                    unique_relationship_types.add(relationship_type)
+            edge_distances = await vector_engine.get_distance_from_collection_elements(
+                "edge_type_relationship_name", query_text=query
+            )
 
-            # Step 3: Embed all unique relationship types
-            unique_relationship_types = list(unique_relationship_types)
-            relationship_type_embeddings = await vector_engine.embed_data(unique_relationship_types)
+            embedding_map = {result.payload["text"]: result.score for result in edge_distances}
 
-            # Step 4: Map relationship types to their embeddings and calculate distances
-            embedding_map = {}
-            for relationship_type, embedding in zip(
-                unique_relationship_types, relationship_type_embeddings
-            ):
-                edge_vector = np.array(embedding)
-
-                # Calculate cosine similarity
-                similarity = np.dot(query_vector, edge_vector) / (
-                    np.linalg.norm(query_vector) * np.linalg.norm(edge_vector)
-                )
-                distance = 1 - similarity
-
-                # Round the distance to 4 decimal places and store it
-                embedding_map[relationship_type] = round(distance, 4)
-
-            # Step 4: Assign precomputed distances to edges
             for edge in self.edges:
                 relationship_type = edge.attributes.get("relationship_type")
                 if not relationship_type or relationship_type not in embedding_map:
                     print(f"Edge {edge} has an unknown or missing relationship type.")
                     continue
 
-                # Assign the precomputed distance
                 edge.attributes["vector_distance"] = embedding_map[relationship_type]
 
         except Exception as ex:
