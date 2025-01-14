@@ -5,35 +5,11 @@ from deepeval.dataset import EvaluationDataset
 from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
 
-import cognee
-from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from evals.qa_dataset_utils import load_qa_dataset
 from evals.qa_metrics_utils import get_metric
-
-
-async def get_context_with_cognee(instance):
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    for title, sentences in instance["context"]:
-        await cognee.add("\n".join(sentences), dataset_name="QA")
-    await cognee.cognify("QA")
-
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text=instance["question"])
-    search_results_second = await cognee.search(
-        SearchType.SUMMARIES, query_text=instance["question"]
-    )
-    search_results = search_results + search_results_second
-
-    search_results_str = "\n".join([context_item["text"] for context_item in search_results])
-
-    return search_results_str
-
-
-async def get_context_without_cognee(instance):
-    return instance["context"]
+from evals.qa_context_provider_utils import qa_context_providers
 
 
 async def answer_qa_instance(instance, context_provider):
@@ -72,11 +48,12 @@ async def eval_answers(instances, answers, eval_metric):
 
 
 async def eval_on_QA_dataset(
-    dataset_name_or_filename: str, context_provider, num_samples, eval_metric_name
+    dataset_name_or_filename: str, context_provider_name, num_samples, eval_metric_name
 ):
     dataset = load_qa_dataset(dataset_name_or_filename)
-
+    context_provider = qa_context_providers[context_provider_name]
     eval_metric = get_metric(eval_metric_name)
+
     instances = dataset if not num_samples else dataset[:num_samples]
 
     if eval_metric_name.startswith("promptfoo"):
@@ -99,18 +76,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--dataset", type=str, required=True, help="Which dataset to evaluate on")
-    parser.add_argument("--with_cognee", action="store_true")
+    parser.add_argument(
+        "--rag_option",
+        type=str,
+        choices=qa_context_providers.keys(),
+        required=True,
+        help="RAG option to use for providing context",
+    )
     parser.add_argument("--num_samples", type=int, default=500)
     parser.add_argument("--metric_name", type=str, default="Correctness")
 
     args = parser.parse_args()
 
-    if args.with_cognee:
-        context_provider = get_context_with_cognee
-    else:
-        context_provider = get_context_without_cognee
-
     avg_score = asyncio.run(
-        eval_on_QA_dataset(args.dataset, context_provider, args.num_samples, args.metric_name)
+        eval_on_QA_dataset(args.dataset, args.rag_option, args.num_samples, args.metric_name)
     )
     print(f"Average {args.metric_name}: {avg_score}")
