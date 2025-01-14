@@ -40,7 +40,6 @@ networkx = "^3.2.1"
 aiosqlite = "^0.20.0"
 pandas = "2.2.3"
 filetype = "^1.2.0"
-nltk = "^3.8.1"
 dlt = {extras = ["sqlalchemy"], version = "^1.4.1"}
 aiofiles = "^23.2.1"
 qdrant-client = {version = "^1.9.0", optional = true}
@@ -64,7 +63,7 @@ langfuse = "^2.32.0"
 pydantic-settings = "^2.2.1"
 anthropic = "^0.26.1"
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
-fastapi-users = {version = "*", extras = ["sqlalchemy"]}
+fastapi-users = {version = "14.0.0", extras = ["sqlalchemy"]}
 alembic = "^1.13.3"
 asyncpg =  {version = "0.30.0", optional = true}
 pgvector = {version = "^0.3.5", optional = true}

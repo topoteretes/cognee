@@ -435,12 +435,6 @@ async def create_cognee_style_network_with_logo(
     with open(output_filename, "w") as f:
         f.write(html_content)
 
-
-
-    logging.info("Visualization complete.")
-
-    if bokeh_object:
-        return p
     return html_content
 
 

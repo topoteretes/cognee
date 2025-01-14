@@ -3,6 +3,8 @@ import os
 import asyncio
 from contextlib import redirect_stderr, redirect_stdout
 
+from sqlalchemy.testing.plugin.plugin_base import logging
+
 import cognee
 import mcp.server.stdio
 import mcp.types as types
@@ -11,7 +13,7 @@ from cognee.shared.data_models import KnowledgeGraph
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from PIL import Image
-from PIL import Image as PILImage
+
 
 server = Server("cognee-mcp")
 
@@ -197,9 +199,15 @@ async def handle_call_tool(
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 try:
-                    await cognee.visualize()
-                    img = get_freshest_png(".")
-                    return types.Image(data=img.tobytes(), format="png")
+                    result = await cognee.visualize_graph()
+                    results = retrieved_edges_to_string(result)
+
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=results,
+                        )
+                    ]
                 except (FileNotFoundError, IOError, ValueError) as e:
                     raise ValueError(f"Failed to create visualization: {str(e)}")
     else:

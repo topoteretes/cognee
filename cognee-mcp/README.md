@@ -83,3 +83,12 @@ npx -y @smithery/cli install cognee --client claude
 
 Define cognify tool in server.py
 Restart your Claude desktop.
+
+
+To use debugger, run:
+```bash
+npx @modelcontextprotocol/inspector uv --directory /Users/name/folder run cognee
+```
+
+To reset the installation
+uv sync --dev --all-extras --reinstall 
