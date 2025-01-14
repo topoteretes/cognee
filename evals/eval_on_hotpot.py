@@ -1,11 +1,7 @@
 import argparse
 import asyncio
-import json
 import statistics
-from pathlib import Path
-
 import deepeval.metrics
-import wget
 from deepeval.dataset import EvaluationDataset
 from deepeval.test_case import LLMTestCase
 from tqdm import tqdm
@@ -13,9 +9,9 @@ from tqdm import tqdm
 import cognee
 import evals.deepeval_metrics
 from cognee.api.v1.search import SearchType
-from cognee.base_config import get_base_config
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from evals.qa_dataset_utils import load_qa_dataset
 
 
 async def answer_without_cognee(instance):
@@ -40,12 +36,8 @@ async def answer_with_cognee(instance):
     await cognee.prune.prune_system(metadata=True)
 
     for title, sentences in instance["context"]:
-        await cognee.add("\n".join(sentences), dataset_name="HotPotQA")
-
-    for n in range(1, 4):
-        print(n)
-
-        await cognee.cognify("HotPotQA")
+        await cognee.add("\n".join(sentences), dataset_name="QA")
+    await cognee.cognify("QA")
 
     search_results = await cognee.search(SearchType.INSIGHTS, query_text=instance["question"])
     search_results_second = await cognee.search(
@@ -85,20 +77,10 @@ async def eval_answers(instances, answers, eval_metric):
     return eval_results
 
 
-async def eval_on_hotpotQA(answer_provider, num_samples, eval_metric):
-    base_config = get_base_config()
-    data_root_dir = base_config.data_root_directory
-
-    if not Path(data_root_dir).exists():
-        Path(data_root_dir).mkdir()
-
-    filepath = data_root_dir / Path("hotpot_dev_fullwiki_v1.json")
-    if not filepath.exists():
-        url = "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json"
-        wget.download(url, out=data_root_dir)
-
-    with open(filepath, "r") as file:
-        dataset = json.load(file)
+async def eval_on_QA_dataset(
+    dataset_name_or_filename: str, answer_provider, num_samples, eval_metric
+):
+    dataset = load_qa_dataset(dataset_name_or_filename)
 
     instances = dataset if not num_samples else dataset[:num_samples]
     answers = []
@@ -117,6 +99,7 @@ async def eval_on_hotpotQA(answer_provider, num_samples, eval_metric):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--dataset", type=str, help="Which dataset to evaluate on")
     parser.add_argument("--with_cognee", action="store_true")
     parser.add_argument("--num_samples", type=int, default=500)
     parser.add_argument(
@@ -142,5 +125,7 @@ if __name__ == "__main__":
     else:
         answer_provider = answer_without_cognee
 
-    avg_score = asyncio.run(eval_on_hotpotQA(answer_provider, args.num_samples, metric))
+    avg_score = asyncio.run(
+        eval_on_QA_dataset(args.dataset, answer_provider, args.num_samples, metric)
+    )
     print(f"Average {args.metric}: {avg_score}")
