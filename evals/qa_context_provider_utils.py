@@ -5,7 +5,7 @@ from cognee.modules.retrieval.brute_force_triplet_search import brute_force_trip
 from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
 
 
-async def get_context_without_rag(instance: dict) -> str:
+async def get_raw_context(instance: dict) -> str:
     return instance["context"]
 
 
@@ -21,11 +21,9 @@ async def cognify_instance(instance: dict):
 async def get_context_with_cognee(instance: dict) -> str:
     await cognify_instance(instance)
 
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text=instance["question"])
-    search_results_second = await cognee.search(
-        SearchType.SUMMARIES, query_text=instance["question"]
-    )
-    search_results = search_results + search_results_second
+    insights = await cognee.search(SearchType.INSIGHTS, query_text=instance["question"])
+    summaries = await cognee.search(SearchType.SUMMARIES, query_text=instance["question"])
+    search_results = insights + summaries
 
     search_results_str = "\n".join([context_item["text"] for context_item in search_results])
 
@@ -54,7 +52,7 @@ async def get_context_with_brute_force_triplet_search(instance: dict) -> str:
 
 
 qa_context_providers = {
-    "no_rag": get_context_without_rag,
+    "no_rag": get_raw_context,
     "cognee": get_context_with_cognee,
     "simple_rag": get_context_with_simple_rag,
     "brute_force": get_context_with_brute_force_triplet_search,
