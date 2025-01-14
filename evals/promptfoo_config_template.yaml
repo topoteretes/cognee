@@ -5,9 +5,3 @@
 description: "My eval"
 providers:
   - id: openai:gpt-4o-mini
-
-defaultTest:
-  assert:
-    # Comprehensiveness
-    - type: llm-rubric
-      value: Determine how much detail the answer provides to cover all the aspects and details of the question.
