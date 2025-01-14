@@ -1,6 +1,6 @@
 from cognee.root_dir import get_absolute_path
 import json
-import wget
+import requests
 from jsonschema import ValidationError, validate
 from pathlib import Path
 
@@ -31,7 +31,7 @@ qa_json_schema = {
 }
 
 
-def download_qa_dataset(dataset_name: str, dir: str):
+def download_qa_dataset(dataset_name: str, filepath: Path):
     if dataset_name not in qa_datasets:
         raise ValueError(f"{dataset_name} is not a supported dataset.")
 
@@ -44,7 +44,15 @@ def download_qa_dataset(dataset_name: str, dir: str):
                         and unzip it."
         )
 
-    wget.download(url, out=dir)
+    response = requests.get(url, stream=True)
+
+    if response.status_code == 200:
+        with open(filepath, "wb") as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
+        print(f"Dataset {dataset_name} downloaded and saved to {filepath}")
+    else:
+        print(f"Failed to download {dataset_name}. Status code: {response.status_code}")
 
 
 def load_qa_dataset(dataset_name_or_filename: str):
@@ -58,7 +66,7 @@ def load_qa_dataset(dataset_name_or_filename: str):
 
         filepath = data_root_dir / Path(filename)
         if not filepath.exists():
-            download_qa_dataset(dataset_name, data_root_dir)
+            download_qa_dataset(dataset_name, filepath)
     else:
         filename = dataset_name_or_filename
         filepath = Path(filename)
