@@ -430,7 +430,7 @@ class Neo4jAdapter(GraphDBInterface):
         query_nodes = "MATCH (n) RETURN collect(n) AS nodes"
         nodes = await self.query(query_nodes)
 
-        query_edges = "MATCH ()-[r]->() RETURN collect(r) AS relationships"
+        query_edges = "MATCH (n)-[r]->(m) RETURN collect([n, r, m]) AS elements"
         edges = await self.query(query_edges)
 
         return (nodes, edges)
