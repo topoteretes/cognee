@@ -1,9 +1,10 @@
-name: Build and Push Docker Image
+name: build | Build and Push Docker Image to dockerhub
 
 on:
-  push
-#    branches:
-#      - dev
+  push:
+    branches:
+      - dev
+      - main
 
 jobs:
   docker-build-and-push:
