@@ -1,0 +1,10 @@
+[
+    {
+      "role": "system",
+      "content": "Answer the question using the provided context. Be as brief as possible."
+    },
+    {
+      "role": "user",
+      "content": "The question is: `{{ question }}` \n And here is the context: `{{ context }}`"
+    }
+]
