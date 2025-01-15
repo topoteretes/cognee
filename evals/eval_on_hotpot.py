@@ -73,7 +73,6 @@ async def eval_on_QA_dataset(
 
     if eval_metric_name.startswith("promptfoo"):
         return await eval_metric.measure(instances, context_provider)
-
     else:
         return await deepeval_on_instances(instances, context_provider, eval_metric)
 
