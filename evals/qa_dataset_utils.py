@@ -55,7 +55,7 @@ def download_qa_dataset(dataset_name: str, filepath: Path):
         print(f"Failed to download {dataset_name}. Status code: {response.status_code}")
 
 
-def load_qa_dataset(dataset_name_or_filename: str):
+def load_qa_dataset(dataset_name_or_filename: str) -> list[dict]:
     if dataset_name_or_filename in qa_datasets:
         dataset_name = dataset_name_or_filename
         filename = qa_datasets[dataset_name]["filename"]
@@ -77,6 +77,6 @@ def load_qa_dataset(dataset_name_or_filename: str):
     try:
         validate(instance=dataset, schema=qa_json_schema)
     except ValidationError as e:
-        print("File is not a valid QA dataset:", e.message)
+        raise ValidationError(f"Invalid QA dataset: {e.message}")
 
     return dataset
