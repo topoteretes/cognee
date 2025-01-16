@@ -9,8 +9,9 @@ import aiofiles
 import jedi
 import parso
 from parso.tree import BaseNode
+import logging
 
-from cognee.tasks.repo_processor import logger
+logger = logging.getLogger(__name__)
 
 
 @contextmanager

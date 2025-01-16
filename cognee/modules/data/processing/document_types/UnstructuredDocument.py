@@ -1,14 +1,16 @@
 from io import StringIO
+from typing import Optional
 
 from cognee.modules.chunking.TextChunker import TextChunker
-from .Document import Document
 from cognee.modules.data.exceptions import UnstructuredLibraryImportError
+
+from .Document import Document
 
 
 class UnstructuredDocument(Document):
     type: str = "unstructured"
 
-    def read(self, chunk_size: int):
+    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int] = None) -> str:
         def get_text():
             try:
                 from unstructured.partition.auto import partition
@@ -27,6 +29,6 @@ class UnstructuredDocument(Document):
 
                 yield text
 
-        chunker = TextChunker(self, chunk_size=chunk_size, get_text=get_text)
+        chunker = TextChunker(self, chunk_size=chunk_size, get_text=get_text, max_tokens=max_tokens)
 
         yield from chunker.read()
