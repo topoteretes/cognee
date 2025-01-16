@@ -13,7 +13,15 @@ LOCAL_COGNEE_PATH = "/Users/vasilije/cognee"
 image = (
     modal.Image.debian_slim()
     .pip_install("poetry")
-    .add_local_dir(LOCAL_COGNEE_PATH, "/root/cognee", copy=True)
+    .add_local_dir(LOCAL_COGNEE_PATH, "/root/cognee", copy=True,
+        ignore=[
+            ".venv/**/*",
+            "__pycache__",
+            "*.pyc",
+            ".git",
+            ".pytest_cache",
+            "*.egg-info"
+        ])
     .run_commands(
         "cd /root/cognee && poetry config virtualenvs.in-project true",
         # Install dependencies
