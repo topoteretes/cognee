@@ -21,9 +21,11 @@ async def cognify_instance(instance: dict):
 async def get_context_with_cognee(instance: dict) -> str:
     await cognify_instance(instance)
 
-    insights = await cognee.search(SearchType.INSIGHTS, query_text=instance["question"])
+    # TODO: Fix insights
+    # insights = await cognee.search(SearchType.INSIGHTS, query_text=instance["question"])
     summaries = await cognee.search(SearchType.SUMMARIES, query_text=instance["question"])
-    search_results = insights + summaries
+    # search_results = insights + summaries
+    search_results = summaries
 
     search_results_str = "\n".join([context_item["text"] for context_item in search_results])
 
@@ -31,7 +33,11 @@ async def get_context_with_cognee(instance: dict) -> str:
 
 
 async def get_context_with_simple_rag(instance: dict) -> str:
-    await cognify_instance(instance)
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    for title, sentences in instance["context"]:
+        await cognee.add("\n".join(sentences), dataset_name="QA")
 
     vector_engine = get_vector_engine()
     found_chunks = await vector_engine.search("document_chunk_text", instance["question"], limit=5)

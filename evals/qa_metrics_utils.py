@@ -7,10 +7,9 @@ from evals.deepeval_metrics import (
     f1_score_metric,
     em_score_metric,
 )
-from evals.promptfoo_metrics import PromptfooMetric
 from deepeval.metrics import AnswerRelevancyMetric
 import deepeval.metrics
-from cognee.infrastructure.llm.prompts.llm_judge_prompts import llm_judge_prompts
+from evals.promptfoo_metrics import is_valid_promptfoo_metric, PromptfooMetric
 
 native_deepeval_metrics = {"AnswerRelevancy": AnswerRelevancyMetric}
 
@@ -24,18 +23,10 @@ custom_deepeval_metrics = {
     "EM": em_score_metric,
 }
 
-promptfoo_metrics = {
-    "promptfoo.correctness": PromptfooMetric(llm_judge_prompts["correctness"]),
-    "promptfoo.comprehensiveness": PromptfooMetric(llm_judge_prompts["comprehensiveness"]),
-    "promptfoo.diversity": PromptfooMetric(llm_judge_prompts["diversity"]),
-    "promptfoo.empowerment": PromptfooMetric(llm_judge_prompts["empowerment"]),
-    "promptfoo.directness": PromptfooMetric(llm_judge_prompts["directness"]),
-}
-
-qa_metrics = native_deepeval_metrics | custom_deepeval_metrics | promptfoo_metrics
+qa_metrics = native_deepeval_metrics | custom_deepeval_metrics
 
 
-def get_metric(metric_name: str):
+def get_deepeval_metric(metric_name: str):
     if metric_name in qa_metrics:
         metric = qa_metrics[metric_name]
     else:
@@ -49,3 +40,27 @@ def get_metric(metric_name: str):
         metric = metric()
 
     return metric
+
+
+def get_metrics(metric_name_list: list[str]):
+    metrics = {
+        "deepeval_metrics": [],
+    }
+
+    promptfoo_metric_names = []
+
+    for metric_name in metric_name_list:
+        if (
+            (metric_name in native_deepeval_metrics)
+            or (metric_name in custom_deepeval_metrics)
+            or hasattr(deepeval.metrics, metric_name)
+        ):
+            metric = get_deepeval_metric(metric_name)
+            metrics["deepeval_metrics"].append(metric)
+        elif is_valid_promptfoo_metric(metric_name):
+            promptfoo_metric_names.append(metric_name)
+
+    if len(promptfoo_metric_names) > 0:
+        metrics["promptfoo_metrics"] = PromptfooMetric(promptfoo_metric_names)
+
+    return metrics

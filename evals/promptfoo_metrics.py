@@ -3,19 +3,42 @@ import os
 import yaml
 import json
 import shutil
+from cognee.infrastructure.llm.prompts.llm_judge_prompts import llm_judge_prompts
+
+
+def is_valid_promptfoo_metric(metric_name: str):
+    try:
+        prefix, suffix = metric_name.split(".")
+    except ValueError:
+        return False
+    if prefix != "promptfoo":
+        return False
+    if suffix not in llm_judge_prompts:
+        return False
+    return True
 
 
 class PromptfooMetric:
-    def __init__(self, judge_prompt):
+    def __init__(self, metric_name_list):
         promptfoo_path = shutil.which("promptfoo")
         self.wrapper = PromptfooWrapper(promptfoo_path=promptfoo_path)
-        self.judge_prompt = judge_prompt
+        self.prompts = {}
+        for metric_name in metric_name_list:
+            if is_valid_promptfoo_metric(metric_name):
+                self.prompts[metric_name] = llm_judge_prompts[metric_name.split(".")[1]]
+            else:
+                raise Exception(f"{metric_name} is not a valid promptfoo metric")
 
     async def measure(self, instances, context_provider):
         with open(os.path.join(os.getcwd(), "evals/promptfoo_config_template.yaml"), "r") as file:
             config = yaml.safe_load(file)
 
-        config["defaultTest"] = [{"assert": {"type": "llm_rubric", "value": self.judge_prompt}}]
+        config["defaultTest"] = {
+            "assert": [
+                {"type": "llm-rubric", "value": prompt, "name": metric_name}
+                for metric_name, prompt in self.prompts.items()
+            ]
+        }
 
         # Fill config file with test cases
         tests = []
@@ -48,6 +71,9 @@ class PromptfooMetric:
         with open(file_path, "r") as file:
             results = json.load(file)
 
-        self.score = results["results"]["prompts"][0]["metrics"]["score"]
+        scores = {}
 
-        return self.score
+        for result in results["results"]["results"][0]["gradingResult"]["componentResults"]:
+            scores[result["assertion"]["name"]] = result["score"]
+
+        return scores
