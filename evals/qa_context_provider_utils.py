@@ -27,7 +27,7 @@ async def cognify_instance(instance: dict, task_indices: list[int] = None):
 async def get_context_with_cognee(
     instance: dict,
     task_indices: list[int] = None,
-    search_types: list[SearchType] = [SearchType.INSIGHTS, SearchType.SUMMARIES, SearchType.CHUNKS],
+    search_types: list[SearchType] = [SearchType.SUMMARIES, SearchType.CHUNKS],
 ) -> str:
     await cognify_instance(instance, task_indices)
 
@@ -40,7 +40,9 @@ async def get_context_with_cognee(
     return search_results_str
 
 
-def create_cognee_context_getter(task_indices=None, search_types=[SearchType.CHUNKS]):
+def create_cognee_context_getter(
+    task_indices=None, search_types=[SearchType.SUMMARIES, SearchType.CHUNKS]
+):
     return partial(get_context_with_cognee, task_indices=task_indices, search_types=search_types)
 
 
