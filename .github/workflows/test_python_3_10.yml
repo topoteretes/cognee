@@ -42,6 +42,9 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-interaction -E docs
+      - name: Download NLTK tokenizer data
+        run: |
+          poetry run python -m nltk.downloader punkt_data
 
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
