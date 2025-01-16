@@ -445,7 +445,7 @@ async def create_cognee_style_network_with_logo(
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
 
-    home_dir = os.path.expanduser('~')
+    home_dir = os.path.expanduser("~")
 
     # Construct the final output file path
     output_filepath = os.path.join(home_dir, output_filename)
