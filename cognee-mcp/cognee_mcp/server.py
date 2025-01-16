@@ -130,6 +130,7 @@ def get_freshest_png(directory: str) -> Image.Image:
     except (IOError, OSError) as e:
         raise IOError(f"Failed to open PNG file {freshest_path}") from e
 
+
 @server.call_tool()
 async def handle_call_tool(
     name: str, arguments: dict | None

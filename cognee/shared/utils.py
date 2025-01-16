@@ -11,8 +11,6 @@ import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
 import tiktoken
-import nltk
-import base64
 import time
 
 import logging
@@ -28,7 +26,6 @@ from cognee.shared.exceptions import IngestionError
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
-
 
 
 def get_entities(tagged_tokens):
@@ -271,11 +268,6 @@ async def render_graph(
 #     return df.replace([np.inf, -np.inf, np.nan], None)
 
 
-
-
-
-
-
 logging.basicConfig(level=logging.INFO)
 
 
@@ -449,14 +441,6 @@ async def create_cognee_style_network_with_logo(
         ],
     )
     p.add_tools(hover_tool)
-
-    # Get the latest Unix timestamp as an integer
-    timestamp = int(time.time())
-
-    # Construct your filename
-    filename = f"{timestamp}.png"
-
-
 
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
