@@ -15,7 +15,11 @@ image = (
     .pip_install("poetry")
     .add_local_dir(LOCAL_COGNEE_PATH, "/root/cognee", copy=True)
     .run_commands(
-        "cd /root/cognee && poetry install",
+        "cd /root/cognee && poetry config virtualenvs.in-project true",
+        # Install dependencies
+        "cd /root/cognee && poetry install --no-interaction",
+        # Ensure the virtual environment is activated for subsequent commands
+        "cd /root/cognee && poetry env use python3",
     )
 )
 
