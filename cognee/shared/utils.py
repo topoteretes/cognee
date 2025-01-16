@@ -23,7 +23,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 
 from uuid import uuid4
 import pathlib
-
+import nltk
 from cognee.shared.exceptions import IngestionError
 
 # Analytics Proxy Url, currently hosted by Vercel
