@@ -13,7 +13,7 @@ LOCAL_COGNEE_PATH = "/Users/vasilije/cognee"
 image = (
     modal.Image.debian_slim()
     .pip_install("poetry")
-    .copy_local_dir(LOCAL_COGNEE_PATH, "/root/cognee")
+    .add_local_dir(LOCAL_COGNEE_PATH, "/root/cognee", copy=True)
     .run_commands(
         "cd /root/cognee && poetry install",
     )
@@ -52,7 +52,7 @@ def run_single_repo(instance_data: dict, disable_cognee: bool = False):
 
 
 @app.local_entrypoint()
-def main(disable_cognee: bool = False, num_samples: int = 5):
+def main(disable_cognee: bool = False, num_samples: int = 2):
     """
     Main entry point for Modal.
     Args:
