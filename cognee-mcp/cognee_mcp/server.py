@@ -200,9 +200,7 @@ async def handle_call_tool(
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 try:
-                    result = await cognee.visualize_graph()
-                    results = retrieved_edges_to_string(result)
-
+                    results = await cognee.visualize_graph()
                     return [
                         types.TextContent(
                             type="text",
