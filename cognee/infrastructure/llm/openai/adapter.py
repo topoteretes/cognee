@@ -35,22 +35,7 @@ class OpenAIAdapter(LLMInterface):
         transcription_model: str,
         streaming: bool = False,
     ):
-        self.aclient = instructor.from_litellm(litellm.acompletion)
-        self.client = instructor.from_litellm(litellm.completion)
-        self.transcription_model = transcription_model
-        self.model = model
-        self.api_key = api_key
-        self.endpoint = endpoint
-        self.api_version = api_version
-        self.streaming = streaming
 
-        base_config = get_base_config()
-
-        if base_config.monitoring_tool == MonitoringTool.LANGFUSE:
-            self.aclient.success_callback = ["langfuse"]
-            self.aclient.failure_callback = ["langfuse"]
-            self.client.success_callback = ["langfuse"]
-            self.client.failure_callback = ["langfuse"]
 
 
 
