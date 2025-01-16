@@ -1,5 +1,5 @@
 import asyncio
-from evals.eval_on_hotpot import eval_on_QA_dataset
+from evals.eval_on_hotpot import eval_on_QA_dataset, incremental_eval_on_QA_dataset
 from evals.qa_eval_utils import get_combinations, save_results_as_image
 import argparse
 from pathlib import Path
@@ -15,19 +15,26 @@ async def run_evals_on_paramset(paramset: dict, out_path: str):
         num_samples = params["num_samples"]
         rag_option = params["rag_option"]
 
-        result = await eval_on_QA_dataset(
-            dataset,
-            rag_option,
-            num_samples,
-            paramset["metric_names"],
-        )
-
         if dataset not in results:
             results[dataset] = {}
         if num_samples not in results[dataset]:
             results[dataset][num_samples] = {}
 
-        results[dataset][num_samples][rag_option] = result
+        if rag_option == "cognee_incremental":
+            result = await incremental_eval_on_QA_dataset(
+                dataset,
+                num_samples,
+                paramset["metric_names"],
+            )
+            results[dataset][num_samples] |= result
+        else:
+            result = await eval_on_QA_dataset(
+                dataset,
+                rag_option,
+                num_samples,
+                paramset["metric_names"],
+            )
+            results[dataset][num_samples][rag_option] = result
 
         with open(json_path, "w") as file:
             json.dump(results, file, indent=1)

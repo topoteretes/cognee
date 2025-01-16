@@ -3,7 +3,8 @@
         "hotpotqa"
     ],
     "rag_option": [
-        "cognee_incremental"
+        "cognee_incremental",
+        "simple_rag"
     ],
     "num_samples": [
         2
