@@ -101,15 +101,9 @@ cognee.config.set_graphistry_config({
 })
 ```
 
-(Optional) To run the UI, go to cognee-frontend directory and run:
-```
-npm run dev
-```
-or run everything in a docker container:
-```
-docker-compose up
-```
-Then navigate to localhost:3000
+(Optional) To run the with an UI, go to cognee-mcp directory and follow the instructions.
+You will be able to use cognee as mcp tool and create graphs and query them.
+
 
 If you want to use Cognee with PostgreSQL, make sure to set the following values in the .env file:
 ```

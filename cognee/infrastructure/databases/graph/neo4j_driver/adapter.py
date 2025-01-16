@@ -426,6 +426,15 @@ class Neo4jAdapter(GraphDBInterface):
 
         return serialized_properties
 
+    async def get_model_independent_graph_data(self):
+        query_nodes = "MATCH (n) RETURN collect(n) AS nodes"
+        nodes = await self.query(query_nodes)
+
+        query_edges = "MATCH (n)-[r]->(m) RETURN collect([n, r, m]) AS elements"
+        edges = await self.query(query_edges)
+
+        return (nodes, edges)
+
     async def get_graph_data(self):
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
 
@@ -493,7 +502,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         query_edges = f"""
         MATCH (n)-[r]->(m)
-        WHERE {where_clause} AND {where_clause.replace('n.', 'm.')}
+        WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
         RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result_edges = await self.query(query_edges)

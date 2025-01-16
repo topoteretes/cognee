@@ -16,7 +16,7 @@ jobs:
       fail-fast: true
       matrix:
         os:
-          - ubuntu-22.04
+          - ubuntu-latest
         python-version: ["3.10.x", "3.11.x"]
 
     defaults:

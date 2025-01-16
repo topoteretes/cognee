@@ -43,7 +43,7 @@ def format_triplets(edges):
         edge_info = {key: value for key, value in edge_attributes.items() if value is not None}
 
         # Create the formatted triplet
-        triplet = f"Node1: {node1_info}\n" f"Edge: {edge_info}\n" f"Node2: {node2_info}\n\n\n"
+        triplet = f"Node1: {node1_info}\nEdge: {edge_info}\nNode2: {node2_info}\n\n\n"
         triplets.append(triplet)
 
     return "".join(triplets)
@@ -60,24 +60,6 @@ async def brute_force_triplet_search(
 
     retrieved_results = await brute_force_search(query, user, top_k, collections=collections)
     return retrieved_results
-
-
-def delete_duplicated_vector_db_elements(
-    collections, results
-):  #:TODO: This is just for now to fix vector db duplicates
-    results_dict = {}
-    for collection, results in zip(collections, results):
-        seen_ids = set()
-        unique_results = []
-        for result in results:
-            if result.id not in seen_ids:
-                unique_results.append(result)
-                seen_ids.add(result.id)
-            else:
-                print(f"Duplicate found in collection '{collection}': {result.id}")
-        results_dict[collection] = unique_results
-
-    return results_dict
 
 
 async def brute_force_search(
@@ -125,10 +107,7 @@ async def brute_force_search(
             ]
         )
 
-        ############################################# :TODO: Change when vector db does not contain duplicates
-        node_distances = delete_duplicated_vector_db_elements(collections, results)
-        # node_distances = {collection: result for collection, result in zip(collections, results)}
-        ##############################################
+        node_distances = {collection: result for collection, result in zip(collections, results)}
 
         memory_fragment = CogneeGraph()
 
@@ -140,14 +119,12 @@ async def brute_force_search(
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
 
-        #:TODO: Change when vectordb contains edge embeddings
         await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
         send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
 
-        #:TODO: Once we have Edge pydantic models we should retrieve the exact edge and node objects from graph db
         return results
 
     except Exception as e:
