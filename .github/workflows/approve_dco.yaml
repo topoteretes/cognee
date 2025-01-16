@@ -1,0 +1,23 @@
+name: DCO Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+jobs:
+  check-dco:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Developer Certificate of Origin statement
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body || '';
+            // This is the exact text required in the PR body:
+            const requiredStatement = "I affirm that all code in every commit of this pull request conforms to the terms of the Topoteretes Developer Certificate of Origin";
+            
+            if (!prBody.includes(requiredStatement)) {
+              core.setFailed(
+                `DCO check failed. The PR body must include the following statement:\n\n${requiredStatement}`
+              );
+            }
