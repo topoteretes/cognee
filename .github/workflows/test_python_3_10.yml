@@ -44,7 +44,8 @@ jobs:
         run: poetry install --no-interaction -E docs
       - name: Download NLTK tokenizer data
         run: |
-          poetry run python -m nltk.downloader punkt
+          poetry run python -m nltk.downloader punkt_tab averaged_perceptron_tagger_eng
+
 
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
