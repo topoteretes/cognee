@@ -21,7 +21,6 @@ class DataPoint(BaseModel):
     created_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
     updated_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
     version: int = 1  # Default version
-    type: Optional[str] = "text"  # "text", "file", "image", "video"
     topological_rank: Optional[int] = 0
     _metadata: Optional[MetaData] = {"index_fields": [], "type": "DataPoint"}
 
