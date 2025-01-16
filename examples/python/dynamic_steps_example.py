@@ -204,4 +204,9 @@ if __name__ == "__main__":
         "retriever": retrieve,
     }
 
-    asyncio.run(main(steps_to_enable))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(main(steps_to_enable))
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
