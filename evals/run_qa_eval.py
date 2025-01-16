@@ -19,8 +19,8 @@ def save_table_as_image(df, image_path):
 parameters = {
     "dataset": ["hotpotqa"],  # "2wikimultihop"],
     "rag_option": ["no_rag", "cognee", "simple_rag", "brute_force"],
-    "num_samples": [40],
-    "metric_names": ["Correctness", "Comprehensiveness", "promptfoo.comprehensiveness"],
+    "num_samples": [2],
+    "metric_names": ["Correctness", "Comprehensiveness"],
 }
 
 # Generate the cross product of all parameter values
@@ -28,21 +28,20 @@ params_for_combos = {k: v for k, v in parameters.items() if k != "metric_name"}
 keys, values = zip(*params_for_combos.items())
 combinations = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
 
+
 # Main async function to run all combinations concurrently
-if __name__ == "__main__":
+async def main():
     results = {}
     for params in combinations:
         dataset = params["dataset"]
         num_samples = params["num_samples"]
         rag_option = params["rag_option"]
 
-        result = asyncio.run(
-            eval_on_QA_dataset(
-                dataset,
-                rag_option,
-                num_samples,
-                parameters["metric_names"],
-            )
+        result = await eval_on_QA_dataset(
+            dataset,
+            rag_option,
+            num_samples,
+            parameters["metric_names"],
         )
 
         # Initialize nested structure if needed
@@ -59,10 +58,14 @@ if __name__ == "__main__":
         with open(json_path, "w") as file:
             json.dump(results, file, indent=1)
 
-        # Convert to tables and save images
-        for dataset, num_samples_data in results.items():
-            for num_samples, table_data in num_samples_data.items():
-                df = pd.DataFrame.from_dict(table_data, orient="index")
-                df.index.name = f"Dataset: {dataset}, Num Samples: {num_samples}"
-                image_path = f"table_{dataset}_{num_samples}.png"
-                save_table_as_image(df, image_path)
+    # Convert to tables and save images
+    for dataset, num_samples_data in results.items():
+        for num_samples, table_data in num_samples_data.items():
+            df = pd.DataFrame.from_dict(table_data, orient="index")
+            df.index.name = f"Dataset: {dataset}, Num Samples: {num_samples}"
+            image_path = f"table_{dataset}_{num_samples}.png"
+            save_table_as_image(df, image_path)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
