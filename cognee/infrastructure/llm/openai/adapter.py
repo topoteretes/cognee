@@ -12,7 +12,6 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.base_config import get_base_config
 
-
 monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
@@ -35,14 +34,19 @@ class OpenAIAdapter(LLMInterface):
         transcription_model: str,
         streaming: bool = False,
     ):
+        self.aclient = instructor.from_litellm(litellm.acompletion)
+        self.client = instructor.from_litellm(litellm.completion)
+        self.transcription_model = transcription_model
+        self.model = model
+        self.api_key = api_key
+        self.endpoint = endpoint
+        self.api_version = api_version
+        self.streaming = streaming
 
-
-
-
-    @observe(as_type='generation')
-    async def acreate_structured_output(self, text_input: str, system_prompt: str,
-                                        response_model: Type[BaseModel]) -> BaseModel:
-
+    @observe(as_type="generation")
+    async def acreate_structured_output(
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+    ) -> BaseModel:
         """Generate a response from a user query."""
 
         return await self.aclient.chat.completions.create(
