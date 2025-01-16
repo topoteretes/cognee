@@ -1,5 +1,3 @@
-
-
 from datetime import datetime, timezone
 from typing import Optional, Any, Dict
 from uuid import UUID, uuid4
@@ -8,18 +6,22 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 import pickle
 
+
 # Define metadata type
 class MetaData(TypedDict):
     index_fields: list[str]
-
 
 
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
     __tablename__ = "data_point"
     id: UUID = Field(default_factory=uuid4)
-    created_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
-    updated_at: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
+    created_at: int = Field(
+        default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
+    )
+    updated_at: int = Field(
+        default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
+    )
     version: int = 1  # Default version
     topological_rank: Optional[int] = 0
     _metadata: Optional[MetaData] = {"index_fields": [], "type": "DataPoint"}
@@ -45,7 +47,6 @@ class DataPoint(BaseModel):
     def get_embeddable_properties(self, data_point):
         """Retrieve all embeddable properties."""
         if data_point._metadata and len(data_point._metadata["index_fields"]) > 0:
-
             return [
                 getattr(data_point, field, None) for field in data_point._metadata["index_fields"]
             ]
@@ -54,7 +55,6 @@ class DataPoint(BaseModel):
 
     @classmethod
     def get_embeddable_property_names(self, data_point):
-
         """Retrieve names of embeddable properties."""
         return data_point._metadata["index_fields"] or []
 
@@ -63,7 +63,7 @@ class DataPoint(BaseModel):
         self.version += 1
         self.updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
- # JSON Serialization
+    # JSON Serialization
     def to_json(self) -> str:
         """Serialize the instance to a JSON string."""
         return self.json()
@@ -92,4 +92,3 @@ class DataPoint(BaseModel):
     def from_dict(cls, data: Dict[str, Any]) -> "DataPoint":
         """Deserialize model from a dictionary."""
         return cls.model_validate(data)
-
