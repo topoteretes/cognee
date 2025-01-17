@@ -9,7 +9,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from evals.qa_dataset_utils import load_qa_dataset
 from evals.qa_metrics_utils import get_metrics
-from evals.qa_context_provider_utils import qa_context_providers, create_cognee_context_getter
+from evals.qa_context_provider_utils import qa_context_providers, valid_pipeline_slices
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ async def eval_on_QA_dataset(
 async def incremental_eval_on_QA_dataset(
     dataset_name_or_filename: str, num_samples, metric_name_list
 ):
-    pipeline_slice_names = ["base", "extract_chunks", "extract_graph", "summarize"]
+    pipeline_slice_names = valid_pipeline_slices.keys()
 
     incremental_results = {}
     for pipeline_slice_name in pipeline_slice_names:
