@@ -19,6 +19,7 @@ if monitoring == MonitoringTool.LANGFUSE:
 
 class GeminiAdapter(LLMInterface):
     MAX_TOKENS = 8192
+    MAX_RETRIES = 5
 
     def __init__(
         self,
@@ -110,7 +111,7 @@ Example structure:
                 {"role": "user", "content": text_input},
             ]
 
-            for attempt in range(3):
+            for attempt in range(self.MAX_RETRIES):
                 try:
                     response = await acompletion(
                         model=f"gemini/{self.model}",
