@@ -27,12 +27,12 @@ def test_PdfDocument():
     for ground_truth, paragraph_data in zip(
         GROUND_TRUTH, document.read(chunk_size=1024, chunker="text_chunker")
     ):
-        assert (
-            ground_truth["word_count"] == paragraph_data.word_count
-        ), f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
-        assert ground_truth["len_text"] == len(
-            paragraph_data.text
-        ), f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
-        assert (
-            ground_truth["cut_type"] == paragraph_data.cut_type
-        ), f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
+        assert ground_truth["word_count"] == paragraph_data.word_count, (
+            f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
+        )
+        assert ground_truth["len_text"] == len(paragraph_data.text), (
+            f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
+        )
+        assert ground_truth["cut_type"] == paragraph_data.cut_type, (
+            f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
+        )
