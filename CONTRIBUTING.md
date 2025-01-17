@@ -79,6 +79,9 @@ $ git config alias.cos "commit -s"
 
 Will allow you to write git cos which will automatically sign-off your commit. By signing a commit you are agreeing to the DCO and agree that you will be banned from the topoteretes GitHub organisation and Discord server if you violate the DCO.
 
+"When a commit is ready to be merged please use the following template to agree to our developer certificate of origin:
+  'I affirm that all code in every commit of this pull request conforms to the terms of the Topoteretes Developer Certificate of Origin'
+
 We consider the following as violations to the DCO:
 
 Signing the DCO with a fake name or pseudonym, if you are registered on GitHub or another platform with a fake name then you will not be able to contribute to topoteretes before updating your name;

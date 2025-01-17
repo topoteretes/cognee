@@ -19,9 +19,11 @@ async def index_and_transform_graphiti_nodes_and_edges():
         raise RuntimeError("Initialization error") from e
 
     await graph_engine.query("""MATCH (n) SET n.id = n.uuid RETURN n""")
-    await graph_engine.query("""MATCH (source)-[r]->(target) SET r.source_node_id = source.id,
+    await graph_engine.query(
+        """MATCH (source)-[r]->(target) SET r.source_node_id = source.id,
                              r.target_node_id = target.id,
-                             r.relationship_name = type(r) RETURN r""")
+                             r.relationship_name = type(r) RETURN r"""
+    )
     await graph_engine.query("""MATCH (n) SET n.text = COALESCE(n.summary, n.content) RETURN n""")
 
     nodes_data, edges_data = await graph_engine.get_model_independent_graph_data()

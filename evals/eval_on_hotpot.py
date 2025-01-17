@@ -75,10 +75,7 @@ async def eval_on_QA_dataset(
     dataset_name_or_filename: str, context_provider_name, num_samples, metric_name_list
 ):
     dataset = load_qa_dataset(dataset_name_or_filename)
-    if isinstance(context_provider_name, str):
-        context_provider = qa_context_providers[context_provider_name]
-    else:
-        context_provider = context_provider_name
+    context_provider = qa_context_providers[context_provider_name]
     eval_metrics = get_metrics(metric_name_list)
     instances = dataset if not num_samples else dataset[:num_samples]
 
@@ -100,25 +97,19 @@ async def eval_on_QA_dataset(
 async def incremental_eval_on_QA_dataset(
     dataset_name_or_filename: str, num_samples, metric_name_list
 ):
-    valid_pipeline_slices = {
-        "base": [0, 1, 5],
-        "extract_chunks": [0, 1, 2, 5],
-        "extract_graph": [0, 1, 2, 3, 5],
-        "summarize": [0, 1, 2, 3, 4, 5],
-    }
+    pipeline_slice_names = ["base", "extract_chunks", "extract_graph", "summarize"]
 
     incremental_results = {}
-    for pipeline_slice_name, pipeline_slice in valid_pipeline_slices.items():
-        context_provider_increment = create_cognee_context_getter(pipeline_slice)
+    for pipeline_slice_name in pipeline_slice_names:
         results = await eval_on_QA_dataset(
-            dataset_name_or_filename, context_provider_increment, num_samples, metric_name_list
+            dataset_name_or_filename, pipeline_slice_name, num_samples, metric_name_list
         )
         incremental_results[pipeline_slice_name] = results
 
     return incremental_results
 
 
-if __name__ == "__main__":
+async def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--dataset", type=str, required=True, help="Which dataset to evaluate on")
@@ -135,12 +126,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.rag_option == "cognee_incremental":
-        avg_scores = asyncio.run(
-            incremental_eval_on_QA_dataset(args.dataset, args.num_samples, args.metrics)
+        avg_scores = await incremental_eval_on_QA_dataset(
+            args.dataset, args.num_samples, args.metrics
         )
+
     else:
-        avg_scores = asyncio.run(
-            eval_on_QA_dataset(args.dataset, args.rag_option, args.num_samples, args.metrics)
+        avg_scores = await eval_on_QA_dataset(
+            args.dataset, args.rag_option, args.num_samples, args.metrics
         )
 
     logger.info(f"{avg_scores}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
