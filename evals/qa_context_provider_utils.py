@@ -5,6 +5,9 @@ from cognee.modules.retrieval.brute_force_triplet_search import brute_force_trip
 from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
 from functools import partial
 from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def get_raw_context(instance: dict) -> str:
@@ -25,18 +28,29 @@ async def cognify_instance(instance: dict, task_indices: list[int] = None):
 
 
 def _insight_to_string(triplet: tuple) -> str:
-    node1_name = triplet[0]["name"] if "name" in triplet[0] else "N/A"
-    node1_description = (
-        triplet[0]["description"] if "description" in triplet[0] else triplet[0]["text"]
-    )
+    if not (isinstance(triplet, tuple) and len(triplet) == 3):
+        logger.warning("Invalid input: Expected a tuple of length 3.")
+        return ""
+
+    node1, edge, node2 = triplet
+
+    if not (isinstance(node1, dict) and isinstance(edge, dict) and isinstance(node2, dict)):
+        logger.warning("Invalid input: Each element in the tuple must be a dictionary.")
+        return ""
+
+    node1_name = node1["name"] if "name" in node1 else "N/A"
+    node1_description = node1["description"] if "description" in node1 else node1["text"]
     node1_string = f"name: {node1_name}, description: {node1_description}"
-    node2_name = triplet[2]["name"] if "name" in triplet[1] else "N/A"
-    node2_description = (
-        triplet[2]["description"] if "description" in triplet[2] else triplet[2]["text"]
-    )
+    node2_name = node2["name"] if "name" in node2 else "N/A"
+    node2_description = node2["description"] if "description" in node2 else node2["text"]
     node2_string = f"name: {node2_name}, description: {node2_description}"
 
-    edge_string = triplet[1]["relationship_name"]
+    edge_string = edge.get("relationship_name", "")
+
+    if not edge_string:
+        logger.warning("Missing required field: 'relationship_name' in edge dictionary.")
+        return ""
+
     triplet_str = f"{node1_string} -- {edge_string} -- {node2_string}"
     return triplet_str
 
@@ -51,10 +65,20 @@ async def get_context_with_cognee(
     search_results = []
     for search_type in search_types:
         raw_search_results = await cognee.search(search_type, query_text=instance["question"])
+
         if search_type == SearchType.INSIGHTS:
             res_list = [_insight_to_string(edge) for edge in raw_search_results]
         else:
-            res_list = [context_item["text"] for context_item in raw_search_results]
+            res_list = [
+                context_item.get("text", "")
+                for context_item in raw_search_results
+                if isinstance(context_item, dict)
+            ]
+            if all(not text for text in res_list):
+                logger.warning(
+                    "res_list contains only empty strings: No valid 'text' entries found in raw_search_results."
+                )
+
         search_results += res_list
 
     search_results_str = "\n".join(res_list)
