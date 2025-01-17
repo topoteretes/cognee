@@ -114,7 +114,7 @@ Example structure:
             for attempt in range(self.MAX_RETRIES):
                 try:
                     response = await acompletion(
-                        model=f"gemini/{self.model}",
+                        model=f"{self.model}",
                         messages=messages,
                         api_key=self.api_key,
                         max_tokens=self.MAX_TOKENS,
