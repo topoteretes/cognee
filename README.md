@@ -260,11 +260,11 @@ pip install cognee
 
 | Name     | Type               | Current state (Mac/Linux) | Known Issues | Current state (Win) | Known Issues |
 |----------|--------------------|---------------------------|--------------|---------------------|--------------|
-| Qdrant   | Vector             | Stable &#x2705;           |              | Untested ⏳          |              |
-| Weaviate | Vector             | Stable &#x2705;           |              | Untested ⏳          |              |
+| Qdrant   | Vector             | Stable &#x2705;           |              | Unstable &#x274C;           |              |
+| Weaviate | Vector             | Stable &#x2705;           |              | Unstable &#x274C;           |              |
 | LanceDB  | Vector             | Stable &#x2705;           |              | Stable &#x2705;     |              |
 | Neo4j    | Graph              | Stable &#x2705;           |              | Stable &#x2705;     |              |
 | NetworkX | Graph              | Stable &#x2705;           |              | Stable &#x2705;     |              |
-| FalkorDB | Vector/Graph       | Unstable &#x274C;         |              | Unstable &#x274C;   |              |
+| FalkorDB | Vector/Graph       | Stable &#x2705;         |              | Unstable &#x274C;   |              |
 | PGVector | Vector             | Stable &#x2705;           |              | Unstable &#x274C;   |              |
-| Milvus   | Vector             | Stable &#x2705;           |              | Untested ⏳          |              |
+| Milvus   | Vector             | Stable &#x2705;           |              | Unstable &#x274C;           |              |
