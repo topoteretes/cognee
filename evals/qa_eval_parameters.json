@@ -4,6 +4,9 @@
     ],
     "rag_option": [
         "cognee_incremental"
+        "no_rag",
+        "simple_rag",
+        "brute_force"
     ],
     "num_samples": [
         2

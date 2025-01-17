@@ -88,23 +88,27 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             }
         )
 
-        return dedent(f"""
+        return dedent(
+            f"""
             MERGE (node:{node_label} {{id: '{str(data_point.id)}'}})
             ON CREATE SET node += ({{{node_properties}}}), node.updated_at = timestamp()
             ON MATCH SET node += ({{{node_properties}}}), node.updated_at = timestamp()
-        """).strip()
+        """
+        ).strip()
 
     async def create_edge_query(self, edge: tuple[str, str, str, dict]) -> str:
         properties = await self.stringify_properties(edge[3])
         properties = f"{{{properties}}}"
 
-        return dedent(f"""
+        return dedent(
+            f"""
             MERGE (source {{id:'{edge[0]}'}})
             MERGE (target {{id: '{edge[1]}'}})
             MERGE (source)-[edge:{edge[2]} {properties}]->(target)
             ON MATCH SET edge.updated_at = timestamp()
             ON CREATE SET edge.updated_at = timestamp()
-        """).strip()
+        """
+        ).strip()
 
     async def create_collection(self, collection_name: str):
         pass
@@ -195,12 +199,14 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             self.query(query)
 
     async def has_edges(self, edges):
-        query = dedent("""
+        query = dedent(
+            """
             UNWIND $edges AS edge
             MATCH (a)-[r]->(b)
             WHERE id(a) = edge.from_node AND id(b) = edge.to_node AND type(r) = edge.relationship_name
             RETURN edge.from_node AS from_node, edge.to_node AS to_node, edge.relationship_name AS relationship_name, count(r) > 0 AS edge_exists
-        """).strip()
+        """
+        ).strip()
 
         params = {
             "edges": [
@@ -279,14 +285,16 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
 
         [label, attribute_name] = collection_name.split(".")
 
-        query = dedent(f"""
+        query = dedent(
+            f"""
             CALL db.idx.vector.queryNodes(
                 '{label}',
                 '{attribute_name}',
                 {limit},
                 vecf32({query_vector})
             ) YIELD node, score
-        """).strip()
+        """
+        ).strip()
 
         result = self.query(query)
 

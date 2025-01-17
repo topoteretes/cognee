@@ -62,10 +62,12 @@ class Neo4jAdapter(GraphDBInterface):
     async def add_node(self, node: DataPoint):
         serialized_properties = self.serialize_properties(node.model_dump())
 
-        query = dedent("""MERGE (node {id: $node_id})
+        query = dedent(
+            """MERGE (node {id: $node_id})
                 ON CREATE SET node += $properties, node.updated_at = timestamp()
                 ON MATCH SET node += $properties, node.updated_at = timestamp()
-                RETURN ID(node) AS internal_id, node.id AS nodeId""")
+                RETURN ID(node) AS internal_id, node.id AS nodeId"""
+        )
 
         params = {
             "node_id": str(node.id),
@@ -182,13 +184,15 @@ class Neo4jAdapter(GraphDBInterface):
     ):
         serialized_properties = self.serialize_properties(edge_properties)
 
-        query = dedent("""MATCH (from_node {id: $from_node}),
+        query = dedent(
+            """MATCH (from_node {id: $from_node}),
             (to_node {id: $to_node})
             MERGE (from_node)-[r]->(to_node)
             ON CREATE SET r += $properties, r.updated_at = timestamp(), r.type = $relationship_name
             ON MATCH SET r += $properties, r.updated_at = timestamp()
             RETURN r
-        """)
+        """
+        )
 
         params = {
             "from_node": str(from_node),
