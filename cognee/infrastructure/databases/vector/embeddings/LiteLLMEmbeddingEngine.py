@@ -24,14 +24,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        provider: str = "openai",
-        model: Optional[str] = "text-embedding-3-large",
+        model: Optional[str] = "openai/text-embedding-3-large",
         dimensions: Optional[int] = 3072,
         api_key: str = None,
         endpoint: str = None,
         api_version: str = None,
     ):
-        self.provider = provider
         self.model = model
         self.dimensions = dimensions
         self.api_key = api_key
@@ -96,10 +94,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.NotFoundError,
             litellm.llms.OpenAI.openai.OpenAIError,
         ) as e:
-            logger.error(f"Embedding error with provider {self.provider}: {str(e)}")
-            raise EmbeddingException(
-                f"Failed to index data points using {self.provider} provider with model {self.model}"
-            )
+            logger.error(f"Embedding error with model {self.model}: {str(e)}")
+            raise EmbeddingException(f"Failed to index data points using model {self.model}")
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
