@@ -53,15 +53,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
                 return [data["embedding"] for data in response["data"]]
             else:
-                # # Configure model name based on provider
-                # if self.provider == "gemini":
-                #     model_name = f"gemini/{self.model}"
-                #     # For Gemini, we need to ensure we're using their specific endpoint format
-                #     api_base = f"{self.endpoint}/models/{self.model}:embedContent"
-                # else:
-                #     model_name = self.model
-                #     api_base = self.endpoint
-
                 response = await litellm.aembedding(
                     model=self.model,
                     input=text,
