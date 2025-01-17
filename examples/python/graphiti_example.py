@@ -69,4 +69,9 @@ async def main():
 
 if __name__ == "__main__":
     setup_logging(logging.ERROR)
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())

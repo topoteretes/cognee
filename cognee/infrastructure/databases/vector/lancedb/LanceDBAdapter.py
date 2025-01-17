@@ -2,7 +2,6 @@ import asyncio
 from typing import Generic, List, Optional, TypeVar, get_type_hints
 from uuid import UUID
 
-import logging
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
@@ -153,7 +152,9 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         collection = await connection.open_table(collection_name)
 
-        results = await collection.vector_search(query_vector).to_pandas()
+        collection_size = await collection.count_rows()
+
+        results = await collection.vector_search(query_vector).limit(collection_size).to_pandas()
 
         result_values = list(results.to_dict("index").values())
 
@@ -253,14 +254,13 @@ class LanceDBAdapter(VectorDBInterface):
     async def prune(self):
         connection = await self.get_connection()
         collection_names = await connection.table_names()
-        
+
         for collection_name in collection_names:
             collection = await connection.open_table(collection_name)
             await collection.delete("id IS NOT NULL")
             await connection.drop_table(collection_name)
-        
+
         if self.url.startswith("/"):
-            logging.info(f"Cleaning up temporary storage at {self.url}")
             LocalStorage.remove_all(self.url)
 
     def get_data_point_schema(self, model_type):

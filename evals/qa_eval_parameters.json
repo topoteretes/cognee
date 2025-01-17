@@ -1,0 +1,19 @@
+{
+    "dataset": [
+        "hotpotqa"
+    ],
+    "rag_option": [
+        "cognee_incremental",
+        "cognee",
+        "no_rag",
+        "simple_rag",
+        "brute_force"
+    ],
+    "num_samples": [
+        2
+    ],
+    "metric_names": [
+        "Correctness",
+        "Comprehensiveness"
+    ]
+}
