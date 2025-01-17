@@ -10,7 +10,7 @@ def get_embedding_engine() -> EmbeddingEngine:
 
     return LiteLLMEmbeddingEngine(
         # If OpenAI API is used for embeddings, litellm needs only the api_key.
-        provider=config.embeddig_provider,
+        provider=config.embedding_provider,
         api_key=config.embedding_api_key or llm_config.llm_api_key,
         endpoint=config.embedding_endpoint,
         api_version=config.embedding_api_version,
