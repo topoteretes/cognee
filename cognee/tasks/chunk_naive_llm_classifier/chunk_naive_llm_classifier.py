@@ -10,7 +10,29 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 async def chunk_naive_llm_classifier(
     data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]
-):
+) -> list[DocumentChunk]:
+    """
+    Classifies a list of document chunks using a specified classification model and updates vector and graph databases with the classification results.
+
+    Vector Database Structure:
+        - Collection Name: `classification`
+        - Payload Schema:
+            - uuid (str): Unique identifier for the classification.
+            - text (str): Text label of the classification.
+            - chunk_id (str): Identifier of the chunk associated with this classification.
+            - document_id (str): Identifier of the document associated with this classification.
+
+    Graph Database Structure:
+        - Nodes:
+            - Represent document chunks, classification types, and classification subtypes.
+        - Edges:
+            - `is_media_type`: Links document chunks to their classification type.
+            - `is_subtype_of`: Links classification subtypes to their parent type.
+            - `is_classified_as`: Links document chunks to their classification subtypes.
+    Notes:
+        - The function assumes that vector and graph database engines (`get_vector_engine` and `get_graph_engine`) are properly initialized and accessible.
+        - Classification labels are processed to ensure uniqueness using UUIDs based on their values.
+    """
     if len(data_chunks) == 0:
         return data_chunks
 
