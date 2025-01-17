@@ -44,7 +44,7 @@ def save_results_as_image(results, out_path):
         for num_samples, table_data in num_samples_data.items():
             df = pd.DataFrame.from_dict(table_data, orient="index")
             df.index.name = f"Dataset: {dataset}, Num Samples: {num_samples}"
-            image_path = Path(out_path) / Path(f"table_{dataset}_{num_samples}.png")
+            image_path = out_path / Path(f"table_{dataset}_{num_samples}.png")
             save_table_as_image(df, image_path)
 
 

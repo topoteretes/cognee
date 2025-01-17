@@ -3,7 +3,7 @@
         "hotpotqa"
     ],
     "rag_option": [
-        "cognee_incremental"
+        "cognee_incremental",
         "no_rag",
         "simple_rag",
         "brute_force"

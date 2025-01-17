@@ -118,7 +118,7 @@ async def incremental_eval_on_QA_dataset(
     return incremental_results
 
 
-if __name__ == "__main__":
+async def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--dataset", type=str, required=True, help="Which dataset to evaluate on")
@@ -135,12 +135,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.rag_option == "cognee_incremental":
-        avg_scores = asyncio.run(
-            incremental_eval_on_QA_dataset(args.dataset, args.num_samples, args.metrics)
+        avg_scores = await incremental_eval_on_QA_dataset(
+            args.dataset, args.num_samples, args.metrics
         )
+
     else:
-        avg_scores = asyncio.run(
-            eval_on_QA_dataset(args.dataset, args.rag_option, args.num_samples, args.metrics)
+        avg_scores = await eval_on_QA_dataset(
+            args.dataset, args.rag_option, args.num_samples, args.metrics
         )
 
     logger.info(f"{avg_scores}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
