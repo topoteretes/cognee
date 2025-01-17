@@ -93,11 +93,7 @@ def create_cognee_context_getter(
 
 
 async def get_context_with_simple_rag(instance: dict) -> str:
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    for title, sentences in instance["context"]:
-        await cognee.add("\n".join(sentences), dataset_name="QA")
+    await cognify_instance(instance)
 
     vector_engine = get_vector_engine()
     found_chunks = await vector_engine.search("document_chunk_text", instance["question"], limit=5)
