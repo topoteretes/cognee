@@ -4,6 +4,7 @@
     ],
     "rag_option": [
         "cognee_incremental",
+        "cognee",
         "no_rag",
         "simple_rag",
         "brute_force"
