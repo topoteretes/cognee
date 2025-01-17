@@ -71,9 +71,19 @@ async def get_context_with_brute_force_triplet_search(instance: dict) -> str:
     return search_results_str
 
 
+valid_pipeline_slices = {
+    "base": [0, 1, 5],
+    "extract_chunks": [0, 1, 2, 5],
+    "extract_graph": [0, 1, 2, 3, 5],
+    "summarize": [0, 1, 2, 3, 4, 5],
+}
+
 qa_context_providers = {
     "no_rag": get_raw_context,
     "cognee": get_context_with_cognee,
     "simple_rag": get_context_with_simple_rag,
     "brute_force": get_context_with_brute_force_triplet_search,
+} | {
+    name: create_cognee_context_getter(task_indices=slice)
+    for name, slice in valid_pipeline_slices.items()
 }
