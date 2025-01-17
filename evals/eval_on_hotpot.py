@@ -9,7 +9,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from evals.qa_dataset_utils import load_qa_dataset
 from evals.qa_metrics_utils import get_metrics
-from evals.qa_context_provider_utils import qa_context_providers
+from evals.qa_context_provider_utils import qa_context_providers, create_cognee_context_getter
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +94,29 @@ async def eval_on_QA_dataset(
     return results
 
 
-if __name__ == "__main__":
+async def incremental_eval_on_QA_dataset(
+    dataset_name_or_filename: str, num_samples, metric_name_list
+):
+    pipeline_slice_names = ["base", "extract_chunks", "extract_graph", "summarize"]
+
+    incremental_results = {}
+    for pipeline_slice_name in pipeline_slice_names:
+        results = await eval_on_QA_dataset(
+            dataset_name_or_filename, pipeline_slice_name, num_samples, metric_name_list
+        )
+        incremental_results[pipeline_slice_name] = results
+
+    return incremental_results
+
+
+async def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--dataset", type=str, required=True, help="Which dataset to evaluate on")
     parser.add_argument(
         "--rag_option",
         type=str,
-        choices=qa_context_providers.keys(),
+        choices=list(qa_context_providers.keys()) + ["cognee_incremental"],
         required=True,
         help="RAG option to use for providing context",
     )
@@ -110,7 +125,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    avg_scores = asyncio.run(
-        eval_on_QA_dataset(args.dataset, args.rag_option, args.num_samples, args.metrics)
-    )
+    if args.rag_option == "cognee_incremental":
+        avg_scores = await incremental_eval_on_QA_dataset(
+            args.dataset, args.num_samples, args.metrics
+        )
+
+    else:
+        avg_scores = await eval_on_QA_dataset(
+            args.dataset, args.rag_option, args.num_samples, args.metrics
+        )
+
     logger.info(f"{avg_scores}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
