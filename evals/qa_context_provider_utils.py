@@ -24,6 +24,23 @@ async def cognify_instance(instance: dict, task_indices: list[int] = None):
     await cognee.cognify("QA", tasks=selected_tasks)
 
 
+def _insight_to_string(triplet: tuple) -> str:
+    node1_name = triplet[0]["name"] if "name" in triplet[0] else "N/A"
+    node1_description = (
+        triplet[0]["description"] if "description" in triplet[0] else triplet[0]["text"]
+    )
+    node1_string = f"name: {node1_name}, description: {node1_description}"
+    node2_name = triplet[2]["name"] if "name" in triplet[1] else "N/A"
+    node2_description = (
+        triplet[2]["description"] if "description" in triplet[2] else triplet[2]["text"]
+    )
+    node2_string = f"name: {node2_name}, description: {node2_description}"
+
+    edge_string = triplet[1]["relationship_name"]
+    triplet_str = f"{node1_string} -- {edge_string} -- {node2_string}"
+    return triplet_str
+
+
 async def get_context_with_cognee(
     instance: dict,
     task_indices: list[int] = None,
@@ -33,9 +50,14 @@ async def get_context_with_cognee(
 
     search_results = []
     for search_type in search_types:
-        search_results += await cognee.search(search_type, query_text=instance["question"])
+        raw_search_results = await cognee.search(search_type, query_text=instance["question"])
+        if search_type == SearchType.INSIGHTS:
+            res_list = [_insight_to_string(edge) for edge in raw_search_results]
+        else:
+            res_list = [context_item["text"] for context_item in raw_search_results]
+        search_results += res_list
 
-    search_results_str = "\n".join([context_item["text"] for context_item in search_results])
+    search_results_str = "\n".join(res_list)
 
     return search_results_str
 
@@ -72,10 +94,14 @@ async def get_context_with_brute_force_triplet_search(instance: dict) -> str:
 
 
 valid_pipeline_slices = {
-    "base": [0, 1, 5],
-    "extract_chunks": [0, 1, 2, 5],
-    "extract_graph": [0, 1, 2, 3, 5],
-    "summarize": [0, 1, 2, 3, 4, 5],
+    "extract_graph": {
+        "slice": [0, 1, 2, 3, 5],
+        "search_types": [SearchType.INSIGHTS, SearchType.CHUNKS],
+    },
+    "summarize": {
+        "slice": [0, 1, 2, 3, 4, 5],
+        "search_types": [SearchType.INSIGHTS, SearchType.SUMMARIES, SearchType.CHUNKS],
+    },
 }
 
 qa_context_providers = {
@@ -84,6 +110,8 @@ qa_context_providers = {
     "simple_rag": get_context_with_simple_rag,
     "brute_force": get_context_with_brute_force_triplet_search,
 } | {
-    name: create_cognee_context_getter(task_indices=slice)
-    for name, slice in valid_pipeline_slices.items()
+    name: create_cognee_context_getter(
+        task_indices=value["slice"], search_types=value["search_types"]
+    )
+    for name, value in valid_pipeline_slices.items()
 }
