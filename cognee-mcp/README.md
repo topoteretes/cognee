@@ -6,7 +6,7 @@
 ### Installing Manually
 A MCP server project
 =======
-1. Clone the [cognee](www.github.com/topoteretes/cognee) repo
+1. Clone the [cognee](https://github.com/topoteretes/cognee) repo
 
 
 
