@@ -81,7 +81,7 @@ async def get_context_with_cognee(
 
         search_results += res_list
 
-    search_results_str = "\n".join(res_list)
+    search_results_str = "\n".join(search_results)
 
     return search_results_str
 
