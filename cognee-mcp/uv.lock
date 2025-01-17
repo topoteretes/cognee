@@ -561,7 +561,7 @@ name = "click"
 version = "8.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "platform_system == 'Windows'" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/96/d3/f04c7bfcf5c1862a2a5b845c6b2b360488cf47af55dfa79c98f6a6bf98b5/click-8.1.7.tar.gz", hash = "sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de", size = 336121 }
 wheels = [
@@ -570,7 +570,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.1.21"
+version = "0.1.22"
 source = { directory = "../" }
 dependencies = [
     { name = "aiofiles" },
@@ -633,7 +633,7 @@ requires-dist = [
     { name = "dlt", extras = ["sqlalchemy"], specifier = ">=1.4.1,<2.0.0" },
     { name = "falkordb", marker = "extra == 'falkordb'", specifier = "==1.0.9" },
     { name = "fastapi", specifier = ">=0.109.2,<0.116.0" },
-    { name = "fastapi-users", extras = ["sqlalchemy"] },
+    { name = "fastapi-users", extras = ["sqlalchemy"], specifier = "==14.0.0" },
     { name = "filetype", specifier = ">=1.2.0,<2.0.0" },
     { name = "graphistry", specifier = ">=0.33.5,<0.34.0" },
     { name = "groq", marker = "extra == 'groq'", specifier = "==0.8.0" },
@@ -647,12 +647,12 @@ requires-dist = [
     { name = "langfuse", specifier = ">=2.32.0,<3.0.0" },
     { name = "langsmith", marker = "extra == 'langchain'", specifier = "==0.2.3" },
     { name = "litellm", specifier = "==1.57.2" },
-    { name = "llama-index-core", marker = "extra == 'llama-index'", specifier = ">=0.12.10.post1,<0.13.0" },
+    { name = "llama-index-core", marker = "extra == 'llama-index'", specifier = ">=0.12.11,<0.13.0" },
     { name = "matplotlib", specifier = ">=3.8.3,<4.0.0" },
     { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.20.0,<6.0.0" },
     { name = "nest-asyncio", specifier = "==1.6.0" },
     { name = "networkx", specifier = ">=3.2.1,<4.0.0" },
-    { name = "nltk", specifier = ">=3.8.1,<4.0.0" },
+    { name = "nltk", specifier = "==3.9.1" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "openai", specifier = "==1.59.4" },
     { name = "pandas", specifier = "==2.2.3" },
@@ -674,7 +674,7 @@ requires-dist = [
     { name = "tiktoken", specifier = "==0.7.0" },
     { name = "transformers", specifier = ">=4.46.3,<5.0.0" },
     { name = "typing-extensions", specifier = "==4.12.2" },
-    { name = "unstructured", extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "extra == 'docs'", specifier = ">=0.16.10,<0.17.0" },
+    { name = "unstructured", extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "extra == 'docs'", specifier = ">=0.16.13,<0.17.0" },
     { name = "uvicorn", specifier = "==0.22.0" },
     { name = "weaviate-client", marker = "extra == 'weaviate'", specifier = "==4.9.6" },
 ]
@@ -777,7 +777,7 @@ requires-dist = [
     { name = "dlt", extras = ["sqlalchemy"], specifier = ">=1.4.1,<2.0.0" },
     { name = "falkordb", specifier = "==1.0.9" },
     { name = "fastapi", specifier = ">=0.109.2,<0.110.0" },
-    { name = "fastapi-users", extras = ["sqlalchemy"] },
+    { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=14.0.0" },
     { name = "filetype", specifier = ">=1.2.0,<2.0.0" },
     { name = "gitpython", specifier = ">=3.1.43,<4.0.0" },
     { name = "graphistry", specifier = ">=0.33.5,<0.34.0" },
@@ -3359,7 +3359,7 @@ name = "portalocker"
 version = "2.10.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pywin32", marker = "platform_system == 'Windows'" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ed/d3/c6c64067759e87af98cc668c1cc75171347d0f1577fab7ca3749134e3cd4/portalocker-2.10.1.tar.gz", hash = "sha256:ef1bf844e878ab08aee7e40184156e1151f228f103aa5c6bd0724cc330960f8f", size = 40891 }
 wheels = [
@@ -4954,7 +4954,7 @@ name = "tqdm"
 version = "4.67.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "platform_system == 'Windows'" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737 }
 wheels = [

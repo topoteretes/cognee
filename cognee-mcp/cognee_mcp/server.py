@@ -3,6 +3,8 @@ import os
 import asyncio
 from contextlib import redirect_stderr, redirect_stdout
 
+from sqlalchemy.testing.plugin.plugin_base import logging
+
 import cognee
 import mcp.server.stdio
 import mcp.types as types
@@ -10,6 +12,8 @@ from cognee.api.v1.search import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
+from PIL import Image
+
 
 server = Server("cognee-mcp")
 
@@ -87,7 +91,44 @@ async def handle_list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="visualize",
+            description="Visualize the knowledge graph.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+            },
+        ),
     ]
+
+
+def get_freshest_png(directory: str) -> Image.Image:
+    if not os.path.exists(directory):
+        raise FileNotFoundError(f"Directory {directory} does not exist")
+
+    # List all files in 'directory' that end with .png
+    files = [f for f in os.listdir(directory) if f.endswith(".png")]
+    if not files:
+        raise FileNotFoundError("No PNG files found in the given directory.")
+
+    # Sort by integer value of the filename (minus the '.png')
+    # Example filename: 1673185134.png -> integer 1673185134
+    try:
+        files_sorted = sorted(files, key=lambda x: int(x.replace(".png", "")))
+    except ValueError as e:
+        raise ValueError("Invalid PNG filename format. Expected timestamp format.") from e
+
+    # The "freshest" file has the largest timestamp
+    freshest_filename = files_sorted[-1]
+    freshest_path = os.path.join(directory, freshest_filename)
+
+    # Open the image with PIL and return the PIL Image object
+    try:
+        return Image.open(freshest_path)
+    except (IOError, OSError) as e:
+        raise IOError(f"Failed to open PNG file {freshest_path}") from e
 
 
 @server.call_tool()
@@ -154,6 +195,20 @@ async def handle_call_tool(
                         text="Pruned",
                     )
                 ]
+
+    elif name == "visualize":
+        with open(os.devnull, "w") as fnull:
+            with redirect_stdout(fnull), redirect_stderr(fnull):
+                try:
+                    results = await cognee.visualize_graph()
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=results,
+                        )
+                    ]
+                except (FileNotFoundError, IOError, ValueError) as e:
+                    raise ValueError(f"Failed to create visualization: {str(e)}")
     else:
         raise ValueError(f"Unknown tool: {name}")
 

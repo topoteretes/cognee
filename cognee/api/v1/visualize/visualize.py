@@ -10,5 +10,6 @@ async def visualize_graph(label: str = "name"):
     logging.info(graph_data)
 
     graph = await create_cognee_style_network_with_logo(graph_data, label=label)
+    logging.info("The HTML file has been stored on your home directory! Navigate there with cd ~")
 
     return graph
