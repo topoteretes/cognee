@@ -1,0 +1,45 @@
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PIP_NO_CACHE_DIR=true
+ENV PATH="${PATH}:/root/.poetry/bin"
+ENV PYTHONPATH=/app
+ENV RUN_MODE=modal
+ENV SKIP_MIGRATIONS=true
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+
+ENV PYTHONPATH=/app
+WORKDIR /app
+COPY pyproject.toml poetry.lock /app/
+
+
+RUN pip install poetry
+
+# Don't create virtualenv since docker is already isolated
+RUN poetry config virtualenvs.create false
+
+# Install the dependencies
+RUN poetry install --all-extras --no-root --without dev
+
+RUN pip install python-dotenv
+RUN pip install transformers
+RUN pip install swebench
+RUN pip install sentencepiece
+
+
+COPY  cognee/ /app/cognee
+COPY evals/ /app/evals
+COPY README.md /app/README.md
+COPY process_single_repo.py /app/
+
