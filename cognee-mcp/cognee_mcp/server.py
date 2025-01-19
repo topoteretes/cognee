@@ -173,7 +173,7 @@ async def handle_call_tool(
 
                 search_query = arguments.get("query")
 
-                search_results = await cognee.search(SearchType.INSIGHTS, query_text=search_query)
+                search_results = await cognee.search(SearchType.COMPLETION, query_text=search_query)
 
                 results = retrieved_edges_to_string(search_results)
 

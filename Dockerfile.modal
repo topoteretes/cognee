@@ -25,17 +25,11 @@ COPY pyproject.toml poetry.lock /app/
 
 
 RUN pip install poetry
-
-# Don't create virtualenv since docker is already isolated
-RUN poetry config virtualenvs.create false
-
-# Install the dependencies
-RUN poetry install --all-extras --no-root --without dev
-
 RUN pip install python-dotenv
 RUN pip install transformers
 RUN pip install swebench
 RUN pip install sentencepiece
+RUN pip install protobuf
 
 
 COPY  cognee/ /app/cognee

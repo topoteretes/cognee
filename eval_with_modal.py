@@ -42,7 +42,8 @@ image = modal.Image.from_dockerfile(
 @app.function(
     image=image,
     gpu="T4",
-    concurrency_limit=5
+    concurrency_limit=5,
+    timeout=9000000
 )
 async def run_single_repo(instance_data: dict, disable_cognee: bool = False):
     import os
