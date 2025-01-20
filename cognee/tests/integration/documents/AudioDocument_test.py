@@ -29,6 +29,7 @@ def test_AudioDocument():
         id=uuid.uuid4(),
         name="audio-dummy-test",
         raw_data_location="",
+        foreign_metadata="",
         mime_type="",
     )
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
