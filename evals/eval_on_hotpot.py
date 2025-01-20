@@ -11,13 +11,29 @@ from evals.qa_dataset_utils import load_qa_dataset
 from evals.qa_metrics_utils import get_metrics
 from evals.qa_context_provider_utils import qa_context_providers, valid_pipeline_slices
 import random
+import os
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 random.seed(42)
 
 
-async def answer_qa_instance(instance, context_provider):
-    context = await context_provider(instance)
+async def answer_qa_instance(instance, context_provider, contexts_filename):
+    if os.path.exists(contexts_filename):
+        with open(contexts_filename, "r") as file:
+            preloaded_contexts = json.load(file)
+    else:
+        preloaded_contexts = {}
+
+    if instance["_id"] in preloaded_contexts:
+        context = preloaded_contexts[instance["_id"]]
+    else:
+        context = await context_provider(instance)
+        preloaded_contexts[instance["_id"]] = context
+
+    with open(contexts_filename, "w") as file:
+        json.dump(preloaded_contexts, file)
 
     args = {
         "question": instance["question"],
@@ -51,11 +67,26 @@ async def deepeval_answers(instances, answers, eval_metrics):
     return eval_results
 
 
-async def deepeval_on_instances(instances, context_provider, eval_metrics):
+async def deepeval_on_instances(
+    instances, context_provider, eval_metrics, answers_filename, contexts_filename
+):
+    if os.path.exists(answers_filename):
+        with open(answers_filename, "r") as file:
+            preloaded_answers = json.load(file)
+    else:
+        preloaded_answers = {}
+
     answers = []
     for instance in tqdm(instances, desc="Getting answers"):
-        answer = await answer_qa_instance(instance, context_provider)
+        if instance["_id"] in preloaded_answers:
+            answer = preloaded_answers[instance["_id"]]
+        else:
+            answer = await answer_qa_instance(instance, context_provider, contexts_filename)
+            preloaded_answers[instance["_id"]] = answer
         answers.append(answer)
+
+    with open(answers_filename, "w") as file:
+        json.dump(preloaded_answers, file)
 
     eval_results = await deepeval_answers(instances, answers, eval_metrics)
     score_lists_dict = {}
@@ -74,21 +105,32 @@ async def deepeval_on_instances(instances, context_provider, eval_metrics):
 
 
 async def eval_on_QA_dataset(
-    dataset_name_or_filename: str, context_provider_name, num_samples, metric_name_list
+    dataset_name_or_filename: str, context_provider_name, num_samples, metric_name_list, out_path
 ):
     dataset = load_qa_dataset(dataset_name_or_filename)
     context_provider = qa_context_providers[context_provider_name]
     eval_metrics = get_metrics(metric_name_list)
     instances = dataset if not num_samples else random.sample(dataset, num_samples)
 
+    contexts_filename = Path(out_path) / Path(
+        f"contexts_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
+    )
     if "promptfoo_metrics" in eval_metrics:
         promptfoo_results = await eval_metrics["promptfoo_metrics"].measure(
-            instances, context_provider
+            instances, context_provider, contexts_filename
         )
     else:
         promptfoo_results = {}
+
+    answers_filename = Path(out_path) / Path(
+        f"answers_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
+    )
     deepeval_results = await deepeval_on_instances(
-        instances, context_provider, eval_metrics["deepeval_metrics"]
+        instances,
+        context_provider,
+        eval_metrics["deepeval_metrics"],
+        answers_filename,
+        contexts_filename,
     )
 
     results = promptfoo_results | deepeval_results
@@ -97,14 +139,14 @@ async def eval_on_QA_dataset(
 
 
 async def incremental_eval_on_QA_dataset(
-    dataset_name_or_filename: str, num_samples, metric_name_list
+    dataset_name_or_filename: str, num_samples, metric_name_list, out_path
 ):
     pipeline_slice_names = valid_pipeline_slices.keys()
 
     incremental_results = {}
     for pipeline_slice_name in pipeline_slice_names:
         results = await eval_on_QA_dataset(
-            dataset_name_or_filename, pipeline_slice_name, num_samples, metric_name_list
+            dataset_name_or_filename, pipeline_slice_name, num_samples, metric_name_list, out_path
         )
         incremental_results[pipeline_slice_name] = results
 
