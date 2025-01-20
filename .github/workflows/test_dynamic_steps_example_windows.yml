@@ -1,4 +1,4 @@
-name: test-example-windows
+name: test
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   run_notebook_test_windows:
-    name: test-windows
+    name: windows-latest
     runs-on: windows-latest
     defaults:
       run:
