@@ -7,7 +7,6 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.modules.data.operations.get_metadata import get_metadata
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -52,14 +51,12 @@ EXTENSION_TO_DOCUMENT_CLASS = {
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
     documents = []
     for data_item in data_documents:
-        metadata = await get_metadata(data_item.id)
         document = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](
             id=data_item.id,
             title=f"{data_item.name}.{data_item.extension}",
             raw_data_location=data_item.raw_data_location,
             name=data_item.name,
             mime_type=data_item.mime_type,
-            metadata_id=metadata.id,
         )
         documents.append(document)
 
