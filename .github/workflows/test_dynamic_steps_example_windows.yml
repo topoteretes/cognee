@@ -39,7 +39,4 @@ jobs:
           ENV: 'dev'
           PYTHONFAULTHANDLER: 1
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
-          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
-          GRAPH_DATABASE_USERNAME: "neo4j"
         run: poetry run python ./examples/python/dynamic_steps_example.py
