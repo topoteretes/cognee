@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-random.seed(42)
 
 
 async def answer_qa_instance(instance, context_provider, contexts_filename):
@@ -110,6 +109,7 @@ async def eval_on_QA_dataset(
     dataset = load_qa_dataset(dataset_name_or_filename)
     context_provider = qa_context_providers[context_provider_name]
     eval_metrics = get_metrics(metric_name_list)
+    random.seed(42)
     instances = dataset if not num_samples else random.sample(dataset, num_samples)
 
     contexts_filename = Path(out_path) / Path(

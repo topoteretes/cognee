@@ -39,10 +39,22 @@ def _insight_to_string(triplet: tuple) -> str:
         return ""
 
     node1_name = node1["name"] if "name" in node1 else "N/A"
-    node1_description = node1["description"] if "description" in node1 else node1["text"]
+    node1_description = (
+        node1["description"]
+        if "description" in node1
+        else node1["text"]
+        if "text" in node1
+        else "N/A"
+    )
     node1_string = f"name: {node1_name}, description: {node1_description}"
     node2_name = node2["name"] if "name" in node2 else "N/A"
-    node2_description = node2["description"] if "description" in node2 else node2["text"]
+    node2_description = (
+        node2["description"]
+        if "description" in node2
+        else node2["text"]
+        if "text" in node2
+        else "N/A"
+    )
     node2_string = f"name: {node2_name}, description: {node2_description}"
 
     edge_string = edge.get("relationship_name", "")
