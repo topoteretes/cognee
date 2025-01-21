@@ -6,6 +6,9 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from transformers import AutoTokenizer
+import tiktoken  # Assuming this is how you import TikToken
 
 litellm.set_verbose = False
 logger = logging.getLogger("LiteLLMEmbeddingEngine")
@@ -15,23 +18,30 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     api_key: str
     endpoint: str
     api_version: str
+    provider: str
     model: str
     dimensions: int
     mock: bool
 
     def __init__(
         self,
+        provider: str = "openai",
         model: Optional[str] = "text-embedding-3-large",
         dimensions: Optional[int] = 3072,
         api_key: str = None,
         endpoint: str = None,
         api_version: str = None,
+        max_tokens: int = float("inf"),
     ):
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
+        # TODO: Add or remove provider info
+        self.provider = provider
         self.model = model
         self.dimensions = dimensions
+        self.max_tokens = max_tokens
+        self.tokenizer = self.set_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -104,3 +114,16 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     def get_vector_size(self) -> int:
         return self.dimensions
+
+    def set_tokenizer(self):
+        logger.debug(f"Loading tokenizer for model {self.model}...")
+        # If model also contains provider information, extract only model information
+        model = self.model.split("/")[-1]
+
+        if "openai" in self.provider.lower() or "gpt" in self.model:
+            tokenizer = TikTokenTokenizer(model=model, max_tokens=self.max_tokens)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(self.model)
+
+        logger.debug(f"Tokenizer loaded for model: {self.model}")
+        return tokenizer

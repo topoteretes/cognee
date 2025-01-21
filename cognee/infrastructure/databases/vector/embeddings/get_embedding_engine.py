@@ -15,4 +15,5 @@ def get_embedding_engine() -> EmbeddingEngine:
         api_version=config.embedding_api_version,
         model=config.embedding_model,
         dimensions=config.embedding_dimensions,
+        max_tokens=config.embedding_max_tokens,
     )

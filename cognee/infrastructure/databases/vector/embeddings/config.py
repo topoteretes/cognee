@@ -9,7 +9,7 @@ class EmbeddingConfig(BaseSettings):
     embedding_endpoint: Optional[str] = None
     embedding_api_key: Optional[str] = None
     embedding_api_version: Optional[str] = None
-
+    embedding_max_tokens: Optional[int] = float("inf")
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 

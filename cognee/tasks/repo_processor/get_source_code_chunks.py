@@ -89,26 +89,31 @@ def _get_subchunk_token_counts(
 
 
 def _get_chunk_source_code(
-    code_token_counts: list[tuple[str, int]], overlap: float, max_tokens: int
+    code_token_counts: list[tuple[str, int]], overlap: float
 ) -> tuple[list[tuple[str, int]], str]:
     """Generates a chunk of source code from tokenized subchunks with overlap handling."""
     current_count = 0
     cumulative_counts = []
     current_source_code = ""
 
+    # Get embedding engine used in vector database
+    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+
+    embedding_engine = get_vector_engine().embedding_engine
+
     for i, (child_code, token_count) in enumerate(code_token_counts):
         current_count += token_count
         cumulative_counts.append(current_count)
-        if current_count > max_tokens:
+        if current_count > embedding_engine.max_tokens:
             break
         current_source_code += f"\n{child_code}"
 
-    if current_count <= max_tokens:
+    if current_count <= embedding_engine.max_tokens:
         return [], current_source_code.strip()
 
     cutoff = 1
     for i, cum_count in enumerate(cumulative_counts):
-        if cum_count > (1 - overlap) * max_tokens:
+        if cum_count > (1 - overlap) * embedding_engine.max_tokens:
             break
         cutoff = i
 
