@@ -250,7 +250,8 @@ class NetworkXAdapter(GraphDBInterface):
         graph_data = nx.readwrite.json_graph.node_link_data(self.graph)
 
         async with aiofiles.open(file_path, "w") as file:
-            await file.write(json.dumps(graph_data, cls=JSONEncoder))
+            json_data = json.dumps(graph_data, cls=JSONEncoder)
+            await file.write(json_data)
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""
@@ -265,19 +266,32 @@ class NetworkXAdapter(GraphDBInterface):
                     graph_data = json.loads(await file.read())
                     for node in graph_data["nodes"]:
                         try:
-                            node["id"] = UUID(node["id"])
+                            if not isinstance(node["id"], UUID):
+                                node["id"] = UUID(node["id"])
                         except Exception as e:
                             print(e)
                             pass
-                        if "updated_at" in node:
+
+                        if isinstance(node.get("updated_at"), int):
+                            node["updated_at"] = datetime.fromtimestamp(
+                                node["updated_at"] / 1000, tz=timezone.utc
+                            )
+                        elif isinstance(node.get("updated_at"), str):
                             node["updated_at"] = datetime.strptime(
                                 node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )
 
                     for edge in graph_data["links"]:
                         try:
-                            source_id = UUID(edge["source"])
-                            target_id = UUID(edge["target"])
+                            if not isinstance(edge["source"], UUID):
+                                source_id = UUID(edge["source"])
+                            else:
+                                source_id = edge["source"]
+
+                            if not isinstance(edge["target"], UUID):
+                                target_id = UUID(edge["target"])
+                            else:
+                                target_id = edge["target"]
 
                             edge["source"] = source_id
                             edge["target"] = target_id
@@ -287,7 +301,11 @@ class NetworkXAdapter(GraphDBInterface):
                             print(e)
                             pass
 
-                        if "updated_at" in edge:
+                        if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
+                            edge["updated_at"] = datetime.fromtimestamp(
+                                edge["updated_at"] / 1000, tz=timezone.utc
+                            )
+                        elif isinstance(edge["updated_at"], str):
                             edge["updated_at"] = datetime.strptime(
                                 edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )
