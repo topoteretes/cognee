@@ -50,6 +50,13 @@ EXTENSION_TO_DOCUMENT_CLASS = {
 
 
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
+    """
+    Classifies a list of data items into specific document types based on file extensions.
+
+    Notes:
+        - The function relies on `get_metadata` to retrieve metadata information for each data item.
+        - Ensure the `Data` objects and their attributes (e.g., `extension`, `id`) are valid before calling this function.
+    """
     documents = []
     for data_item in data_documents:
         metadata = await get_metadata(data_item.id)

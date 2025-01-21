@@ -6,6 +6,10 @@ from cognee.modules.retrieval.brute_force_triplet_search import brute_force_trip
 
 
 def retrieved_edges_to_string(retrieved_edges: list) -> str:
+    """
+    Converts a list of retrieved graph edges into a human-readable string format.
+
+    """
     edge_strings = []
     for edge in retrieved_edges:
         node1_string = edge.node1.attributes.get("text") or edge.node1.attributes.get("name")
@@ -18,11 +22,19 @@ def retrieved_edges_to_string(retrieved_edges: list) -> str:
 
 async def graph_query_completion(query: str) -> list:
     """
+    Executes a query on the graph database and retrieves a relevant completion based on the found data.
+
     Parameters:
     - query (str): The query string to compute.
 
     Returns:
     - list: Answer to the query.
+
+    Notes:
+    - The `brute_force_triplet_search` is used to retrieve relevant graph data.
+    - Prompts are dynamically rendered and provided to the LLM for contextual understanding.
+    - Ensure that the LLM client and graph database are properly configured and accessible.
+
     """
     found_triplets = await brute_force_triplet_search(query, top_k=5)
 

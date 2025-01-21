@@ -6,11 +6,20 @@ from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 
 async def query_completion(query: str) -> list:
     """
+
+    Executes a query against a vector database and computes a relevant response using an LLM.
+
     Parameters:
     - query (str): The query string to compute.
 
     Returns:
     - list: Answer to the query.
+
+    Notes:
+    - Limits the search to the top 1 matching chunk for simplicity and relevance.
+    - Ensure that the vector database and LLM client are properly configured and accessible.
+    - The response model used for the LLM output is expected to be a string.
+
     """
     vector_engine = get_vector_engine()
 
