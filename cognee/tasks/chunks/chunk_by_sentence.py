@@ -1,9 +1,19 @@
-from uuid import uuid4
-from typing import Optional
+from uuid import uuid4, UUID
+from typing import Optional, Iterator, Tuple
 from .chunk_by_word import chunk_by_word
 
 
-def chunk_by_sentence(data: str, maximum_length: Optional[int] = None):
+def chunk_by_sentence(
+    data: str, maximum_length: Optional[int] = None
+) -> Iterator[Tuple[UUID, str, int, Optional[str]]]:
+    """
+    Splits the input text into sentences based on word-level processing, with optional sentence length constraints.
+
+    Notes:
+        - Relies on the `chunk_by_word` function for word-level tokenization and classification.
+        - Ensures sentences within paragraphs are uniquely identifiable using UUIDs.
+        - Handles cases where the text ends mid-sentence by appending a special "sentence_cut" type.
+    """
     sentence = ""
     paragraph_id = uuid4()
     word_count = 0
