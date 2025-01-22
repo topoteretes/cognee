@@ -32,7 +32,7 @@ def test_TextDocument(input_file, chunk_size):
         id=uuid.uuid4(),
         name=input_file,
         raw_data_location=test_file_path,
-        foreign_metadata="",
+        external_metadata="",
         mime_type="",
     )
 

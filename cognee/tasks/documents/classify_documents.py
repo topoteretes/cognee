@@ -58,7 +58,7 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
             raw_data_location=data_item.raw_data_location,
             name=data_item.name,
             mime_type=data_item.mime_type,
-            foreign_metadata=json.dumps(data_item.foreign_metadata, indent=4),
+            external_metadata=json.dumps(data_item.external_metadata, indent=4),
         )
         documents.append(document)
 
