@@ -42,9 +42,12 @@ def save_table_as_image(df, image_path):
 def save_results_as_image(results, out_path):
     for dataset, num_samples_data in results.items():
         for num_samples, table_data in num_samples_data.items():
+            for rag_option, metric_data in table_data.items():
+                for name, value in metric_data.items():
+                    metric_name = name
             df = pd.DataFrame.from_dict(table_data, orient="index")
             df.index.name = f"Dataset: {dataset}, Num Samples: {num_samples}"
-            image_path = out_path / Path(f"table_{dataset}_{num_samples}.png")
+            image_path = out_path / Path(f"table_{dataset}_{num_samples}_{metric_name}.png")
             save_table_as_image(df, image_path)
 
 
@@ -54,7 +57,8 @@ def get_combinations(parameters):
     except ValidationError as e:
         raise ValidationError(f"Invalid parameter set: {e.message}")
 
-    params_for_combos = {k: v for k, v in parameters.items() if k != "metric_name"}
+    # params_for_combos = {k: v for k, v in parameters.items() if k != "metric_name"}
+    params_for_combos = {k: v for k, v in parameters.items()}
     keys, values = zip(*params_for_combos.items())
     combinations = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
     return combinations
