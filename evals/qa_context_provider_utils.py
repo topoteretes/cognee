@@ -70,7 +70,7 @@ def _insight_to_string(triplet: tuple) -> str:
 async def get_context_with_cognee(
     instance: dict,
     task_indices: list[int] = None,
-    search_types: list[SearchType] = [SearchType.SUMMARIES, SearchType.CHUNKS],
+    search_types: list[SearchType] = [SearchType.INSIGHTS, SearchType.SUMMARIES, SearchType.CHUNKS],
 ) -> str:
     await cognify_instance(instance, task_indices)
 
