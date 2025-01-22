@@ -3,6 +3,14 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
 async def remove_disconnected_chunks(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
+    """
+    Removes disconnected or obsolete chunks from the graph database.
+
+    Notes:
+        - Obsolete chunks are defined as chunks with no "next_chunk" predecessor.
+        - Fully disconnected nodes are identified and deleted separately.
+        - This function assumes that the graph database is properly initialized and accessible.
+    """
     graph_engine = await get_graph_engine()
 
     document_ids = set((data_chunk.document_id for data_chunk in data_chunks))
