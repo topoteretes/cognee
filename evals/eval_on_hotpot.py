@@ -109,10 +109,15 @@ async def eval_on_QA_dataset(
     dataset = load_qa_dataset(dataset_name_or_filename)
     context_provider = qa_context_providers[context_provider_name]
     eval_metrics = get_metrics(metric_name_list)
+
+    out_path = Path(out_path)
+    if not out_path.exists():
+        out_path.mkdir(parents=True, exist_ok=True)
+
     random.seed(42)
     instances = dataset if not num_samples else random.sample(dataset, num_samples)
 
-    contexts_filename = Path(out_path) / Path(
+    contexts_filename = out_path / Path(
         f"contexts_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
     )
     if "promptfoo_metrics" in eval_metrics:
@@ -122,7 +127,7 @@ async def eval_on_QA_dataset(
     else:
         promptfoo_results = {}
 
-    answers_filename = Path(out_path) / Path(
+    answers_filename = out_path / Path(
         f"answers_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
     )
     deepeval_results = await deepeval_on_instances(
