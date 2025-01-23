@@ -35,8 +35,6 @@ def chunk_by_paragraph(
     vector_engine = get_vector_engine()
     embedding_engine = vector_engine.embedding_engine
 
-    # embedding_model = embedding_engine.model.split("/")[-1]
-
     for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(
         data, maximum_length=paragraph_length
     ):
