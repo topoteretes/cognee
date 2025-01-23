@@ -6,6 +6,7 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
+from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from transformers import AutoTokenizer
 import tiktoken  # Assuming this is how you import TikToken
@@ -123,7 +124,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         if "openai" in self.provider.lower() or "gpt" in self.model:
             tokenizer = TikTokenTokenizer(model=model, max_tokens=self.max_tokens)
         else:
-            tokenizer = AutoTokenizer.from_pretrained(self.model)
+            tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
 
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
