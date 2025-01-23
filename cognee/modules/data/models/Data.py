@@ -19,7 +19,7 @@ class Data(Base):
     raw_data_location = Column(String)
     owner_id = Column(UUID, index=True)
     content_hash = Column(String)
-    foreign_metadata = Column(JSON)
+    external_metadata = Column(JSON)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 

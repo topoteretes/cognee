@@ -7,7 +7,7 @@ from cognee.infrastructure.engine import DataPoint
 class Document(DataPoint):
     name: str
     raw_data_location: str
-    foreign_metadata: Optional[str]
+    external_metadata: Optional[str]
     mime_type: str
     _metadata: dict = {"index_fields": ["name"], "type": "Document"}
 

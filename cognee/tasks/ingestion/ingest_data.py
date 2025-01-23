@@ -26,7 +26,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
         destination=destination,
     )
 
-    def get_foreign_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
+    def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
@@ -95,7 +95,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                         data_point.mime_type = file_metadata["mime_type"]
                         data_point.owner_id = user.id
                         data_point.content_hash = file_metadata["content_hash"]
-                        data_point.foreign_metadata = (get_foreign_metadata_dict(data_item),)
+                        data_point.external_metadata = (get_external_metadata_dict(data_item),)
                         await session.merge(data_point)
                     else:
                         data_point = Data(
@@ -106,7 +106,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                             mime_type=file_metadata["mime_type"],
                             owner_id=user.id,
                             content_hash=file_metadata["content_hash"],
-                            foreign_metadata=get_foreign_metadata_dict(data_item),
+                            external_metadata=get_external_metadata_dict(data_item),
                         )
 
                     # Check if data is already in dataset

@@ -18,7 +18,7 @@ def test_ImageDocument():
         id=uuid.uuid4(),
         name="image-dummy-test",
         raw_data_location="",
-        foreign_metadata="",
+        external_metadata="",
         mime_type="",
     )
     with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
