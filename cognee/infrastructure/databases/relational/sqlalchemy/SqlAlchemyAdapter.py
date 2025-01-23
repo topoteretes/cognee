@@ -92,14 +92,17 @@ class SQLAlchemyAdapter:
             return 0
 
         try:
-            # Dialect-agnostic table reference
-            if self.engine.dialect.name == "sqlite":
-                table = await self.get_table(table_name)  # SQLite ignores schemas
-            else:
-                table = await self.get_table(table_name, schema_name)
-
             # Use SQLAlchemy Core insert with execution options
             async with self.engine.begin() as conn:
+                # Dialect-agnostic table reference
+                if self.engine.dialect.name == "sqlite":
+                    # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
+                    # so must be enabled for each database connection/session separately.
+                    await conn.execute(text("PRAGMA foreign_keys=ON"))
+                    table = await self.get_table(table_name)  # SQLite ignores schemas
+                else:
+                    table = await self.get_table(table_name, schema_name)
+
                 result = await conn.execute(table.insert().values(data))
 
                 # Return rowcount for validation
