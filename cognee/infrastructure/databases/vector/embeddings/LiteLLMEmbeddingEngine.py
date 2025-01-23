@@ -31,12 +31,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         api_key: str = None,
         endpoint: str = None,
         api_version: str = None,
-        max_tokens: int = float("inf"),
+        max_tokens: int = 512,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
-        # TODO: Add or remove provider info
         self.provider = provider
         self.model = model
         self.dimensions = dimensions

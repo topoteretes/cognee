@@ -7,7 +7,7 @@ class GeminiTokenizer(TokenizerInterface):
     def __init__(
         self,
         model: str,
-        max_tokens: int = float("inf"),
+        max_tokens: int = 3072,
     ):
         self.model = model
         self.max_tokens = max_tokens

@@ -9,7 +9,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
     def __init__(
         self,
         model: str,
-        max_tokens: int = float("inf"),
+        max_tokens: int = 512,
     ):
         self.model = model
         self.max_tokens = max_tokens

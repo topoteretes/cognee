@@ -13,7 +13,7 @@ class TikTokenTokenizer(TokenizerInterface):
     def __init__(
         self,
         model: str,
-        max_tokens: int = float("inf"),
+        max_tokens: int = 8191,
     ):
         self.model = model
         self.max_tokens = max_tokens
