@@ -1,12 +1,14 @@
 import os
 import cognee
 import importlib.util
+
 # from PIL import Image as PILImage
 from mcp.server.fastmcp import FastMCP
 from cognee.api.v1.search import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 
 mcp = FastMCP("cognee", timeout=120000)
+
 
 @mcp.tool()
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
@@ -19,9 +21,9 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     await cognee.add(text)
 
     try:
-      await cognee.cognify(graph_model=graph_model)
+        await cognee.cognify(graph_model=graph_model)
     except Exception as e:
-      raise ValueError(f"Failed to cognify: {str(e)}")
+        raise ValueError(f"Failed to cognify: {str(e)}")
 
     return "Ingested"
 
@@ -55,7 +57,6 @@ async def prune() -> str:
 #         return Image(data=img.tobytes(), format="png")
 #     except (FileNotFoundError, IOError, ValueError) as e:
 #       raise ValueError(f"Failed to create visualization: {str(e)}")
-
 
 
 def node_to_string(node):

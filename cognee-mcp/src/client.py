@@ -4,9 +4,9 @@ from mcp.client.stdio import stdio_client
 
 # Create server parameters for stdio connection
 server_params = StdioServerParameters(
-    command="mcp", # Executable
-    args=["run", "src/server.py"], # Optional command line arguments
-    env=None # Optional environment variables
+    command="mcp",  # Executable
+    args=["run", "src/server.py"],  # Optional command line arguments
+    env=None,  # Optional environment variables
 )
 
 text = """
@@ -27,6 +27,7 @@ brain, that can ‘learn’ from available data and make increasingly
 more accurate classifications or predictions over time.
 """
 
+
 async def run():
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write, timedelta(minutes=3)) as session:
@@ -37,6 +38,8 @@ async def run():
 
             print(f"Cognify result: {toolResult}")
 
+
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(run())
