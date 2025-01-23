@@ -86,6 +86,17 @@ class SQLAlchemyAdapter:
         """
         Insert data into specified table using SQLAlchemy Core with batch optimization
         Returns number of inserted rows
+
+        Usage Example:
+            from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
+            from uuid import UUID
+            db = get_relational_engine()
+            table_name = "groups"
+            data = {
+                "id": UUID("c70a3cec-3309-44df-8ee6-eced820cf438"),
+                "name": "test"
+            }
+            await db.insert_data(table_name, data)
         """
         if not data:
             logger.info("No data provided for insertion")
