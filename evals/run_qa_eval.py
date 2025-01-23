@@ -22,17 +22,12 @@ async def run_evals_on_paramset(paramset: dict, out_path: str):
 
         if rag_option == "cognee_incremental":
             result = await incremental_eval_on_QA_dataset(
-                dataset,
-                num_samples,
-                paramset["metric_names"],
+                dataset, num_samples, paramset["metric_names"], out_path
             )
             results[dataset][num_samples] |= result
         else:
             result = await eval_on_QA_dataset(
-                dataset,
-                rag_option,
-                num_samples,
-                paramset["metric_names"],
+                dataset, rag_option, num_samples, paramset["metric_names"], out_path
             )
             results[dataset][num_samples][rag_option] = result
 
