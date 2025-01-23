@@ -9,8 +9,6 @@ from cognee.infrastructure.databases.exceptions.EmbeddingException import Embedd
 from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
-from transformers import AutoTokenizer
-import tiktoken  # Assuming this is how you import TikToken
 
 litellm.set_verbose = False
 logger = logging.getLogger("LiteLLMEmbeddingEngine")
