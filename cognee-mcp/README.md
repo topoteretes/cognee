@@ -1,31 +1,19 @@
 # cognee MCP server
 
-
-
-
 ### Installing Manually
 A MCP server project
 =======
 1. Clone the [cognee](https://github.com/topoteretes/cognee) repo
 
-
-
 2. Install dependencies
 
 ```
-pip install uv
-```
-```
-brew install postgresql
-```
-
-```
-brew install rust
+brew install uv
 ```
 
 ```jsx
 cd cognee-mcp
-uv sync --dev --all-extras
+uv sync --dev --all-extras --reinstall
 ```
 
 3. Activate the venv with
@@ -48,8 +36,6 @@ nano claude_desktop_config.json
 ```
 
 ```
-
-
 {
 	"mcpServers": {
 		"cognee": {
@@ -65,16 +51,7 @@ nano claude_desktop_config.json
         "TOKENIZERS_PARALLELISM": "false",
         "LLM_API_KEY": "sk-"
       }
-		},
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/{user}/Desktop",
-        "/Users/{user}/Projects"
-      ]
-    }
+		}
 	}
 }
 ```
@@ -89,19 +66,21 @@ To install Cognee for Claude Desktop automatically via [Smithery](https://smithe
 npx -y @smithery/cli install cognee --client claude
 ```
 
-Define cognify tool in server.py
+Define cognify tool in server.py.
 Restart your Claude desktop.
 
 
 To use debugger, run:
 ```bash
-npx @modelcontextprotocol/inspector uv --directory /Users/name/folder run cognee
+mcp dev src/server.py
+```
+Open inspector with timeout passed:
+```
+http://localhost:5173?timeout=120000
 ```
 
-To apply new changes while development you do:
+To apply new changes while developing cognee you need to do:
 
-1. Poetry lock in cognee folder
-2. uv sync --dev --all-extras --reinstall 
-3. npx @modelcontextprotocol/inspector uv --directory /Users/vasilije/cognee/cognee-mcp run cognee
-
-
+1. `poetry lock` in cognee folder
+2. `uv sync --dev --all-extras --reinstall `
+3. `mcp dev src/server.py`
