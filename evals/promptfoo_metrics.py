@@ -29,7 +29,7 @@ class PromptfooMetric:
             else:
                 raise Exception(f"{metric_name} is not a valid promptfoo metric")
 
-    async def measure(self, instances, context_provider):
+    async def measure(self, instances, context_provider, contexts_filename):
         with open(os.path.join(os.getcwd(), "evals/promptfoo_config_template.yaml"), "r") as file:
             config = yaml.safe_load(file)
 
@@ -40,10 +40,20 @@ class PromptfooMetric:
             ]
         }
 
-        # Fill config file with test cases
         tests = []
+        if os.path.exists(contexts_filename):
+            with open(contexts_filename, "r") as file:
+                preloaded_contexts = json.load(file)
+        else:
+            preloaded_contexts = {}
+
         for instance in instances:
-            context = await context_provider(instance)
+            if instance["_id"] in preloaded_contexts:
+                context = preloaded_contexts[instance["_id"]]
+            else:
+                context = await context_provider(instance)
+                preloaded_contexts[instance["_id"]] = context
+
             test = {
                 "vars": {
                     "name": instance["question"][:15],
@@ -52,7 +62,10 @@ class PromptfooMetric:
                 }
             }
             tests.append(test)
+
         config["tests"] = tests
+        with open(contexts_filename, "w") as file:
+            json.dump(preloaded_contexts, file)
 
         # Write the updated YAML back, preserving formatting and structure
         updated_yaml_file_path = os.path.join(os.getcwd(), "config_with_context.yaml")
