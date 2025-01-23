@@ -6,6 +6,7 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
+from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from transformers import AutoTokenizer
@@ -121,8 +122,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # If model also contains provider information, extract only model information
         model = self.model.split("/")[-1]
 
-        if "openai" in self.provider.lower() or "gpt" in self.model:
+        if "openai" in self.provider.lower():
             tokenizer = TikTokenTokenizer(model=model, max_tokens=self.max_tokens)
+        elif "gemini" in self.provider.lower():
+            tokenizer = GeminiTokenizer(model=model, max_tokens=self.max_tokens)
         else:
             tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
 
