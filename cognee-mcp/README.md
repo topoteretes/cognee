@@ -66,7 +66,7 @@ To install Cognee for Claude Desktop automatically via [Smithery](https://smithe
 npx -y @smithery/cli install cognee --client claude
 ```
 
-Define cognify tool in server.py.
+Define cognify tool in server.py
 Restart your Claude desktop.
 
 
