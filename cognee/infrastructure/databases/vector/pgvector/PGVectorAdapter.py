@@ -208,7 +208,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(id=UUID(row.id), payload=row.payload, score=row.similarity)
+            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
             for row in vector_list
         ]
 
@@ -249,7 +249,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         for vector in closest_items:
             vector_list.append(
                 {
-                    "id": UUID(vector.id),
+                    "id": UUID(str(vector.id)),
                     "payload": vector.payload,
                     "_distance": vector.similarity,
                 }
