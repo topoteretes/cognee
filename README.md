@@ -243,7 +243,7 @@ pip install cognee
 ```
 ### Deployment at Scale (Modal)
 
-Scale cognee in 4 simple steps to handle enterprise workloads using [Modal](https://modal.com)'s GPU-powered infrastructure
+Scale cognee in 4(+1) simple steps to handle enterprise workloads using [Modal](https://modal.com)'s GPU-powered infrastructure
 
 **1. Install the modal python client**
 ```bash
@@ -262,6 +262,7 @@ This simple example will deploy separate cognee instances building their own mem
 ```bash
 modal run -d modal_deployment.py
 ```
+**5. Change the modal_deploy script and develop your own AI memory at scale 🚀**
 
 ## 💫 Contributors
 
