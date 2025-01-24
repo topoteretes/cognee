@@ -247,7 +247,7 @@ class NetworkXAdapter(GraphDBInterface):
         if not file_path:
             file_path = self.filename
 
-        graph_data = nx.readwrite.json_graph.node_link_data(self.graph)
+        graph_data = nx.readwrite.json_graph.node_link_data(self.graph, edges="links")
 
         async with aiofiles.open(file_path, "w") as file:
             json_data = json.dumps(graph_data, cls=JSONEncoder)
@@ -310,7 +310,7 @@ class NetworkXAdapter(GraphDBInterface):
                                 edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )
 
-                    self.graph = nx.readwrite.json_graph.node_link_graph(graph_data)
+                    self.graph = nx.readwrite.json_graph.node_link_graph(graph_data, edges="links")
 
                     for node_id, node_data in self.graph.nodes(data=True):
                         node_data["id"] = node_id
