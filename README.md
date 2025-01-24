@@ -241,6 +241,27 @@ Please see the cognee [Development Guide](https://docs.cognee.ai/quickstart/) fo
 ```bash
 pip install cognee
 ```
+### Deployment at Scale (Modal)
+
+Scale cognee in 4 simple steps to handle enterprise workloads using [Modal](https://modal.com)'s GPU-powered infrastructure
+
+**1. Install the modal python client**
+```bash
+pip install modal
+```
+**2. Create a free account on [Modal](https://modal.com)**
+
+**3. Set Up Modal API Key**
+```bash
+modal token set --token-id TOKEN_ID --token-secret TOKEN_SECRET --profile=PROFILE
+modal profile activate PROFILE
+```
+**4. Run cognee example**
+
+This simple example will deploy separate cognee instances building their own memory stores and answering a list of questions at scale.
+```bash
+modal run -d modal_deployment.py
+```
 
 ## 💫 Contributors
 
