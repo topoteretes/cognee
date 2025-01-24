@@ -122,21 +122,18 @@ def _get_chunk_source_code(
 
 def get_source_code_chunks_from_code_part(
     code_file_part: CodePart,
-    max_tokens: int = 8192,
     overlap: float = 0.25,
     granularity: float = 0.1,
-    model_name: str = "text-embedding-3-large",
 ) -> Generator[SourceCodeChunk, None, None]:
     """Yields source code chunks from a CodePart object, with configurable token limits and overlap."""
     if not code_file_part.source_code:
         logger.error(f"No source code in CodeFile {code_file_part.id}")
         return
 
-    vector_engine = get_vector_engine()
-    embedding_model = vector_engine.embedding_engine.model
-    model_name = embedding_model.split("/")[-1]
-    tokenizer = tiktoken.encoding_for_model(model_name)
-    max_subchunk_tokens = max(1, int(granularity * max_tokens))
+    embedding_engine = get_vector_engine().embedding_engine
+    tokenizer = embedding_engine.tokenizer
+
+    max_subchunk_tokens = max(1, int(granularity * embedding_engine.max_tokens))
     subchunk_token_counts = _get_subchunk_token_counts(
         tokenizer, code_file_part.source_code, max_subchunk_tokens
     )
@@ -144,7 +141,7 @@ def get_source_code_chunks_from_code_part(
     previous_chunk = None
     while subchunk_token_counts:
         subchunk_token_counts, chunk_source_code = _get_chunk_source_code(
-            subchunk_token_counts, overlap, max_tokens
+            subchunk_token_counts, overlap
         )
         if not chunk_source_code:
             continue
