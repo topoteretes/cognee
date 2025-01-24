@@ -9033,6 +9033,7 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 type = ["pytest-mypy"]
 
 [extras]
+codegraph = ["jedi", "parso"]
 deepeval = ["deepeval"]
 docs = ["unstructured"]
 falkordb = ["falkordb"]
@@ -9052,4 +9053,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10.0,<3.13"
-content-hash = "585d4ecc16fcc18370d9729046baef7b3b02f92a4860b7f7f7be2d1a26654127"
+content-hash = "ddc6f5406ee0205107a278cf46918b082d12dbc51471ff6464011731cfd41890"

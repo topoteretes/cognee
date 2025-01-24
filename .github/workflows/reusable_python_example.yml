@@ -7,6 +7,10 @@ on:
         description: "Location of example script to run"
         required: true
         type: string
+      arguments:
+        description: "Arguments for example script"
+        required: false
+        type: string
     secrets:
       GRAPHISTRY_USERNAME:
         required: true
@@ -53,4 +57,4 @@ jobs:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ${{ inputs.example-location }}
+        run: poetry run python ${{ inputs.example-location }} ${{ inputs.arguments }}
