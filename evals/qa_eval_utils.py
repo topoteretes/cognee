@@ -45,6 +45,7 @@ def save_results_as_image(results, out_path):
             for rag_option, metric_data in table_data.items():
                 for name, value in metric_data.items():
                     metric_name = name
+                    break
             df = pd.DataFrame.from_dict(table_data, orient="index")
             df.index.name = f"Dataset: {dataset}, Num Samples: {num_samples}"
             image_path = out_path / Path(f"table_{dataset}_{num_samples}_{metric_name}.png")
