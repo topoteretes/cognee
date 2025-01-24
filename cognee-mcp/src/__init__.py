@@ -1,6 +1,7 @@
-from .server import mcp
+from .server import main as server_main
 
 
 def main():
     """Main entry point for the package."""
-    mcp.run(transport="stdio")
+    import asyncio
+    asyncio.run(server_main())

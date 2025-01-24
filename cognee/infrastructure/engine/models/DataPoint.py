@@ -26,10 +26,6 @@ class DataPoint(BaseModel):
     topological_rank: Optional[int] = 0
     _metadata: Optional[MetaData] = {"index_fields": [], "type": "DataPoint"}
 
-    # Override the Pydantic configuration
-    class Config:
-        underscore_attrs_are_private = True
-
     @classmethod
     def get_embeddable_data(self, data_point):
         if (

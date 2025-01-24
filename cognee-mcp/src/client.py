@@ -4,8 +4,8 @@ from mcp.client.stdio import stdio_client
 
 # Create server parameters for stdio connection
 server_params = StdioServerParameters(
-    command="mcp",  # Executable
-    args=["run", "src/server.py"],  # Optional command line arguments
+    command="uv",  # Executable
+    args=["--directory", ".", "run", "cognee"],  # Optional command line arguments
     env=None,  # Optional environment variables
 )
 
@@ -32,6 +32,10 @@ async def run():
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write, timedelta(minutes=3)) as session:
             await session.initialize()
+
+            toolResult = await session.list_tools()
+
+            toolResult = await session.call_tool("prune", arguments={})
 
             toolResult = await session.call_tool("cognify", arguments={"text": text})
             # toolResult = await session.call_tool("search", arguments={"search_query": "AI"})
