@@ -220,8 +220,9 @@ Cognee supports a variety of tools and services for different operations:
 Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee_demo.ipynb)
 
 
-[<img src="https://i3.ytimg.com/vi/-ARUfIzhzC4/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=BDFt4xVPmro "Learn about cognee: 55")
+[<img src="https://i3.ytimg.com/vi/-fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
 
+https://youtu.be/fI4hDzguN5k
 
 ## Get Started
 
