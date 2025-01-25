@@ -22,24 +22,6 @@ class GraphMetricData(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
-    def to_json(self) -> dict:
-        return {
-            "num_nodes": self.num_nodes,
-            "num_edges": self.num_edges,
-            "mean_degree": self.mean_degree,
-            "edge_density": self.edge_density,
-            "num_connected_components": self.num_connected_components,
-            "sizes_of_connected_components": self.sizes_of_connected_components,
-            "num_selfloops": self.num_selfloops if self.num_selfloops else None,
-            "diameter": self.diameter if self.diameter else None,
-            "avg_shortest_path_length": self.avg_shortest_path_length
-            if self.avg_shortest_path_length
-            else None,
-            "avg_clustering": self.avg_clustering if self.avg_clustering else None,
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
 
 class InputMetricData(Base):
     __tablename__ = "input_metric_table"
@@ -48,10 +30,3 @@ class InputMetricData(Base):
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
-
-    def to_json(self) -> dict:
-        return {
-            "num_tokens": self.num_tokens,
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
-        }
