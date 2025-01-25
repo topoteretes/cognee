@@ -54,7 +54,6 @@ class TextChunker:
                             contains=[],
                             _metadata={
                                 "index_fields": ["text"],
-                                "metadata_id": self.document.metadata_id,
                             },
                         )
                         paragraph_chunks = []
@@ -74,7 +73,6 @@ class TextChunker:
                                 contains=[],
                                 _metadata={
                                     "index_fields": ["text"],
-                                    "metadata_id": self.document.metadata_id,
                                 },
                             )
                         except Exception as e:
@@ -95,7 +93,7 @@ class TextChunker:
                     chunk_index=self.chunk_index,
                     cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                     contains=[],
-                    _metadata={"index_fields": ["text"], "metadata_id": self.document.metadata_id},
+                    _metadata={"index_fields": ["text"]},
                 )
             except Exception as e:
                 print(e)
