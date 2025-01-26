@@ -38,9 +38,10 @@ async def run():
             toolResult = await session.call_tool("prune", arguments={})
 
             toolResult = await session.call_tool("cognify", arguments={"text": text})
-            # toolResult = await session.call_tool("search", arguments={"search_query": "AI"})
 
-            print(f"Cognify result: {toolResult}")
+            toolResult = await session.call_tool("search", arguments={"search_query": "AI"})
+
+            print(f"Cognify result: {toolResult.content}")
 
 
 if __name__ == "__main__":

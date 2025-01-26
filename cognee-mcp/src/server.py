@@ -15,13 +15,16 @@ mcp = Server("cognee")
 
 logger = logging.getLogger(__name__)
 
+
 @mcp.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-            name = "cognify",
-            description = "Cognifies text into knowledge graph",
-            inputSchema = {
+
+            name="cognify",
+            description="Cognifies text into knowledge graph",
+            inputSchema={
+
                 "type": "object",
                 "properties": {
                     "text": {
@@ -41,9 +44,10 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name = "search",
-            description = "Searches for information in knowledge graph",
-            inputSchema = {
+
+            name="search",
+            description="Searches for information in knowledge graph",
+            inputSchema={
                 "type": "object",
                 "properties": {
                     "search_query": {
@@ -55,9 +59,11 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name = "prune",
-            description = "Prunes knowledge graph",
-            inputSchema = {
+
+            name="prune",
+            description="Prunes knowledge graph",
+            inputSchema={
+
                 "type": "object",
                 "properties": {},
             },
@@ -71,35 +77,26 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 if name == "cognify":
-                    await cognify(arguments["text"])
+                    asyncio.create_task( cognify(
+                        text=arguments["text"],
+                        graph_model_file=arguments.get("graph_model_file", None),
+                        graph_model_name=arguments.get("graph_model_name", None),
+                    ))
 
-                    return [
-                        types.TextContent(
-                            type = "text",
-                            text = "Ingested"
-                        )
-                    ]
+                    return [types.TextContent(type="text", text="Ingested")]
                 elif name == "search":
                     search_results = await search(arguments["search_query"])
 
-                    return [
-                        types.TextContent(
-                            type = "text",
-                            text = search_results
-                        )
-                    ]
+                    return [types.TextContent(type="text", text=search_results)]
                 elif name == "prune":
                     await prune()
 
-                    return [
-                        types.TextContent(
-                            type = "text",
-                            text = "Pruned"
-                        )
-                    ]
+                    return [types.TextContent(type="text", text="Pruned")]
     except Exception as e:
         logger.error(f"Error calling tool '{name}': {str(e)}")
         return [types.TextContent(type="text", text=f"Error calling tool '{name}': {str(e)}")]
+
+
 
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
     """Build knowledge graph from the input text"""
@@ -115,7 +112,6 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     except Exception as e:
         raise ValueError(f"Failed to cognify: {str(e)}")
 
-    return "Ingested"
 
 
 async def search(search_query: str) -> str:
@@ -132,6 +128,7 @@ async def prune() -> str:
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
+
 async def main():
     try:
         from mcp.server.stdio import stdio_server
@@ -146,9 +143,16 @@ async def main():
                     capabilities=mcp.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},
-                    )
-                )
+
+                    ),
+                ),
+                raise_exceptions=True,
             )
+
+    except Exception as e:
+        logger.error(f"Server failed to start: {str(e)}", exc_info=True)
+        raise
+
 
     except Exception as e:
         logger.error(f"Server failed to start: {str(e)}", exc_info=True)
