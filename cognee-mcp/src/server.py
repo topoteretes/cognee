@@ -111,7 +111,7 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     await cognee.add(text)
 
     try:
-        await cognee.cognify(graph_model=graph_model)
+        asyncio.create_task(cognee.cognify(graph_model=graph_model))
     except Exception as e:
         raise ValueError(f"Failed to cognify: {str(e)}")
 
