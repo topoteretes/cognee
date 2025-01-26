@@ -115,8 +115,6 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     except Exception as e:
         raise ValueError(f"Failed to cognify: {str(e)}")
 
-    return "Ingested"
-
 
 async def search(search_query: str) -> str:
     """Search the knowledge graph"""
@@ -147,7 +145,8 @@ async def main():
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},
                     )
-                )
+                ),
+                raise_exceptions=True,
             )
 
     except Exception as e:
