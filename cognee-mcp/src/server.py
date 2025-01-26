@@ -75,7 +75,7 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
                     await cognify(
                         text=arguments["text"],
                         graph_model_file=arguments.get("graph_model_file", None),
-                        graph_model_name=arguments.get("graph_model_name", None)
+                        graph_model_name=arguments.get("graph_model_name", None),
                     )
 
                     return [types.TextContent(type="text", text="Ingested")]
