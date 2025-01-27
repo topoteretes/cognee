@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type
+from typing import Type, List
 
 from pydantic import BaseModel
 
@@ -13,7 +13,14 @@ from cognee.modules.graph.utils import (
 from cognee.tasks.storage import add_data_points
 
 
-async def extract_graph_from_data(data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]):
+async def extract_graph_from_data(
+    data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]
+) -> List[DocumentChunk]:
+    """
+    Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
+
+    """
+
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )

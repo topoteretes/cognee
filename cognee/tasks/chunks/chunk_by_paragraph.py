@@ -17,6 +17,12 @@ def chunk_by_paragraph(
     """
     Chunks text by paragraph while preserving exact text reconstruction capability.
     When chunks are joined with empty string "", they reproduce the original text exactly.
+
+    Notes:
+        - Tokenization is handled using the `tiktoken` library, ensuring compatibility with the vector engine's embedding model.
+        - If `batch_paragraphs` is False, each paragraph will be yielded as a separate chunk.
+        - Handles cases where paragraphs exceed the specified token or word limits by splitting them as needed.
+        - Remaining text at the end of the input will be yielded as a final chunk.
     """
     current_chunk = ""
     current_word_count = 0

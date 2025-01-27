@@ -8,7 +8,6 @@ from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
 from cognee.modules.data.models import Data
-from cognee.modules.data.operations.write_metadata import write_metadata
 from cognee.modules.ingestion.data_types import BinaryData
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.CodeGraphEntities import Repository
