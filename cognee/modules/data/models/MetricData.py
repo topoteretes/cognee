@@ -1,13 +1,17 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, Integer, ARRAY
+from sqlalchemy import Column, DateTime, Float, Integer, ARRAY, UUID
 
 from cognee.infrastructure.databases.relational import Base
+from uuid import uuid4
 
 
 class GraphMetricData(Base):
     __tablename__ = "graph_metric_table"
 
+    # TODO: Change ID to reflect unique id of graph database
+    id = Column(UUID, primary_key=True, default=uuid4)
+    num_tokens = Column(Integer)
     num_nodes = Column(Integer)
     num_edges = Column(Integer)
     mean_degree = Column(Float)
@@ -18,15 +22,6 @@ class GraphMetricData(Base):
     diameter = Column(Integer, nullable=True)
     avg_shortest_path_length = Column(Float, nullable=True)
     avg_clustering = Column(Float, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
-
-
-class InputMetricData(Base):
-    __tablename__ = "input_metric_table"
-
-    num_tokens = Column(Integer)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
