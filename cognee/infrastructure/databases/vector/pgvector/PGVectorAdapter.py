@@ -14,9 +14,9 @@ from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
-from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
+from ..utils import normalize_distances
 
 
 class IndexSchema(DataPoint):
@@ -247,12 +247,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Extract distances and find min/max for normalization
         for vector in closest_items:
-            # TODO: Add normalization of similarity score
-            vector_list.append(vector)
+            vector_list.append(
+                {
+                    "id": UUID(str(vector.id)),
+                    "payload": vector.payload,
+                    "_distance": vector.similarity,
+                }
+            )
+
+        # Normalize vector distance and add this as score information to vector_list
+        normalized_values = normalize_distances(vector_list)
+        for i in range(0, len(normalized_values)):
+            vector_list[i]["score"] = normalized_values[i]
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
+            ScoredResult(id=row.get("id"), payload=row.get("payload"), score=row.get("score"))
             for row in vector_list
         ]
 
