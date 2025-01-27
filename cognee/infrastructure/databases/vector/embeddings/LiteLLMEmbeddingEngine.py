@@ -95,7 +95,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             return await self.embed_text(text)
 
-        except (litellm.exceptions.BadRequestError, litellm.llms.OpenAI.openai.OpenAIError):
+        except litellm.exceptions.BadRequestError:
             raise EmbeddingException("Failed to index data points.")
 
         except Exception as error:

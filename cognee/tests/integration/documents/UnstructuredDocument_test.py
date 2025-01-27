@@ -39,7 +39,7 @@ def test_UnstructuredDocument():
         id=uuid.uuid4(),
         name="example.pptx",
         raw_data_location=pptx_file_path,
-        metadata_id=uuid.uuid4(),
+        external_metadata="",
         mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
 
@@ -47,7 +47,7 @@ def test_UnstructuredDocument():
         id=uuid.uuid4(),
         name="example.docx",
         raw_data_location=docx_file_path,
-        metadata_id=uuid.uuid4(),
+        external_metadata="",
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -55,7 +55,7 @@ def test_UnstructuredDocument():
         id=uuid.uuid4(),
         name="example.csv",
         raw_data_location=csv_file_path,
-        metadata_id=uuid.uuid4(),
+        external_metadata="",
         mime_type="text/csv",
     )
 
@@ -63,7 +63,7 @@ def test_UnstructuredDocument():
         id=uuid.uuid4(),
         name="example.xlsx",
         raw_data_location=xlsx_file_path,
-        metadata_id=uuid.uuid4(),
+        external_metadata="",
         mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
