@@ -1,0 +1,24 @@
+name: clean | remove stale PRs
+
+on:
+  # Run this action periodically (daily at 0:00 UTC in this example).
+  schedule:
+    - cron: "0 0 * * *"
+  # Optionally, also run when pull requests are labeled, unlabeled, synchronized, or reopened
+  # to update the stale timer as needed. Uncomment if desired.
+  # pull_request:
+  #   types: [labeled, unlabeled, synchronize, reopened]
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark and Close Stale
+        uses: actions/stale@v6
+        with:
+          # Number of days of inactivity before the pull request is marked stale
+          days-before-stale: 60
+          # Number of days of inactivity after being marked stale before the pull request is closed
+          days-before-close: 7
+          # Comment to post when marking as stale
+          stale-pr-message: "This pull request has been automatically marke
