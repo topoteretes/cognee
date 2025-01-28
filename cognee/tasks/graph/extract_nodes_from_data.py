@@ -13,15 +13,13 @@ from cognee.tasks.storage import add_data_points
 async def extract_nodes_from_data(
     data_chunks: list[DocumentChunk], n_rounds: int
 ) -> List[DocumentChunk]:
-    """Extracts and integrates entities from document chunks using multi-round entity extraction."""
-    chunk_entities = await asyncio.gather(
+    """Extracts and integrates potential nodes from document chunks using multi-round extraction."""
+    chunk_nodes = await asyncio.gather(
         *[extract_content_nodes(chunk.text, n_rounds) for chunk in data_chunks]
     )
 
-    # Update chunks with their entities and collect all entities for storage
-    all_entities = []
-    for chunk, entities in zip(data_chunks, chunk_entities):
-        chunk.contains = entities
-        all_entities.extend(entities)
+    # Update chunks with their potential nodes
+    for chunk, nodes in zip(data_chunks, chunk_nodes):
+        chunk.potential_nodes = nodes
 
     return data_chunks
