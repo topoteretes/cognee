@@ -62,6 +62,8 @@ async def code_description_to_code_part(
         "Search initiated by user %s with query: '%s' and top_k: %d", user.id, query, top_k
     )
 
+    context_from_documents = ""
+
     try:
         if include_docs:
             search_results = await search(SearchType.INSIGHTS, query_text=query)
@@ -131,14 +133,7 @@ async def code_description_to_code_part(
             len(code_pieces_to_return),
         )
 
-        context = ""
-        for code_piece in code_pieces_to_return:
-            context = context + code_piece.get_attribute("source_code")
-
-        if include_docs:
-            context = context_from_documents + context
-
-        return context
+        return code_pieces_to_return, context_from_documents
 
     except Exception as exec_error:
         logging.error(
