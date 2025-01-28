@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from pathlib import Path
 
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
@@ -21,6 +20,7 @@ from cognee.tasks.repo_processor import (
 from cognee.tasks.repo_processor.get_source_code_chunks import get_source_code_chunks
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_code, summarize_text
+from cognee.infrastructure.llm import get_max_chunk_tokens
 
 monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:
@@ -33,21 +33,8 @@ update_status_lock = asyncio.Lock()
 
 @observe
 async def run_code_graph_pipeline(repo_path, include_docs=True):
-    import os
-    import pathlib
-
     import cognee
     from cognee.infrastructure.databases.relational import create_db_and_tables
-
-    file_path = Path(__file__).parent
-    data_directory_path = str(
-        pathlib.Path(os.path.join(file_path, ".data_storage/code_graph")).resolve()
-    )
-    cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(
-        pathlib.Path(os.path.join(file_path, ".cognee_system/code_graph")).resolve()
-    )
-    cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -71,7 +58,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
             Task(ingest_data, dataset_name="repo_docs", user=user),
             Task(get_data_list_for_user, dataset_name="repo_docs", user=user),
             Task(classify_documents),
-            Task(extract_chunks_from_documents),
+            Task(extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()),
             Task(
                 extract_graph_from_data, graph_model=KnowledgeGraph, task_config={"batch_size": 50}
             ),

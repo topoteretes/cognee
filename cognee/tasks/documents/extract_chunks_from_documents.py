@@ -5,6 +5,7 @@ from cognee.modules.data.processing.document_types.Document import Document
 
 async def extract_chunks_from_documents(
     documents: list[Document],
+    max_chunk_tokens: int,
     chunk_size: int = 1024,
     chunker="text_chunker",
 ) -> AsyncGenerator:
@@ -17,7 +18,9 @@ async def extract_chunks_from_documents(
     """
     for document in documents:
         document_token_count = 0
-        for document_chunk in document.read(chunk_size=chunk_size, chunker=chunker):
+        for document_chunk in document.read(
+            chunk_size=chunk_size, chunker=chunker, max_chunk_tokens=max_chunk_tokens
+        ):
             document_token_count += document_chunk.token_count
             yield document_chunk
         document.token_count = document_token_count

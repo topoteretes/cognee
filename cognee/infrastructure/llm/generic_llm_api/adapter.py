@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import List, Type
+
 from pydantic import BaseModel
 import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
@@ -16,11 +17,12 @@ class GenericAPIAdapter(LLMInterface):
     model: str
     api_key: str
 
-    def __init__(self, endpoint, api_key: str, model: str, name: str):
+    def __init__(self, endpoint, api_key: str, model: str, name: str, max_tokens: int):
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
+        self.max_tokens = max_tokens
 
         llm_config = get_llm_config()
 

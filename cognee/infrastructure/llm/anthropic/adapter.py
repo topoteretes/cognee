@@ -14,11 +14,12 @@ class AnthropicAdapter(LLMInterface):
     name = "Anthropic"
     model: str
 
-    def __init__(self, model: str = None):
+    def __init__(self, max_tokens: int, model: str = None):
         self.aclient = instructor.patch(
             create=anthropic.Anthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
         )
         self.model = model
+        self.max_tokens = max_tokens
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]

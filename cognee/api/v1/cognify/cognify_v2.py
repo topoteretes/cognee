@@ -4,6 +4,7 @@ from typing import Union
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -151,7 +152,9 @@ async def get_default_tasks(
         default_tasks = [
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
-            Task(extract_chunks_from_documents),  # Extract text chunks based on the document type.
+            Task(
+                extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
+            ),  # Extract text chunks based on the document type.
             Task(
                 extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
             ),  # Generate knowledge graphs from the document chunks.
