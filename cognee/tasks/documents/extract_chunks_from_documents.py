@@ -1,6 +1,25 @@
-from typing import Optional, AsyncGenerator
+from typing import AsyncGenerator
 
 from cognee.modules.data.processing.document_types.Document import Document
+from sqlalchemy import select
+from cognee.modules.data.models import Data
+from cognee.infrastructure.databases.relational import get_relational_engine
+from uuid import UUID
+
+
+async def update_document_token_count(document_id: UUID, token_count: int) -> None:
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        document_data_point = (
+            await session.execute(select(Data).filter(Data.id == document_id))
+        ).scalar_one_or_none()
+
+        if document_data_point:
+            document_data_point.token_count = token_count
+            await session.merge(document_data_point)
+            await session.commit()
+        else:
+            raise ValueError(f"Document with id {document_id} not found.")
 
 
 async def extract_chunks_from_documents(
@@ -23,4 +42,5 @@ async def extract_chunks_from_documents(
         ):
             document_token_count += document_chunk.token_count
             yield document_chunk
-        document.token_count = document_token_count
+
+        await update_document_token_count(document.id, document_token_count)
