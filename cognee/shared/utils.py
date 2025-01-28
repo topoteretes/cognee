@@ -10,8 +10,6 @@ import graphistry
 import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
-import tiktoken
-import time
 
 import logging
 import sys
@@ -100,15 +98,6 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
-
-    # tiktoken.get_encoding("cl100k_base")
-    encoding = tiktoken.encoding_for_model(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
-
-
 def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
     h = hashlib.md5()
 
@@ -132,34 +121,6 @@ def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
         return h.hexdigest()
     except IOError as e:
         raise IngestionError(message=f"Failed to load data from {file}: {e}")
-
-
-def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
-    """
-    Trims the text so that the number of tokens does not exceed max_tokens.
-
-    Args:
-    text (str): Original text string to be trimmed.
-    max_tokens (int): Maximum number of tokens allowed.
-    encoding_name (str): The name of the token encoding to use.
-
-    Returns:
-    str: Trimmed version of text or original text if under the limit.
-    """
-    # First check the number of tokens
-    num_tokens = num_tokens_from_string(text, encoding_name)
-
-    # If the number of tokens is within the limit, return the text as is
-    if num_tokens <= max_tokens:
-        return text
-
-    # If the number exceeds the limit, trim the text
-    # This is a simple trim, it may cut words in half; consider using word boundaries for a cleaner cut
-    encoded_text = tiktoken.get_encoding(encoding_name).encode(text)
-    trimmed_encoded_text = encoded_text[:max_tokens]
-    # Decoding the trimmed text
-    trimmed_text = tiktoken.get_encoding(encoding_name).decode(trimmed_encoded_text)
-    return trimmed_text
 
 
 def generate_color_palette(unique_layers):

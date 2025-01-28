@@ -7,7 +7,6 @@ async def extract_chunks_from_documents(
     documents: list[Document],
     chunk_size: int = 1024,
     chunker="text_chunker",
-    max_tokens: Optional[int] = None,
 ) -> AsyncGenerator:
     """
     Extracts chunks of data from a list of documents based on the specified chunking parameters.
@@ -18,9 +17,7 @@ async def extract_chunks_from_documents(
     """
     for document in documents:
         document_token_count = 0
-        for document_chunk in document.read(
-            chunk_size=chunk_size, chunker=chunker, max_tokens=max_tokens
-        ):
+        for document_chunk in document.read(chunk_size=chunk_size, chunker=chunker):
             document_token_count += document_chunk.token_count
             yield document_chunk
         document.token_count = document_token_count

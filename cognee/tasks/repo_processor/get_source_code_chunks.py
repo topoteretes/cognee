@@ -89,26 +89,31 @@ def _get_subchunk_token_counts(
 
 
 def _get_chunk_source_code(
-    code_token_counts: list[tuple[str, int]], overlap: float, max_tokens: int
+    code_token_counts: list[tuple[str, int]], overlap: float
 ) -> tuple[list[tuple[str, int]], str]:
     """Generates a chunk of source code from tokenized subchunks with overlap handling."""
     current_count = 0
     cumulative_counts = []
     current_source_code = ""
 
+    # Get embedding engine used in vector database
+    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+
+    embedding_engine = get_vector_engine().embedding_engine
+
     for i, (child_code, token_count) in enumerate(code_token_counts):
         current_count += token_count
         cumulative_counts.append(current_count)
-        if current_count > max_tokens:
+        if current_count > embedding_engine.max_tokens:
             break
         current_source_code += f"\n{child_code}"
 
-    if current_count <= max_tokens:
+    if current_count <= embedding_engine.max_tokens:
         return [], current_source_code.strip()
 
     cutoff = 1
     for i, cum_count in enumerate(cumulative_counts):
-        if cum_count > (1 - overlap) * max_tokens:
+        if cum_count > (1 - overlap) * embedding_engine.max_tokens:
             break
         cutoff = i
 
@@ -117,21 +122,18 @@ def _get_chunk_source_code(
 
 def get_source_code_chunks_from_code_part(
     code_file_part: CodePart,
-    max_tokens: int = 8192,
     overlap: float = 0.25,
     granularity: float = 0.1,
-    model_name: str = "text-embedding-3-large",
 ) -> Generator[SourceCodeChunk, None, None]:
     """Yields source code chunks from a CodePart object, with configurable token limits and overlap."""
     if not code_file_part.source_code:
         logger.error(f"No source code in CodeFile {code_file_part.id}")
         return
 
-    vector_engine = get_vector_engine()
-    embedding_model = vector_engine.embedding_engine.model
-    model_name = embedding_model.split("/")[-1]
-    tokenizer = tiktoken.encoding_for_model(model_name)
-    max_subchunk_tokens = max(1, int(granularity * max_tokens))
+    embedding_engine = get_vector_engine().embedding_engine
+    tokenizer = embedding_engine.tokenizer
+
+    max_subchunk_tokens = max(1, int(granularity * embedding_engine.max_tokens))
     subchunk_token_counts = _get_subchunk_token_counts(
         tokenizer, code_file_part.source_code, max_subchunk_tokens
     )
@@ -139,7 +141,7 @@ def get_source_code_chunks_from_code_part(
     previous_chunk = None
     while subchunk_token_counts:
         subchunk_token_counts, chunk_source_code = _get_chunk_source_code(
-            subchunk_token_counts, overlap, max_tokens
+            subchunk_token_counts, overlap
         )
         if not chunk_source_code:
             continue
