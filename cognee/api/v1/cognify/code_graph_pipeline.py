@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from pathlib import Path
 
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
@@ -34,21 +33,8 @@ update_status_lock = asyncio.Lock()
 
 @observe
 async def run_code_graph_pipeline(repo_path, include_docs=True):
-    import os
-    import pathlib
-
     import cognee
     from cognee.infrastructure.databases.relational import create_db_and_tables
-
-    file_path = Path(__file__).parent
-    data_directory_path = str(
-        pathlib.Path(os.path.join(file_path, ".data_storage/code_graph")).resolve()
-    )
-    cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(
-        pathlib.Path(os.path.join(file_path, ".cognee_system/code_graph")).resolve()
-    )
-    cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
