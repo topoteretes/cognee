@@ -26,7 +26,7 @@ class GeminiTokenizer(TokenizerInterface):
     def extract_tokens(self, text: str) -> List[Any]:
         raise NotImplementedError
 
-    def num_tokens_from_text(self, text: str) -> int:
+    def count_tokens(self, text: str) -> int:
         """
         Returns the number of tokens in the given text.
         Args:

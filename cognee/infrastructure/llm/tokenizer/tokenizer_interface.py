@@ -10,7 +10,7 @@ class TokenizerInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def num_tokens_from_text(self, text: str) -> int:
+    def count_tokens(self, text: str) -> int:
         raise NotImplementedError
 
     @abstractmethod

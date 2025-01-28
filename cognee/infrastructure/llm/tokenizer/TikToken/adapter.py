@@ -30,7 +30,7 @@ class TikTokenTokenizer(TokenizerInterface):
             tokens.append(token)
         return tokens
 
-    def num_tokens_from_text(self, text: str) -> int:
+    def count_tokens(self, text: str) -> int:
         """
         Returns the number of tokens in the given text.
         Args:
@@ -54,7 +54,7 @@ class TikTokenTokenizer(TokenizerInterface):
         str: Trimmed version of text or original text if under the limit.
         """
         # First check the number of tokens
-        num_tokens = self.num_tokens_from_string(text)
+        num_tokens = self.count_tokens(text)
 
         # If the number of tokens is within the limit, return the text as is
         if num_tokens <= self.max_tokens:

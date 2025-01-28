@@ -20,7 +20,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
         tokens = self.tokenizer.tokenize(text)
         return tokens
 
-    def num_tokens_from_text(self, text: str) -> int:
+    def count_tokens(self, text: str) -> int:
         """
         Returns the number of tokens in the given text.
         Args:

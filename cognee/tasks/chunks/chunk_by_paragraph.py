@@ -39,7 +39,7 @@ def chunk_by_paragraph(
         data, maximum_length=paragraph_length
     ):
         # Check if this sentence would exceed length limit
-        token_count = embedding_engine.tokenizer.num_tokens_from_text(sentence)
+        token_count = embedding_engine.tokenizer.count_tokens(sentence)
 
         if current_word_count > 0 and (
             current_word_count + word_count > paragraph_length

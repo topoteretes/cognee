@@ -40,7 +40,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
         self.max_tokens = max_tokens
-        self.tokenizer = self.set_tokenizer()
+        self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -114,7 +114,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     def get_vector_size(self) -> int:
         return self.dimensions
 
-    def set_tokenizer(self):
+    def get_tokenizer(self):
         logger.debug(f"Loading tokenizer for model {self.model}...")
         # If model also contains provider information, extract only model information
         model = self.model.split("/")[-1]
