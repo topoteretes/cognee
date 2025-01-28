@@ -20,11 +20,9 @@ logger = logging.getLogger(__name__)
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-
             name="cognify",
             description="Cognifies text into knowledge graph",
             inputSchema={
-
                 "type": "object",
                 "properties": {
                     "text": {
@@ -44,7 +42,6 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-
             name="search",
             description="Searches for information in knowledge graph",
             inputSchema={
@@ -59,11 +56,9 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-
             name="prune",
             description="Prunes knowledge graph",
             inputSchema={
-
                 "type": "object",
                 "properties": {},
             },
@@ -77,11 +72,13 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 if name == "cognify":
-                    asyncio.create_task( cognify(
-                        text=arguments["text"],
-                        graph_model_file=arguments.get("graph_model_file", None),
-                        graph_model_name=arguments.get("graph_model_name", None),
-                    ))
+                    asyncio.create_task(
+                        cognify(
+                            text=arguments["text"],
+                            graph_model_file=arguments.get("graph_model_file", None),
+                            graph_model_name=arguments.get("graph_model_name", None),
+                        )
+                    )
 
                     return [types.TextContent(type="text", text="Ingested")]
                 elif name == "search":
@@ -97,7 +94,6 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text=f"Error calling tool '{name}': {str(e)}")]
 
 
-
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
     """Build knowledge graph from the input text"""
     if graph_model_file and graph_model_name:
@@ -111,7 +107,6 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
         asyncio.create_task(cognee.cognify(graph_model=graph_model))
     except Exception as e:
         raise ValueError(f"Failed to cognify: {str(e)}")
-
 
 
 async def search(search_query: str) -> str:
@@ -143,7 +138,6 @@ async def main():
                     capabilities=mcp.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},
-
                     ),
                 ),
                 raise_exceptions=True,
@@ -153,10 +147,6 @@ async def main():
         logger.error(f"Server failed to start: {str(e)}", exc_info=True)
         raise
 
-
-    except Exception as e:
-        logger.error(f"Server failed to start: {str(e)}", exc_info=True)
-        raise
 
 # async def visualize() -> Image:
 #     """Visualize the knowledge graph"""
@@ -227,4 +217,5 @@ def load_class(model_file, model_name):
 if __name__ == "__main__":
     # Initialize and run the server
     import asyncio
+
     asyncio.run(main())
