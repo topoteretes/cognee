@@ -22,13 +22,12 @@ def get_llm_client():
 
     # Check if max_token value is defined in liteLLM for given model
     # if not use value from cognee configuration
-    from cognee.infrastructure.llm.utils import get_model_max_tokens
+    from cognee.infrastructure.llm.utils import (
+        get_model_max_tokens,
+    )  # imported here to avoid circular imports
 
-    max_tokens = (
-        get_model_max_tokens(llm_config.llm_model)
-        if get_model_max_tokens(llm_config.llm_model)
-        else llm_config.llm_max_tokens
-    )
+    model_max_tokens = get_model_max_tokens(llm_config.llm_model)
+    max_tokens = model_max_tokens if model_max_tokens else llm_config.llm_max_tokens
 
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None:
