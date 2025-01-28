@@ -4,8 +4,7 @@ from typing import Union
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -148,22 +147,13 @@ async def get_default_tasks(
     if user is None:
         user = await get_default_user()
 
-    # Calculate max chunk size based on the following formula
-    embedding_engine = get_vector_engine().embedding_engine
-    llm_client = get_llm_client()
-
-    # We need to make sure chunk size won't take more than half of LLM max context token size
-    # but it also can't be bigger than the embedding engine max token size
-    llm_cutoff_point = llm_client.max_tokens // 2  # Round down the division
-    max_chunk_tokens = min(embedding_engine.max_tokens, llm_cutoff_point)
-
     try:
         cognee_config = get_cognify_config()
         default_tasks = [
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(
-                extract_chunks_from_documents, max_chunk_tokens=max_chunk_tokens
+                extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
             ),  # Extract text chunks based on the document type.
             Task(
                 extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
