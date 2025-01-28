@@ -97,8 +97,6 @@ def _get_chunk_source_code(
     current_source_code = ""
 
     # Get embedding engine used in vector database
-    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
-
     embedding_engine = get_vector_engine().embedding_engine
 
     for i, (child_code, token_count) in enumerate(code_token_counts):
