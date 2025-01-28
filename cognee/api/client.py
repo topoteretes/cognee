@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
-from cognee.api.v1.cognify.routers import get_cognify_router
+from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
 from fastapi import Request
@@ -168,6 +168,10 @@ app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"]
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
+
+app.include_router(
+    get_code_pipeline_router(), prefix="/api/v1/code-pipeline", tags=["code-pipeline"]
+)
 
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
