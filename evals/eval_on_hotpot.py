@@ -171,17 +171,18 @@ async def main():
     )
     parser.add_argument("--num_samples", type=int, default=500)
     parser.add_argument("--metrics", type=str, nargs="+", default=["Correctness"])
+    parser.add_argument("--out_dir", type=str, help="Dir to save eval results")
 
     args = parser.parse_args()
 
     if args.rag_option == "cognee_incremental":
         avg_scores = await incremental_eval_on_QA_dataset(
-            args.dataset, args.num_samples, args.metrics
+            args.dataset, args.num_samples, args.metrics, args.out_dir
         )
 
     else:
         avg_scores = await eval_on_QA_dataset(
-            args.dataset, args.rag_option, args.num_samples, args.metrics
+            args.dataset, args.rag_option, args.num_samples, args.metrics, args.out_dir
         )
 
     logger.info(f"{avg_scores}")
