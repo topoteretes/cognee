@@ -4,13 +4,13 @@ from uuid import NAMESPACE_OID, uuid5
 import tiktoken
 
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 
 from .chunk_by_sentence import chunk_by_sentence
 
 
 def chunk_by_paragraph(
     data: str,
+    max_chunk_tokens,
     paragraph_length: int = 1024,
     batch_paragraphs: bool = True,
 ) -> Iterator[Dict[str, Any]]:
@@ -31,19 +31,21 @@ def chunk_by_paragraph(
     last_cut_type = None
     current_token_count = 0
 
-    # Get vector and embedding engine
     vector_engine = get_vector_engine()
-    embedding_engine = vector_engine.embedding_engine
+    embedding_model = vector_engine.embedding_engine.model
+    embedding_model = embedding_model.split("/")[-1]
 
     for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(
         data, maximum_length=paragraph_length
     ):
         # Check if this sentence would exceed length limit
-        token_count = embedding_engine.tokenizer.count_tokens(sentence)
+
+        tokenizer = tiktoken.encoding_for_model(embedding_model)
+        token_count = len(tokenizer.encode(sentence))
 
         if current_word_count > 0 and (
             current_word_count + word_count > paragraph_length
-            or current_token_count + token_count > embedding_engine.max_tokens
+            or current_token_count + token_count > max_chunk_tokens
         ):
             # Yield current chunk
             chunk_dict = {

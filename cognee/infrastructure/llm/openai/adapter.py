@@ -32,6 +32,7 @@ class OpenAIAdapter(LLMInterface):
         api_version: str,
         model: str,
         transcription_model: str,
+        max_tokens: int,
         streaming: bool = False,
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
@@ -41,6 +42,7 @@ class OpenAIAdapter(LLMInterface):
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
+        self.max_tokens = max_tokens
         self.streaming = streaming
 
     @observe(as_type="generation")

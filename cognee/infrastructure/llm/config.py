@@ -11,6 +11,7 @@ class LLMConfig(BaseSettings):
     llm_api_version: Optional[str] = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
+    llm_max_tokens: int = 128000
     transcription_model: str = "whisper-1"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
@@ -24,6 +25,7 @@ class LLMConfig(BaseSettings):
             "api_version": self.llm_api_version,
             "temperature": self.llm_temperature,
             "streaming": self.llm_streaming,
+            "max_tokens": self.llm_max_tokens,
             "transcription_model": self.transcription_model,
         }
 
