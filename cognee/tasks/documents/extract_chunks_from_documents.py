@@ -17,7 +17,10 @@ async def extract_chunks_from_documents(
         - The `chunker` parameter determines the chunking logic and should align with the document type.
     """
     for document in documents:
+        document_token_count = 0
         for document_chunk in document.read(
             chunk_size=chunk_size, chunker=chunker, max_tokens=max_tokens
         ):
+            document_token_count += document_chunk.token_count
             yield document_chunk
+        document.token_count = document_token_count
