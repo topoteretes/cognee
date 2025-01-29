@@ -20,6 +20,7 @@ from cognee.tasks.repo_processor import (
 from cognee.tasks.repo_processor.get_source_code_chunks import get_source_code_chunks
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_code, summarize_text
+from cognee.infrastructure.llm import get_max_chunk_tokens
 
 monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:
@@ -57,7 +58,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
             Task(ingest_data, dataset_name="repo_docs", user=user),
             Task(get_data_list_for_user, dataset_name="repo_docs", user=user),
             Task(classify_documents),
-            Task(extract_chunks_from_documents, max_tokens=cognee_config.max_tokens),
+            Task(extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()),
             Task(
                 extract_graph_from_data, graph_model=KnowledgeGraph, task_config={"batch_size": 50}
             ),

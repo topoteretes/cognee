@@ -14,17 +14,15 @@ class TextChunker:
     chunk_size = 0
     token_count = 0
 
-    def __init__(
-        self, document, get_text: callable, max_tokens: Optional[int] = None, chunk_size: int = 1024
-    ):
+    def __init__(self, document, get_text: callable, max_chunk_tokens: int, chunk_size: int = 1024):
         self.document = document
         self.max_chunk_size = chunk_size
         self.get_text = get_text
-        self.max_tokens = max_tokens if max_tokens else float("inf")
+        self.max_chunk_tokens = max_chunk_tokens
 
     def check_word_count_and_token_count(self, word_count_before, token_count_before, chunk_data):
         word_count_fits = word_count_before + chunk_data["word_count"] <= self.max_chunk_size
-        token_count_fits = token_count_before + chunk_data["token_count"] <= self.max_tokens
+        token_count_fits = token_count_before + chunk_data["token_count"] <= self.max_chunk_tokens
         return word_count_fits and token_count_fits
 
     def read(self):
@@ -32,7 +30,7 @@ class TextChunker:
         for content_text in self.get_text():
             for chunk_data in chunk_by_paragraph(
                 content_text,
-                self.max_tokens,
+                self.max_chunk_tokens,
                 self.max_chunk_size,
                 batch_paragraphs=True,
             ):

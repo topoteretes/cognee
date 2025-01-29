@@ -5,9 +5,9 @@ from cognee.modules.data.processing.document_types.Document import Document
 
 async def extract_chunks_from_documents(
     documents: list[Document],
+    max_chunk_tokens: int,
     chunk_size: int = 1024,
     chunker="text_chunker",
-    max_tokens: Optional[int] = None,
 ) -> AsyncGenerator:
     """
     Extracts chunks of data from a list of documents based on the specified chunking parameters.
@@ -18,6 +18,6 @@ async def extract_chunks_from_documents(
     """
     for document in documents:
         for document_chunk in document.read(
-            chunk_size=chunk_size, chunker=chunker, max_tokens=max_tokens
+            chunk_size=chunk_size, chunker=chunker, max_chunk_tokens=max_chunk_tokens
         ):
             yield document_chunk

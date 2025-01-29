@@ -20,6 +20,15 @@ def get_llm_client():
 
     provider = LLMProvider(llm_config.llm_provider)
 
+    # Check if max_token value is defined in liteLLM for given model
+    # if not use value from cognee configuration
+    from cognee.infrastructure.llm.utils import (
+        get_model_max_tokens,
+    )  # imported here to avoid circular imports
+
+    model_max_tokens = get_model_max_tokens(llm_config.llm_model)
+    max_tokens = model_max_tokens if model_max_tokens else llm_config.llm_max_tokens
+
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None:
             raise InvalidValueError(message="LLM API key is not set.")
@@ -32,6 +41,7 @@ def get_llm_client():
             api_version=llm_config.llm_api_version,
             model=llm_config.llm_model,
             transcription_model=llm_config.transcription_model,
+            max_tokens=max_tokens,
             streaming=llm_config.llm_streaming,
         )
 
@@ -42,13 +52,17 @@ def get_llm_client():
         from .generic_llm_api.adapter import GenericAPIAdapter
 
         return GenericAPIAdapter(
-            llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Ollama"
+            llm_config.llm_endpoint,
+            llm_config.llm_api_key,
+            llm_config.llm_model,
+            "Ollama",
+            max_tokens=max_tokens,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
         from .anthropic.adapter import AnthropicAdapter
 
-        return AnthropicAdapter(llm_config.llm_model)
+        return AnthropicAdapter(max_tokens=max_tokens, model=llm_config.llm_model)
 
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
@@ -57,7 +71,11 @@ def get_llm_client():
         from .generic_llm_api.adapter import GenericAPIAdapter
 
         return GenericAPIAdapter(
-            llm_config.llm_endpoint, llm_config.llm_api_key, llm_config.llm_model, "Custom"
+            llm_config.llm_endpoint,
+            llm_config.llm_api_key,
+            llm_config.llm_model,
+            "Custom",
+            max_tokens=max_tokens,
         )
 
     else:
