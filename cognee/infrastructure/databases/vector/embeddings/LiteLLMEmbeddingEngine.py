@@ -6,6 +6,9 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
+from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
+from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 litellm.set_verbose = False
 logger = logging.getLogger("LiteLLMEmbeddingEngine")
@@ -15,6 +18,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     api_key: str
     endpoint: str
     api_version: str
+    provider: str
     model: str
     dimensions: int
     mock: bool
@@ -25,16 +29,21 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     def __init__(
         self,
         model: Optional[str] = "openai/text-embedding-3-large",
+        provider: str = "openai",
         dimensions: Optional[int] = 3072,
         api_key: str = None,
         endpoint: str = None,
         api_version: str = None,
+        max_tokens: int = 512,
     ):
-        self.model = model
-        self.dimensions = dimensions
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
+        self.provider = provider
+        self.model = model
+        self.dimensions = dimensions
+        self.max_tokens = max_tokens
+        self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -49,6 +58,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         try:
             if self.mock:
                 response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
+
+                self.retry_count = 0
+
                 return [data["embedding"] for data in response["data"]]
             else:
                 response = await litellm.aembedding(
@@ -60,6 +72,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 )
 
                 self.retry_count = 0  # Reset retry count on successful call
+
                 return [data["embedding"] for data in response.data]
 
         except litellm.exceptions.ContextWindowExceededError as error:
@@ -87,12 +100,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             await exponential_backoff(self.retry_count)
             self.retry_count += 1
+
             return await self.embed_text(text)
 
         except (
             litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
-            litellm.llms.OpenAI.openai.OpenAIError,
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
             raise EmbeddingException(f"Failed to index data points using model {self.model}")
@@ -103,3 +116,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     def get_vector_size(self) -> int:
         return self.dimensions
+
+    def get_tokenizer(self):
+        logger.debug(f"Loading tokenizer for model {self.model}...")
+        # If model also contains provider information, extract only model information
+        model = self.model.split("/")[-1]
+
+        if "openai" in self.provider.lower():
+            tokenizer = TikTokenTokenizer(model=model, max_tokens=self.max_tokens)
+        elif "gemini" in self.provider.lower():
+            tokenizer = GeminiTokenizer(model=model, max_tokens=self.max_tokens)
+        else:
+            tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
+
+        logger.debug(f"Tokenizer loaded for model: {self.model}")
+        return tokenizer

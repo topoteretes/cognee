@@ -14,6 +14,10 @@
     ],
     "metric_names": [
         "Correctness",
-        "Comprehensiveness"
+        "Comprehensiveness",
+        "Directness",
+        "Diversity",
+        "Empowerment",
+        "promptfoo.directness"
     ]
 }

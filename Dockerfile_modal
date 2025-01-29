@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PIP_NO_CACHE_DIR=true
+ENV PATH="${PATH}:/root/.poetry/bin"
+ENV PYTHONPATH=/app
+ENV RUN_MODE=modal
+ENV SKIP_MIGRATIONS=true
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+
+ENV PYTHONPATH=/app
+WORKDIR /app
+COPY pyproject.toml poetry.lock /app/
+
+
+RUN pip install poetry
+
+RUN poetry install --all-extras --no-root --without dev
+
+COPY cognee/ /app/cognee
+COPY README.md /app/README.md

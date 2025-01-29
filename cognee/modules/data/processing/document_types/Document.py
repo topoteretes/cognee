@@ -7,9 +7,9 @@ from cognee.infrastructure.engine import DataPoint
 class Document(DataPoint):
     name: str
     raw_data_location: str
-    metadata_id: UUID
+    external_metadata: Optional[str]
     mime_type: str
     _metadata: dict = {"index_fields": ["name"], "type": "Document"}
 
-    def read(self, chunk_size: int, chunker=str, max_tokens: Optional[int] = None) -> str:
+    def read(self, chunk_size: int, chunker=str, max_chunk_tokens: Optional[int] = None) -> str:
         pass

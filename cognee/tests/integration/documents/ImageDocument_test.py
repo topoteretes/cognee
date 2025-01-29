@@ -18,12 +18,12 @@ def test_ImageDocument():
         id=uuid.uuid4(),
         name="image-dummy-test",
         raw_data_location="",
-        metadata_id=uuid.uuid4(),
+        external_metadata="",
         mime_type="",
     )
     with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
         for ground_truth, paragraph_data in zip(
-            GROUND_TRUTH, document.read(chunk_size=64, chunker="text_chunker")
+            GROUND_TRUTH, document.read(chunk_size=64, chunker="text_chunker", max_chunk_tokens=512)
         ):
             assert ground_truth["word_count"] == paragraph_data.word_count, (
                 f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
