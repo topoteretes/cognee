@@ -107,6 +107,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                             owner_id=user.id,
                             content_hash=file_metadata["content_hash"],
                             external_metadata=get_external_metadata_dict(data_item),
+                            token_count=-1,
                         )
 
                     # Check if data is already in dataset

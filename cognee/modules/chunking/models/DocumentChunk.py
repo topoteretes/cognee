@@ -9,6 +9,7 @@ class DocumentChunk(DataPoint):
     __tablename__ = "document_chunk"
     text: str
     word_count: int
+    token_count: int
     chunk_index: int
     cut_type: str
     is_part_of: Document
