@@ -23,44 +23,11 @@ class EntityListResponse(BaseModel):
     entities: List[Entity]
 
 
-class PotentialNodes(BaseModel):
-    """Response model containing a list of potential node names."""
-
-    nodes: List[str]
-
-
 class PotentialNodesAndRelationships(BaseModel):
     """Response model containing lists of potential node names and relationships."""
 
     nodes: List[str]
     relationships: List[str]
-
-
-async def extract_content_nodes(content: str, n_rounds: int = 2) -> List[str]:
-    """Extracts node names from content through multiple rounds of analysis."""
-    llm_client = get_llm_client()
-    all_nodes: List[str] = []
-    existing_nodes = set()  # Track existing node names in lowercase
-
-    for round_num in range(n_rounds):
-        context = {
-            "previous_nodes": all_nodes,
-            "round_number": round_num + 1,
-            "total_rounds": n_rounds,
-        }
-
-        system_prompt = render_prompt("extract_graph_nodes_prompt.txt", context)
-        response = await llm_client.acreate_structured_output(
-            text_input=content, system_prompt=system_prompt, response_model=PotentialNodes
-        )
-
-        # Only add new nodes that haven't been seen before
-        for node in response.nodes:
-            if node.lower() not in existing_nodes:
-                all_nodes.append(node)
-                existing_nodes.add(node.lower())
-
-    return all_nodes
 
 
 async def extract_content_nodes_and_relationships(
