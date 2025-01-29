@@ -169,5 +169,7 @@ async def get_source_code_chunks(
                         yield source_code_chunk
                 except Exception as e:
                     logger.error(f"Error processing code part: {e}")
+                    raise e
         except Exception as e:
             logger.error(f"Error processing data point: {e}")
+            raise e
