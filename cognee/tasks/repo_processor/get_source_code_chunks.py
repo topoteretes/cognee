@@ -7,6 +7,7 @@ import parso
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
+from cognee.infrastructure.llm import get_max_chunk_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ def _get_naive_subchunk_token_counts(
         token_count = len(subchunk_token_ids)
         # Note: This can't work with Gemini embeddings as they keep their method of encoding text
         # to tokens hidden and don't offer a decoder
+        # TODO: Add support for different tokenizers for this function
         subchunk = "".join(
             tokenizer.decode_single_token(token_id) for token_id in subchunk_token_ids
         )
@@ -93,22 +95,19 @@ def _get_chunk_source_code(
     cumulative_counts = []
     current_source_code = ""
 
-    # Get embedding engine used in vector database
-    embedding_engine = get_vector_engine().embedding_engine
-
     for i, (child_code, token_count) in enumerate(code_token_counts):
         current_count += token_count
         cumulative_counts.append(current_count)
-        if current_count > embedding_engine.max_tokens:
+        if current_count > get_max_chunk_tokens():
             break
         current_source_code += f"\n{child_code}"
 
-    if current_count <= embedding_engine.max_tokens:
+    if current_count <= get_max_chunk_tokens():
         return [], current_source_code.strip()
 
     cutoff = 1
     for i, cum_count in enumerate(cumulative_counts):
-        if cum_count > (1 - overlap) * embedding_engine.max_tokens:
+        if cum_count > (1 - overlap) * get_max_chunk_tokens():
             break
         cutoff = i
 
@@ -125,9 +124,7 @@ def get_source_code_chunks_from_code_part(
         logger.error(f"No source code in CodeFile {code_file_part.id}")
         return
 
-    embedding_engine = get_vector_engine().embedding_engine
-
-    max_subchunk_tokens = max(1, int(granularity * embedding_engine.max_tokens))
+    max_subchunk_tokens = max(1, int(granularity * get_max_chunk_tokens()))
     subchunk_token_counts = _get_subchunk_token_counts(
         code_file_part.source_code, max_subchunk_tokens
     )
