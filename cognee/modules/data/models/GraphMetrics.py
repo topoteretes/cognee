@@ -6,8 +6,8 @@ from cognee.infrastructure.databases.relational import Base
 from uuid import uuid4
 
 
-class GraphMetricData(Base):
-    __tablename__ = "graph_metric_table"
+class GraphMetrics(Base):
+    __tablename__ = "graph_metrics_table"
 
     # TODO: Change ID to reflect unique id of graph database
     id = Column(UUID, primary_key=True, default=uuid4)

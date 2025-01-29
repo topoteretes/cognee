@@ -4,7 +4,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from cognee.modules.data.models import Data
-from cognee.modules.data.models.MetricData import GraphMetricData
+from cognee.modules.data.models import GraphMetrics
 import uuid
 from cognee.infrastructure.databases.graph import get_graph_engine
 
@@ -41,7 +41,7 @@ async def store_descriptive_metrics(data_points: list[DataPoint]):
     token_count_sum = await fetch_token_count(db_engine)
     graph_metrics = await calculate_graph_metrics(graph_data)
 
-    table_name = "graph_metric_table"
+    table_name = "graph_metrics_table"
     metrics_dict = {"id": uuid.uuid4(), "num_tokens": token_count_sum} | graph_metrics
 
     await db_engine.insert_data(table_name, metrics_dict)
