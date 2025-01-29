@@ -2,27 +2,10 @@ import asyncio
 from typing import List
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
-from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt
-
-
-async def extract_nodes_from_data(
-    data_chunks: list[DocumentChunk], n_rounds: int
-) -> List[DocumentChunk]:
-    """Extracts and integrates potential nodes from document chunks using multi-round extraction."""
-    chunk_nodes = await asyncio.gather(
-        *[extract_content_nodes(chunk.text, n_rounds) for chunk in data_chunks]
-    )
-
-    # Update chunks with their potential nodes
-    for chunk, nodes in zip(data_chunks, chunk_nodes):
-        chunk.potential_nodes = nodes
-
-    return data_chunks
 
 
 class PotentialNodes(BaseModel):
@@ -56,3 +39,18 @@ async def extract_content_nodes(content: str, n_rounds: int = 2) -> List[str]:
                 existing_nodes.add(node.lower())
 
     return all_nodes
+
+
+async def extract_nodes_from_data(
+    data_chunks: list[DocumentChunk], n_rounds: int
+) -> List[DocumentChunk]:
+    """Extracts and integrates potential nodes from document chunks using multi-round extraction."""
+    chunk_nodes = await asyncio.gather(
+        *[extract_content_nodes(chunk.text, n_rounds) for chunk in data_chunks]
+    )
+
+    # Update chunks with their potential nodes
+    for chunk, nodes in zip(data_chunks, chunk_nodes):
+        chunk.potential_nodes = nodes
+
+    return data_chunks
