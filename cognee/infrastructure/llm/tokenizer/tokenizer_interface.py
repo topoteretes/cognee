@@ -14,5 +14,5 @@ class TokenizerInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def trim_text_to_max_tokens(self, text: str) -> str:
+    def decode_single_token(self, token: int) -> str:
         raise NotImplementedError

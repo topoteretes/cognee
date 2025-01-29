@@ -12,6 +12,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
+    GEMINI = "gemini"
 
 
 def get_llm_client():
@@ -76,6 +77,21 @@ def get_llm_client():
             llm_config.llm_model,
             "Custom",
             max_tokens=max_tokens,
+        )
+
+    elif provider == LLMProvider.GEMINI:
+        if llm_config.llm_api_key is None:
+            raise InvalidValueError(message="LLM API key is not set.")
+
+        from .gemini.adapter import GeminiAdapter
+
+        return GeminiAdapter(
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_tokens=max_tokens,
+            endpoint=llm_config.llm_endpoint,
+            api_version=llm_config.llm_api_version,
+            streaming=llm_config.llm_streaming,
         )
 
     else:

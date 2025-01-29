@@ -23,10 +23,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     dimensions: int
     mock: bool
 
+    MAX_RETRIES = 5
+    retry_count = 0
+
     def __init__(
         self,
+        model: Optional[str] = "openai/text-embedding-3-large",
         provider: str = "openai",
-        model: Optional[str] = "text-embedding-3-large",
         dimensions: Optional[int] = 3072,
         api_key: str = None,
         endpoint: str = None,
@@ -47,9 +50,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    MAX_RETRIES = 5
-    retry_count = 0
-
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         async def exponential_backoff(attempt):
             wait_time = min(10 * (2**attempt), 60)  # Max 60 seconds
@@ -64,14 +64,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [data["embedding"] for data in response["data"]]
             else:
                 response = await litellm.aembedding(
-                    self.model,
+                    model=self.model,
                     input=text,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     api_version=self.api_version,
                 )
 
-                self.retry_count = 0
+                self.retry_count = 0  # Reset retry count on successful call
 
                 return [data["embedding"] for data in response.data]
 
@@ -99,13 +99,16 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 raise Exception("Rate limit exceeded and no more retries left.")
 
             await exponential_backoff(self.retry_count)
-
             self.retry_count += 1
 
             return await self.embed_text(text)
 
-        except litellm.exceptions.BadRequestError:
-            raise EmbeddingException("Failed to index data points.")
+        except (
+            litellm.exceptions.BadRequestError,
+            litellm.exceptions.NotFoundError,
+        ) as e:
+            logger.error(f"Embedding error with model {self.model}: {str(e)}")
+            raise EmbeddingException(f"Failed to index data points using model {self.model}")
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))

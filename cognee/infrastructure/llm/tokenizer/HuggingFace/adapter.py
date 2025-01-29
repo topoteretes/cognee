@@ -32,5 +32,6 @@ class HuggingFaceTokenizer(TokenizerInterface):
         """
         return len(self.tokenizer.tokenize(text))
 
-    def trim_text_to_max_tokens(self, text: str) -> str:
+    def decode_single_token(self, encoding: int):
+        # Gemini tokenizer doesn't have the option to decode tokens
         raise NotImplementedError
