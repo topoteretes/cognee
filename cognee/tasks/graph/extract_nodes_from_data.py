@@ -19,9 +19,7 @@ async def extract_nodes_from_data(
     )
 
     # Update chunks with their entities and collect all entities for storage
-    all_entities = []
     for chunk, entities in zip(data_chunks, chunk_entities):
         chunk.contains = entities
-        all_entities.extend(entities)
 
     return data_chunks
