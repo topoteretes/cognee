@@ -26,7 +26,7 @@ class TikTokenTokenizer(TokenizerInterface):
         return token_ids
 
     def decode_token_list(self, tokens: List[Any]) -> List[Any]:
-        if isinstance(tokens, list):
+        if not isinstance(tokens, list):
             tokens = [tokens]
         return [self.tokenizer.decode(i) for i in tokens]
 
