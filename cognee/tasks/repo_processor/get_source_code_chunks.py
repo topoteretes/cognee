@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_naive_subchunk_token_counts(
-    source_code: str, max_subchunk_tokens: int = 8000
+    source_code: str, max_subchunk_tokens
 ) -> list[tuple[str, int]]:
     """Splits source code into subchunks of up to max_subchunk_tokens and counts tokens."""
 
@@ -37,7 +37,7 @@ def _get_naive_subchunk_token_counts(
 
 def _get_subchunk_token_counts(
     source_code: str,
-    max_subchunk_tokens: int = 8000,
+    max_subchunk_tokens,
     depth: int = 0,
     max_depth: int = 100,
 ) -> list[tuple[str, int]]:
@@ -117,7 +117,7 @@ def _get_chunk_source_code(
 def get_source_code_chunks_from_code_part(
     code_file_part: CodePart,
     overlap: float = 0.25,
-    granularity: float = 0.1,
+    granularity: float = 0.09,
 ) -> Generator[SourceCodeChunk, None, None]:
     """Yields source code chunks from a CodePart object, with configurable token limits and overlap."""
     if not code_file_part.source_code:
@@ -150,7 +150,6 @@ async def get_source_code_chunks(
     data_points: list[DataPoint],
 ) -> AsyncGenerator[list[DataPoint], None]:
     """Processes code graph datapoints, create SourceCodeChink datapoints."""
-    # TODO: Add support for other embedding models, with max_token mapping
     for data_point in data_points:
         try:
             yield data_point
