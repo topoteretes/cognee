@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import List, Any, Union
 
 from ..tokenizer_interface import TokenizerInterface
 
@@ -26,6 +26,10 @@ class GeminiTokenizer(TokenizerInterface):
     def extract_tokens(self, text: str) -> List[Any]:
         raise NotImplementedError
 
+    def decode_single_token(self, encoding: int):
+        # Gemini tokenizer doesn't have the option to decode tokens
+        raise NotImplementedError
+
     def count_tokens(self, text: str) -> int:
         """
         Returns the number of tokens in the given text.
@@ -39,6 +43,3 @@ class GeminiTokenizer(TokenizerInterface):
         import google.generativeai as genai
 
         return len(genai.embed_content(model=f"models/{self.model}", content=text))
-
-    def trim_text_to_max_tokens(self, text: str) -> str:
-        raise NotImplementedError

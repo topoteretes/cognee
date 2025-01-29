@@ -3,7 +3,6 @@ from typing import AsyncGenerator, Generator
 from uuid import NAMESPACE_OID, uuid5
 
 import parso
-import tiktoken
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
@@ -12,24 +11,22 @@ from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
 logger = logging.getLogger(__name__)
 
 
-def _count_tokens(tokenizer: tiktoken.Encoding, source_code: str) -> int:
-    return len(tokenizer.encode(source_code))
-
-
 def _get_naive_subchunk_token_counts(
-    tokenizer: tiktoken.Encoding, source_code: str, max_subchunk_tokens: int = 8000
+    source_code: str, max_subchunk_tokens: int = 8000
 ) -> list[tuple[str, int]]:
     """Splits source code into subchunks of up to max_subchunk_tokens and counts tokens."""
 
-    token_ids = tokenizer.encode(source_code)
+    tokenizer = get_vector_engine().embedding_engine.tokenizer
+    token_ids = tokenizer.extract_tokens(source_code)
     subchunk_token_counts = []
 
     for start_idx in range(0, len(token_ids), max_subchunk_tokens):
         subchunk_token_ids = token_ids[start_idx : start_idx + max_subchunk_tokens]
         token_count = len(subchunk_token_ids)
+        # Note: This can't work with Gemini embeddings as they keep their method of encoding text
+        # to tokens hidden and don't offer a decoder
         subchunk = "".join(
-            tokenizer.decode_single_token_bytes(token_id).decode("utf-8", errors="replace")
-            for token_id in subchunk_token_ids
+            tokenizer.decode_single_token(token_id) for token_id in subchunk_token_ids
         )
         subchunk_token_counts.append((subchunk, token_count))
 
@@ -37,7 +34,6 @@ def _get_naive_subchunk_token_counts(
 
 
 def _get_subchunk_token_counts(
-    tokenizer: tiktoken.Encoding,
     source_code: str,
     max_subchunk_tokens: int = 8000,
     depth: int = 0,
@@ -45,7 +41,7 @@ def _get_subchunk_token_counts(
 ) -> list[tuple[str, int]]:
     """Splits source code into subchunk and counts tokens for each subchunk."""
     if depth > max_depth:
-        return _get_naive_subchunk_token_counts(tokenizer, source_code, max_subchunk_tokens)
+        return _get_naive_subchunk_token_counts(source_code, max_subchunk_tokens)
 
     try:
         module = parso.parse(source_code)
@@ -64,7 +60,8 @@ def _get_subchunk_token_counts(
     subchunk_token_counts = []
     for child in module.children:
         subchunk = child.get_code()
-        token_count = _count_tokens(tokenizer, subchunk)
+        tokenizer = get_vector_engine().embedding_engine.tokenizer
+        token_count = tokenizer.count_tokens(subchunk)
 
         if token_count == 0:
             continue
@@ -75,13 +72,13 @@ def _get_subchunk_token_counts(
 
         if child.type == "string":
             subchunk_token_counts.extend(
-                _get_naive_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens)
+                _get_naive_subchunk_token_counts(subchunk, max_subchunk_tokens)
             )
             continue
 
         subchunk_token_counts.extend(
             _get_subchunk_token_counts(
-                tokenizer, subchunk, max_subchunk_tokens, depth=depth + 1, max_depth=max_depth
+                subchunk, max_subchunk_tokens, depth=depth + 1, max_depth=max_depth
             )
         )
 
@@ -129,11 +126,10 @@ def get_source_code_chunks_from_code_part(
         return
 
     embedding_engine = get_vector_engine().embedding_engine
-    tokenizer = embedding_engine.tokenizer
 
     max_subchunk_tokens = max(1, int(granularity * embedding_engine.max_tokens))
     subchunk_token_counts = _get_subchunk_token_counts(
-        tokenizer, code_file_part.source_code, max_subchunk_tokens
+        code_file_part.source_code, max_subchunk_tokens
     )
 
     previous_chunk = None

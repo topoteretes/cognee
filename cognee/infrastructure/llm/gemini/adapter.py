@@ -18,13 +18,13 @@ if monitoring == MonitoringTool.LANGFUSE:
 
 
 class GeminiAdapter(LLMInterface):
-    MAX_TOKENS = 8192
     MAX_RETRIES = 5
 
     def __init__(
         self,
         api_key: str,
         model: str,
+        max_tokens: int,
         endpoint: Optional[str] = None,
         api_version: Optional[str] = None,
         streaming: bool = False,
@@ -34,6 +34,7 @@ class GeminiAdapter(LLMInterface):
         self.endpoint = endpoint
         self.api_version = api_version
         self.streaming = streaming
+        self.max_tokens = max_tokens
 
     @observe(as_type="generation")
     async def acreate_structured_output(
@@ -117,7 +118,7 @@ Example structure:
                         model=f"{self.model}",
                         messages=messages,
                         api_key=self.api_key,
-                        max_tokens=self.MAX_TOKENS,
+                        max_tokens=self.max_tokens,
                         temperature=0.1,
                         response_format={"type": "json_object", "schema": response_schema},
                     )
