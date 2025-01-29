@@ -4,9 +4,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.extraction.knowledge_graph.extract_content_graph import (
-    EntityListResponse,
-)
+
 from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt
