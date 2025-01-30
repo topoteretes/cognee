@@ -31,7 +31,7 @@ async def store_descriptive_metrics(data_points: list[DataPoint]):
     token_count_sum = await fetch_token_count(db_engine)
     graph_metrics = await graph_engine.get_graph_metrics()
 
-    table_name = "graph_metrics_table"
+    table_name = "graph_metrics"
     metrics_dict = {"id": uuid.uuid4(), "num_tokens": token_count_sum} | graph_metrics
 
     await db_engine.insert_data(table_name, metrics_dict)
