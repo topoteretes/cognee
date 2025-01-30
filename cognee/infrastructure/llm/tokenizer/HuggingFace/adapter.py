@@ -1,7 +1,5 @@
 from typing import List, Any
 
-from transformers import AutoTokenizer
-
 from ..tokenizer_interface import TokenizerInterface
 
 
@@ -13,6 +11,9 @@ class HuggingFaceTokenizer(TokenizerInterface):
     ):
         self.model = model
         self.max_tokens = max_tokens
+
+        # Import here to make it an optional dependency
+        from transformers import AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 
