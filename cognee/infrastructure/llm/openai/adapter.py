@@ -71,7 +71,7 @@ class OpenAIAdapter(LLMInterface):
             max_retries=5,
         )
 
-    @observe
+    @observe()
     def create_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:

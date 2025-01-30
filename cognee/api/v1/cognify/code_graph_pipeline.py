@@ -31,7 +31,7 @@ logger = logging.getLogger("code_graph_pipeline")
 update_status_lock = asyncio.Lock()
 
 
-@observe
+@observe()
 async def run_code_graph_pipeline(repo_path, include_docs=True):
     import cognee
     from cognee.infrastructure.databases.relational import create_db_and_tables
