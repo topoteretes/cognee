@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  run_multimedia_example_test:
+  run_multimetric_qa_eval_test:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
         example-location: ./evals/multimetric_qa_eval_run.py
