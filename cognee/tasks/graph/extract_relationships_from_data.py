@@ -41,15 +41,17 @@ async def extract_content_nodes_and_relationships(
 
     for round_num in range(n_rounds):
         context = {
+            "content": content,
             "previous_nodes": all_nodes,
             "previous_relationships": all_relationships,
             "round_number": round_num + 1,
             "total_rounds": n_rounds,
         }
 
-        system_prompt = render_prompt("extract_graph_relationships_prompt.txt", context)
+        text_input = render_prompt("extract_graph_relationships_prompt_input.txt", context)
+        system_prompt = render_prompt("extract_graph_relationships_prompt_system.txt", context)
         response = await llm_client.acreate_structured_output(
-            text_input=content,
+            text_input=text_input,
             system_prompt=system_prompt,
             response_model=PotentialNodesAndRelationships,
         )

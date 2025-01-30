@@ -1,0 +1,12 @@
+Analyze the following text to identify relationships between entities in the knowledge graph. This is round {{ round_number }} of {{ total_rounds }}.
+
+**Text:**
+{{ text }}
+
+**Previously Identified Nodes:**
+{{ previous_nodes }}
+
+**Previously Identified Relationships:**
+{{ previous_relationships }}
+
+Extract both explicit and implicit relationships between the nodes, building upon previous findings while ensuring completeness and consistency.

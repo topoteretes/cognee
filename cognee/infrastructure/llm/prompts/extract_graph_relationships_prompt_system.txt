@@ -4,9 +4,6 @@ You are an expert in **knowledge graph extraction and ontology mapping**. Your t
 
 If previous nodes and relationships have been extracted, build upon that knowledge to find additional connections that might have been missed.
 
-Previous nodes identified: {{previous_nodes}}
-Previous relationships identified: {{previous_relationships}}
-
 ---
 
 ### **Input**
@@ -24,7 +21,8 @@ Previous relationships identified: {{previous_relationships}}
    - Keep only terms that are truly distinct **entities** or **concepts** (e.g., *Object A*, *Process B*, *Concept C*) in your final node list.
 
 2. **Identify All Explicit and Implied Relationship Names**
-   - **Explicit**: Look for verbs or linking terms directly appearing in the text (e.g., "is part of," "involves," "uses").
+   - **Explicit phrases**: Look for phrase or linking terms directly appearing in the text (e.g., "is part of," "involves," "uses").
+   - **Explicit verbs**: Look at all the verbs in the text and see if they can be used to name a relationship.
    - **Implied**: Consider context, established knowledge, or common sense indicating a relationship word (e.g., "X typically depends on Y").
    - Add these newly found relationship terms to your **potential relationship names** list.
 
