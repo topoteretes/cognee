@@ -246,6 +246,15 @@ Please see the cognee [Development Guide](https://docs.cognee.ai/quickstart/) fo
 ```bash
 pip install cognee
 ```
+
+### Installing via Smithery
+
+To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
+
+```bash
+npx -y @smithery/cli install cognee --client claude
+```
+
 ### Deployment at Scale (Modal)
 
 Scale cognee in 4(+1) simple steps to handle enterprise workloads using [Modal](https://modal.com)'s GPU-powered infrastructure
