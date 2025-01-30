@@ -1,0 +1,17 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - llmApiKey
+    properties:
+      llmApiKey:
+        type: string
+        description: The API key for the LLM service (e.g., OpenAI).
+  commandFunction:
+    # A function that produces the CLI command to start the MCP on stdio.
+    |-
+    (config) => ({ command: '/app/entrypoint.sh', env: { LLM_API_KEY: config.llmApiKey } })
