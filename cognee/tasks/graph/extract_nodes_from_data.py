@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.prompts import render_prompt
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
 
 class PotentialNodes(BaseModel):
@@ -27,9 +27,10 @@ async def extract_content_nodes(content: str, n_rounds: int = 2) -> List[str]:
             "total_rounds": n_rounds,
         }
 
-        system_prompt = render_prompt("extract_graph_nodes_prompt.txt", context)
+        text_input = render_prompt("extract_graph_nodes_prompt_input.txt", context)
+        system_prompt = read_query_prompt("extract_graph_nodes_prompt_system.txt")
         response = await llm_client.acreate_structured_output(
-            text_input=content, system_prompt=system_prompt, response_model=PotentialNodes
+            text_input=text_input, system_prompt=system_prompt, response_model=PotentialNodes
         )
 
         # Only add new nodes that haven't been seen before
