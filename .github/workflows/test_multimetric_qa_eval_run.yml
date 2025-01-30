@@ -1,0 +1,22 @@
+name: test | multimetric qa eval run
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run_multimedia_example_test:
+      uses: ./.github/workflows/reusable_python_example.yml
+      with:
+        example-location: ./evals/multimetric_qa_eval_run.py
+        arguments: "--params_file evals/qa_eval_parameters.json --out_dir dirname"
+      secrets:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+        GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
