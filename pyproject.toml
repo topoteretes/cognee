@@ -19,9 +19,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10.0,<3.13"
-pandas = "2.2.2"
 openai = "1.59.4"
-pydantic = "2.8.2"
 python-dotenv = "1.0.1"
 fastapi = "0.115.7"
 uvicorn = "0.22.0"
@@ -30,7 +28,6 @@ aiohttp = "3.10.10"
 typing_extensions = "4.12.2"
 nest_asyncio = "1.6.0"
 numpy = "1.26.4"
-datasets = "3.1.0"
 falkordb = {version = "1.0.9", optional = true}
 boto3 = "^1.26.125"
 botocore="^1.35.54"
@@ -39,7 +36,6 @@ sqlalchemy = "2.0.36"
 instructor = "1.7.2"
 networkx = "^3.2.1"
 aiosqlite = "^0.20.0"
-anyio = "3.7.1"
 filetype = "^1.2.0"
 dlt = {extras = ["sqlalchemy"], version = "^1.4.1"}
 aiofiles = "^23.2.1"
@@ -82,7 +78,10 @@ google-generativeai = {version = "^0.8.4", optional = true}
 parso = {version = "^0.8.4", optional = true}
 jedi =  {version = "^0.19.2", optional = true}
 
-# Explicitly specify PyTorch version
+# Explicit versions set for google colab
+pydantic = "2.8.2"
+pandas = "2.2.2"
+anyio = "3.7.1"
 torch = {version = "2.5.1"}
 
 
