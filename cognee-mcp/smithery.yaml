@@ -1,0 +1,19 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+build:
+  dockerBuildPath: ../../
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - llmApiKey
+    properties:
+      llmApiKey:
+        type: string
+        description: The API key for the LLM integration, should start with sk-.
+  commandFunction:
+    # A function that produces the CLI command to start the MCP on stdio.
+    |-
+    config => ({ command: '.venv/bin/uv', args: ['run', 'cognee'], env: { ENV: 'local', TOKENIZERS_PARALLELISM: 'false', LLM_API_KEY: config.llmApiKey } })
