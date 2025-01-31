@@ -24,7 +24,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     mock: bool
 
     MAX_RETRIES = 5
-    retry_count = 0
 
     def __init__(
         self,
@@ -44,6 +43,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.dimensions = dimensions
         self.max_tokens = max_tokens
         self.tokenizer = self.get_tokenizer()
+        self.retry_count = 0
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
