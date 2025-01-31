@@ -2,7 +2,7 @@ import asyncio
 from typing import List
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.models.ExtractionChunk import ExtractionChunk
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.shared.data_models import KnowledgeGraph
@@ -13,7 +13,7 @@ from cognee.modules.graph.utils import (
 from cognee.tasks.storage import add_data_points
 
 
-async def extract_content_edges(chunk: DocumentChunk, n_rounds: int = 2) -> KnowledgeGraph:
+async def extract_content_edges(chunk: ExtractionChunk, n_rounds: int = 2) -> KnowledgeGraph:
     """Creates a knowledge graph by identifying relationships between the provided potential nodes."""
     llm_client = get_llm_client()
     final_graph = KnowledgeGraph(nodes=[], edges=[])
@@ -22,9 +22,9 @@ async def extract_content_edges(chunk: DocumentChunk, n_rounds: int = 2) -> Know
 
     for round_num in range(n_rounds):
         context = {
-            "text": chunk.text,
-            "potential_nodes": chunk.potential_nodes or [],
-            "potential_relationships": chunk.potential_relationships or [],
+            "text": chunk.document_chunk.text,
+            "potential_nodes": chunk.potential_nodes,
+            "potential_relationships": chunk.potential_relationships,
             "previous_nodes": [node.name for node in final_graph.nodes],
             "previous_edges": [
                 (edge.source_node_id, edge.target_node_id, edge.relationship_name)
@@ -59,22 +59,22 @@ async def extract_content_edges(chunk: DocumentChunk, n_rounds: int = 2) -> Know
 
 
 async def extract_edges_from_data(
-    data_chunks: list[DocumentChunk], n_rounds: int = 2
-) -> List[DocumentChunk]:
+    extraction_chunks: list[ExtractionChunk], n_rounds: int = 2
+) -> List[ExtractionChunk]:
     """Extracts and integrates edges between nodes using potential nodes and relationships from chunks."""
     chunk_graphs = await asyncio.gather(
-        *[extract_content_edges(chunk, n_rounds) for chunk in data_chunks]
+        *[extract_content_edges(chunk, n_rounds) for chunk in extraction_chunks]
     )
     graph_engine = await get_graph_engine()
 
     existing_edges_map = await retrieve_existing_edges(
-        data_chunks,
+        [chunk.document_chunk for chunk in extraction_chunks],
         chunk_graphs,
         graph_engine,
     )
 
     graph_nodes, graph_edges = expand_with_nodes_and_edges(
-        data_chunks,
+        [chunk.document_chunk for chunk in extraction_chunks],
         chunk_graphs,
         existing_edges_map,
     )
@@ -85,4 +85,4 @@ async def extract_edges_from_data(
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
 
-    return data_chunks
+    return extraction_chunks

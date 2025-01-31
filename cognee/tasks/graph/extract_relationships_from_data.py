@@ -3,7 +3,7 @@ from typing import List
 from pydantic import BaseModel
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.models.ExtractionChunk import ExtractionChunk
 
 
 class PotentialNodesAndRelationships(BaseModel):
@@ -14,19 +14,19 @@ class PotentialNodesAndRelationships(BaseModel):
 
 
 async def extract_content_nodes_and_relationships(
-    chunk: DocumentChunk, n_rounds: int = 2
+    extraction_chunk: ExtractionChunk, n_rounds: int = 2
 ) -> tuple[List[str], List[str]]:
     """Extracts node names and relationships from content through multiple rounds of analysis."""
     llm_client = get_llm_client()
-    all_nodes: List[str] = chunk.potential_nodes.copy() if chunk.potential_nodes else []
+    all_nodes: List[str] = extraction_chunk.potential_nodes.copy()
     all_relationships: List[str] = []
     existing_nodes = {node.lower() for node in all_nodes}  # Track existing node names in lowercase
     existing_relationships = set()  # Track existing relationship names in lowercase
 
     for round_num in range(n_rounds):
         context = {
-            "text": chunk.text,
-            "potential_nodes": chunk.potential_nodes,
+            "text": extraction_chunk.document_chunk.text,
+            "potential_nodes": extraction_chunk.potential_nodes,
             "previous_nodes": all_nodes,
             "previous_relationships": all_relationships,
             "round_number": round_num + 1,
@@ -57,16 +57,15 @@ async def extract_content_nodes_and_relationships(
 
 
 async def extract_relationships_from_data(
-    data_chunks: list[DocumentChunk], n_rounds: int
-) -> List[DocumentChunk]:
-    """Extracts and integrates potential nodes and relationships from document chunks using multi-round extraction."""
+    extraction_chunks: list[ExtractionChunk], n_rounds: int
+) -> List[ExtractionChunk]:
+    """Extracts and integrates potential nodes and relationships from extraction chunks using multi-round extraction."""
     chunk_results = await asyncio.gather(
-        *[extract_content_nodes_and_relationships(chunk, n_rounds) for chunk in data_chunks]
+        *[extract_content_nodes_and_relationships(chunk, n_rounds) for chunk in extraction_chunks]
     )
 
-    # Update chunks with their potential nodes and relationships
-    for chunk, (nodes, relationships) in zip(data_chunks, chunk_results):
-        chunk.potential_nodes = nodes
+    # Update ExtractionChunks with their relationships (nodes are already present)
+    for chunk, (nodes, relationships) in zip(extraction_chunks, chunk_results):
         chunk.potential_relationships = relationships
 
-    return data_chunks
+    return extraction_chunks

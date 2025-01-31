@@ -3,7 +3,7 @@ from typing import List
 from pydantic import BaseModel
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-
+from cognee.modules.chunking.models.ExtractionChunk import ExtractionChunk
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
@@ -44,14 +44,16 @@ async def extract_content_nodes(content: str, n_rounds: int = 2) -> List[str]:
 
 async def extract_nodes_from_data(
     data_chunks: list[DocumentChunk], n_rounds: int
-) -> List[DocumentChunk]:
+) -> List[ExtractionChunk]:
     """Extracts and integrates potential nodes from document chunks using multi-round extraction."""
     chunk_nodes = await asyncio.gather(
         *[extract_content_nodes(chunk.text, n_rounds) for chunk in data_chunks]
     )
 
-    # Update chunks with their potential nodes
-    for chunk, nodes in zip(data_chunks, chunk_nodes):
-        chunk.potential_nodes = nodes
+    # Create ExtractionChunk instances instead of modifying DocumentChunks directly
+    extraction_chunks = [
+        ExtractionChunk(document_chunk=chunk, potential_nodes=nodes)
+        for chunk, nodes in zip(data_chunks, chunk_nodes)
+    ]
 
-    return data_chunks
+    return extraction_chunks

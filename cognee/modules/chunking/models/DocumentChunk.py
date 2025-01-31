@@ -16,7 +16,7 @@ class DocumentChunk(DataPoint):
     is_part_of: Document
     pydantic_type: str = "DocumentChunk"
     contains: List[Entity] = None
-    potential_nodes: List[str] = Field(default_factory=list)
-    potential_relationships: List[str] = Field(default_factory=list)
+    # potential_nodes: List[str] = Field(default_factory=list)
+    # potential_relationships: List[str] = Field(default_factory=list)
 
     _metadata: dict = {"index_fields": ["text"], "type": "DocumentChunk"}
