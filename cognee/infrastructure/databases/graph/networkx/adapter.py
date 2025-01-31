@@ -15,7 +15,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 
-logger = logging.getLogger("NetworkXAdapter")
+logger = logging.getLogger(__name__)
 
 
 class NetworkXAdapter(GraphDBInterface):
@@ -269,8 +269,8 @@ class NetworkXAdapter(GraphDBInterface):
                             if not isinstance(node["id"], UUID):
                                 node["id"] = UUID(node["id"])
                         except Exception as e:
-                            print(e)
-                            pass
+                            logger.error(e)
+                            raise e
 
                         if isinstance(node.get("updated_at"), int):
                             node["updated_at"] = datetime.fromtimestamp(
@@ -298,8 +298,8 @@ class NetworkXAdapter(GraphDBInterface):
                             edge["source_node_id"] = source_id
                             edge["target_node_id"] = target_id
                         except Exception as e:
-                            print(e)
-                            pass
+                            logger.error(e)
+                            raise e
 
                         if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
                             edge["updated_at"] = datetime.fromtimestamp(
@@ -327,8 +327,9 @@ class NetworkXAdapter(GraphDBInterface):
 
                 await self.save_graph_to_file(file_path)
 
-        except Exception:
+        except Exception as e:
             logger.error("Failed to load graph from file: %s", file_path)
+            raise e
 
     async def delete_graph(self, file_path: str = None):
         """Asynchronously delete the graph file from the filesystem."""
@@ -344,6 +345,7 @@ class NetworkXAdapter(GraphDBInterface):
             logger.info("Graph deleted successfully.")
         except Exception as error:
             logger.error("Failed to delete graph: %s", error)
+            raise error
 
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]

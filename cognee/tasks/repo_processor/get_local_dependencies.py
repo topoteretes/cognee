@@ -63,6 +63,7 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
     except Exception as e:
         # logging.warning(f"Failed to analyze code entity {code_entity['name']}: {e}")
         logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
+        raise e
 
 
 async def _extract_dependencies(script_path: str) -> List[str]:
