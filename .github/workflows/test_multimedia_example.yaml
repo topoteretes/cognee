@@ -16,10 +16,10 @@ jobs:
       with:
         example-location: ./examples/python/multimedia_example.py
       secrets:
-        LLM_MODEL: ${{ secrets.LLM_MODEL }}
-        LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-        LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-        LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+        #LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        #LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+        LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Use OpenAI until we deploy models to handle multimedia
+        #LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
