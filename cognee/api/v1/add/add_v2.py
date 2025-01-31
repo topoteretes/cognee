@@ -16,6 +16,11 @@ async def add(
     dataset_name: str = "main_dataset",
     user: User = None,
 ):
+    from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
+
+    await test_llm_connection()
+    await test_embedding_connection()
+
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
 
