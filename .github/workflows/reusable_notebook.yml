@@ -18,6 +18,8 @@ on:
       #  required: true
       LLM_API_KEY:
         required: true
+      OPENAI_API_KEY:
+        required: true
       #LLM_API_VERSION:
       #  required: true
       EMBEDDING_MODEL:
