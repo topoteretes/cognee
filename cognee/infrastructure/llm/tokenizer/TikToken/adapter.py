@@ -21,14 +21,17 @@ class TikTokenTokenizer(TokenizerInterface):
         self.tokenizer = tiktoken.encoding_for_model(self.model)
 
     def extract_tokens(self, text: str) -> List[Any]:
-        tokens = []
         # Using TikToken's method to tokenize text
         token_ids = self.tokenizer.encode(text)
-        # Go through tokens and decode them to text value
-        for token_id in token_ids:
-            token = self.tokenizer.decode([token_id])
-            tokens.append(token)
-        return tokens
+        return token_ids
+
+    def decode_token_list(self, tokens: List[Any]) -> List[Any]:
+        if not isinstance(tokens, list):
+            tokens = [tokens]
+        return [self.tokenizer.decode(i) for i in tokens]
+
+    def decode_single_token(self, token: int):
+        return self.tokenizer.decode_single_token_bytes(token).decode("utf-8", errors="replace")
 
     def count_tokens(self, text: str) -> int:
         """
