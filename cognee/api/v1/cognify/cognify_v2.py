@@ -164,7 +164,7 @@ async def get_default_tasks(
                 summarization_model=cognee_config.summarization_model,
                 task_config={"batch_size": 10},
             ),
-            Task(add_data_points, only_root=True, task_config={"batch_size": 10}),
+            Task(add_data_points, task_config={"batch_size": 10}),
             Task(store_descriptive_metrics),
         ]
     except Exception as error:
