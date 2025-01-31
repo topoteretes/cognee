@@ -23,7 +23,7 @@ on:
       LLM_API_KEY:
         required: true
       OPENAI_API_KEY:
-        required: true
+        required: false
       LLM_API_VERSION:
         required: true
       EMBEDDING_MODEL:
