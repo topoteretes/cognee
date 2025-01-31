@@ -3,6 +3,7 @@ import asyncio
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from pickle import UnpicklingError
 from typing import List, Dict, Optional
 
 import aiofiles
@@ -60,6 +61,18 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
             code_entity["full_name"] = getattr(result, "full_name", None)
             code_entity["module_name"] = getattr(result, "module_name", None)
             code_entity["module_path"] = getattr(result, "module_path", None)
+    except KeyError as e:
+        # TODO: See if there is a way to handle KeyError properly
+        logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
+        return
+    except UnpicklingError as e:
+        # TODO: See if there is a way to handle UnpicklingError properly
+        logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
+        return
+    except EOFError as e:
+        # TODO: See if there is a way to handle EOFError properly
+        logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
+        return
     except Exception as e:
         # logging.warning(f"Failed to analyze code entity {code_entity['name']}: {e}")
         logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
