@@ -247,13 +247,6 @@ Please see the cognee [Development Guide](https://docs.cognee.ai/quickstart/) fo
 pip install cognee
 ```
 
-### Installing via Smithery
-
-To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
-
-```bash
-npx -y @smithery/cli install cognee --client claude
-```
 
 ### Deployment at Scale (Modal)
 
