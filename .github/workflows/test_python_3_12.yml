@@ -41,10 +41,6 @@ jobs:
           virtualenvs-in-project: true
           installer-parallel: true
 
-      - name: Add pytest-asyncio
-        run: |
-          poetry add --dev pytest-asyncio
-
       - name: Install dependencies
         run: poetry install --no-interaction -E docs
       - name: Download NLTK tokenizer data
