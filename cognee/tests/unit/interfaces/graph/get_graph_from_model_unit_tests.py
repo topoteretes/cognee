@@ -42,7 +42,7 @@ async def test_get_graph_from_model_simple_structure():
     )
 
     entity = Entity(name="TestEntity", is_type=entitytype)
-
+    
     added_nodes = {}
     added_edges = {}
     visited_properties = {}
