@@ -112,33 +112,25 @@ Example structure:
                 {"role": "user", "content": text_input},
             ]
 
-            for attempt in range(self.MAX_RETRIES):
-                try:
-                    response = await acompletion(
-                        model=f"{self.model}",
-                        messages=messages,
-                        api_key=self.api_key,
-                        max_tokens=self.max_tokens,
-                        temperature=0.1,
-                        response_format={"type": "json_object", "schema": response_schema},
-                    )
+            try:
+                response = await acompletion(
+                    model=f"{self.model}",
+                    messages=messages,
+                    api_key=self.api_key,
+                    max_tokens=self.max_tokens,
+                    temperature=0.1,
+                    response_format={"type": "json_object", "schema": response_schema},
+                    timeout=10,
+                    num_retries=self.MAX_RETRIES,
+                )
 
-                    if response.choices and response.choices[0].message.content:
-                        content = response.choices[0].message.content
-                        return response_model.model_validate_json(content)
+                if response.choices and response.choices[0].message.content:
+                    content = response.choices[0].message.content
+                    return response_model.model_validate_json(content)
 
-                except litellm.exceptions.OpenAIError as e:
-                    if attempt == 2:
-                        raise
-                    backoff_time = (2**attempt) * 1
-                    logger.warning(
-                        f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {backoff_time}s"
-                    )
-                    await asyncio.sleep(backoff_time)
-                    continue
-                except litellm.exceptions.BadRequestError as e:
-                    logger.error(f"Bad request error: {str(e)}")
-                    raise ValueError(f"Invalid request: {str(e)}")
+            except litellm.exceptions.BadRequestError as e:
+                logger.error(f"Bad request error: {str(e)}")
+                raise ValueError(f"Invalid request: {str(e)}")
 
             raise ValueError("Failed to get valid response after retries")
 
