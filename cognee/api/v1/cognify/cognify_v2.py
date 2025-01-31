@@ -4,6 +4,7 @@ from typing import Union
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -24,6 +25,7 @@ from cognee.tasks.documents import (
 )
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage.descriptive_metrics import store_descriptive_metrics
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 from cognee.tasks.summarization import summarize_text
 
@@ -151,7 +153,9 @@ async def get_default_tasks(
         default_tasks = [
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
-            Task(extract_chunks_from_documents),  # Extract text chunks based on the document type.
+            Task(
+                extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
+            ),  # Extract text chunks based on the document type.
             Task(
                 extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
             ),  # Generate knowledge graphs from the document chunks.
@@ -160,7 +164,8 @@ async def get_default_tasks(
                 summarization_model=cognee_config.summarization_model,
                 task_config={"batch_size": 10},
             ),
-            Task(add_data_points, task_config={"batch_size": 10}),
+            Task(add_data_points, only_root=True, task_config={"batch_size": 10}),
+            Task(store_descriptive_metrics),
         ]
     except Exception as error:
         send_telemetry("cognee.cognify DEFAULT TASKS CREATION ERRORED", user.id)

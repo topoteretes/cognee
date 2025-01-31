@@ -11,9 +11,7 @@ from cognee.shared.exceptions import IngestionError
 from cognee.shared.utils import (
     get_anonymous_id,
     send_telemetry,
-    num_tokens_from_string,
     get_file_content_hash,
-    trim_text_to_max_tokens,
     prepare_edges,
     prepare_nodes,
     create_cognee_style_network_with_logo,
@@ -45,15 +43,6 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
 #     args, kwargs = mock_post.call_args
 #     assert kwargs["json"]["event_name"] == "test_event"
 
-#
-# @patch("tiktoken.encoding_for_model")
-# def test_num_tokens_from_string(mock_encoding):
-#     mock_encoding.return_value.encode = lambda x: list(x)
-#
-#     assert num_tokens_from_string("hello", "test_encoding") == 5
-#     assert num_tokens_from_string("world", "test_encoding") == 5
-#
-
 
 @patch("builtins.open", new_callable=mock_open, read_data=b"test_data")
 def test_get_file_content_hash_file(mock_open_file):
@@ -71,18 +60,6 @@ def test_get_file_content_hash_stream():
     expected_hash = hashlib.md5(b"test_data").hexdigest()
     result = get_file_content_hash(stream)
     assert result == expected_hash
-
-
-# def test_trim_text_to_max_tokens():
-#     text = "This is a test string with multiple words."
-#     encoding_name = "test_encoding"
-#
-#     with patch("tiktoken.get_encoding") as mock_get_encoding:
-#         mock_get_encoding.return_value.encode = lambda x: list(x)
-#         mock_get_encoding.return_value.decode = lambda x: "".join(x)
-#
-#         result = trim_text_to_max_tokens(text, 5, encoding_name)
-#         assert result == text[:5]
 
 
 def test_prepare_edges():

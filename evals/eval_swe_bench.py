@@ -34,6 +34,15 @@ def check_install_package(package_name):
 
 
 async def generate_patch_with_cognee(instance):
+    import os
+    from cognee import config
+
+    file_path = Path(__file__).parent
+    data_directory_path = str(Path(os.path.join(file_path, ".data_storage/code_graph")).resolve())
+
+    config.data_root_directory(data_directory_path)
+    config.system_root_directory(data_directory_path)
+
     repo_path = download_github_repo(instance, "../RAW_GIT_REPOS")
     include_docs = True
     problem_statement = instance["problem_statement"]
@@ -42,9 +51,16 @@ async def generate_patch_with_cognee(instance):
     async for result in run_code_graph_pipeline(repo_path, include_docs=include_docs):
         print(result)
 
-    retrieved_codeparts = await code_description_to_code_part_search(
+    retrieved_codeparts, context_from_documents = await code_description_to_code_part_search(
         problem_statement, include_docs=include_docs
     )
+
+    context = ""
+    for code_piece in retrieved_codeparts:
+        context = context + code_piece.get_attribute("source_code")
+
+    if include_docs:
+        context = context_from_documents + context
 
     prompt = "\n".join(
         [
@@ -53,7 +69,7 @@ async def generate_patch_with_cognee(instance):
             PATCH_EXAMPLE,
             "</patch>",
             "This is the additional context to solve the problem (description from documentation together with codeparts):",
-            retrieved_codeparts,
+            context,
         ]
     )
 

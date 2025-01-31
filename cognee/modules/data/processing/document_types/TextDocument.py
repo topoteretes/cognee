@@ -7,7 +7,7 @@ from .Document import Document
 class TextDocument(Document):
     type: str = "text"
 
-    def read(self, chunk_size: int, chunker: str, max_tokens: Optional[int] = None):
+    def read(self, chunk_size: int, chunker: str, max_chunk_tokens: int):
         def get_text():
             with open(self.raw_data_location, mode="r", encoding="utf-8") as file:
                 while True:
@@ -21,7 +21,7 @@ class TextDocument(Document):
         chunker_func = ChunkerConfig.get_chunker(chunker)
 
         chunker = chunker_func(
-            self, chunk_size=chunk_size, get_text=get_text, max_tokens=max_tokens
+            self, chunk_size=chunk_size, get_text=get_text, max_chunk_tokens=max_chunk_tokens
         )
 
         yield from chunker.read()
