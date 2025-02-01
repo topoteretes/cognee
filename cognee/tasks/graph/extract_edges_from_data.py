@@ -48,12 +48,16 @@ async def extract_content_edges(chunk: ExtractionChunk, n_rounds: int = 2) -> Kn
 
         for edge in round_graph.edges:
             edge_key = (edge.source_node_id, edge.target_node_id, edge.relationship_name)
-            if edge_key not in existing_edges:
-                source_exists = any(node.id == edge.source_node_id for node in final_graph.nodes)
-                target_exists = any(node.id == edge.target_node_id for node in final_graph.nodes)
-                if source_exists and target_exists:
-                    final_graph.edges.append(edge)
-                    existing_edges.add(edge_key)
+            if edge_key in existing_edges:
+                continue
+
+            source_node_exists = any(node.id == edge.source_node_id for node in final_graph.nodes)
+            target_node_exists = any(node.id == edge.target_node_id for node in final_graph.nodes)
+            if not (source_node_exists and target_node_exists):
+                continue
+
+            final_graph.edges.append(edge)
+            existing_edges.add(edge_key)
 
     return final_graph
 
