@@ -10,6 +10,8 @@ from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
 
+FIRST_RUN = True
+
 
 async def add(
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
@@ -18,12 +20,15 @@ async def add(
 ):
     from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
 
-    # Test LLM and Embedding configuration before running Cognee
-    await test_llm_connection()
-    await test_embedding_connection()
-
-    await create_relational_db_and_tables()
-    await create_pgvector_db_and_tables()
+    global FIRST_RUN
+    if FIRST_RUN:
+        # Test LLM and Embedding configuration once before running Cognee
+        await test_llm_connection()
+        await test_embedding_connection()
+        FIRST_RUN = False
+        # Create tables for databases
+        await create_relational_db_and_tables()
+        await create_pgvector_db_and_tables()
 
     if user is None:
         user = await get_default_user()
