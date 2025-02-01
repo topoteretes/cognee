@@ -20,12 +20,12 @@ def test_PdfDocument():
         id=uuid.uuid4(),
         name="Test document.pdf",
         raw_data_location=test_file_path,
-        metadata_id=uuid.uuid4(),
+        external_metadata="",
         mime_type="",
     )
 
     for ground_truth, paragraph_data in zip(
-        GROUND_TRUTH, document.read(chunk_size=1024, chunker="text_chunker")
+        GROUND_TRUTH, document.read(chunk_size=1024, chunker="text_chunker", max_chunk_tokens=2048)
     ):
         assert ground_truth["word_count"] == paragraph_data.word_count, (
             f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'

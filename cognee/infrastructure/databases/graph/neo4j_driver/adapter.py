@@ -62,10 +62,12 @@ class Neo4jAdapter(GraphDBInterface):
     async def add_node(self, node: DataPoint):
         serialized_properties = self.serialize_properties(node.model_dump())
 
-        query = dedent("""MERGE (node {id: $node_id})
+        query = dedent(
+            """MERGE (node {id: $node_id})
                 ON CREATE SET node += $properties, node.updated_at = timestamp()
                 ON MATCH SET node += $properties, node.updated_at = timestamp()
-                RETURN ID(node) AS internal_id, node.id AS nodeId""")
+                RETURN ID(node) AS internal_id, node.id AS nodeId"""
+        )
 
         params = {
             "node_id": str(node.id),
@@ -182,13 +184,15 @@ class Neo4jAdapter(GraphDBInterface):
     ):
         serialized_properties = self.serialize_properties(edge_properties)
 
-        query = dedent("""MATCH (from_node {id: $from_node}),
+        query = dedent(
+            """MATCH (from_node {id: $from_node}),
             (to_node {id: $to_node})
             MERGE (from_node)-[r]->(to_node)
             ON CREATE SET r += $properties, r.updated_at = timestamp(), r.type = $relationship_name
             ON MATCH SET r += $properties, r.updated_at = timestamp()
             RETURN r
-        """)
+        """
+        )
 
         params = {
             "from_node": str(from_node),
@@ -201,12 +205,20 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         query = """
-        UNWIND $edges AS edge
-        MATCH (from_node {id: edge.from_node})
-        MATCH (to_node {id: edge.to_node})
-        CALL apoc.create.relationship(from_node, edge.relationship_name, edge.properties, to_node) YIELD rel
-        RETURN rel
-        """
+            UNWIND $edges AS edge
+            MATCH (from_node {id: edge.from_node})
+            MATCH (to_node {id: edge.to_node})
+            CALL apoc.merge.relationship(
+                from_node,
+                edge.relationship_name,
+                {
+                    source_node_id: edge.from_node,
+                    target_node_id: edge.to_node
+                },
+                edge.properties,
+                to_node
+            ) YIELD rel
+            RETURN rel"""
 
         edges = [
             {
@@ -425,6 +437,15 @@ class Neo4jAdapter(GraphDBInterface):
             serialized_properties[property_key] = property_value
 
         return serialized_properties
+
+    async def get_model_independent_graph_data(self):
+        query_nodes = "MATCH (n) RETURN collect(n) AS nodes"
+        nodes = await self.query(query_nodes)
+
+        query_edges = "MATCH (n)-[r]->(m) RETURN collect([n, r, m]) AS elements"
+        edges = await self.query(query_edges)
+
+        return (nodes, edges)
 
     async def get_graph_data(self):
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"

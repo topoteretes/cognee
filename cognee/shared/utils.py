@@ -10,10 +10,6 @@ import graphistry
 import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
-import tiktoken
-import nltk
-import base64
-
 
 import logging
 import sys
@@ -23,11 +19,38 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 
 from uuid import uuid4
 import pathlib
-
+import nltk
 from cognee.shared.exceptions import IngestionError
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
+
+
+def get_entities(tagged_tokens):
+    nltk.download("maxent_ne_chunker", quiet=True)
+    from nltk.chunk import ne_chunk
+
+    return ne_chunk(tagged_tokens)
+
+
+def extract_pos_tags(sentence):
+    """Extract Part-of-Speech (POS) tags for words in a sentence."""
+
+    # Ensure that the necessary NLTK resources are downloaded
+    nltk.download("words", quiet=True)
+    nltk.download("punkt", quiet=True)
+    nltk.download("averaged_perceptron_tagger", quiet=True)
+
+    from nltk.tag import pos_tag
+    from nltk.tokenize import word_tokenize
+
+    # Tokenize the sentence into words
+    tokens = word_tokenize(sentence)
+
+    # Tag each word with its corresponding POS tag
+    pos_tags = pos_tag(tokens)
+
+    return pos_tags
 
 
 def get_anonymous_id():
@@ -75,15 +98,6 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
-
-    # tiktoken.get_encoding("cl100k_base")
-    encoding = tiktoken.encoding_for_model(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
-
-
 def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
     h = hashlib.md5()
 
@@ -107,34 +121,6 @@ def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
         return h.hexdigest()
     except IOError as e:
         raise IngestionError(message=f"Failed to load data from {file}: {e}")
-
-
-def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
-    """
-    Trims the text so that the number of tokens does not exceed max_tokens.
-
-    Args:
-    text (str): Original text string to be trimmed.
-    max_tokens (int): Maximum number of tokens allowed.
-    encoding_name (str): The name of the token encoding to use.
-
-    Returns:
-    str: Trimmed version of text or original text if under the limit.
-    """
-    # First check the number of tokens
-    num_tokens = num_tokens_from_string(text, encoding_name)
-
-    # If the number of tokens is within the limit, return the text as is
-    if num_tokens <= max_tokens:
-        return text
-
-    # If the number exceeds the limit, trim the text
-    # This is a simple trim, it may cut words in half; consider using word boundaries for a cleaner cut
-    encoded_text = tiktoken.get_encoding(encoding_name).encode(text)
-    trimmed_encoded_text = encoded_text[:max_tokens]
-    # Decoding the trimmed text
-    trimmed_text = tiktoken.get_encoding(encoding_name).decode(trimmed_encoded_text)
-    return trimmed_text
 
 
 def generate_color_palette(unique_layers):
@@ -241,33 +227,6 @@ async def render_graph(
 # def sanitize_df(df):
 #     """Replace NaNs and infinities in a DataFrame with None, making it JSON compliant."""
 #     return df.replace([np.inf, -np.inf, np.nan], None)
-
-
-def get_entities(tagged_tokens):
-    nltk.download("maxent_ne_chunker", quiet=True)
-    from nltk.chunk import ne_chunk
-
-    return ne_chunk(tagged_tokens)
-
-
-def extract_pos_tags(sentence):
-    """Extract Part-of-Speech (POS) tags for words in a sentence."""
-
-    # Ensure that the necessary NLTK resources are downloaded
-    nltk.download("words", quiet=True)
-    nltk.download("punkt", quiet=True)
-    nltk.download("averaged_perceptron_tagger", quiet=True)
-
-    from nltk.tag import pos_tag
-    from nltk.tokenize import word_tokenize
-
-    # Tokenize the sentence into words
-    tokens = word_tokenize(sentence)
-
-    # Tag each word with its corresponding POS tag
-    pos_tags = pos_tag(tokens)
-
-    return pos_tags
 
 
 logging.basicConfig(level=logging.INFO)
@@ -396,6 +355,7 @@ async def create_cognee_style_network_with_logo(
 
     from bokeh.embed import file_html
     from bokeh.resources import CDN
+    from bokeh.io import export_png
 
     logging.info("Converting graph to serializable format...")
     G = await convert_to_serializable_graph(G)
@@ -445,13 +405,14 @@ async def create_cognee_style_network_with_logo(
 
     logging.info(f"Saving visualization to {output_filename}...")
     html_content = file_html(p, CDN, title)
-    with open(output_filename, "w") as f:
+
+    home_dir = os.path.expanduser("~")
+
+    # Construct the final output file path
+    output_filepath = os.path.join(home_dir, output_filename)
+    with open(output_filepath, "w") as f:
         f.write(html_content)
 
-    logging.info("Visualization complete.")
-
-    if bokeh_object:
-        return p
     return html_content
 
 
@@ -512,7 +473,7 @@ if __name__ == "__main__":
             G,
             output_filename="example_network.html",
             title="Example Cognee Network",
-            node_attribute="group",  # Attribute to use for coloring nodes
+            label="group",  # Attribute to use for coloring nodes
             layout_func=nx.spring_layout,  # Layout function
             layout_scale=3.0,  # Scale for the layout
             logo_alpha=0.2,

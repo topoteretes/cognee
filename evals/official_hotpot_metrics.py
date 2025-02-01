@@ -4,10 +4,7 @@ These are the official evaluation metrics for HotpotQA taken from https://hotpot
 
 import re
 import string
-import sys
 from collections import Counter
-
-import ujson as json
 
 
 def normalize_answer(s):

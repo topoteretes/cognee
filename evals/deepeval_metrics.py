@@ -2,14 +2,57 @@ from deepeval.metrics import BaseMetric, GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 
 from evals.official_hotpot_metrics import exact_match_score, f1_score
+from cognee.infrastructure.llm.prompts.llm_judge_prompts import llm_judge_prompts
 
 correctness_metric = GEval(
     name="Correctness",
     model="gpt-4o-mini",
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.EXPECTED_OUTPUT],
-    evaluation_steps=[
-        "Determine whether the actual output is factually correct based on the expected output."
+    evaluation_steps=[llm_judge_prompts["correctness"]],
+)
+
+comprehensiveness_metric = GEval(
+    name="Comprehensiveness",
+    model="gpt-4o-mini",
+    evaluation_params=[
+        LLMTestCaseParams.INPUT,
+        LLMTestCaseParams.ACTUAL_OUTPUT,
+        LLMTestCaseParams.EXPECTED_OUTPUT,
     ],
+    evaluation_steps=[llm_judge_prompts["comprehensiveness"]],
+)
+
+diversity_metric = GEval(
+    name="Diversity",
+    model="gpt-4o-mini",
+    evaluation_params=[
+        LLMTestCaseParams.INPUT,
+        LLMTestCaseParams.ACTUAL_OUTPUT,
+        LLMTestCaseParams.EXPECTED_OUTPUT,
+    ],
+    evaluation_steps=[llm_judge_prompts["diversity"]],
+)
+
+empowerment_metric = GEval(
+    name="Empowerment",
+    model="gpt-4o-mini",
+    evaluation_params=[
+        LLMTestCaseParams.INPUT,
+        LLMTestCaseParams.ACTUAL_OUTPUT,
+        LLMTestCaseParams.EXPECTED_OUTPUT,
+    ],
+    evaluation_steps=[llm_judge_prompts["empowerment"]],
+)
+
+directness_metric = GEval(
+    name="Directness",
+    model="gpt-4o-mini",
+    evaluation_params=[
+        LLMTestCaseParams.INPUT,
+        LLMTestCaseParams.ACTUAL_OUTPUT,
+        LLMTestCaseParams.EXPECTED_OUTPUT,
+    ],
+    evaluation_steps=[llm_judge_prompts["directness"]],
 )
 
 

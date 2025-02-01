@@ -1,0 +1,53 @@
+name: DCO Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+jobs:
+  check-dco:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Developer Certificate of Origin statement
+        uses: actions/github-script@v6
+        with:
+          # If using the built-in GITHUB_TOKEN, ensure it has 'read:org' permission.
+          # In GitHub Enterprise or private orgs, you might need a PAT (personal access token) with read:org scope.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const orgName = 'YOUR_ORGANIZATION_NAME'; // Replace with your org
+            const prUser = context.payload.pull_request.user.login;
+            const prBody = context.payload.pull_request.body || '';
+
+            // Exact text you require in the PR body
+            const requiredStatement = "I affirm that all code in every commit of this pull request conforms to the terms of the Topoteretes Developer Certificate of Origin";
+
+            // 1. Check if user is in the org
+            let isOrgMember = false;
+            try {
+              // Attempt to get membership info
+              const membership = await github.rest.orgs.getMembershipForUser({
+                org: orgName,
+                username: prUser,
+              });
+              // If we get here without an error, user is in the org
+              isOrgMember = true;
+              console.log(`${prUser} is a member of ${orgName}. Skipping DCO check.`);
+            } catch (error) {
+              // If we get a 404, user is NOT an org member
+              if (error.status === 404) {
+                console.log(`${prUser} is NOT a member of ${orgName}. Enforcing DCO check.`);
+              } else {
+                // Some other error—fail the workflow or handle accordingly
+                core.setFailed(`Error checking organization membership: ${error.message}`);
+              }
+            }
+
+            // 2. If user is not in the org, enforce the DCO statement
+            if (!isOrgMember) {
+              if (!prBody.includes(requiredStatement)) {
+                core.setFailed(
+                  `DCO check failed. The PR body must include the following statement:\n\n${requiredStatement}`
+                );
+              }
+            }

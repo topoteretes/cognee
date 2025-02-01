@@ -1,7 +1,5 @@
-from typing import Any, Dict, Iterator, Optional, Union
+from typing import Any, Dict, Iterator
 from uuid import NAMESPACE_OID, uuid5
-
-import tiktoken
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -10,13 +8,19 @@ from .chunk_by_sentence import chunk_by_sentence
 
 def chunk_by_paragraph(
     data: str,
-    max_tokens: Optional[Union[int, float]] = None,
+    max_chunk_tokens,
     paragraph_length: int = 1024,
     batch_paragraphs: bool = True,
 ) -> Iterator[Dict[str, Any]]:
     """
     Chunks text by paragraph while preserving exact text reconstruction capability.
     When chunks are joined with empty string "", they reproduce the original text exactly.
+
+    Notes:
+        - Tokenization is handled using our tokenization adapters, ensuring compatibility with the vector engine's embedding model.
+        - If `batch_paragraphs` is False, each paragraph will be yielded as a separate chunk.
+        - Handles cases where paragraphs exceed the specified token or word limits by splitting them as needed.
+        - Remaining text at the end of the input will be yielded as a final chunk.
     """
     current_chunk = ""
     current_word_count = 0
@@ -24,24 +28,17 @@ def chunk_by_paragraph(
     paragraph_ids = []
     last_cut_type = None
     current_token_count = 0
-    if not max_tokens:
-        max_tokens = float("inf")
-
-    vector_engine = get_vector_engine()
-    embedding_model = vector_engine.embedding_engine.model
-    embedding_model = embedding_model.split("/")[-1]
 
     for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(
         data, maximum_length=paragraph_length
     ):
         # Check if this sentence would exceed length limit
-
-        tokenizer = tiktoken.encoding_for_model(embedding_model)
-        token_count = len(tokenizer.encode(sentence))
+        embedding_engine = get_vector_engine().embedding_engine
+        token_count = embedding_engine.tokenizer.count_tokens(sentence)
 
         if current_word_count > 0 and (
             current_word_count + word_count > paragraph_length
-            or current_token_count + token_count > max_tokens
+            or current_token_count + token_count > max_chunk_tokens
         ):
             # Yield current chunk
             chunk_dict = {

@@ -1,4 +1,5 @@
 from cognee.modules.data.models import Data
+import json
 from cognee.modules.data.processing.document_types import (
     Document,
     PdfDocument,
@@ -7,7 +8,6 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.modules.data.operations.get_metadata import get_metadata
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -50,16 +50,22 @@ EXTENSION_TO_DOCUMENT_CLASS = {
 
 
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
+    """
+    Classifies a list of data items into specific document types based on file extensions.
+
+    Notes:
+        - The function relies on `get_metadata` to retrieve metadata information for each data item.
+        - Ensure the `Data` objects and their attributes (e.g., `extension`, `id`) are valid before calling this function.
+    """
     documents = []
     for data_item in data_documents:
-        metadata = await get_metadata(data_item.id)
         document = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](
             id=data_item.id,
             title=f"{data_item.name}.{data_item.extension}",
             raw_data_location=data_item.raw_data_location,
             name=data_item.name,
             mime_type=data_item.mime_type,
-            metadata_id=metadata.id,
+            external_metadata=json.dumps(data_item.external_metadata, indent=4),
         )
         documents.append(document)
 
