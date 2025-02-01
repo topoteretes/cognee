@@ -26,9 +26,10 @@ async def add(
         await test_llm_connection()
         await test_embedding_connection()
         FIRST_RUN = False
-        # Create tables for databases
-        await create_relational_db_and_tables()
-        await create_pgvector_db_and_tables()
+
+    # Create tables for databases
+    await create_relational_db_and_tables()
+    await create_pgvector_db_and_tables()
 
     if user is None:
         user = await get_default_user()
