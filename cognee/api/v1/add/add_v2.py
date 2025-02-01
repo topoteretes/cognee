@@ -18,6 +18,7 @@ async def add(
 ):
     from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
 
+    # Test LLM and Embedding configuration before running Cognee
     await test_llm_connection()
     await test_embedding_connection()
 

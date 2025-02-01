@@ -1,5 +1,6 @@
 import logging
 import litellm
+from functools import lru_cache
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
@@ -38,6 +39,7 @@ def get_model_max_tokens(model_name: str):
     return max_tokens
 
 
+@lru_cache
 async def test_llm_connection():
     try:
         llm_adapter = get_llm_client()
@@ -48,17 +50,16 @@ async def test_llm_connection():
         )
     except Exception as e:
         logger.error(e)
-        raise e
-    finally:
         logger.error("Connection to LLM could not be established.")
+        raise e
 
 
+@lru_cache
 async def test_embedding_connection():
     try:
         embedding = await get_vector_engine().embedding_engine.embed_text("test")
         print(embedding)
     except Exception as e:
         logger.error(e)
-        raise e
-    finally:
         logger.error("Connection to Embedding handler could not be established.")
+        raise e
