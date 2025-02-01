@@ -70,7 +70,7 @@ pgvector = {version = "^0.3.5", optional = true}
 psycopg2 = {version = "^2.9.10", optional = true}
 llama-index-core = {version = "^0.12.11", optional = true}
 deepeval = {version = "^2.0.1", optional = true}
-transformers = "^4.46.3"
+transformers = {version = "^4.46.3", optional = true}
 pymilvus = {version = "^2.5.0", optional = true}
 unstructured = { extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], version = "^0.16.13", optional = true }
 pre-commit = "^4.0.1"
@@ -92,6 +92,7 @@ notebook = ["notebook", "ipykernel", "overrides", "ipywidgets", "jupyterlab", "j
 langchain = ["langsmith", "langchain_text_splitters"]
 llama-index = ["llama-index-core"]
 gemini = ["google-generativeai"]
+huggingface = ["transformers"]
 deepeval = ["deepeval"]
 posthog = ["posthog"]
 falkordb = ["falkordb"]

@@ -1,4 +1,4 @@
-name: test | dynamic steps example
+name: test | multimetric qa eval run
 
 on:
   workflow_dispatch:
@@ -11,15 +11,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  run_dynamic_steps_example_test:
+  run_multimetric_qa_eval_test:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
-        example-location: ./examples/python/dynamic_steps_example.py
+        example-location: ./evals/multimetric_qa_eval_run.py
+        arguments: "--params_file evals/qa_eval_parameters.json --out_dir dirname"
       secrets:
         LLM_MODEL: ${{ secrets.LLM_MODEL }}
         LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
         LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Until we add support for azure for DeepEval
         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
