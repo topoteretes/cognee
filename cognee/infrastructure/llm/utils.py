@@ -1,6 +1,5 @@
 import logging
 import litellm
-from functools import lru_cache
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
