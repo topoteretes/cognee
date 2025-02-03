@@ -415,7 +415,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         def _get_avg_clustering(graph):
             try:
-                return nx.average_clustering(graph.to_undirected())
+                return nx.average_clustering(nx.DiGraph(graph))
             except Exception as e:
                 logger.warning("Failed to calculate clustering coefficient: %s", e)
                 return None
