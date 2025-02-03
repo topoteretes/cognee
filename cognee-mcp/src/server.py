@@ -139,7 +139,9 @@ async def codify(repo_path: str):
 
 async def search(search_query: str, search_type: str) -> str:
     """Search the knowledge graph"""
-    search_results = await cognee.search(query_type=SearchType[search_type.upper()], query_text=search_query)
+    search_results = await cognee.search(
+        query_type=SearchType[search_type.upper()], query_text=search_query
+    )
 
     results = retrieved_edges_to_string(search_results)
 
