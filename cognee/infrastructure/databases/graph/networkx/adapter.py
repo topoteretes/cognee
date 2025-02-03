@@ -14,6 +14,7 @@ import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
+import numpy as np
 
 logger = logging.getLogger("NetworkXAdapter")
 
@@ -386,16 +387,63 @@ class NetworkXAdapter(GraphDBInterface):
 
         return filtered_nodes, filtered_edges
 
-    async def get_graph_metrics(self):
-        return {
-            "num_nodes": -1,
-            "num_edges": -1,
-            "mean_degree": -1,
-            "edge_density": -1,
-            "num_connected_components": -1,
-            "sizes_of_connected_components": -1,
-            "num_selfloops": -1,
-            "diameter": -1,
-            "avg_shortest_path_length": -1,
-            "avg_clustering": -1,
+    async def get_graph_metrics(self, include_optional=False):
+        graph = self.graph
+
+        def _get_mean_degree(graph):
+            degrees = [d for _, d in graph.degree()]
+            return np.mean(degrees) if degrees else 0
+
+        def _get_edge_density(graph):
+            num_nodes = graph.number_of_nodes()
+            num_edges = graph.number_of_edges()
+            num_possible_edges = num_nodes * (num_nodes - 1)
+            edge_density = num_edges / num_possible_edges if num_possible_edges > 0 else 0
+            return edge_density
+
+        def _get_diameter(graph):
+            if nx.is_strongly_connected(graph):
+                return nx.diameter(graph.to_undirected())
+            else:
+                return None
+
+        def _get_avg_shortest_path_length(graph):
+            if nx.is_strongly_connected(graph):
+                return nx.average_shortest_path_length(graph)
+            else:
+                return None
+
+        def _get_avg_clustering(graph):
+            try:
+                return nx.average_clustering(nx.DiGraph(graph))
+            except Exception as e:
+                logger.warning("Failed to calculate clustering coefficient: %s", e)
+                return None
+
+        mandatory_metrics = {
+            "num_nodes": graph.number_of_nodes(),
+            "num_edges": graph.number_of_edges(),
+            "mean_degree": _get_mean_degree(graph),
+            "edge_density": _get_edge_density(graph),
+            "num_connected_components": nx.number_weakly_connected_components(graph),
+            "sizes_of_connected_components": [
+                len(c) for c in nx.weakly_connected_components(graph)
+            ],
         }
+
+        if include_optional:
+            optional_metrics = {
+                "num_selfloops": sum(1 for u, v in graph.edges() if u == v),
+                "diameter": _get_diameter(graph),
+                "avg_shortest_path_length": _get_avg_shortest_path_length(graph),
+                "avg_clustering": _get_avg_clustering(graph),
+            }
+        else:
+            optional_metrics = {
+                "num_selfloops": -1,
+                "diameter": -1,
+                "avg_shortest_path_length": -1,
+                "avg_clustering": -1,
+            }
+
+        return mandatory_metrics | optional_metrics
