@@ -8,7 +8,6 @@ async def get_graph_from_model(
     added_nodes: dict,
     added_edges: dict,
     visited_properties: dict = None,
-    only_root=False,
     include_root=True,
 ):
     if str(data_point.id) in added_nodes:
@@ -98,7 +97,7 @@ async def get_graph_from_model(
             )
             added_edges[str(edge_key)] = True
 
-        if str(field_value.id) in added_nodes or only_root:
+        if str(field_value.id) in added_nodes:
             continue
 
         property_nodes, property_edges = await get_graph_from_model(

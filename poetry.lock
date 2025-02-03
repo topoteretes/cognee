@@ -7241,7 +7241,7 @@ crt = ["botocore[crt] (>=1.36.0,<2.0a.0)"]
 name = "safetensors"
 version = "0.5.2"
 description = ""
-optional = false
+optional = true
 python-versions = ">=3.7"
 files = [
     {file = "safetensors-0.5.2-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:45b6092997ceb8aa3801693781a71a99909ab9cc776fbc3fa9322d29b1d3bef2"},
@@ -8079,7 +8079,7 @@ test = ["argcomplete (>=3.0.3)", "mypy (>=1.7.0)", "pre-commit", "pytest (>=7.0,
 name = "transformers"
 version = "4.48.1"
 description = "State-of-the-art Machine Learning for JAX, PyTorch and TensorFlow"
-optional = false
+optional = true
 python-versions = ">=3.9.0"
 files = [
     {file = "transformers-4.48.1-py3-none-any.whl", hash = "sha256:24be0564b0a36d9e433d9a65de248f1545b6f6edce1737669605eb6a8141bbbb"},
@@ -9040,6 +9040,7 @@ falkordb = ["falkordb"]
 filesystem = ["botocore"]
 gemini = ["google-generativeai"]
 groq = ["groq"]
+huggingface = ["transformers"]
 langchain = ["langchain_text_splitters", "langsmith"]
 llama-index = ["llama-index-core"]
 milvus = ["pymilvus"]
@@ -9053,4 +9054,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10.0,<3.13"
-content-hash = "480675c274cd85a76a95bf03af865b1a0b462f25bbc21d7427b0a0b8e21c13db"
+content-hash = "e0752df2545fd5048c0969acc7282fce8e034ec0abfabfe07785e7d34c44fc8b"
