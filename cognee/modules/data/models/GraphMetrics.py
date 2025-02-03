@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from sqlalchemy.sql import func
 
 from sqlalchemy import Column, DateTime, Float, Integer, JSON, UUID
 

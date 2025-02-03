@@ -23,10 +23,10 @@ async def fetch_token_count(db_engine) -> int:
     return token_count_sum
 
 
-async def store_descriptive_metrics(data_points: list[DataPoint]):
+async def store_descriptive_metrics(data_points: list[DataPoint], include_optional: bool):
     db_engine = get_relational_engine()
     graph_engine = await get_graph_engine()
-    graph_metrics = await graph_engine.get_graph_metrics()
+    graph_metrics = await graph_engine.get_graph_metrics(include_optional)
 
     async with db_engine.get_async_session() as session:
         metrics = GraphMetrics(
