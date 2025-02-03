@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
-    "cognee",
+    "cognee[codegraph]",
     "mcp==1.1.3",
 ]
 

@@ -94,9 +94,7 @@ async def cognify_search_base_rag(content: str, context: str):
 async def cognify_search_graph(content: str, context: str):
     from cognee.api.v1.search import search, SearchType
 
-    params = {"query": "Donald Trump"}
-
-    results = await search(SearchType.INSIGHTS, params)
+    results = await search(SearchType.INSIGHTS, query_text="Donald Trump")
     print("results", results)
     return results
 

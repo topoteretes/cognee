@@ -2,8 +2,8 @@ import os
 import logging
 import pathlib
 import cognee
-from cognee.api.v1.search import SearchType
-from cognee.shared.utils import render_graph
+from cognee.modules.search.types import SearchType
+# from cognee.shared.utils import render_graph
 
 logging.basicConfig(level=logging.DEBUG)
 
