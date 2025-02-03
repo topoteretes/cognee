@@ -581,16 +581,6 @@ class Neo4jAdapter(GraphDBInterface):
         await self.drop_graph(graph_name)
         await self.project_entire_graph(graph_name)
 
-        async def _get_mean_degree():
-            query = """
-            MATCH (n)
-            OPTIONAL MATCH (n)-[r]-()
-            WITH n, COUNT(r) AS degree
-            RETURN avg(degree) AS mean_degree;
-            """
-            result = await self.query(query)
-            return result[0]["mean_degree"] if result else 0
-
         async def _get_edge_density():
             query = """
             MATCH (n)
@@ -606,7 +596,6 @@ class Neo4jAdapter(GraphDBInterface):
             return result[0]["edge_density"] if result else 0
 
         async def _get_num_connected_components():
-            graph_name = "myGraph"
             await self.drop_graph(graph_name)
             await self.project_entire_graph(graph_name)
 
@@ -620,7 +609,6 @@ class Neo4jAdapter(GraphDBInterface):
             return result[0]["num_connected_components"] if result else 0
 
         async def _get_size_of_connected_components():
-            graph_name = "myGraph"
             await self.drop_graph(graph_name)
             await self.project_entire_graph(graph_name)
 
