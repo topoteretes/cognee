@@ -39,7 +39,6 @@ def get_model_max_tokens(model_name: str):
     return max_tokens
 
 
-@lru_cache
 async def test_llm_connection():
     try:
         llm_adapter = get_llm_client()
@@ -54,7 +53,6 @@ async def test_llm_connection():
         raise e
 
 
-@lru_cache
 async def test_embedding_connection():
     try:
         embedding = await get_vector_engine().embedding_engine.embed_text("test")
