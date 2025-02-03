@@ -417,7 +417,7 @@ class NetworkXAdapter(GraphDBInterface):
             try:
                 return nx.average_clustering(graph.to_undirected())
             except Exception as e:
-                print(f"Unexpected error in clustering calculation: {e}")
+                logger.warning("Failed to calculate clustering coefficient: %s", e)
                 return None
 
         mandatory_metrics = {
