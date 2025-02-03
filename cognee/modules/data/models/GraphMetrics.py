@@ -24,5 +24,5 @@ class GraphMetrics(Base):
     avg_shortest_path_length = Column(Float, nullable=True)
     avg_clustering = Column(Float, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
