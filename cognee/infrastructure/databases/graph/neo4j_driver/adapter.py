@@ -530,3 +530,17 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
         return (nodes, edges)
+
+    async def get_graph_metrics(self):
+        return {
+            "num_nodes": -1,
+            "num_edges": -1,
+            "mean_degree": -1,
+            "edge_density": -1,
+            "num_connected_components": -1,
+            "sizes_of_connected_components": -1,
+            "num_selfloops": -1,
+            "diameter": -1,
+            "avg_shortest_path_length": -1,
+            "avg_clustering": -1,
+        }
