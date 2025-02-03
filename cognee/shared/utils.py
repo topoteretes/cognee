@@ -352,15 +352,21 @@ async def create_cognee_style_network_with_logo(graph_data):
 
     for node_id, node_info in nodes_data:
         node_info = node_info.copy()
-        node_info["id"] = node_id
+        node_info["id"] = str(node_id)
         node_info["color"] = color_map.get(node_info.get("pydantic_type", "default"), "#D3D3D3")
         node_info["name"] = node_info.get("name", str(node_id))
+        del node_info[
+            "updated_at"
+        ]  #:TODO: We should decide what properties to show on the nodes and edges, we dont necessarily need all.
+        del node_info["created_at"]
         nodes_list.append(node_info)
         G.add_node(node_id, **node_info)
 
     edge_labels = {}
     links_list = []
     for source, target, relation, edge_info in edges_data:
+        source = str(source)
+        target = str(target)
         G.add_edge(source, target)
         edge_labels[(source, target)] = relation
         links_list.append({"source": source, "target": target, "relation": relation})
@@ -494,12 +500,12 @@ async def create_cognee_style_network_with_logo(graph_data):
     </html>
     """
 
-    # Insert the nodes and links data into the HTML template
     html_content = html_template.replace("{nodes}", json.dumps(nodes_list))
     html_content = html_content.replace("{links}", json.dumps(links_list))
 
-    # Write the HTML content to a file
-    output_file = "graph_visualization.html"
+    home_dir = os.path.expanduser("~")
+    output_file = os.path.join(home_dir, "graph_visualization.html")
+
     with open(output_file, "w") as f:
         f.write(html_content)
 
