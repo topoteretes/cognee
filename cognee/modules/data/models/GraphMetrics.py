@@ -7,7 +7,7 @@ from uuid import uuid4
 
 
 class GraphMetrics(Base):
-    __tablename__ = "graph_metrics_table"
+    __tablename__ = "graph_metrics"
 
     # TODO: Change ID to reflect unique id of graph database
     id = Column(UUID, primary_key=True, default=uuid4)
