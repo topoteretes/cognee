@@ -571,7 +571,7 @@ class Neo4jAdapter(GraphDBInterface):
         await self.query(query)
 
     async def drop_graph(self, graph_name="myGraph"):
-        if self.graph_exists(graph_name):
+        if await self.graph_exists(graph_name):
             drop_query = f"CALL gds.graph.drop('{graph_name}');"
             await self.query(drop_query)
 
@@ -656,10 +656,13 @@ class Neo4jAdapter(GraphDBInterface):
             logging.warning("Average clustering calculation is not implemented for neo4j.")
             return -1
 
+        num_nodes = len(nodes[0]["nodes"])
+        num_edges = len(edges[0]["elements"])
+
         mandatory_metrics = {
-            "num_nodes": len(nodes[0]["nodes"]),
-            "num_edges": len(edges[0]["elements"]),
-            "mean_degree": await _get_mean_degree(),
+            "num_nodes": num_nodes,
+            "num_edges": num_edges,
+            "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
             "edge_density": await _get_edge_density(),
             "num_connected_components": await _get_num_connected_components(),
             "sizes_of_connected_components": await _get_size_of_connected_components(),
