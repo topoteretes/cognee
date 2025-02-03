@@ -10,22 +10,23 @@ from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
 
-FIRST_RUN = True
-
 
 async def add(
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
     dataset_name: str = "main_dataset",
     user: User = None,
 ):
-    from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
+    # Initialize first_run attribute if it doesn't exist
+    if not hasattr(add, "first_run"):
+        add.first_run = True
 
-    global FIRST_RUN
-    if FIRST_RUN:
+    if add.first_run:
+        from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
+
         # Test LLM and Embedding configuration once before running Cognee
         await test_llm_connection()
         await test_embedding_connection()
-        FIRST_RUN = False
+        add.first_run = False  # Update flag after first run
 
     # Create tables for databases
     await create_relational_db_and_tables()
