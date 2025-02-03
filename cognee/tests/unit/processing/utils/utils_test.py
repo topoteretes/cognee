@@ -85,8 +85,16 @@ async def test_create_cognee_style_network_with_logo():
     from pathlib import Path
 
     nodes_data = [
-        (1, {"pydantic_type": "Entity", "name": "Node1"}),
-        (2, {"pydantic_type": "DocumentChunk", "name": "Node2"}),
+        (1, {"pydantic_type": "Entity", "name": "Node1", "updated_at": 123, "created_at": 123}),
+        (
+            2,
+            {
+                "pydantic_type": "DocumentChunk",
+                "name": "Node2",
+                "updated_at": 123,
+                "created_at": 123,
+            },
+        ),
     ]
     edges_data = [
         (1, 2, "related_to", {}),
@@ -101,8 +109,3 @@ async def test_create_cognee_style_network_with_logo():
     assert '<script src="https://d3js.org/d3.v5.min.js"></script>' in html_output
     assert "var nodes =" in html_output
     assert "var links =" in html_output
-
-    output_file = Path("graph_visualization.html")
-    assert output_file.exists()
-
-    output_file.unlink()
