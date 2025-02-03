@@ -205,12 +205,20 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         query = """
-        UNWIND $edges AS edge
-        MATCH (from_node {id: edge.from_node})
-        MATCH (to_node {id: edge.to_node})
-        CALL apoc.create.relationship(from_node, edge.relationship_name, edge.properties, to_node) YIELD rel
-        RETURN rel
-        """
+            UNWIND $edges AS edge
+            MATCH (from_node {id: edge.from_node})
+            MATCH (to_node {id: edge.to_node})
+            CALL apoc.merge.relationship(
+                from_node,
+                edge.relationship_name,
+                {
+                    source_node_id: edge.from_node,
+                    target_node_id: edge.to_node
+                },
+                edge.properties,
+                to_node
+            ) YIELD rel
+            RETURN rel"""
 
         edges = [
             {

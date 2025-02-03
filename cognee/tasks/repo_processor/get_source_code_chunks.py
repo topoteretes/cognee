@@ -3,33 +3,32 @@ from typing import AsyncGenerator, Generator
 from uuid import NAMESPACE_OID, uuid5
 
 import parso
-import tiktoken
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
+from cognee.infrastructure.llm import get_max_chunk_tokens
 
 logger = logging.getLogger(__name__)
 
 
-def _count_tokens(tokenizer: tiktoken.Encoding, source_code: str) -> int:
-    return len(tokenizer.encode(source_code))
-
-
 def _get_naive_subchunk_token_counts(
-    tokenizer: tiktoken.Encoding, source_code: str, max_subchunk_tokens: int = 8000
+    source_code: str, max_subchunk_tokens
 ) -> list[tuple[str, int]]:
     """Splits source code into subchunks of up to max_subchunk_tokens and counts tokens."""
 
-    token_ids = tokenizer.encode(source_code)
+    tokenizer = get_vector_engine().embedding_engine.tokenizer
+    token_ids = tokenizer.extract_tokens(source_code)
     subchunk_token_counts = []
 
     for start_idx in range(0, len(token_ids), max_subchunk_tokens):
         subchunk_token_ids = token_ids[start_idx : start_idx + max_subchunk_tokens]
         token_count = len(subchunk_token_ids)
+        # Note: This can't work with Gemini embeddings as they keep their method of encoding text
+        # to tokens hidden and don't offer a decoder
+        # TODO: Add support for different tokenizers for this function
         subchunk = "".join(
-            tokenizer.decode_single_token_bytes(token_id).decode("utf-8", errors="replace")
-            for token_id in subchunk_token_ids
+            tokenizer.decode_single_token(token_id) for token_id in subchunk_token_ids
         )
         subchunk_token_counts.append((subchunk, token_count))
 
@@ -37,15 +36,14 @@ def _get_naive_subchunk_token_counts(
 
 
 def _get_subchunk_token_counts(
-    tokenizer: tiktoken.Encoding,
     source_code: str,
-    max_subchunk_tokens: int = 8000,
+    max_subchunk_tokens,
     depth: int = 0,
     max_depth: int = 100,
 ) -> list[tuple[str, int]]:
     """Splits source code into subchunk and counts tokens for each subchunk."""
     if depth > max_depth:
-        return _get_naive_subchunk_token_counts(tokenizer, source_code, max_subchunk_tokens)
+        return _get_naive_subchunk_token_counts(source_code, max_subchunk_tokens)
 
     try:
         module = parso.parse(source_code)
@@ -64,7 +62,8 @@ def _get_subchunk_token_counts(
     subchunk_token_counts = []
     for child in module.children:
         subchunk = child.get_code()
-        token_count = _count_tokens(tokenizer, subchunk)
+        tokenizer = get_vector_engine().embedding_engine.tokenizer
+        token_count = tokenizer.count_tokens(subchunk)
 
         if token_count == 0:
             continue
@@ -75,13 +74,13 @@ def _get_subchunk_token_counts(
 
         if child.type == "string":
             subchunk_token_counts.extend(
-                _get_naive_subchunk_token_counts(tokenizer, subchunk, max_subchunk_tokens)
+                _get_naive_subchunk_token_counts(subchunk, max_subchunk_tokens)
             )
             continue
 
         subchunk_token_counts.extend(
             _get_subchunk_token_counts(
-                tokenizer, subchunk, max_subchunk_tokens, depth=depth + 1, max_depth=max_depth
+                subchunk, max_subchunk_tokens, depth=depth + 1, max_depth=max_depth
             )
         )
 
@@ -96,22 +95,19 @@ def _get_chunk_source_code(
     cumulative_counts = []
     current_source_code = ""
 
-    # Get embedding engine used in vector database
-    embedding_engine = get_vector_engine().embedding_engine
-
     for i, (child_code, token_count) in enumerate(code_token_counts):
         current_count += token_count
         cumulative_counts.append(current_count)
-        if current_count > embedding_engine.max_tokens:
+        if current_count > get_max_chunk_tokens():
             break
         current_source_code += f"\n{child_code}"
 
-    if current_count <= embedding_engine.max_tokens:
+    if current_count <= get_max_chunk_tokens():
         return [], current_source_code.strip()
 
     cutoff = 1
     for i, cum_count in enumerate(cumulative_counts):
-        if cum_count > (1 - overlap) * embedding_engine.max_tokens:
+        if cum_count > (1 - overlap) * get_max_chunk_tokens():
             break
         cutoff = i
 
@@ -121,19 +117,16 @@ def _get_chunk_source_code(
 def get_source_code_chunks_from_code_part(
     code_file_part: CodePart,
     overlap: float = 0.25,
-    granularity: float = 0.1,
+    granularity: float = 0.09,
 ) -> Generator[SourceCodeChunk, None, None]:
     """Yields source code chunks from a CodePart object, with configurable token limits and overlap."""
     if not code_file_part.source_code:
         logger.error(f"No source code in CodeFile {code_file_part.id}")
         return
 
-    embedding_engine = get_vector_engine().embedding_engine
-    tokenizer = embedding_engine.tokenizer
-
-    max_subchunk_tokens = max(1, int(granularity * embedding_engine.max_tokens))
+    max_subchunk_tokens = max(1, int(granularity * get_max_chunk_tokens()))
     subchunk_token_counts = _get_subchunk_token_counts(
-        tokenizer, code_file_part.source_code, max_subchunk_tokens
+        code_file_part.source_code, max_subchunk_tokens
     )
 
     previous_chunk = None
@@ -157,7 +150,6 @@ async def get_source_code_chunks(
     data_points: list[DataPoint],
 ) -> AsyncGenerator[list[DataPoint], None]:
     """Processes code graph datapoints, create SourceCodeChink datapoints."""
-    # TODO: Add support for other embedding models, with max_token mapping
     for data_point in data_points:
         try:
             yield data_point
@@ -173,5 +165,7 @@ async def get_source_code_chunks(
                         yield source_code_chunk
                 except Exception as e:
                     logger.error(f"Error processing code part: {e}")
+                    raise e
         except Exception as e:
             logger.error(f"Error processing data point: {e}")
+            raise e
