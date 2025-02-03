@@ -55,8 +55,7 @@ async def test_llm_connection():
 
 async def test_embedding_connection():
     try:
-        embedding = await get_vector_engine().embedding_engine.embed_text("test")
-        print(embedding)
+        await get_vector_engine().embedding_engine.embed_text("test")
     except Exception as e:
         logger.error(e)
         logger.error("Connection to Embedding handler could not be established.")
