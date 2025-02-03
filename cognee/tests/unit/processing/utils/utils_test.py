@@ -82,27 +82,27 @@ def test_prepare_nodes():
 
 @pytest.mark.asyncio
 async def test_create_cognee_style_network_with_logo():
-    import networkx as nx
-    from unittest.mock import patch
-    from io import BytesIO
+    from pathlib import Path
 
-    # Create a sample graph
-    graph = nx.Graph()
-    graph.add_node(1, group="A")
-    graph.add_node(2, group="B")
-    graph.add_edge(1, 2)
+    nodes_data = [
+        (1, {"pydantic_type": "Entity", "name": "Node1"}),
+        (2, {"pydantic_type": "DocumentChunk", "name": "Node2"}),
+    ]
+    edges_data = [
+        (1, 2, "related_to", {}),
+    ]
+    graph_data = (nodes_data, edges_data)
 
-    # Convert the graph to a tuple format for serialization
-    graph_tuple = graph_to_tuple(graph)
+    html_output = await create_cognee_style_network_with_logo(graph_data)
 
-    result = await create_cognee_style_network_with_logo(
-        graph_tuple,
-        title="Test Network",
-        layout_func=nx.spring_layout,
-        layout_scale=3.0,
-        logo_alpha=0.5,
-    )
+    assert isinstance(html_output, str)
 
-    assert result is not None
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert "<html>" in html_output
+    assert '<script src="https://d3js.org/d3.v5.min.js"></script>' in html_output
+    assert "var nodes =" in html_output
+    assert "var links =" in html_output
+
+    output_file = Path("graph_visualization.html")
+    assert output_file.exists()
+
+    output_file.unlink()
