@@ -15,6 +15,8 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph.extract_nodes_from_data import extract_nodes_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.api.v1.cognify.cognify_v2 import cognify
+from cognee.tasks.graph.extract_edges_from_data import extract_edges_from_data
+from cognee.tasks.graph.extract_relationships_from_data import extract_relationships_from_data
 
 logger = logging.getLogger("cognify.25q1")
 
@@ -30,7 +32,9 @@ async def get_25q1_tasks(user: User = None) -> list[Task]:
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(extract_chunks_from_documents),
             Task(extract_nodes_from_data, n_rounds=5, task_config={"batch_size": 10}),
-            Task(add_data_points, only_root=False, task_config={"batch_size": 10}),
+            Task(extract_relationships_from_data, n_rounds=2),
+            Task(extract_edges_from_data),
+            # Task(add_data_points, only_root=False, task_config={"batch_size": 10}),
         ]
     except Exception as error:
         logger.error("Failed to create 25Q1 tasks: %s", error)
