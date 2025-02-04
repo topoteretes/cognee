@@ -4,7 +4,7 @@ import pathlib
 import cognee
 
 from cognee.modules.data.models import Data
-from cognee.api.v1.search import SearchType
+from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.users.methods import get_default_user
 

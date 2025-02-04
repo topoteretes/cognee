@@ -23,6 +23,7 @@ class CodeFile(DataPoint):
 
 class CodePart(DataPoint):
     __tablename__ = "codepart"
+    file_path: str  # file path
     # part_of: Optional[CodeFile] = None
     pydantic_type: str = "CodePart"
     source_code: Optional[str] = None
