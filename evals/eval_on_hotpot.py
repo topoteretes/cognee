@@ -66,14 +66,15 @@ async def deepeval_answers(instances, answers, eval_metrics):
     return eval_results
 
 
-async def deepeval_on_instances(
-    instances, context_provider, eval_metrics, answers_filename, contexts_filename
+async def get_answers_for_instances(
+    instances, context_provider, answers_filename=None, contexts_filename=None, save_answers=True
 ):
-    if os.path.exists(answers_filename):
+    """Loads or generates answers for instances and optionally saves them."""
+    preloaded_answers = {}
+
+    if answers_filename and os.path.exists(answers_filename):
         with open(answers_filename, "r") as file:
             preloaded_answers = json.load(file)
-    else:
-        preloaded_answers = {}
 
     answers = []
     for instance in tqdm(instances, desc="Getting answers"):
@@ -84,20 +85,41 @@ async def deepeval_on_instances(
             preloaded_answers[instance["_id"]] = answer
         answers.append(answer)
 
-    with open(answers_filename, "w") as file:
-        json.dump(preloaded_answers, file)
+    if save_answers and answers_filename:
+        with open(answers_filename, "w") as file:
+            json.dump(preloaded_answers, file)
 
+    return answers
+
+
+async def calculate_eval_metrics(instances, answers, eval_metrics):
+    """Evaluates answers and returns a dictionary of metric scores lists."""
     eval_results = await deepeval_answers(instances, answers, eval_metrics)
+
     score_lists_dict = {}
     for instance_result in eval_results.test_results:
         for metric_result in instance_result.metrics_data:
-            if metric_result.name not in score_lists_dict:
-                score_lists_dict[metric_result.name] = []
-            score_lists_dict[metric_result.name].append(metric_result.score)
+            score_lists_dict.setdefault(metric_result.name, []).append(metric_result.score)
+
+    return score_lists_dict  # Returning raw lists of scores
+
+
+async def deepeval_on_instances(
+    instances,
+    context_provider,
+    eval_metrics,
+    answers_filename=None,
+    contexts_filename=None,
+    save_answers=True,
+):
+    """Orchestrates answer generation and evaluation, including averaging of scores."""
+    answers = await get_answers_for_instances(
+        instances, context_provider, answers_filename, contexts_filename, save_answers
+    )
+    score_lists_dict = await calculate_eval_metrics(instances, answers, eval_metrics)
 
     avg_scores = {
-        metric_name: statistics.mean(scorelist)
-        for metric_name, scorelist in score_lists_dict.items()
+        metric_name: statistics.mean(scores) for metric_name, scores in score_lists_dict.items()
     }
 
     return avg_scores
