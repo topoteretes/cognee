@@ -16,6 +16,10 @@ async def add(
     dataset_name: str = "main_dataset",
     user: User = None,
 ):
+    # Create tables for databases
+    await create_relational_db_and_tables()
+    await create_pgvector_db_and_tables()
+
     # Initialize first_run attribute if it doesn't exist
     if not hasattr(add, "first_run"):
         add.first_run = True
@@ -27,10 +31,6 @@ async def add(
         await test_llm_connection()
         await test_embedding_connection()
         add.first_run = False  # Update flag after first run
-
-    # Create tables for databases
-    await create_relational_db_and_tables()
-    await create_pgvector_db_and_tables()
 
     if user is None:
         user = await get_default_user()
