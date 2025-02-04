@@ -1,7 +1,10 @@
 import inspect
 import json
 import logging
+from uuid import UUID
 
+from cognee.modules.data.models import Data
+from cognee.modules.pipelines.operations import logPipelineRunStart
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -261,6 +264,15 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
         raise error
 
 
-async def run_tasks(tasks: list[Task], data=None, pipeline_name: str = "default_pipeline"):
-    async for result in run_tasks_with_telemetry(tasks, data, pipeline_name):
-        yield result
+async def run_tasks(tasks: list[Task], dataset_id: UUID, data: list[Data], pipeline_id: str):
+    pipeline_run = await logPipelineRunStart(pipeline_id, dataset_id, data)
+    yield pipeline_run
+
+    try:
+        async for _ in run_tasks_with_telemetry(tasks, data, pipeline_id):
+            pass
+
+        yield await logPipelineRunComplete(pipeline_run.id, data)
+    except Exception as e:
+        yield await logPipelineRunError(pipeline_run.id, tasks, data, e)
+        raise e

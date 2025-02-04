@@ -20,5 +20,5 @@ class PipelineRun(Base):
 
     status = Column(Enum(PipelineRunStatus))
 
-    run_id = Column(UUID, index=True)
+    pipeline_id = Column(UUID, index=True)
     run_info = Column(JSON)

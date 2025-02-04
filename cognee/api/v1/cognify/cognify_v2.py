@@ -107,10 +107,11 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
             if not isinstance(task, Task):
                 raise ValueError(f"Task {task} is not an instance of Task")
 
-        pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")
+        pipeline_run = run_tasks(tasks, dataset.id, data_documents, "cognify_pipeline")
+        pipeline_run_status = None
 
-        async for result in pipeline:
-            print(result)
+        async for run_status in pipeline_run:
+            pipeline_run_status = run_status
 
         await index_graph_edges()
 
@@ -124,6 +125,8 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
                 "files": document_ids_str,
             },
         )
+
+        return pipeline_run_status
     except Exception as error:
         send_telemetry("cognee.cognify EXECUTION ERRORED", user.id)
 
