@@ -5,8 +5,8 @@ import asyncio
 import cognee
 import signal
 
-from cognee.api.v1.search import SearchType
 from cognee.shared.utils import setup_logging
+from cognee.modules.search.types import SearchType
 
 app = modal.App("cognee-runner")
 

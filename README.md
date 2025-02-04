@@ -130,7 +130,7 @@ This script will run the default pipeline:
 ```python
 import cognee
 import asyncio
-from cognee.api.v1.search import SearchType
+from cognee.modules.search.types import SearchType
 
 async def main():
     # Create a clean slate for cognee -- reset data and system state
