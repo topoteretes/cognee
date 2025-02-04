@@ -1,9 +1,11 @@
-from typing import Optional
+import logging
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph
 
 from .models.DocumentChunk import DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 
 class TextChunker:
@@ -76,7 +78,8 @@ class TextChunker:
                                 },
                             )
                         except Exception as e:
-                            print(e)
+                            logger.error(e)
+                            raise e
                         paragraph_chunks = [chunk_data]
                         self.chunk_size = chunk_data["word_count"]
                         self.token_count = chunk_data["token_count"]
@@ -97,4 +100,5 @@ class TextChunker:
                     _metadata={"index_fields": ["text"]},
                 )
             except Exception as e:
-                print(e)
+                logger.error(e)
+                raise e

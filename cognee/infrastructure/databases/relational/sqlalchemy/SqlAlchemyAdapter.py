@@ -303,9 +303,10 @@ class SQLAlchemyAdapter:
                 await connection.execute(text("DROP TABLE IF EXISTS group_permission CASCADE"))
                 await connection.execute(text("DROP TABLE IF EXISTS permissions CASCADE"))
                 # Add more DROP TABLE statements for other tables as needed
-                print("Database tables dropped successfully.")
+                logger.debug("Database tables dropped successfully.")
             except Exception as e:
-                print(f"Error dropping database tables: {e}")
+                logger.error(f"Error dropping database tables: {e}")
+                raise e
 
     async def create_database(self):
         if self.engine.dialect.name == "sqlite":
@@ -340,6 +341,7 @@ class SQLAlchemyAdapter:
                             await connection.execute(drop_table_query)
                         metadata.clear()
         except Exception as e:
-            print(f"Error deleting database: {e}")
+            logger.error(f"Error deleting database: {e}")
+            raise e
 
-        print("Database deleted successfully.")
+        logger.info("Database deleted successfully.")

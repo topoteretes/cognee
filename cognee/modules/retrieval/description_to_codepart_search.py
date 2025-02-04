@@ -11,6 +11,8 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.search.methods import search
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
+logger = logging.getLogger(__name__)
+
 
 async def code_description_to_code_part_search(
     query: str, include_docs=False, user: User = None, top_k=5
@@ -154,8 +156,9 @@ if __name__ == "__main__":
         user = None
         try:
             results = await code_description_to_code_part_search(query, user)
-            print("Retrieved Code Parts:", results)
+            logger.debug("Retrieved Code Parts:", results)
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.error(f"An error occurred: {e}")
+            raise e
 
     asyncio.run(main())
