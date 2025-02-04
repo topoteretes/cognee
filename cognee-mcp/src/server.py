@@ -1,4 +1,5 @@
 import os
+
 import cognee
 import logging
 import importlib.util
@@ -8,7 +9,8 @@ from contextlib import redirect_stderr, redirect_stdout
 import mcp.types as types
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
-from cognee.api.v1.search import SearchType
+from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
+from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 
 mcp = Server("cognee")
@@ -42,6 +44,19 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="codify",
+            description="Transforms codebase into knowledge graph",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        ),
+        types.Tool(
             name="search",
             description="Searches for information in knowledge graph",
             inputSchema={
@@ -50,6 +65,10 @@ async def list_tools() -> list[types.Tool]:
                     "search_query": {
                         "type": "string",
                         "description": "The query to search for",
+                    },
+                    "search_type": {
+                        "type": "string",
+                        "description": "The type of search to perform (e.g., INSIGHTS, CODE)",
                     },
                 },
                 "required": ["search_query"],
@@ -72,15 +91,21 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 if name == "cognify":
-                    await cognify(
+                    cognify(
                         text=arguments["text"],
                         graph_model_file=arguments.get("graph_model_file", None),
                         graph_model_name=arguments.get("graph_model_name", None),
                     )
 
                     return [types.TextContent(type="text", text="Ingested")]
+                if name == "codify":
+                    await codify(arguments.get("repo_path"))
+
+                    return [types.TextContent(type="text", text="Indexed")]
                 elif name == "search":
-                    search_results = await search(arguments["search_query"])
+                    search_results = await search(
+                        arguments["search_query"], arguments["search_type"]
+                    )
 
                     return [types.TextContent(type="text", text=search_results)]
                 elif name == "prune":
@@ -102,21 +127,28 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     await cognee.add(text)
 
     try:
-        await cognee.cognify(graph_model=graph_model)
+        asyncio.create_task(cognee.cognify(graph_model=graph_model))
     except Exception as e:
         raise ValueError(f"Failed to cognify: {str(e)}")
 
 
-async def search(search_query: str) -> str:
+async def codify(repo_path: str):
+    async for result in run_code_graph_pipeline(repo_path, False):
+        print(result)
+
+
+async def search(search_query: str, search_type: str) -> str:
     """Search the knowledge graph"""
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text=search_query)
+    search_results = await cognee.search(
+        query_type=SearchType[search_type.upper()], query_text=search_query
+    )
 
     results = retrieved_edges_to_string(search_results)
 
     return results
 
 
-async def prune() -> str:
+async def prune():
     """Reset the knowledge graph"""
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
