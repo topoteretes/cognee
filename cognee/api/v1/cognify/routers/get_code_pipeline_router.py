@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
+from cognee.api.DTO import InDTO
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.retrieval.description_to_codepart_search import (
     code_description_to_code_part_search,
@@ -7,14 +7,14 @@ from cognee.modules.retrieval.description_to_codepart_search import (
 from fastapi.responses import JSONResponse
 
 
-class CodePipelineIndexPayloadDTO(BaseModel):
+class CodePipelineIndexPayloadDTO(InDTO):
     repo_path: str
     include_docs: bool = False
 
 
-class CodePipelineRetrievePayloadDTO(BaseModel):
+class CodePipelineRetrievePayloadDTO(InDTO):
     query: str
-    fullInput: str
+    full_input: str
 
 
 def get_code_pipeline_router() -> APIRouter:
@@ -34,9 +34,9 @@ def get_code_pipeline_router() -> APIRouter:
         """This endpoint is responsible for retrieving the context."""
         try:
             query = (
-                payload.fullInput.replace("cognee ", "")
-                if payload.fullInput.startswith("cognee ")
-                else payload.fullInput
+                payload.full_input.replace("cognee ", "")
+                if payload.full_input.startswith("cognee ")
+                else payload.full_input
             )
 
             retrieved_codeparts, __ = await code_description_to_code_part_search(
@@ -45,8 +45,8 @@ def get_code_pipeline_router() -> APIRouter:
 
             return [
                 {
-                    "name": codepart.attributes["id"],
-                    "description": codepart.attributes["id"],
+                    "name": codepart.attributes["file_path"],
+                    "description": codepart.attributes["file_path"],
                     "content": codepart.attributes["source_code"],
                 }
                 for codepart in retrieved_codeparts
