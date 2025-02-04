@@ -36,7 +36,7 @@ async def graph_query_completion(query: str) -> list:
     - Ensure that the LLM client and graph database are properly configured and accessible.
 
     """
-    found_triplets = await brute_force_triplet_search(query, top_k=5)
+    found_triplets = await brute_force_triplet_search(query, top_k=10)
 
     if len(found_triplets) == 0:
         raise NoRelevantDataFound
