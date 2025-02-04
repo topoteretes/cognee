@@ -152,6 +152,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         except Exception as ex:
             print(f"Error mapping vector distances to edges: {ex}")
+            raise ex
 
     async def calculate_top_triplet_importances(self, k: int) -> List:
         min_heap = []
