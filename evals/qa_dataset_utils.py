@@ -80,3 +80,8 @@ def load_qa_dataset(dataset_name_or_filename: str) -> list[dict]:
         raise ValidationError(f"Invalid QA dataset: {e.message}")
 
     return dataset
+
+
+def load_hotpotqa_instances_by_ids(ids: list[str]) -> list[dict]:
+    dataset = load_qa_dataset("hotpotqa")
+    return [instance for instance in dataset if instance["_id"] in ids]
