@@ -17,11 +17,11 @@ jobs:
         example-location: ./examples/python/multimedia_example.py
       secrets:
         LLM_MODEL: "openai/gpt-4o-mini"
-        #LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+        LLM_ENDPOINT: ""
         LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Use OpenAI until we deploy models to handle multimedia
         EMBEDDING_MODEL : "openai/text-embedding-3-large"
         EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
-        #LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+        LLM_API_VERSION: ""
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
