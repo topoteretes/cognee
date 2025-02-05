@@ -7,12 +7,12 @@ Using provided potential nodes and relationships, extract concrete edges from th
 {{ potential_nodes }}
 
 **Potential Relationships to Use:**
-{{ potential_relationships }}
+{{ potential_relationship_names }}
 
 **Previously Extracted Nodes:**
 {{ previous_nodes }}
 
-**Previously Extracted Edges:**
-{{ previous_edges }}
+**Previously Extracted Edge Triplets:**
+{{ previous_edge_triplets }}
 
-Create specific edges between nodes, ensuring each connection is clearly supported by the text content. Use the potential nodes and relationships as your primary building blocks, while considering previously extracted nodes and edges for consistency and completeness.
+Create specific edge triplets between nodes, ensuring each connection is clearly supported by the text content. Use the potential nodes and relationships as your primary building blocks, while considering previously extracted nodes and edges for consistency and completeness.

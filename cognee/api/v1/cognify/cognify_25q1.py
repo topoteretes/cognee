@@ -11,12 +11,11 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
+from cognee.tasks.graph.extract_graph_from_data_chunks import extract_graph_from_data_chunks
 
-from cognee.tasks.graph.extract_nodes_from_data import extract_nodes_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.api.v1.cognify.cognify_v2 import cognify
-from cognee.tasks.graph.extract_edges_from_data import extract_edges_from_data
-from cognee.tasks.graph.extract_relationships_from_data import extract_relationships_from_data
+
 
 logger = logging.getLogger("cognify.25q1")
 
@@ -31,9 +30,7 @@ async def get_25q1_tasks(user: User = None) -> list[Task]:
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(extract_chunks_from_documents),
-            Task(extract_nodes_from_data, n_rounds=5, task_config={"batch_size": 10}),
-            Task(extract_relationships_from_data, n_rounds=2),
-            Task(extract_edges_from_data),
+            Task(extract_graph_from_data_chunks, n_rounds=2, task_config={"batch_size": 10}),
             # Task(add_data_points, only_root=False, task_config={"batch_size": 10}),
         ]
     except Exception as error:
@@ -62,7 +59,10 @@ if __name__ == "__main__":
         text = """
         Natural language processing (NLP) is an interdisciplinary
         subfield of computer science and information retrieval.
+        And Mathematics? It's a science, for sure. Some would say that CS is part of it, some wouldn't.
         """
+
+        # text = """Alice read a book in the park."""
 
         await cognee.add(text)
         await cognify_25q1()
