@@ -19,7 +19,9 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
                 )
                 .label("rn"),
             )
-            .filter(PipelineRun.run_info.op("->>")("dataset_id") == str(pipeline_ids[0]))
+            .filter(
+                PipelineRun.run_info.op("->>")("dataset_id").in_([str(id) for id in pipeline_ids])
+            )
             .subquery()
         )
 
