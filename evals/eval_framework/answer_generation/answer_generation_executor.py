@@ -1,16 +1,12 @@
 import cognee
-import logging
-from typing import Optional, Any
+from typing import Any
 from cognee.api.v1.search import SearchType
-
-from cognee.shared.utils import setup_logging
 
 
 class AnswerGeneratorExecutor:
     question_answering_engine_options = {
         "cognee_graph_completion": SearchType.GRAPH_COMPLETION,
         "cognee_completion": SearchType.COMPLETION,
-        "cognee_insights": SearchType.INSIGHTS,
     }
 
     search_type = None
@@ -30,7 +26,11 @@ class AnswerGeneratorExecutor:
 
             # Store the results along with the question
             answers.append(
-                {"question": query_text, "answer": search_results, "golden_answer": correct_answer}
+                {
+                    "question": query_text,
+                    "answer": search_results[0],
+                    "golden_answer": correct_answer,
+                }
             )
 
         return answers
