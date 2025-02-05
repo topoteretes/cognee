@@ -30,6 +30,7 @@ def _add_code_parts_nodes_and_edges(code_file: CodeFile, part_type, code_parts) 
                 id=part_node_id,
                 type=part_type,
                 # part_of = code_file,
+                file_path=code_file.extracted_id[len(code_file.part_of.path) + 1 :],
                 source_code=code_part,
             )
         )

@@ -34,5 +34,6 @@ async def detect_language(text: str):
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        raise e
 
     return None
