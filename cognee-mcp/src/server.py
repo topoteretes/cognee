@@ -1,5 +1,5 @@
+import json
 import os
-
 import cognee
 import logging
 import importlib.util
@@ -12,6 +12,7 @@ from mcp.server.models import InitializationOptions
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.modules.storage.utils import JSONEncoder
 
 mcp = Server("cognee")
 
@@ -143,9 +144,11 @@ async def search(search_query: str, search_type: str) -> str:
         query_type=SearchType[search_type.upper()], query_text=search_query
     )
 
-    results = retrieved_edges_to_string(search_results)
-
-    return results
+    if search_type.upper() == "CODE":
+        return json.dumps(search_results, cls=JSONEncoder)
+    else:
+        results = retrieved_edges_to_string(search_results)
+        return results
 
 
 async def prune():
