@@ -16,8 +16,21 @@ async def add(
     dataset_name: str = "main_dataset",
     user: User = None,
 ):
+    # Create tables for databases
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
+
+    # Initialize first_run attribute if it doesn't exist
+    if not hasattr(add, "first_run"):
+        add.first_run = True
+
+    if add.first_run:
+        from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
+
+        # Test LLM and Embedding configuration once before running Cognee
+        await test_llm_connection()
+        await test_embedding_connection()
+        add.first_run = False  # Update flag after first run
 
     if user is None:
         user = await get_default_user()

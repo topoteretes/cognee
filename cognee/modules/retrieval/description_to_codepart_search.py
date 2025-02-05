@@ -1,16 +1,17 @@
 import asyncio
 import logging
 
-from typing import Set, List
+from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
-from cognee.api.v1.search import SearchType
-from cognee.api.v1.search.search_v2 import search
+from cognee.modules.search.methods import search
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+
+logger = logging.getLogger(__name__)
 
 
 async def code_description_to_code_part_search(
@@ -39,7 +40,7 @@ async def code_description_to_code_part(
         include_docs(bool): Boolean showing whether we have the docs in the graph or not
 
     Returns:
-        Set[str]: A set of unique code parts matching the query.
+        List[str]: A set of unique code parts matching the query.
 
     Raises:
         ValueError: If arguments are invalid.
@@ -66,7 +67,7 @@ async def code_description_to_code_part(
 
     try:
         if include_docs:
-            search_results = await search(SearchType.INSIGHTS, query_text=query)
+            search_results = await search(query_text=query, query_type="INSIGHTS", user=user)
 
             concatenated_descriptions = " ".join(
                 obj["description"]
@@ -98,6 +99,7 @@ async def code_description_to_code_part(
                 "id",
                 "type",
                 "text",
+                "file_path",
                 "source_code",
                 "pydantic_type",
             ],
@@ -154,8 +156,9 @@ if __name__ == "__main__":
         user = None
         try:
             results = await code_description_to_code_part_search(query, user)
-            print("Retrieved Code Parts:", results)
+            logger.debug("Retrieved Code Parts:", results)
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.error(f"An error occurred: {e}")
+            raise e
 
     asyncio.run(main())

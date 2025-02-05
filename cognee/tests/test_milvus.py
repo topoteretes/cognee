@@ -2,7 +2,7 @@ import os
 import logging
 import pathlib
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee.modules.search.types import SearchType
 
 logging.basicConfig(level=logging.DEBUG)
 

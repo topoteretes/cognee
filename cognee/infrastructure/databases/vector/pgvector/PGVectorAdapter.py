@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Optional, get_type_hints
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData
@@ -69,7 +69,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 __tablename__ = collection_name
                 __table_args__ = {"extend_existing": True}
                 # PGVector requires one column to be the primary key
-                primary_key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+                primary_key: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
                 id: Mapped[data_point_types["id"]]
                 payload = Column(JSON)
                 vector = Column(self.Vector(vector_size))
@@ -103,7 +103,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             __tablename__ = collection_name
             __table_args__ = {"extend_existing": True}
             # PGVector requires one column to be the primary key
-            primary_key: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+            primary_key: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
             id: Mapped[data_point_types["id"]]
             payload = Column(JSON)
             vector = Column(self.Vector(vector_size))
