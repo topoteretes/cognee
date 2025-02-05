@@ -1,49 +1,47 @@
-from typing import Dict
+from functools import lru_cache
 
 
-class VectorConfig(Dict):
-    vector_db_url: str
-    vector_db_port: str
-    vector_db_key: str
-    vector_db_provider: str
-
-
-def create_vector_engine(config: VectorConfig, embedding_engine):
-    if config["vector_db_provider"] == "weaviate":
+@lru_cache
+def create_vector_engine(
+    embedding_engine,
+    vector_db_url: str,
+    vector_db_port: str,
+    vector_db_key: str,
+    vector_db_provider: str,
+):
+    if vector_db_provider == "weaviate":
         from .weaviate_db import WeaviateAdapter
 
-        if not (config["vector_db_url"] and config["vector_db_key"]):
+        if not (vector_db_url and vector_db_key):
             raise EnvironmentError("Missing requred Weaviate credentials!")
 
-        return WeaviateAdapter(
-            config["vector_db_url"], config["vector_db_key"], embedding_engine=embedding_engine
-        )
+        return WeaviateAdapter(vector_db_url, vector_db_key, embedding_engine=embedding_engine)
 
-    elif config["vector_db_provider"] == "qdrant":
-        if not (config["vector_db_url"] and config["vector_db_key"]):
+    elif vector_db_provider == "qdrant":
+        if not (vector_db_url and vector_db_key):
             raise EnvironmentError("Missing requred Qdrant credentials!")
 
         from .qdrant.QDrantAdapter import QDrantAdapter
 
         return QDrantAdapter(
-            url=config["vector_db_url"],
-            api_key=config["vector_db_key"],
+            url=vector_db_url,
+            api_key=vector_db_key,
             embedding_engine=embedding_engine,
         )
 
-    elif config["vector_db_provider"] == "milvus":
+    elif vector_db_provider == "milvus":
         from .milvus.MilvusAdapter import MilvusAdapter
 
-        if not config["vector_db_url"]:
+        if not vector_db_url:
             raise EnvironmentError("Missing required Milvus credentials!")
 
         return MilvusAdapter(
-            url=config["vector_db_url"],
-            api_key=config["vector_db_key"],
+            url=vector_db_url,
+            api_key=vector_db_key,
             embedding_engine=embedding_engine,
         )
 
-    elif config["vector_db_provider"] == "pgvector":
+    elif vector_db_provider == "pgvector":
         from cognee.infrastructure.databases.relational import get_relational_config
 
         # Get configuration for postgres database
@@ -65,19 +63,19 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
 
         return PGVectorAdapter(
             connection_string,
-            config["vector_db_key"],
+            vector_db_key,
             embedding_engine,
         )
 
-    elif config["vector_db_provider"] == "falkordb":
-        if not (config["vector_db_url"] and config["vector_db_port"]):
+    elif vector_db_provider == "falkordb":
+        if not (vector_db_url and vector_db_port):
             raise EnvironmentError("Missing requred FalkorDB credentials!")
 
         from ..hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
 
         return FalkorDBAdapter(
-            database_url=config["vector_db_url"],
-            database_port=config["vector_db_port"],
+            database_url=vector_db_url,
+            database_port=vector_db_port,
             embedding_engine=embedding_engine,
         )
 
@@ -85,7 +83,7 @@ def create_vector_engine(config: VectorConfig, embedding_engine):
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
         return LanceDBAdapter(
-            url=config["vector_db_url"],
-            api_key=config["vector_db_key"],
+            url=vector_db_url,
+            api_key=vector_db_key,
             embedding_engine=embedding_engine,
         )
