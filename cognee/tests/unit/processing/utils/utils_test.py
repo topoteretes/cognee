@@ -7,6 +7,9 @@ from io import BytesIO
 from uuid import uuid4
 from datetime import datetime, timezone
 from cognee.shared.exceptions import IngestionError
+from cognee.infrastructure.visualization.cognee_network_visualization import (
+    create_cognee_style_network_with_logo,
+)
 
 from cognee.shared.utils import (
     get_anonymous_id,
@@ -14,7 +17,6 @@ from cognee.shared.utils import (
     get_file_content_hash,
     prepare_edges,
     prepare_nodes,
-    create_cognee_style_network_with_logo,
     graph_to_tuple,
 )
 

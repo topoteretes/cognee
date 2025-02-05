@@ -1,4 +1,6 @@
-from cognee.shared.utils import create_cognee_style_network_with_logo
+from cognee.infrastructure.visualization.cognee_network_visualization import (
+    create_cognee_style_network_with_logo,
+)
 from cognee.infrastructure.databases.graph import get_graph_engine
 import logging
 
