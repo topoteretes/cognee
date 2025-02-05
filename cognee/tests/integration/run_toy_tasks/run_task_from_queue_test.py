@@ -3,6 +3,7 @@ from queue import Queue
 
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
+from uuid import uuid4
 
 
 async def pipeline(data_queue):
@@ -25,6 +26,8 @@ async def pipeline(data_queue):
             Task(add_one),
             Task(multiply_by_two),
         ],
+        dataset_id=uuid4(),
+        data=str(data_queue),
         pipeline_name="test_run_tasks_from_queue",
     )
 
