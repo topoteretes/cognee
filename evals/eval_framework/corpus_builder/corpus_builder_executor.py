@@ -38,9 +38,6 @@ class CorpusBuilderExecutor:
         await cognee.prune.prune_system(metadata=True)
 
         # Adding corpus elements to cognee metastore
-        for text in self.raw_corpus:
-            await cognee.add(text)
-            print(f"Added text: {text[:35]}...")
-
+        await cognee.add(self.raw_corpus)
         # Running cognify and building knowledge graph
         await cognee.cognify()
