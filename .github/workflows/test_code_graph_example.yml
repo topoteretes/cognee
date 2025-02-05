@@ -17,11 +17,11 @@ jobs:
         example-location: ./examples/python/code_graph_example.py
         arguments: "--repo_path ./evals"
       secrets:
-        LLM_MODEL: ""
+        LLM_MODEL: "openai/gpt-4o-mini"
         LLM_ENDPOINT: ""
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         LLM_API_VERSION: ""
-        EMBEDDING_MODEL: ""
+        EMBEDDING_MODEL: "openai/text-embedding-3-large"
         EMBEDDING_ENDPOINT: ""
         EMBEDDING_API_KEY: ""
         EMBEDDING_API_VERSION: ""
