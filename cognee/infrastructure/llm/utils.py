@@ -36,3 +36,26 @@ def get_model_max_tokens(model_name: str):
         logger.info("Model not found in LiteLLM's model_cost.")
 
     return max_tokens
+
+
+async def test_llm_connection():
+    try:
+        llm_adapter = get_llm_client()
+        await llm_adapter.acreate_structured_output(
+            text_input="test",
+            system_prompt='Respond to me with the following string: "test"',
+            response_model=str,
+        )
+    except Exception as e:
+        logger.error(e)
+        logger.error("Connection to LLM could not be established.")
+        raise e
+
+
+async def test_embedding_connection():
+    try:
+        await get_vector_engine().embedding_engine.embed_text("test")
+    except Exception as e:
+        logger.error(e)
+        logger.error("Connection to Embedding handler could not be established.")
+        raise e
