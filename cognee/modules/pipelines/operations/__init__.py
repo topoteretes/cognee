@@ -1,1 +1,3 @@
 from .logPipelineRunStart import logPipelineRunStart
+from .logPipelineRunComplete import logPipelineRunComplete
+from .logPipelineRunError import logPipelineRunError

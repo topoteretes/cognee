@@ -4,7 +4,11 @@ import logging
 from uuid import UUID
 
 from cognee.modules.data.models import Data
-from cognee.modules.pipelines.operations import logPipelineRunStart
+from cognee.modules.pipelines.operations import (
+    logPipelineRunStart,
+    logPipelineRunComplete,
+    logPipelineRunError,
+)
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
