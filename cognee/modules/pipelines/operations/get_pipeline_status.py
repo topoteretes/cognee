@@ -1,5 +1,5 @@
 from uuid import UUID
-from sqlalchemy import func, select
+from sqlalchemy import func, select, cast, Text
 from sqlalchemy.orm import aliased
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import PipelineRun
@@ -14,17 +14,16 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
                 PipelineRun,
                 func.row_number()
                 .over(
-                    partition_by=PipelineRun.id,
+                    partition_by=PipelineRun.run_info.op("->>")("dataset_id"),
                     order_by=PipelineRun.created_at.desc(),
                 )
                 .label("rn"),
             )
-            .filter(PipelineRun.id.in_(pipeline_ids))
+            .filter(PipelineRun.run_info.op("->>")("dataset_id") == str(pipeline_ids[0]))
             .subquery()
         )
 
         aliased_pipeline_run = aliased(PipelineRun, query)
-
         latest_runs = select(aliased_pipeline_run).filter(query.c.rn == 1)
 
         runs = (await session.execute(latest_runs)).scalars().all()

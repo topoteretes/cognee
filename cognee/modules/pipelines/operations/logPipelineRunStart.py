@@ -5,6 +5,12 @@ from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 
 
 async def logPipelineRunStart(pipeline_id: str, dataset_id: UUID, data: list[Data]):
+    if not isinstance(data, (str, list)):
+        raise TypeError("data must be either a string or a list of Data objects")
+
+    if isinstance(data, list) and not all(isinstance(item, Data) for item in data):
+        raise TypeError("All items in the data list must be of type Data")
+
     pipeline_run_id = uuid4()
 
     pipeline_run = PipelineRun(
