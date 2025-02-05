@@ -19,12 +19,6 @@ jobs:
         #LLM_MODEL: ${{ secrets.LLM_MODEL }}
         #LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Use OpenAI until we deploy models to handle multimedia
-        LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
         #LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-        EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
-        EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-        EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-        EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
