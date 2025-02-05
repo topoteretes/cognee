@@ -74,7 +74,10 @@ def _update_code_entity(script: jedi.Script, code_entity: Dict[str, any]) -> Non
         logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
         return
     except AttributeError as e:
-        # TODO: See if there is a way to handle EOFError properly
+        # TODO: See if there is a way to handle AttributeError properly
+        logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
+    except AssertionError as e:
+        # TODO: See if there is a way to handle AttributeError properly
         logger.error(f"Failed to analyze code entity {code_entity['name']}: {e}")
     except Exception as e:
         # logging.warning(f"Failed to analyze code entity {code_entity['name']}: {e}")
