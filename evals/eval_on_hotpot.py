@@ -18,21 +18,30 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def answer_qa_instance(instance, context_provider, contexts_filename):
-    if os.path.exists(contexts_filename):
+async def get_context(instance, context_provider, contexts_filename=None):
+    """Retrieves or generates context for a QA instance, optionally using a cache."""
+    preloaded_contexts = {}
+
+    if contexts_filename and os.path.exists(contexts_filename):
         with open(contexts_filename, "r") as file:
             preloaded_contexts = json.load(file)
-    else:
-        preloaded_contexts = {}
 
     if instance["_id"] in preloaded_contexts:
-        context = preloaded_contexts[instance["_id"]]
-    else:
-        context = await context_provider(instance)
-        preloaded_contexts[instance["_id"]] = context
+        return preloaded_contexts[instance["_id"]]
 
-    with open(contexts_filename, "w") as file:
-        json.dump(preloaded_contexts, file)
+    context = await context_provider(instance)
+    preloaded_contexts[instance["_id"]] = context
+
+    if contexts_filename:
+        with open(contexts_filename, "w") as file:
+            json.dump(preloaded_contexts, file)
+
+    return context
+
+
+async def answer_qa_instance(instance, context_provider, contexts_filename=None):
+    """Answers a QA instance using a given context provider, optionally caching contexts."""
+    context = await get_context(instance, context_provider, contexts_filename)
 
     args = {
         "question": instance["question"],
@@ -67,7 +76,7 @@ async def deepeval_answers(instances, answers, eval_metrics):
 
 
 async def get_answers_for_instances(
-    instances, context_provider, answers_filename=None, contexts_filename=None, save_answers=True
+    instances, context_provider, answers_filename=None, contexts_filename=None, save_answers=False
 ):
     """Loads or generates answers for instances and optionally saves them."""
     preloaded_answers = {}
@@ -110,7 +119,7 @@ async def deepeval_on_instances(
     eval_metrics,
     answers_filename=None,
     contexts_filename=None,
-    save_answers=True,
+    save_answers=False,
 ):
     """Orchestrates answer generation and evaluation, including averaging of scores."""
     answers = await get_answers_for_instances(
@@ -139,9 +148,10 @@ async def eval_on_QA_dataset(
     random.seed(43)
     instances = dataset if not num_samples else random.sample(dataset, num_samples)
 
-    contexts_filename = out_path / Path(
-        f"contexts_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
-    )
+    # contexts_filename = out_path / Path(
+    #     f"contexts_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
+    # )
+    contexts_filename = None
     if "promptfoo_metrics" in eval_metrics:
         promptfoo_results = await eval_metrics["promptfoo_metrics"].measure(
             instances, context_provider, contexts_filename
@@ -149,9 +159,10 @@ async def eval_on_QA_dataset(
     else:
         promptfoo_results = {}
 
-    answers_filename = out_path / Path(
-        f"answers_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
-    )
+    # answers_filename = out_path / Path(
+    #     f"answers_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
+    # )
+    answers_filename = None
     deepeval_results = await deepeval_on_instances(
         instances,
         context_provider,
