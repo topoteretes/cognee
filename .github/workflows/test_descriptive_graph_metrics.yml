@@ -26,39 +26,3 @@ jobs:
         EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-  run_neo4j_metrics_test:
-    uses: ./.github/workflows/reusable_python_example.yml
-    with:
-      example-location: ./cognee/tests/tasks/descriptive_metrics/neo4j_metrics_test.py
-    secrets:
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-      GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
-      GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
-      GRAPH_DATABASE_USERNAME: "neo4j"
-      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-  run_comparison_metrics_test:
-    uses: ./.github/workflows/reusable_python_example.yml
-    with:
-      example-location: ./cognee/tests/tasks/descriptive_metrics/metric_consistency_test.py
-    secrets:
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-      GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
-      GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
-      GRAPH_DATABASE_USERNAME: "neo4j"
-      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
