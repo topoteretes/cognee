@@ -17,9 +17,6 @@ jobs:
         example-location: ./examples/python/code_graph_example.py
         arguments: "--repo_path ./evals"
       secrets:
-        LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
-        LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
