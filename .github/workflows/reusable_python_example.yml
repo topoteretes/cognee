@@ -17,23 +17,23 @@ on:
       GRAPHISTRY_PASSWORD:
         required: true
       LLM_MODEL:
-        required: true
+        required: false
       LLM_ENDPOINT:
-        required: true
+        required: false
       LLM_API_KEY:
         required: true
       OPENAI_API_KEY:
         required: false
       LLM_API_VERSION:
-        required: true
+        required: false
       EMBEDDING_MODEL:
-        required: true
+        required: false
       EMBEDDING_ENDPOINT:
-        required: true
+        required: false
       EMBEDDING_API_KEY:
-        required: true
+        required: false
       EMBEDDING_API_VERSION:
-        required: true
+        required: false
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
