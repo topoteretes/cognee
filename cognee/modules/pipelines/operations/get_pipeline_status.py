@@ -14,12 +14,12 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
                 PipelineRun,
                 func.row_number()
                 .over(
-                    partition_by=PipelineRun.run_id,
+                    partition_by=PipelineRun.id,
                     order_by=PipelineRun.created_at.desc(),
                 )
                 .label("rn"),
             )
-            .filter(PipelineRun.run_id.in_(pipeline_ids))
+            .filter(PipelineRun.id.in_(pipeline_ids))
             .subquery()
         )
 
@@ -29,7 +29,7 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
 
         runs = (await session.execute(latest_runs)).scalars().all()
 
-        pipeline_statuses = {str(run.run_id): run.status for run in runs}
+        pipeline_statuses = {str(run.id): run.status for run in runs}
 
         return pipeline_statuses
 

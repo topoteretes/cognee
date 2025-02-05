@@ -276,7 +276,7 @@ async def run_tasks(tasks: list[Task], dataset_id: UUID, data: list[Data], pipel
         async for _ in run_tasks_with_telemetry(tasks, data, pipeline_id):
             pass
 
-        yield await logPipelineRunComplete(pipeline_run.id, data)
+        yield await logPipelineRunComplete(pipeline_id, dataset_id, data)
     except Exception as e:
-        yield await logPipelineRunError(pipeline_run.id, tasks, data, e)
+        yield await logPipelineRunError(pipeline_id, dataset_id, data, e)
         raise e

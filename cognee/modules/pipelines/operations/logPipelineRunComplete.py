@@ -12,8 +12,8 @@ async def logPipelineRunComplete(pipeline_id: UUID, dataset_id: UUID, data: list
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
         run_info={
-            "dataset_id": dataset_id,
-            "data": [data.id for data in data],
+            "dataset_id": str(dataset_id),
+            "data": [str(data.id) for data in data] if isinstance(data, list) else data,
         },
     )
 

@@ -4,7 +4,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 
 
-async def logPipelineRunStart(pipeline_id: UUID, dataset_id: UUID, data: list[Data]):
+async def logPipelineRunStart(pipeline_id: str, dataset_id: UUID, data: list[Data]):
     pipeline_run_id = uuid4()
 
     pipeline_run = PipelineRun(
@@ -12,8 +12,8 @@ async def logPipelineRunStart(pipeline_id: UUID, dataset_id: UUID, data: list[Da
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
         run_info={
-            "dataset_id": dataset_id,
-            "data": [data.id for data in data],
+            "dataset_id": str(dataset_id),
+            "data": [str(data.id) for data in data] if isinstance(data, list) else data,
         },
     )
 

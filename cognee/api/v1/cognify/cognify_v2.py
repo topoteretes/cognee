@@ -73,8 +73,6 @@ async def cognify(
 async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
     data_documents: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
-    document_ids_str = [str(document.id) for document in data_documents]
-
     dataset_id = dataset.id
     dataset_name = generate_dataset_name(dataset.name)
 
@@ -89,15 +87,6 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
     ):
         logger.info("Dataset %s is already being processed.", dataset_name)
         return
-
-    await log_pipeline_status(
-        dataset_id,
-        PipelineRunStatus.DATASET_PROCESSING_STARTED,
-        {
-            "dataset_name": dataset_name,
-            "files": document_ids_str,
-        },
-    )
 
     try:
         if not isinstance(tasks, list):
@@ -117,27 +106,10 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
 
         send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
 
-        await log_pipeline_status(
-            dataset_id,
-            PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-            {
-                "dataset_name": dataset_name,
-                "files": document_ids_str,
-            },
-        )
-
         return pipeline_run_status
+
     except Exception as error:
         send_telemetry("cognee.cognify EXECUTION ERRORED", user.id)
-
-        await log_pipeline_status(
-            dataset_id,
-            PipelineRunStatus.DATASET_PROCESSING_ERRORED,
-            {
-                "dataset_name": dataset_name,
-                "files": document_ids_str,
-            },
-        )
         raise error
 
 
