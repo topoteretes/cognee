@@ -474,8 +474,8 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.1.23"
-source = { directory = "../" }
+version = "0.1.24"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
@@ -519,76 +519,15 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/71/b4/28d6bff5a3b3701feff9b1641611607baeadcd254926f86fa01d59f011ad/cognee-0.1.24.tar.gz", hash = "sha256:60cc6a49dfab683f39d1704002e151cfce553c09946a839fc06644014f52143d", size = 336442 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/58/289e3659fb71b0b1ae9cb71129fe2faf5b94e719b9eaee92569e7e1fe01f/cognee-0.1.24-py3-none-any.whl", hash = "sha256:95f1660ecb455eda2b6fb0ccf871fd3ef35b2217d413f90c474ae5a9bee1992f", size = 496144 },
+]
 
 [package.optional-dependencies]
 codegraph = [
     { name = "jedi" },
     { name = "parso" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiofiles", specifier = ">=23.2.1,<24.0.0" },
-    { name = "aiohttp", specifier = "==3.10.10" },
-    { name = "aiosqlite", specifier = ">=0.20.0,<0.21.0" },
-    { name = "alembic", specifier = ">=1.13.3,<2.0.0" },
-    { name = "anthropic", specifier = ">=0.26.1,<0.27.0" },
-    { name = "asyncpg", marker = "extra == 'postgres'", specifier = "==0.30.0" },
-    { name = "bokeh", specifier = ">=3.6.2,<4.0.0" },
-    { name = "boto3", specifier = ">=1.26.125,<2.0.0" },
-    { name = "botocore", marker = "extra == 'filesystem'", specifier = ">=1.35.54,<2.0.0" },
-    { name = "datasets", specifier = "==3.1.0" },
-    { name = "deepeval", marker = "extra == 'deepeval'", specifier = ">=2.0.1,<3.0.0" },
-    { name = "dlt", extras = ["sqlalchemy"], specifier = ">=1.4.1,<2.0.0" },
-    { name = "falkordb", marker = "extra == 'falkordb'", specifier = "==1.0.9" },
-    { name = "fastapi", specifier = "==0.115.7" },
-    { name = "fastapi-users", extras = ["sqlalchemy"], specifier = "==14.0.0" },
-    { name = "filetype", specifier = ">=1.2.0,<2.0.0" },
-    { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.8.4,<0.9.0" },
-    { name = "graphistry", specifier = ">=0.33.5,<0.34.0" },
-    { name = "groq", marker = "extra == 'groq'", specifier = "==0.8.0" },
-    { name = "gunicorn", specifier = ">=20.1.0,<21.0.0" },
-    { name = "httpx", specifier = "==0.27.0" },
-    { name = "instructor", specifier = "==1.7.2" },
-    { name = "jedi", marker = "extra == 'codegraph'", specifier = ">=0.19.2,<0.20.0" },
-    { name = "jinja2", specifier = ">=3.1.3,<4.0.0" },
-    { name = "lancedb", specifier = "==0.16.0" },
-    { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = "==0.3.2" },
-    { name = "langdetect", specifier = "==1.0.9" },
-    { name = "langfuse", specifier = ">=2.32.0,<3.0.0" },
-    { name = "langsmith", marker = "extra == 'langchain'", specifier = "==0.2.3" },
-    { name = "litellm", specifier = "==1.57.2" },
-    { name = "llama-index-core", marker = "extra == 'llama-index'", specifier = ">=0.12.11,<0.13.0" },
-    { name = "matplotlib", specifier = ">=3.8.3,<4.0.0" },
-    { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.20.0,<6.0.0" },
-    { name = "nest-asyncio", specifier = "==1.6.0" },
-    { name = "networkx", specifier = ">=3.2.1,<4.0.0" },
-    { name = "nltk", specifier = "==3.9.1" },
-    { name = "numpy", specifier = "==1.26.4" },
-    { name = "openai", specifier = "==1.59.4" },
-    { name = "pandas", specifier = "==2.2.3" },
-    { name = "parso", marker = "extra == 'codegraph'", specifier = ">=0.8.4,<0.9.0" },
-    { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4.0" },
-    { name = "posthog", marker = "extra == 'posthog'", specifier = ">=3.5.0,<4.0.0" },
-    { name = "pre-commit", specifier = ">=4.0.1,<5.0.0" },
-    { name = "psycopg2", marker = "extra == 'postgres'", specifier = ">=2.9.10,<3.0.0" },
-    { name = "pydantic", specifier = "==2.10.5" },
-    { name = "pydantic-settings", specifier = ">=2.2.1,<3.0.0" },
-    { name = "pymilvus", marker = "extra == 'milvus'", specifier = ">=2.5.0,<3.0.0" },
-    { name = "pypdf", specifier = ">=4.1.0,<5.0.0" },
-    { name = "python-dotenv", specifier = "==1.0.1" },
-    { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.9.0,<2.0.0" },
-    { name = "requests", specifier = "==2.32.3" },
-    { name = "scikit-learn", specifier = ">=1.5.0,<2.0.0" },
-    { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.9.0,<3.0.0" },
-    { name = "sqlalchemy", specifier = "==2.0.36" },
-    { name = "tenacity", specifier = ">=9.0.0,<10.0.0" },
-    { name = "tiktoken", specifier = "==0.7.0" },
-    { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=4.46.3,<5.0.0" },
-    { name = "typing-extensions", specifier = "==4.12.2" },
-    { name = "unstructured", extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "extra == 'docs'", specifier = ">=0.16.13,<0.17.0" },
-    { name = "uvicorn", specifier = "==0.34.0" },
-    { name = "weaviate-client", marker = "extra == 'weaviate'", specifier = "==4.9.6" },
 ]
 
 [[package]]
@@ -602,7 +541,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cognee", extras = ["codegraph"], directory = "../" },
+    { name = "cognee", extras = ["codegraph"] },
     { name = "mcp", specifier = "==1.1.3" },
 ]
 
