@@ -64,7 +64,8 @@ async def run_evals_on_instance_ids(paramset: dict):
 async def main():
     paramset = {
         "dataset": ["hotpotqa"],
-        "rag_option": ["no_rag", "cognee", "brute_force"],
+        "rag_option": ["cognee_25q1", "brute_force_25q1"],
+        # "rag_option": ["no_rag", "cognee", "brute_force"],
         "metric_names": ["F1", "EM", "Correctness"],
     }
 
@@ -72,7 +73,7 @@ async def main():
     with open(instance_ids_path) as f:
         instance_ids = json.load(f)
 
-    # instance_ids = instance_ids
+    instance_ids = instance_ids[:2]
 
     paramsets = [paramset.copy() | dict(hotpotqa_instance_ids=[id]) for id in instance_ids]
 
