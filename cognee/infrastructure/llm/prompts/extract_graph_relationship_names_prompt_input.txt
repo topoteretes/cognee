@@ -10,6 +10,6 @@ Analyze the following text to identify relationships between entities in the kno
 {{ previous_nodes }}
 
 **Relationships Identified in Previous Rounds:**
-{{ previous_relationships }}
+{{ previous_relationship_names }}
 
 Extract both explicit and implicit relationships between the nodes, building upon previous findings while ensuring completeness and consistency.
