@@ -3,26 +3,34 @@ import asyncio
 import json
 import os
 import signal
+
+from bokeh.io import output_file
+
 from evals.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from evals.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
 )
 from evals.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
+from evals.eval_framework.summarize import generate_metrics_dashboard
+from cognee.shared.utils import setup_logging
 
-logging.basicConfig(level=logging.INFO)
+
+setup_logging(logging.INFO)
 
 eval_params = {
     # Corpus builder params
-    "building_corpus_from_scratch": True,
-    "number_of_samples_in_corpus": 10,
-    "benchmark": "TwoWikiMultiHop",  # 'HotPotQA' or 'Dummy' or 'TwoWikiMultiHop'
+    "building_corpus_from_scratch": False,
+    "number_of_samples_in_corpus": 50,
+    "benchmark": "HotPotQA",  # 'HotPotQA' or 'Dummy' or 'TwoWikiMultiHop'
     # Question answering params
     "answering_questions": True,
-    "qa_engine": "cognee_graph_completion",  # 'cognee_completion (simple RAG)' or 'cognee_graph_completion'
+    "qa_engine": "cognee_completion",  # 'cognee_completion (simple RAG)' or 'cognee_graph_completion'
     # Evaluation params
     "evaluating_answers": True,
     "evaluation_engine": "DeepEval",
     "evaluation_metrics": ["correctness", "EM", "f1"],
+    # Visualization
+    "dashboard": True,
 }
 
 questions_file = "questions_output.json"
@@ -85,6 +93,11 @@ async def main():
 
         logging.info("Question answering end...")
 
+    if eval_params["dashboard"]:
+        generate_metrics_dashboard(
+            json_data=metrics_file, output_file="dashboard.html", benchmark=eval_params["benchmark"]
+        )
+
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
@@ -92,4 +105,5 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(main())
     finally:
+        print("Done")
         os.kill(os.getpid(), signal.SIGTERM)

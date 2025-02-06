@@ -41,7 +41,11 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
                 corpus_list.append(" ".join(sentences))
 
             question_answer_pairs.append(
-                {"question": dict["question"], "answer": dict["answer"], "level": dict["level"]}
+                {
+                    "question": dict["question"],
+                    "answer": dict["answer"].lower(),
+                    "level": dict["level"],
+                }
             )
 
         return corpus_list, question_answer_pairs

@@ -39,7 +39,11 @@ class TwoWikiMultihopAdapter(BaseBenchmarkAdapter):
                 corpus_list.append(" ".join(sentences))
 
             question_answer_pairs.append(
-                {"question": dict["question"], "answer": dict["answer"], "type": dict["type"]}
+                {
+                    "question": dict["question"],
+                    "answer": dict["answer"].lower(),
+                    "type": dict["type"],
+                }
             )
 
         return corpus_list, question_answer_pairs
