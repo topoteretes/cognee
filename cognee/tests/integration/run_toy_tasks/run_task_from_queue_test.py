@@ -27,8 +27,8 @@ async def pipeline(data_queue):
             Task(multiply_by_two),
         ],
         dataset_id=uuid4(),
-        data=str(data_queue),
-        pipeline_name="test_run_tasks_from_queue",
+        data=None,
+        pipeline_id="test_run_tasks_from_queue",
     )
 
     results = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]

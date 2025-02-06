@@ -2,6 +2,7 @@ import asyncio
 
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.Task import Task
+from uuid import uuid4
 
 
 async def run_and_check_tasks():
@@ -26,8 +27,9 @@ async def run_and_check_tasks():
             Task(multiply_by_two, task_config={"batch_size": 1}),
             Task(add_one_single),
         ],
-        10,
-        pipeline_name="test_run_tasks",
+        dataset_id=uuid4(),
+        data=10,
+        pipeline_id="test_run_tasks",
     )
 
     results = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
