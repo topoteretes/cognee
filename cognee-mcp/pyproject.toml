@@ -21,8 +21,5 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-[tool.uv.sources]
-cognee = { path = "../../cognee" }
-
 [project.scripts]
 cognee = "src:main"
