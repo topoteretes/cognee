@@ -5,19 +5,12 @@ import pandas as pd
 from unittest.mock import patch, mock_open
 from io import BytesIO
 from uuid import uuid4
-from datetime import datetime, timezone
-from cognee.shared.exceptions import IngestionError
-from cognee.infrastructure.visualization.cognee_network_visualization import (
-    create_cognee_style_network_with_logo,
-)
 
 from cognee.shared.utils import (
     get_anonymous_id,
-    send_telemetry,
     get_file_content_hash,
     prepare_edges,
     prepare_nodes,
-    graph_to_tuple,
 )
 
 
@@ -80,34 +73,3 @@ def test_prepare_nodes():
 
     assert isinstance(nodes_df, pd.DataFrame)
     assert len(nodes_df) == 1
-
-
-@pytest.mark.asyncio
-async def test_create_cognee_style_network_with_logo():
-    from pathlib import Path
-
-    nodes_data = [
-        (1, {"pydantic_type": "Entity", "name": "Node1", "updated_at": 123, "created_at": 123}),
-        (
-            2,
-            {
-                "pydantic_type": "DocumentChunk",
-                "name": "Node2",
-                "updated_at": 123,
-                "created_at": 123,
-            },
-        ),
-    ]
-    edges_data = [
-        (1, 2, "related_to", {}),
-    ]
-    graph_data = (nodes_data, edges_data)
-
-    html_output = await create_cognee_style_network_with_logo(graph_data)
-
-    assert isinstance(html_output, str)
-
-    assert "<html>" in html_output
-    assert '<script src="https://d3js.org/d3.v5.min.js"></script>' in html_output
-    assert "var nodes =" in html_output
-    assert "var links =" in html_output

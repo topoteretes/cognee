@@ -3,7 +3,7 @@ import json
 import os
 
 
-async def create_cognee_style_network_with_logo(graph_data):
+async def cognee_network_visualization(graph_data):
     nodes_data, edges_data = graph_data
 
     G = nx.DiGraph()
