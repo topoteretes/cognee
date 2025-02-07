@@ -36,15 +36,15 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         corpus_list = []
         question_answer_pairs = []
-        for dict in corpus_json:
-            for title, sentences in dict["context"]:
+        for item in corpus_json:
+            for title, sentences in item["context"]:
                 corpus_list.append(" ".join(sentences))
 
             question_answer_pairs.append(
                 {
-                    "question": dict["question"],
-                    "answer": dict["answer"].lower(),
-                    "level": dict["level"],
+                    "question": item["question"],
+                    "answer": item["answer"].lower(),
+                    "level": item["level"],
                 }
             )
 
