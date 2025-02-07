@@ -1,5 +1,4 @@
-import numpy as np
-
+import logging
 from typing import List, Dict, Union
 
 from cognee.exceptions import InvalidValueError
@@ -8,7 +7,8 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 import heapq
-import asyncio
+
+logger = logging.getLogger(__name__)
 
 
 class CogneeGraph(CogneeAbstractGraph):
@@ -40,7 +40,7 @@ class CogneeGraph(CogneeAbstractGraph):
             edge.node1.add_skeleton_edge(edge)
             edge.node2.add_skeleton_edge(edge)
         else:
-            print(f"Edge {edge} already exists in the graph.")
+            logger.debug(f"Edge {edge} already exists in the graph.")
 
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
