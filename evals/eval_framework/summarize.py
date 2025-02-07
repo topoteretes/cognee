@@ -4,8 +4,13 @@ import plotly.graph_objects as go
 
 
 def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmark=""):
-    with open(json_data, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(json_data, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Could not find the file: {json_data}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Error decoding JSON from {json_data}: {e}")
 
     metrics_data = defaultdict(list)
     metric_details = defaultdict(list)

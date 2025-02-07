@@ -1,10 +1,6 @@
 import logging
 import asyncio
 import json
-import os
-import signal
-
-from bokeh.io import output_file
 
 from evals.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from evals.eval_framework.answer_generation.answer_generation_executor import (
@@ -57,8 +53,13 @@ async def main():
     if eval_params["answering_questions"]:
         logging.info("Question answering started...")
 
-        with open(questions_file, "r", encoding="utf-8") as f:
-            questions = json.load(f)
+        try:
+            with open(questions_file, "r", encoding="utf-8") as f:
+                questions = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find the file: {questions_file}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error decoding JSON from {questions_file}: {e}")
 
         print(f"Loaded {len(questions)} questions from {questions_file}")
 
@@ -75,9 +76,13 @@ async def main():
     ################################ Step 3: Evaluation module
     if eval_params["evaluating_answers"]:
         logging.info("Evaluation started...")
-
-        with open(answers_file, "r", encoding="utf-8") as f:
-            answers = json.load(f)
+        try:
+            with open(answers_file, "r", encoding="utf-8") as f:
+                answers = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find the file: {answers_file}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error decoding JSON from {answers_file}: {e}")
 
         print(f"Loaded {len(answers)} questions from {answers_file}")
 
