@@ -336,7 +336,7 @@ class SQLAlchemyAdapter:
                         await connection.run_sync(metadata.reflect, schema=schema_name)
                         for table in metadata.sorted_tables:
                             drop_table_query = text(
-                                f"DROP TABLE IF EXISTS {schema_name}.\"{table.name}\" CASCADE"
+                                f'DROP TABLE IF EXISTS {schema_name}."{table.name}" CASCADE'
                             )
                             await connection.execute(drop_table_query)
                         metadata.clear()
