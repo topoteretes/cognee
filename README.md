@@ -12,7 +12,7 @@ We build for developers who need a reliable, production-ready data layer for AI 
 
 ## What is cognee?
 
-Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost. 
+Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
 
 Cognee merges graph and vector databases to uncover hidden relationships and new patterns in your data. You can automatically model, load and retrieve entities and objects representing your business domain and analyze their relationships, uncovering insights that neither vector stores nor graph stores alone can provide. Learn more about use-cases [here](https://docs.cognee.ai/use_cases)
 
@@ -170,7 +170,7 @@ async def main():
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
     search_results = await cognee.search(
-        SearchType.INSIGHTS, query_text=query_text
+        query_text=query_text, query_type=SearchType.INSIGHTS
     )
 
     print("Search results:")
