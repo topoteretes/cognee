@@ -106,4 +106,3 @@ if __name__ == "__main__":
         loop.run_until_complete(main())
     finally:
         print("Done")
-        os.kill(os.getpid(), signal.SIGTERM)
