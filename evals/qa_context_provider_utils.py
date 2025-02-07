@@ -5,6 +5,9 @@ from cognee.modules.retrieval.brute_force_triplet_search import brute_force_trip
 from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
 from functools import partial
 from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
+from cognee.api.v1.cognify.cognify_25q1 import get_25q1_tasks
+from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.tasks.Task import Task
 import logging
 
@@ -15,20 +18,22 @@ async def get_raw_context(instance: dict) -> str:
     return instance["context"]
 
 
-async def cognify_instance(
-    instance: dict, task_indices: list[int] = None, tasks: list[Task] = None
-):
+async def cognify_instance(instance: dict, task_indices: list[int] = None, task_getter=None):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     for title, sentences in instance["context"]:
-        await cognee.add("\n".join(sentences), dataset_name="QA")
-    all_cognify_tasks = await get_default_tasks()
-    if tasks:
-        selected_tasks = tasks
-    elif task_indices:
+        context_text = f"#{title}\n{' '.join(sentences)}\n---\n"
+        await cognee.add(context_text, dataset_name="QA")
+
+    if task_getter is None:
+        task_getter = get_default_tasks
+
+    all_cognify_tasks = await task_getter()
+    if task_indices:
         selected_tasks = [all_cognify_tasks[ind] for ind in task_indices]
     else:
         selected_tasks = all_cognify_tasks
+
     await cognee.cognify("QA", tasks=selected_tasks)
 
 
@@ -76,9 +81,9 @@ async def get_context_with_cognee(
     instance: dict,
     task_indices: list[int] = None,
     search_types: list[SearchType] = [SearchType.INSIGHTS, SearchType.SUMMARIES, SearchType.CHUNKS],
-    tasks: list[Task] = None,
+    task_getter=None,
 ) -> str:
-    await cognify_instance(instance, task_indices)
+    await cognify_instance(instance, task_indices=task_indices, task_getter=task_getter)
 
     search_results = []
     for search_type in search_types:
@@ -110,8 +115,8 @@ def create_cognee_context_getter(
     return partial(get_context_with_cognee, task_indices=task_indices, search_types=search_types)
 
 
-async def get_context_with_simple_rag(instance: dict, tasks: list[Task] = None) -> str:
-    await cognify_instance(instance, tasks=tasks)
+async def get_context_with_simple_rag(instance: dict, task_getter=None) -> str:
+    await cognify_instance(instance, task_getter=task_getter)
 
     vector_engine = get_vector_engine()
     found_chunks = await vector_engine.search("document_chunk_text", instance["question"], limit=5)
@@ -121,16 +126,26 @@ async def get_context_with_simple_rag(instance: dict, tasks: list[Task] = None) 
     return search_results_str
 
 
-async def get_context_with_brute_force_triplet_search(
-    instance: dict, tasks: list[Task] = None
-) -> str:
-    await cognify_instance(instance, tasks=tasks)
+async def get_context_with_brute_force_triplet_search(instance: dict, task_getter=None) -> str:
+    await cognify_instance(instance, task_getter=task_getter)
 
     found_triplets = await brute_force_triplet_search(instance["question"], top_k=5)
 
     search_results_str = retrieved_edges_to_string(found_triplets)
 
     return search_results_str
+
+
+async def get_cognee_25q1_context(instance):
+    return await get_context_with_cognee(instance, task_getter=get_25q1_tasks)
+
+
+async def get_simple_rag_25q1_context(instance):
+    return await get_context_with_simple_rag(instance, task_getter=get_25q1_tasks)
+
+
+async def get_brute_force_25q1_context(instance):
+    return await get_context_with_brute_force_triplet_search(instance, task_getter=get_25q1_tasks)
 
 
 valid_pipeline_slices = {
@@ -149,6 +164,9 @@ qa_context_providers = {
     "cognee": get_context_with_cognee,
     "simple_rag": get_context_with_simple_rag,
     "brute_force": get_context_with_brute_force_triplet_search,
+    "cognee_25q1": get_cognee_25q1_context,
+    "simple_rag_25q1": get_simple_rag_25q1_context,
+    "brute_force_25q1": get_brute_force_25q1_context,
 } | {
     name: create_cognee_context_getter(
         task_indices=value["slice"], search_types=value["search_types"]

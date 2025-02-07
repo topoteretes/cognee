@@ -11,6 +11,7 @@ from evals.qa_dataset_utils import load_hotpotqa_instances_by_ids
 from evals.eval_on_hotpot import get_answers_for_instances, calculate_eval_metrics
 from evals.qa_eval_utils import get_combinations
 from evals.qa_metrics_utils import get_metrics
+from evals.run_hotpotqa_evals_on_instance_ids import run_hotpotqa_evals_on_instance_ids
 
 
 app = modal.App("qa-eval")
@@ -31,33 +32,10 @@ image = (
 )
 
 
-@app.function(image=image, concurrency_limit=50, timeout=900)
-async def run_evals_on_instance_ids(paramset: dict):
-    """Runs evaluations using instance IDs from paramset, gets answers, and calculates evaluation metrics."""
-    if "hotpotqa_instance_ids" not in paramset:
-        raise ValueError("paramset must contain 'hotpotqa_instance_ids'.")
-
-    instances = load_hotpotqa_instances_by_ids(paramset["hotpotqa_instance_ids"])
-    combinations = get_combinations(paramset)
-    results = {}
-
-    for params in combinations:
-        rag_option = params["rag_option"]
-        metric_names = paramset["metric_names"]
-
-        answers = await get_answers_for_instances(
-            instances,
-            context_provider=qa_context_providers[rag_option],
-            answers_filename=None,
-            contexts_filename=None,
-            save_answers=False,
-        )
-
-        eval_metrics = get_metrics(metric_names)["deepeval_metrics"]
-        result_metrics = await calculate_eval_metrics(instances, answers, eval_metrics)
-        results[rag_option] = result_metrics | {"answers": answers}
-
-    return {"instance_ids": paramset["hotpotqa_instance_ids"], "results": results}
+@app.function(image=image, concurrency_limit=50, timeout=1800, retries=3)
+async def modal_run_hotpotqa_evals_on_instance_ids(paramset: dict):
+    """Wrapper function that calls run_hotpotqa_evals_on_instance_ids with Modal decorator"""
+    return await run_hotpotqa_evals_on_instance_ids(paramset)
 
 
 @app.local_entrypoint()
@@ -73,11 +51,11 @@ async def main():
     with open(instance_ids_path) as f:
         instance_ids = json.load(f)
 
-    instance_ids = instance_ids[:2]
+    # instance_ids = instance_ids[:2]
 
     paramsets = [paramset.copy() | dict(hotpotqa_instance_ids=[id]) for id in instance_ids]
 
-    tasks = [run_evals_on_instance_ids.remote.aio(p) for p in paramsets]
+    tasks = [modal_run_hotpotqa_evals_on_instance_ids.remote.aio(p) for p in paramsets]
 
     results = await asyncio.gather(*tasks)
 

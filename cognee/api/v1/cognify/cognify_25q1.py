@@ -3,9 +3,14 @@ from typing import Union
 
 from pydantic import BaseModel
 from cognee.shared.utils import setup_logging
+from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.tasks.summarization import summarize_text
+
 from cognee.tasks.documents import (
     check_permissions_on_documents,
     classify_documents,
@@ -20,7 +25,7 @@ from cognee.api.v1.cognify.cognify_v2 import cognify
 logger = logging.getLogger("cognify.25q1")
 
 
-async def get_25q1_tasks(user: User = None) -> list[Task]:
+async def get_25q1_tasks(user: User = None, summaries=True) -> list[Task]:
     """Get the task list for 25Q1 pipeline focusing on entity extraction."""
     if user is None:
         user = await get_default_user()
@@ -29,10 +34,20 @@ async def get_25q1_tasks(user: User = None) -> list[Task]:
         default_tasks = [
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
-            Task(extract_chunks_from_documents),
+            Task(extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()),
             Task(extract_graph_from_data_chunks, n_rounds=2, task_config={"batch_size": 10}),
-            # Task(add_data_points, only_root=False, task_config={"batch_size": 10}),
         ]
+        if summaries:
+            default_tasks.append(
+                Task(
+                    summarize_text,
+                    summarization_model=get_cognify_config().summarization_model,
+                    task_config={"batch_size": 10},
+                )
+            )
+        default_tasks.append(
+            Task(add_data_points, task_config={"batch_size": 10}),
+        )
     except Exception as error:
         logger.error("Failed to create 25Q1 tasks: %s", error)
         raise error
@@ -51,8 +66,11 @@ async def cognify_25q1(
 if __name__ == "__main__":
     import asyncio
     import cognee
+    from cognee.api.v1.search import SearchType
 
     async def main():
+        from cognee.infrastructure.databases.vector import get_vector_engine
+
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
@@ -66,6 +84,28 @@ if __name__ == "__main__":
 
         await cognee.add(text)
         await cognify_25q1()
+        search_results = await brute_force_triplet_search(
+            "Is Mathematics a part of CS?",
+        )
 
+        vector_engine = get_vector_engine()
+        search_results += await vector_engine.search(
+            "document_chunk_text", "Is Mathematics a part of CS?", limit=5
+        )
+        search_results += await cognee.search(
+            SearchType.INSIGHTS, query_text="Is Mathematics a part of CS?"
+        )
+        search_results += await cognee.search(
+            SearchType.SUMMARIES, query_text="Is Mathematics a part of CS?"
+        )
+        search_results += await cognee.search(
+            SearchType.CHUNKS, query_text="Is Mathematics a part of CS?"
+        )
+        return search_results
+
+    # asyncio.run(main())
     # setup_logging(logging.DEBUG)
-    asyncio.run(main())
+    triplets = asyncio.run(main())
+
+    for triplet in triplets:
+        print(triplet)
