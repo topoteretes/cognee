@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  run_dynamic_steps_example_test:
+  run_eval_framework_test:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
         example-location: ./evals/eval_framework/run_eval.py
