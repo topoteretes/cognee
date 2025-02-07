@@ -38,6 +38,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install jupyter
+          pip install llama-index-graph-rag-cognee==0.1.2
 
       - name: Execute Jupyter Notebook
         env:
