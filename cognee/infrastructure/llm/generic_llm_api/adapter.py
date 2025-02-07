@@ -23,7 +23,9 @@ class GenericAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_tokens = max_tokens
 
-        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON, api_key=api_key)
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode.JSON, api_key=api_key
+        )
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
