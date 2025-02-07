@@ -27,7 +27,7 @@ async def entry(text: str, query: str):
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(text)
     await cognee.cognify()
-    search_results = await cognee.search(SearchType.GRAPH_COMPLETION, query_text=query)
+    search_results = await cognee.search(query_type=SearchType.GRAPH_COMPLETION, query_text=query)
 
     return {
         "text": text,

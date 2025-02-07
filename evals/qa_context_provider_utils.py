@@ -76,7 +76,9 @@ async def get_context_with_cognee(
 
     search_results = []
     for search_type in search_types:
-        raw_search_results = await cognee.search(search_type, query_text=instance["question"])
+        raw_search_results = await cognee.search(
+            query_type=search_type, query_text=instance["question"]
+        )
 
         if search_type == SearchType.INSIGHTS:
             res_list = [_insight_to_string(edge) for edge in raw_search_results]
