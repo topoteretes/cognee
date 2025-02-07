@@ -84,10 +84,10 @@ async def brute_force_search(
 
     if collections is None:
         collections = [
-            "entity_name",
-            "text_summary_text",
-            "entity_type_name",
-            "document_chunk_text",
+            "Entity_name",
+            "TextSummary_text",
+            "EntityType_name",
+            "DocumentChunk_text",
         ]
 
     try:
