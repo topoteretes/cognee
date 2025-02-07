@@ -9,7 +9,7 @@ import asyncio
 from cognee.shared.utils import setup_logging
 
 
-async def visualize_graph(destination_file_path: str):
+async def visualize_graph(destination_file_path: str = None):
     graph_engine = await get_graph_engine()
     graph_data = await graph_engine.get_graph_data()
     logging.info(graph_data)

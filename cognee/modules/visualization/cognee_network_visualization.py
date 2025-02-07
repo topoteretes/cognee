@@ -9,7 +9,7 @@ from cognee.infrastructure.files.storage import LocalStorage
 logger = logging.getLogger(__name__)
 
 
-async def cognee_network_visualization(graph_data, destination_file_path: str):
+async def cognee_network_visualization(graph_data, destination_file_path: str = None):
     nodes_data, edges_data = graph_data
 
     G = nx.DiGraph()
