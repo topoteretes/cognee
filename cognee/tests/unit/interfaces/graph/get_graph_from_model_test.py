@@ -9,25 +9,25 @@ from cognee.modules.graph.utils import get_graph_from_model
 
 class Document(DataPoint):
     path: str
-    metadata = {"index_fields": []}
+    metadata: dict = {"index_fields": []}
 
 
 class DocumentChunk(DataPoint):
     part_of: Document
     text: str
     contains: List["Entity"] = None
-    metadata = {"index_fields": ["text"]}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class EntityType(DataPoint):
     name: str
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class Entity(DataPoint):
     name: str
     is_type: EntityType
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 DocumentChunk.model_rebuild()

@@ -62,7 +62,6 @@ async def get_graph_from_model(
         SimpleDataPointModel = copy_model(
             type(data_point),
             include_fields={
-                # "metadata": (dict, data_point.metadata),
                 "__tablename__": (str, data_point.__tablename__),
             },
             exclude_fields=list(excluded_properties),

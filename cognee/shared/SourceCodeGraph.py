@@ -11,7 +11,7 @@ class Variable(DataPoint):
     default_value: Optional[str] = None
     data_type: str
 
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class Operator(DataPoint):
@@ -19,7 +19,7 @@ class Operator(DataPoint):
     name: str
     description: str
     return_type: str
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class Class(DataPoint):
@@ -30,7 +30,7 @@ class Class(DataPoint):
     extended_from_class: Optional["Class"] = None
     has_methods: List["Function"]
 
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class ClassInstance(DataPoint):
@@ -41,7 +41,7 @@ class ClassInstance(DataPoint):
     instantiated_by: Union["Function"]
     instantiation_arguments: List[Variable]
 
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class Function(DataPoint):
@@ -52,7 +52,7 @@ class Function(DataPoint):
     return_type: str
     is_static: Optional[bool] = False
 
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class FunctionCall(DataPoint):
@@ -60,7 +60,7 @@ class FunctionCall(DataPoint):
     called_by: Union[Function, Literal["main"]]
     function_called: Function
     function_arguments: List[Any]
-    metadata = {"index_fields": []}
+    metadata: dict = {"index_fields": []}
 
 
 class Expression(DataPoint):
@@ -69,7 +69,7 @@ class Expression(DataPoint):
     description: str
     expression: str
     members: List[Union[Variable, Function, Operator, "Expression"]]
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class SourceCodeGraph(DataPoint):
@@ -88,7 +88,7 @@ class SourceCodeGraph(DataPoint):
             Expression,
         ]
     ]
-    metadata = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 Class.model_rebuild()
