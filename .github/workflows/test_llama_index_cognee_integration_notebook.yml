@@ -1,5 +1,14 @@
 name: test | llama index cognee integration notebook
 
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   RUNTIME__LOG_LEVEL: ERROR
 
