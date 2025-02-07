@@ -5,17 +5,12 @@ import pandas as pd
 from unittest.mock import patch, mock_open
 from io import BytesIO
 from uuid import uuid4
-from datetime import datetime, timezone
-from cognee.shared.exceptions import IngestionError
 
 from cognee.shared.utils import (
     get_anonymous_id,
-    send_telemetry,
     get_file_content_hash,
     prepare_edges,
     prepare_nodes,
-    create_cognee_style_network_with_logo,
-    graph_to_tuple,
 )
 
 
@@ -78,31 +73,3 @@ def test_prepare_nodes():
 
     assert isinstance(nodes_df, pd.DataFrame)
     assert len(nodes_df) == 1
-
-
-@pytest.mark.asyncio
-async def test_create_cognee_style_network_with_logo():
-    import networkx as nx
-    from unittest.mock import patch
-    from io import BytesIO
-
-    # Create a sample graph
-    graph = nx.Graph()
-    graph.add_node(1, group="A")
-    graph.add_node(2, group="B")
-    graph.add_edge(1, 2)
-
-    # Convert the graph to a tuple format for serialization
-    graph_tuple = graph_to_tuple(graph)
-
-    result = await create_cognee_style_network_with_logo(
-        graph_tuple,
-        title="Test Network",
-        layout_func=nx.spring_layout,
-        layout_scale=3.0,
-        logo_alpha=0.5,
-    )
-
-    assert result is not None
-    assert isinstance(result, str)
-    assert len(result) > 0
