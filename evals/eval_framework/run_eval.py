@@ -19,9 +19,9 @@ setup_logging(logging.INFO)
 
 eval_params = {
     # Corpus builder params
-    "building_corpus_from_scratch": False,
-    "number_of_samples_in_corpus": 50,
-    "benchmark": "HotPotQA",  # 'HotPotQA' or 'Dummy' or 'TwoWikiMultiHop'
+    "building_corpus_from_scratch": True,
+    "number_of_samples_in_corpus": 1,
+    "benchmark": "Dummy",  # 'HotPotQA' or 'Dummy' or 'TwoWikiMultiHop'
     # Question answering params
     "answering_questions": True,
     "qa_engine": "cognee_completion",  # 'cognee_completion (simple RAG)' or 'cognee_graph_completion'
