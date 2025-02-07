@@ -164,9 +164,11 @@ qa_context_providers = {
     "cognee": get_context_with_cognee,
     "simple_rag": get_context_with_simple_rag,
     "brute_force": get_context_with_brute_force_triplet_search,
-    "cognee_25q1": get_cognee_25q1_context,
-    "simple_rag_25q1": get_simple_rag_25q1_context,
-    "brute_force_25q1": get_brute_force_25q1_context,
+    "cognee_25q1": partial(get_context_with_cognee, task_getter=get_25q1_tasks),
+    "simple_rag_25q1": partial(get_context_with_simple_rag, task_getter=get_25q1_tasks),
+    "brute_force_25q1": partial(
+        get_context_with_brute_force_triplet_search, task_getter=get_25q1_tasks
+    ),
 } | {
     name: create_cognee_context_getter(
         task_indices=value["slice"], search_types=value["search_types"]

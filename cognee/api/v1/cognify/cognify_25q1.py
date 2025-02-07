@@ -77,7 +77,6 @@ if __name__ == "__main__":
         text = """
         Natural language processing (NLP) is an interdisciplinary
         subfield of computer science and information retrieval.
-        And Mathematics? It's a science, for sure. Some would say that CS is part of it, some wouldn't.
         """
 
         # text = """Alice read a book in the park."""

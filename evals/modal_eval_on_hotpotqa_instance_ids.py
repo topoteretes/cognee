@@ -40,10 +40,13 @@ async def modal_run_hotpotqa_evals_on_instance_ids(paramset: dict):
 
 @app.local_entrypoint()
 async def main():
+    import datetime
+
     paramset = {
         "dataset": ["hotpotqa"],
-        "rag_option": ["cognee_25q1", "brute_force_25q1"],
+        # "rag_option": ["cognee_25q1", "brute_force_25q1"],
         # "rag_option": ["no_rag", "cognee", "brute_force"],
+        "rag_option": ["no_rag", "cognee", "brute_force", "cognee_25q1", "brute_force_25q1"],
         "metric_names": ["F1", "EM", "Correctness"],
     }
 
@@ -64,8 +67,11 @@ async def main():
     for result in results:
         print(result)
 
-    # dump results to json
-    with open("./evals/results.json", "w") as results_file:
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    rag_options = "_".join(paramset["rag_option"])
+    results_filename = f"./evals/results_{timestamp}_{rag_options}.json"
+
+    with open(results_filename, "w") as results_file:
         json.dump(results, results_file, indent=2)
 
     os.kill(os.getpid(), signal.SIGTERM)

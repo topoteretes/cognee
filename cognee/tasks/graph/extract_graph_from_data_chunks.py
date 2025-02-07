@@ -13,7 +13,7 @@ from cognee.tasks.graph.extract.extract_edge_triplets import extract_edge_triple
 
 
 async def extract_graph_from_data_chunks(
-    data_chunks: List[DocumentChunk], n_rounds: int = 2
+    data_chunks: List[DocumentChunk], n_rounds: int = 1
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks in multiple steps."""
     chunk_nodes = await asyncio.gather(
