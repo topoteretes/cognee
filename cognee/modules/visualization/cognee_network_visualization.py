@@ -21,13 +21,19 @@ async def cognee_network_visualization(graph_data):
         node_info["id"] = str(node_id)
         node_info["color"] = color_map.get(node_info.get("pydantic_type", "default"), "#D3D3D3")
         node_info["name"] = node_info.get("name", str(node_id))
+
         try:
             del node_info[
                 "updated_at"
             ]  #:TODO: We should decide what properties to show on the nodes and edges, we dont necessarily need all.
+        except KeyError:
+            pass
+
+        try:
             del node_info["created_at"]
         except KeyError:
             pass
+
         nodes_list.append(node_info)
         G.add_node(node_id, **node_info)
 
