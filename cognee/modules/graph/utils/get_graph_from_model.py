@@ -17,12 +17,14 @@ async def get_graph_from_model(
     edges = []
     visited_properties = visited_properties or {}
 
-    data_point_properties = {}
+    data_point_properties = {
+        "type": type(data_point).__name__,
+    }
     excluded_properties = set()
     properties_to_visit = set()
 
     for field_name, field_value in data_point:
-        if field_name == "_metadata":
+        if field_name == "metadata":
             continue
 
         if isinstance(field_value, DataPoint):
@@ -60,7 +62,7 @@ async def get_graph_from_model(
         SimpleDataPointModel = copy_model(
             type(data_point),
             include_fields={
-                "_metadata": (dict, data_point._metadata),
+                # "metadata": (dict, data_point.metadata),
                 "__tablename__": (str, data_point.__tablename__),
             },
             exclude_fields=list(excluded_properties),

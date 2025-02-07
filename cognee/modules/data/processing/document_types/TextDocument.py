@@ -1,5 +1,3 @@
-from typing import Optional
-
 from .ChunkerMapping import ChunkerConfig
 from .Document import Document
 

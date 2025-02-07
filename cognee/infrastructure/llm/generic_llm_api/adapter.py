@@ -1,7 +1,6 @@
 """Adapter for Generic API LLM provider API"""
 
-import asyncio
-from typing import List, Type
+from typing import Type
 
 from pydantic import BaseModel
 import instructor
@@ -24,13 +23,7 @@ class GenericAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_tokens = max_tokens
 
-        llm_config = get_llm_config()
-
-        if llm_config.llm_provider == "ollama":
-            self.aclient = instructor.from_litellm(litellm.acompletion)
-
-        else:
-            self.aclient = instructor.from_litellm(litellm.acompletion)
+        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON, api_key=api_key)
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]

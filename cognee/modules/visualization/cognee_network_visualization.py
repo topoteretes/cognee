@@ -1,9 +1,15 @@
+import logging
 import networkx as nx
 import json
 import os
 
+from cognee.infrastructure.files.storage import LocalStorage
 
-async def cognee_network_visualization(graph_data):
+
+logger = logging.getLogger(__name__)
+
+
+async def cognee_network_visualization(graph_data, destination_file_path: str):
     nodes_data, edges_data = graph_data
 
     G = nx.DiGraph()
@@ -19,7 +25,7 @@ async def cognee_network_visualization(graph_data):
     for node_id, node_info in nodes_data:
         node_info = node_info.copy()
         node_info["id"] = str(node_id)
-        node_info["color"] = color_map.get(node_info.get("pydantic_type", "default"), "#D3D3D3")
+        node_info["color"] = color_map.get(node_info.get("type", "default"), "#D3D3D3")
         node_info["name"] = node_info.get("name", str(node_id))
         del node_info[
             "updated_at"
@@ -169,12 +175,15 @@ async def cognee_network_visualization(graph_data):
     html_content = html_template.replace("{nodes}", json.dumps(nodes_list))
     html_content = html_content.replace("{links}", json.dumps(links_list))
 
-    home_dir = os.path.expanduser("~")
-    output_file = os.path.join(home_dir, "graph_visualization.html")
+    if not destination_file_path:
+        home_dir = os.path.expanduser("~")
+        destination_file_path = os.path.join(home_dir, "graph_visualization.html")
 
-    with open(output_file, "w") as f:
+    LocalStorage.ensure_directory_exists(os.path.dirname(destination_file_path))
+
+    with open(destination_file_path, "w") as f:
         f.write(html_content)
 
-    print(f"Graph visualization saved as {output_file}")
+    logger.info(f"Graph visualization saved as {destination_file_path}")
 
     return html_content

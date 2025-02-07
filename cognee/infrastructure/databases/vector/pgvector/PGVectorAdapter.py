@@ -22,7 +22,7 @@ from ..utils import normalize_distances
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):

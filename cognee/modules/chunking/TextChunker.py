@@ -53,7 +53,7 @@ class TextChunker:
                             chunk_index=self.chunk_index,
                             cut_type=chunk_data["cut_type"],
                             contains=[],
-                            _metadata={
+                            metadata={
                                 "index_fields": ["text"],
                             },
                         )
@@ -73,7 +73,7 @@ class TextChunker:
                                 chunk_index=self.chunk_index,
                                 cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                                 contains=[],
-                                _metadata={
+                                metadata={
                                     "index_fields": ["text"],
                                 },
                             )
@@ -97,7 +97,7 @@ class TextChunker:
                     chunk_index=self.chunk_index,
                     cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                     contains=[],
-                    _metadata={"index_fields": ["text"]},
+                    metadata={"index_fields": ["text"]},
                 )
             except Exception as e:
                 logger.error(e)
