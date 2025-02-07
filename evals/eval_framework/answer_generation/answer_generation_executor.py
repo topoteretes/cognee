@@ -26,10 +26,9 @@ class AnswerGeneratorExecutor:
         for instance in questions:
             query_text = instance["question"]
             correct_answer = instance["answer"]
-            # Perform async search for the question
+
             search_results = await cognee.search(search_type, query_text=query_text)
 
-            # Store the results along with the question
             answers.append(
                 {
                     "question": query_text,

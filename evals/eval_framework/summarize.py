@@ -15,7 +15,6 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
     metrics_data = defaultdict(list)
     metric_details = defaultdict(list)
 
-    # Include the score in the details if a reason is provided.
     for entry in data:
         for metric, values in entry["metrics"].items():
             score = values["score"]
@@ -27,13 +26,12 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
                         "answer": entry["answer"],
                         "golden_answer": entry["golden_answer"],
                         "reason": values["reason"],
-                        "score": score,  # Added metric score here
+                        "score": score,
                     }
                 )
 
     figures = []
 
-    # Create histogram figures for each metric
     for metric, scores in metrics_data.items():
         fig = go.Figure()
         fig.add_trace(go.Histogram(x=scores, name=metric, nbinsx=10, marker_color="#1f77b4"))
@@ -47,7 +45,6 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
         )
         figures.append(fig.to_html(full_html=False))
 
-    # Create a bar chart for average scores by metric
     avg_scores = {metric: sum(scores) / len(scores) for metric, scores in metrics_data.items()}
     fig = go.Figure()
     fig.add_trace(
@@ -61,7 +58,6 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
     )
     figures.append(fig.to_html(full_html=False))
 
-    # Generate detailed explanations including metric score
     details_html = []
     for metric, details in metric_details.items():
         details_html.append(f"<h3>{metric} Details</h3>")
@@ -82,7 +78,7 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
                 f"<td>{item['answer']}</td>"
                 f"<td>{item['golden_answer']}</td>"
                 f"<td>{item['reason']}</td>"
-                f"<td>{item['score']}</td>"  # Add score column value here
+                f"<td>{item['score']}</td>"
                 f"</tr>"
             )
         details_html.append("</table>")
