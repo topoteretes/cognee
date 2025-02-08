@@ -61,7 +61,7 @@ class SQLAlchemyAdapter:
             await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
             await connection.execute(
                 text(
-                    f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"
+                    f'CREATE TABLE IF NOT EXISTS {schema_name}."{table_name}" ({", ".join(fields_query_parts)});'
                 )
             )
             await connection.close()
@@ -71,10 +71,10 @@ class SQLAlchemyAdapter:
             if self.engine.dialect.name == "sqlite":
                 # SQLite doesn’t support schema namespaces and the CASCADE keyword.
                 # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
-                await connection.execute(text(f"DROP TABLE IF EXISTS {table_name};"))
+                await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}";'))
             else:
                 await connection.execute(
-                    text(f"DROP TABLE IF EXISTS {schema_name}.{table_name} CASCADE;")
+                    text(f'DROP TABLE IF EXISTS {schema_name}."{table_name}" CASCADE;')
                 )
 
     async def insert_data(
@@ -221,7 +221,7 @@ class SQLAlchemyAdapter:
                 # Load table information from schema into MetaData
                 await connection.run_sync(metadata.reflect, schema=schema_name)
                 # Define the full table name
-                full_table_name = f"{schema_name}.{table_name}"
+                full_table_name = f'{schema_name}."{table_name}"'
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
@@ -252,7 +252,7 @@ class SQLAlchemyAdapter:
 
     async def get_data(self, table_name: str, filters: dict = None):
         async with self.engine.begin() as connection:
-            query = f"SELECT * FROM {table_name}"
+            query = f'SELECT * FROM "{table_name}"'
             if filters:
                 filter_conditions = " AND ".join(
                     [

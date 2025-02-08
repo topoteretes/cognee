@@ -15,7 +15,11 @@ async def visualize_graph(destination_file_path: str = None):
     logging.info(graph_data)
 
     graph = await cognee_network_visualization(graph_data, destination_file_path)
-    logging.info("The HTML file has been stored on your home directory! Navigate there with cd ~")
+
+    if destination_file_path:
+        logging.info(f"The HTML file has been stored at path: {destination_file_path}")
+    else:
+        logging.info("The HTML file has been stored on your home directory! Navigate there with cd ~")
 
     return graph
 
