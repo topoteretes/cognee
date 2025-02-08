@@ -80,6 +80,7 @@ nltk = "3.9.1"
 google-generativeai = {version = "^0.8.4", optional = true}
 parso = {version = "^0.8.4", optional = true}
 jedi =  {version = "^0.19.2", optional = true}
+mistral-common = {version = "^1.5.2", optional = true}
 
 
 [tool.poetry.extras]
@@ -93,6 +94,7 @@ langchain = ["langsmith", "langchain_text_splitters"]
 llama-index = ["llama-index-core"]
 gemini = ["google-generativeai"]
 huggingface = ["transformers"]
+mistral = ["mistral-common"]
 deepeval = ["deepeval"]
 posthog = ["posthog"]
 falkordb = ["falkordb"]

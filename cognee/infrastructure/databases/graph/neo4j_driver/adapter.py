@@ -1,9 +1,10 @@
 """Neo4j Adapter for Graph Database"""
 
+import json
 import logging
 import asyncio
 from textwrap import dedent
-from typing import Optional, Any, List, Dict, Union
+from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 from uuid import UUID
 from neo4j import AsyncSession
@@ -11,6 +12,7 @@ from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.modules.storage.utils import JSONEncoder
 
 logger = logging.getLogger("Neo4jAdapter")
 
@@ -432,6 +434,10 @@ class Neo4jAdapter(GraphDBInterface):
         for property_key, property_value in properties.items():
             if isinstance(property_value, UUID):
                 serialized_properties[property_key] = str(property_value)
+                continue
+
+            if isinstance(property_value, dict):
+                serialized_properties[property_key] = json.dumps(property_value, cls=JSONEncoder)
                 continue
 
             serialized_properties[property_key] = property_value

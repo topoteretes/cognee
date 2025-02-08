@@ -123,7 +123,7 @@ async def main():
     await test_getting_of_documents(dataset_name_1)
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("entity_name", "Quantum computer"))[0]
+    random_node = (await vector_engine.search("Entity_name", "Quantum computer"))[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
@@ -142,6 +142,15 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
+    graph_completion = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text=random_node_name,
+        datasets=[dataset_name_2],
+    )
+    assert len(graph_completion) != 0, "Completion result is empty."
+    print("Completion result is:")
+    print(graph_completion)
+
     search_results = await cognee.search(
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
@@ -151,7 +160,7 @@ async def main():
         print(f"{result}\n")
 
     history = await cognee.get_search_history()
-    assert len(history) == 6, "Search history is not correct."
+    assert len(history) == 8, "Search history is not correct."
 
     results = await brute_force_triplet_search("What is a quantum computer?")
     assert len(results) > 0
