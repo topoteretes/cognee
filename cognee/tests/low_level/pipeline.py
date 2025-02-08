@@ -12,12 +12,15 @@ from cognee.shared.utils import render_graph
 class Person(DataPoint):
     name: str
 
+
 class Department(DataPoint):
     name: str
     employees: list[Person]
 
+
 class CompanyType(DataPoint):
     name: str = "Company"
+
 
 class Company(DataPoint):
     name: str

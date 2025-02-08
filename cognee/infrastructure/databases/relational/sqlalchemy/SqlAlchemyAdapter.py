@@ -221,7 +221,7 @@ class SQLAlchemyAdapter:
                 # Load table information from schema into MetaData
                 await connection.run_sync(metadata.reflect, schema=schema_name)
                 # Define the full table name
-                full_table_name = f'{schema_name}."{table_name}"'
+                full_table_name = f"{schema_name}.{table_name}"
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
