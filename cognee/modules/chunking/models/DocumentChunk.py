@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
@@ -16,4 +16,4 @@ class DocumentChunk(DataPoint):
     pydantic_type: str = "DocumentChunk"
     contains: List[Entity] = None
 
-    _metadata: dict = {"index_fields": ["text"], "type": "DocumentChunk"}
+    metadata: dict = {"index_fields": ["text"]}

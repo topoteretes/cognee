@@ -404,15 +404,17 @@ class NetworkXAdapter(GraphDBInterface):
             return edge_density
 
         def _get_diameter(graph):
-            if nx.is_strongly_connected(graph):
-                return nx.diameter(graph.to_undirected())
-            else:
+            try:
+                return nx.diameter(nx.DiGraph(graph.to_undirected()))
+            except Exception as e:
+                logger.warning("Failed to calculate diameter: %s", e)
                 return None
 
         def _get_avg_shortest_path_length(graph):
-            if nx.is_strongly_connected(graph):
-                return nx.average_shortest_path_length(graph)
-            else:
+            try:
+                return nx.average_shortest_path_length(nx.DiGraph(graph.to_undirected()))
+            except Exception as e:
+                logger.warning("Failed to calculate average shortest path length: %s", e)
                 return None
 
         def _get_avg_clustering(graph):
