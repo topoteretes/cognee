@@ -43,5 +43,5 @@ class MistralTokenizer(TokenizerInterface):
         return len(self.extract_tokens(text))
 
     def decode_single_token(self, encoding: int):
-        # Gemini tokenizer doesn't have the option to decode tokens
+        # Mistral tokenizer doesn't have the option to decode tokens
         raise NotImplementedError
