@@ -7,11 +7,11 @@ from cognee.modules.visualization.cognee_network_visualization import (
 @pytest.mark.asyncio
 async def test_create_cognee_style_network_with_logo():
     nodes_data = [
-        (1, {"pydantic_type": "Entity", "name": "Node1", "updated_at": 123, "created_at": 123}),
+        (1, {"type": "Entity", "name": "Node1", "updated_at": 123, "created_at": 123}),
         (
             2,
             {
-                "pydantic_type": "DocumentChunk",
+                "type": "DocumentChunk",
                 "name": "Node2",
                 "updated_at": 123,
                 "created_at": 123,
