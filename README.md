@@ -21,7 +21,7 @@ Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qn
 
 If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community.
 
-Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? It is designed to help you get started with easy setup and example pipelines. Check it out!
+Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? Check it out!
 
 <div align="center">
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
