@@ -51,10 +51,10 @@ async def index_graph_edges():
         data_point_type = type(edge)
 
         for field_name in edge.metadata["index_fields"]:
-            index_name = f"{data_point_type.__tablename__}.{field_name}"
+            index_name = f"{data_point_type.__name__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__tablename__, field_name)
+                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
                 created_indexes[index_name] = True
 
             if index_name not in index_points:

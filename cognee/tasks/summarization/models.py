@@ -6,7 +6,6 @@ from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
 
 
 class TextSummary(DataPoint):
-    __tablename__ = "text_summary"
     text: str
     made_from: DocumentChunk
 
@@ -14,9 +13,7 @@ class TextSummary(DataPoint):
 
 
 class CodeSummary(DataPoint):
-    __tablename__ = "code_summary"
     text: str
     summarizes: Union[CodeFile, CodePart, SourceCodeChunk]
-    pydantic_type: str = "CodeSummary"
 
     metadata: dict = {"index_fields": ["text"]}

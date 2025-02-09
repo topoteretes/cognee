@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Optional
-from uuid import UUID
 
+from cognee.infrastructure.engine.utils import parse_id
 from qdrant_client import AsyncQdrantClient, models
 
 from cognee.exceptions import InvalidValueError
@@ -170,10 +170,10 @@ class QDrantAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result.id),
+                id=parse_id(result.id),
                 payload={
                     **result.payload,
-                    "id": UUID(result.id),
+                    "id": parse_id(result.id),
                 },
                 score=1 - result.score,
             )
@@ -209,10 +209,10 @@ class QDrantAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result.id),
+                id=parse_id(result.id),
                 payload={
                     **result.payload,
-                    "id": UUID(result.id),
+                    "id": parse_id(result.id),
                 },
                 score=1 - result.score,
             )

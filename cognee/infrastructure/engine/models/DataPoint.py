@@ -15,7 +15,6 @@ class MetaData(TypedDict):
 
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
-    __tablename__ = "data_point"
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(
         default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
