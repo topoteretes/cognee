@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from typing import List, Optional
-from uuid import UUID
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -188,7 +188,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(str(result.uuid)),
+                id=parse_id(str(result.uuid)),
                 payload=result.properties,
                 score=1 - float(result.metadata.score),
             )
@@ -221,7 +221,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(str(result.uuid)),
+                id=parse_id(str(result.uuid)),
                 payload=result.properties,
                 score=1 - float(result.metadata.score),
             )
