@@ -15,11 +15,11 @@ async def query_chunks(query: str) -> list[dict]:
     Notes:
         - The function uses the `search` method of the vector engine to find matches.
         - Limits the results to the top 5 matching chunks to balance performance and relevance.
-        - Ensure that the vector database is properly initialized and contains the "document_chunk_text" collection.
+        - Ensure that the vector database is properly initialized and contains the "DocumentChunk_text" collection.
     """
     vector_engine = get_vector_engine()
 
-    found_chunks = await vector_engine.search("document_chunk_text", query, limit=5)
+    found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=5)
 
     chunks = [result.payload for result in found_chunks]
 

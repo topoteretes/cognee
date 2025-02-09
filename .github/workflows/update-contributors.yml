@@ -1,0 +1,37 @@
+name: community | contributors leaderboard
+
+on:
+  schedule:
+    - cron: "0 0 * * 1" # Runs every Monday
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  update-contributors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Generate Contributor List
+        run: |
+          echo "## 💫 Contributors" > CONTRIBUTORS.md
+          echo "" >> CONTRIBUTORS.md
+          echo "Thanks to our amazing contributors! 💖" >> CONTRIBUTORS.md
+          echo "" >> CONTRIBUTORS.md
+          echo '<a href="https://github.com/topoteretes/cognee/graphs/contributors">' >> CONTRIBUTORS.md
+          echo '  <img src="https://contrib.rocks/image?repo=topoteretes/cognee" />' >> CONTRIBUTORS.md
+          echo '</a>' >> CONTRIBUTORS.md
+          echo "" >> CONTRIBUTORS.md
+          echo "## 🏆 Top Contributors" >> CONTRIBUTORS.md
+          echo "" >> CONTRIBUTORS.md
+          echo "| Rank | Contributor | Contributions |" >> CONTRIBUTORS.md
+          echo "|------|------------|---------------|" >> CONTRIBUTORS.md
+          git shortlog -sne | sort -rn | head -10 | awk '{print "| "NR" | ["$2"](https://github.com/"$2") | "$1" Commits |"}' >> CONTRIBUTORS.md
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git add CONTRIBUTORS.md
+          git commit -m "Update contributors list"
+          git push
