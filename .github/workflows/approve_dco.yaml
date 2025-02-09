@@ -1,4 +1,4 @@
-name: DCO Check
+name: community | DCO Check
 
 on:
   pull_request:
