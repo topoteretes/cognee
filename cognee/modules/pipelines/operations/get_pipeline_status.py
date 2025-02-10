@@ -1,5 +1,5 @@
 from uuid import UUID
-from sqlalchemy import func, select, cast, Text
+from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import PipelineRun
@@ -7,21 +7,25 @@ from ..models import PipelineRun
 
 async def get_pipeline_status(pipeline_ids: list[UUID]):
     db_engine = get_relational_engine()
+    dialect = db_engine.engine.dialect.name
 
     async with db_engine.get_async_session() as session:
+        if dialect == "sqlite":
+            dataset_id_column = func.json_extract(PipelineRun.run_info, "$.dataset_id")
+        else:
+            dataset_id_column = PipelineRun.run_info.op("->>")("dataset_id")
+
         query = (
             select(
                 PipelineRun,
                 func.row_number()
                 .over(
-                    partition_by=PipelineRun.run_info.op("->>")("dataset_id"),
+                    partition_by=dataset_id_column,
                     order_by=PipelineRun.created_at.desc(),
                 )
                 .label("rn"),
             )
-            .filter(
-                PipelineRun.run_info.op("->>")("dataset_id").in_([str(id) for id in pipeline_ids])
-            )
+            .filter(dataset_id_column.in_([str(id) for id in pipeline_ids]))
             .subquery()
         )
 
@@ -30,16 +34,6 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
 
         runs = (await session.execute(latest_runs)).scalars().all()
 
-        pipeline_statuses = {str(run.id): run.status for run in runs}
+        pipeline_statuses = {run.run_info["dataset_id"]: run.status for run in runs}
 
         return pipeline_statuses
-
-        # f"""SELECT data_id, status
-        # FROM (
-        #     SELECT data_id, status, ROW_NUMBER() OVER (PARTITION BY data_id ORDER BY created_at DESC) as rn
-        #     FROM cognee.cognee.task_runs
-        #     WHERE data_id IN ({formatted_data_ids})
-        # ) t
-        # WHERE rn = 1;"""
-
-    # return { dataset["data_id"]: dataset["status"] for dataset in datasets_statuses }

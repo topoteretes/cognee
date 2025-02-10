@@ -81,8 +81,8 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
     task_status = await get_pipeline_status([dataset_id])
 
     if (
-        dataset_id in task_status
-        and task_status[dataset_id] == PipelineRunStatus.DATASET_PROCESSING_STARTED
+        str(dataset_id) in task_status
+        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
     ):
         logger.info("Dataset %s is already being processed.", dataset_name)
         return
@@ -104,7 +104,6 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
         await index_graph_edges()
 
         send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
-
         return pipeline_run_status
 
     except Exception as error:
