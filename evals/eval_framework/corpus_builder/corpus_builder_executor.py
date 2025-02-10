@@ -2,28 +2,22 @@ import cognee
 import logging
 from typing import Optional
 
-from evals.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
-from evals.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
-from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
+from evals.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.shared.utils import setup_logging
 
 
 class CorpusBuilderExecutor:
-    benchmark_adapter_options = {
-        "Dummy": DummyAdapter,
-        "HotPotQA": HotpotQAAdapter,
-        "TwoWikiMultiHop": TwoWikiMultihopAdapter,
-    }
-
     benchmark_adapter = None
     raw_corpus = None
     questions = None
 
     async def build_corpus(self, limit: Optional[int] = None, benchmark="Dummy"):
-        if benchmark not in self.benchmark_adapter_options:
+        try:
+            adapter_enum = BenchmarkAdapter(benchmark)
+        except ValueError:
             raise ValueError(f"Unsupported benchmark: {benchmark}")
 
-        self.adapter = self.benchmark_adapter_options[benchmark]()
+        self.adapter = adapter_enum.adapter_class()
         self.raw_corpus, self.questions = self.adapter.load_corpus(limit=limit)
 
         await self.run_cognee()
