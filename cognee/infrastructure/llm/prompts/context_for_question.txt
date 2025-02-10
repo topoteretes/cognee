@@ -1,2 +1,2 @@
-The question is: `{{ question }}`
-And here is the context: `{{ context }}`
+__context__: `{{ context }}`
+__question__: `{{ question }}`

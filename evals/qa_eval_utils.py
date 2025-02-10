@@ -23,8 +23,16 @@ paramset_json_schema = {
             "type": "array",
             "items": {"type": "string"},
         },
+        "hotpotqa_instance_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
     },
-    "required": ["dataset", "rag_option", "num_samples", "metric_names"],
+    "required": ["dataset", "rag_option", "metric_names"],  # Base required keys
+    "oneOf": [
+        {"required": ["num_samples"], "not": {"required": ["hotpotqa_instance_ids"]}},
+        {"required": ["hotpotqa_instance_ids"], "not": {"required": ["num_samples"]}},
+    ],
     "additionalProperties": False,
 }
 
@@ -52,14 +60,21 @@ def save_results_as_image(results, out_path):
             save_table_as_image(df, image_path)
 
 
-def get_combinations(parameters):
+def get_combinations(parameters, include_hotpotqa_ids=False):
+    """Generates parameter combinations with optional instance IDs."""
     try:
         validate(instance=parameters, schema=paramset_json_schema)
     except ValidationError as e:
         raise ValidationError(f"Invalid parameter set: {e.message}")
 
-    # params_for_combos = {k: v for k, v in parameters.items() if k != "metric_name"}
-    params_for_combos = {k: v for k, v in parameters.items()}
+    hotpotqa_ids = parameters.get("hotpotqa_instance_ids", None)
+    params_for_combos = {k: v for k, v in parameters.items() if k != "hotpotqa_instance_ids"}
+
     keys, values = zip(*params_for_combos.items())
     combinations = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
+
+    if include_hotpotqa_ids and hotpotqa_ids is not None:
+        for combo in combinations:
+            combo["hotpotqa_instance_ids"] = hotpotqa_ids
+
     return combinations

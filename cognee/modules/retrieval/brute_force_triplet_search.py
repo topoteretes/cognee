@@ -50,7 +50,7 @@ def format_triplets(edges):
 
 
 async def brute_force_triplet_search(
-    query: str, user: User = None, top_k=5, collections=None
+    query: str, user: User = None, top_k=15, collections=None
 ) -> list:
     if user is None:
         user = await get_default_user()

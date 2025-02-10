@@ -18,21 +18,30 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-async def answer_qa_instance(instance, context_provider, contexts_filename):
-    if os.path.exists(contexts_filename):
+async def get_context(instance, context_provider, contexts_filename=None):
+    """Retrieves or generates context for a QA instance, optionally using a cache."""
+    preloaded_contexts = {}
+
+    if contexts_filename and os.path.exists(contexts_filename):
         with open(contexts_filename, "r") as file:
             preloaded_contexts = json.load(file)
-    else:
-        preloaded_contexts = {}
 
     if instance["_id"] in preloaded_contexts:
-        context = preloaded_contexts[instance["_id"]]
-    else:
-        context = await context_provider(instance)
-        preloaded_contexts[instance["_id"]] = context
+        return preloaded_contexts[instance["_id"]]
 
-    with open(contexts_filename, "w") as file:
-        json.dump(preloaded_contexts, file)
+    context = await context_provider(instance)
+    preloaded_contexts[instance["_id"]] = context
+
+    if contexts_filename:
+        with open(contexts_filename, "w") as file:
+            json.dump(preloaded_contexts, file)
+
+    return context
+
+
+async def answer_qa_instance(instance, context_provider, contexts_filename=None):
+    """Answers a QA instance using a given context provider, optionally caching contexts."""
+    context = await get_context(instance, context_provider, contexts_filename)
 
     args = {
         "question": instance["question"],
@@ -66,14 +75,15 @@ async def deepeval_answers(instances, answers, eval_metrics):
     return eval_results
 
 
-async def deepeval_on_instances(
-    instances, context_provider, eval_metrics, answers_filename, contexts_filename
+async def get_answers_for_instances(
+    instances, context_provider, answers_filename=None, contexts_filename=None, save_answers=False
 ):
-    if os.path.exists(answers_filename):
+    """Loads or generates answers for instances and optionally saves them."""
+    preloaded_answers = {}
+
+    if answers_filename and os.path.exists(answers_filename):
         with open(answers_filename, "r") as file:
             preloaded_answers = json.load(file)
-    else:
-        preloaded_answers = {}
 
     answers = []
     for instance in tqdm(instances, desc="Getting answers"):
@@ -84,20 +94,41 @@ async def deepeval_on_instances(
             preloaded_answers[instance["_id"]] = answer
         answers.append(answer)
 
-    with open(answers_filename, "w") as file:
-        json.dump(preloaded_answers, file)
+    if save_answers and answers_filename:
+        with open(answers_filename, "w") as file:
+            json.dump(preloaded_answers, file)
 
+    return answers
+
+
+async def calculate_eval_metrics(instances, answers, eval_metrics):
+    """Evaluates answers and returns a dictionary of metric scores lists."""
     eval_results = await deepeval_answers(instances, answers, eval_metrics)
+
     score_lists_dict = {}
     for instance_result in eval_results.test_results:
         for metric_result in instance_result.metrics_data:
-            if metric_result.name not in score_lists_dict:
-                score_lists_dict[metric_result.name] = []
-            score_lists_dict[metric_result.name].append(metric_result.score)
+            score_lists_dict.setdefault(metric_result.name, []).append(metric_result.score)
+
+    return score_lists_dict  # Returning raw lists of scores
+
+
+async def deepeval_on_instances(
+    instances,
+    context_provider,
+    eval_metrics,
+    answers_filename=None,
+    contexts_filename=None,
+    save_answers=False,
+):
+    """Orchestrates answer generation and evaluation, including averaging of scores."""
+    answers = await get_answers_for_instances(
+        instances, context_provider, answers_filename, contexts_filename, save_answers
+    )
+    score_lists_dict = await calculate_eval_metrics(instances, answers, eval_metrics)
 
     avg_scores = {
-        metric_name: statistics.mean(scorelist)
-        for metric_name, scorelist in score_lists_dict.items()
+        metric_name: statistics.mean(scores) for metric_name, scores in score_lists_dict.items()
     }
 
     return avg_scores
@@ -117,9 +148,10 @@ async def eval_on_QA_dataset(
     random.seed(43)
     instances = dataset if not num_samples else random.sample(dataset, num_samples)
 
-    contexts_filename = out_path / Path(
-        f"contexts_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
-    )
+    # contexts_filename = out_path / Path(
+    #     f"contexts_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
+    # )
+    contexts_filename = None
     if "promptfoo_metrics" in eval_metrics:
         promptfoo_results = await eval_metrics["promptfoo_metrics"].measure(
             instances, context_provider, contexts_filename
@@ -127,9 +159,10 @@ async def eval_on_QA_dataset(
     else:
         promptfoo_results = {}
 
-    answers_filename = out_path / Path(
-        f"answers_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
-    )
+    # answers_filename = out_path / Path(
+    #     f"answers_{dataset_name_or_filename.split('.')[0]}_{context_provider_name}.json"
+    # )
+    answers_filename = None
     deepeval_results = await deepeval_on_instances(
         instances,
         context_provider,
