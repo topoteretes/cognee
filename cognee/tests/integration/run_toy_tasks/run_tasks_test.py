@@ -1,8 +1,8 @@
 import asyncio
 
-from cognee.modules.pipelines.operations.run_tasks import run_tasks_with_telemetry
+from cognee.modules.pipelines.operations.run_tasks import run_tasks_base
 from cognee.modules.pipelines.tasks.Task import Task
-from uuid import uuid4
+from cognee.modules.users.methods import get_default_user
 
 
 async def run_and_check_tasks():
@@ -20,7 +20,8 @@ async def run_and_check_tasks():
     async def add_one_single(num):
         yield num + 1
 
-    pipeline = run_tasks_with_telemetry(
+    user = await get_default_user()
+    pipeline = run_tasks_base(
         [
             Task(number_generator),
             Task(add_one, task_config={"batch_size": 5}),
@@ -28,7 +29,7 @@ async def run_and_check_tasks():
             Task(add_one_single),
         ],
         data=10,
-        pipeline_name="test_run_tasks",
+        user=user,
     )
 
     results = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23]

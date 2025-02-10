@@ -1,10 +1,9 @@
 import asyncio
 from queue import Queue
 
-from cognee.modules.pipelines.operations.run_tasks import run_tasks_with_telemetry
+from cognee.modules.pipelines.operations.run_tasks import run_tasks_base
 from cognee.modules.pipelines.tasks.Task import Task
-from uuid import uuid4
-from cognee.modules.pipelines.models import PipelineRun
+from cognee.modules.users.methods import get_default_user
 
 
 async def pipeline(data_queue):
@@ -21,14 +20,15 @@ async def pipeline(data_queue):
     async def multiply_by_two(num):
         yield num * 2
 
-    tasks_run = run_tasks_with_telemetry(
+    user = await get_default_user()
+    tasks_run = run_tasks_base(
         [
             Task(queue_consumer),
             Task(add_one),
             Task(multiply_by_two),
         ],
         data=None,
-        pipeline_name="test_run_tasks_from_queue",
+        user=user,
     )
 
     results = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
