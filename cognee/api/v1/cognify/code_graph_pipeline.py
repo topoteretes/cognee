@@ -69,9 +69,19 @@ async def run_code_graph_pipeline(repo_path, include_docs=True):
             ),
         ]
 
+    pipeline_run_status = None
     if include_docs:
-        async for result in run_tasks(non_code_tasks, repo_path):
-            yield result
+        non_code_pipeline_run = run_tasks(non_code_tasks, None, repo_path, "cognify_pipeline")
+        async for run_status in non_code_pipeline_run:
+            pipeline_run_status = run_status
 
-    async for result in run_tasks(tasks, repo_path, "cognify_code_pipeline"):
-        yield result
+    from cognee.modules.data.methods import get_datasets
+
+    existing_datasets = await get_datasets(user.id)
+    code_pipeline_run = run_tasks(
+        tasks, existing_datasets[0].id, repo_path, "cognify_code_pipeline"
+    )
+    async for run_status in code_pipeline_run:
+        pipeline_run_status = run_status
+
+    return pipeline_run_status
