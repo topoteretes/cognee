@@ -1,6 +1,6 @@
 from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
-
+from evals.eval_framework.eval_config import EvalConfig
 from evals.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from evals.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
 from evals.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
@@ -46,7 +46,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
         return GEval(
             name="Correctness",
             criteria="Determine whether the actual output is factually correct based on the expected output.",
-            model="gpt-4o-mini",
+            model=EvalConfig().to_dict()["deepeval_model"],
             evaluation_steps=[
                 "Check whether the facts in 'actual output' contradicts any facts in 'expected output'",
                 "You should also heavily penalize omission of detail",

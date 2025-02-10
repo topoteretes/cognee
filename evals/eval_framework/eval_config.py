@@ -19,6 +19,7 @@ class EvalConfig(BaseSettings):
     evaluating_answers: bool = True
     evaluation_engine: str = "DeepEval"
     evaluation_metrics: List[str] = ["correctness", "EM", "f1"]
+    deepeval_model: str = "gpt-4o-mini"
 
     # Visualization
     dashboard: bool = True
@@ -46,6 +47,7 @@ class EvalConfig(BaseSettings):
             "answers_path": self.answers_path,
             "metrics_path": self.metrics_path,
             "dashboard_path": self.dashboard_path,
+            "deepeval_model": self.deepeval_model,
         }
 
 
