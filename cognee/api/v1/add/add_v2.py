@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
+from uuid import uuid5, NAMESPACE_OID
 
 
 async def add(
@@ -37,7 +38,8 @@ async def add(
 
     tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user)]
 
-    pipeline = run_tasks(tasks=tasks, dataset_id=None, data=data, pipeline_id="add_pipeline")
+    dataset_id = uuid5(NAMESPACE_OID, dataset_name)
+    pipeline = run_tasks(tasks=tasks, dataset_id=dataset_id, data=data, pipeline_id="add_pipeline")
 
     async for result in pipeline:
         print(result)
