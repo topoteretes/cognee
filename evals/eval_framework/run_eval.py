@@ -1,7 +1,7 @@
 import logging
 import asyncio
-import json
 from cognee.shared.utils import setup_logging
+from evals.eval_framework.eval_config import EvalConfig
 
 from evals.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 from evals.eval_framework.answer_generation.run_question_answering_module import (
@@ -13,36 +13,23 @@ from evals.eval_framework.evaluation.run_evaluation_module import run_evaluation
 setup_logging(logging.INFO)
 
 # Define parameters and file paths.
-eval_params = {
-    # Corpus builder params
-    "building_corpus_from_scratch": True,
-    "number_of_samples_in_corpus": 1,
-    "benchmark": "Dummy",  # Options: 'HotPotQA', 'Dummy', 'TwoWikiMultiHop'
-    # Question answering params
-    "answering_questions": True,
-    "qa_engine": "cognee_completion",  # Options: 'cognee_completion' or 'cognee_graph_completion'
-    # Evaluation params
-    "evaluating_answers": True,
-    "evaluation_engine": "DeepEval",
-    "evaluation_metrics": ["correctness", "EM", "f1"],
-    # Visualization
-    "dashboard": True,
-}
+eval_params = EvalConfig().to_dict()
 
 questions_file = "questions_output.json"
 answers_file = "answers_output.json"
 metrics_file = "metrics_output.json"
+dashboard_path = "dashboard.html"
 
 
 async def main():
     # Corpus builder
-    await run_corpus_builder(eval_params, questions_file)
+    await run_corpus_builder(eval_params)
 
     # Question answering
-    await run_question_answering(eval_params, questions_file, answers_file)
+    await run_question_answering(eval_params)
 
     # Metrics calculation + dashboard
-    await run_evaluation(eval_params, answers_file, metrics_file)
+    await run_evaluation(eval_params)
 
 
 if __name__ == "__main__":
