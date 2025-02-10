@@ -3,7 +3,7 @@ import json
 import logging
 from uuid import UUID
 
-from cognee.modules.data.models import Data
+from typing import Any
 from cognee.modules.pipelines.operations import (
     logPipelineRunStart,
     logPipelineRunComplete,
@@ -268,7 +268,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
         raise error
 
 
-async def run_tasks(tasks: list[Task], dataset_id: UUID, data: list[Data], pipeline_id: str):
+async def run_tasks(tasks: list[Task], dataset_id: UUID, data: Any, pipeline_id: str):
     pipeline_run = await logPipelineRunStart(pipeline_id, dataset_id, data)
 
     yield pipeline_run
