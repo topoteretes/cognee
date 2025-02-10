@@ -58,7 +58,7 @@ async def cognify_25q1(
     datasets: Union[str, list[str]] = None,
     user: User = None,
 ):
-    """Run the 25Q1 version of cognify focusing on entity extraction."""
+    """Run the 25Q1 version of cognify focusing on multi-step graph extraction."""
     tasks = await get_25q1_tasks(user)
     return await cognify(tasks=tasks)
 
@@ -66,11 +66,8 @@ async def cognify_25q1(
 if __name__ == "__main__":
     import asyncio
     import cognee
-    from cognee.api.v1.search import SearchType
 
     async def main():
-        from cognee.infrastructure.databases.vector import get_vector_engine
-
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
@@ -79,32 +76,7 @@ if __name__ == "__main__":
         subfield of computer science and information retrieval.
         """
 
-        # text = """Alice read a book in the park."""
-
         await cognee.add(text)
         await cognify_25q1()
-        search_results = await brute_force_triplet_search(
-            "Is Mathematics a part of CS?",
-        )
 
-        vector_engine = get_vector_engine()
-        search_results += await vector_engine.search(
-            "document_chunk_text", "Is Mathematics a part of CS?", limit=5
-        )
-        search_results += await cognee.search(
-            SearchType.INSIGHTS, query_text="Is Mathematics a part of CS?"
-        )
-        search_results += await cognee.search(
-            SearchType.SUMMARIES, query_text="Is Mathematics a part of CS?"
-        )
-        search_results += await cognee.search(
-            SearchType.CHUNKS, query_text="Is Mathematics a part of CS?"
-        )
-        return search_results
-
-    # asyncio.run(main())
-    # setup_logging(logging.DEBUG)
-    triplets = asyncio.run(main())
-
-    for triplet in triplets:
-        print(triplet)
+    asyncio.run(main())
