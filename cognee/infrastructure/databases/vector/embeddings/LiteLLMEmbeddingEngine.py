@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import Em
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 litellm.set_verbose = False
@@ -126,6 +127,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             tokenizer = TikTokenTokenizer(model=model, max_tokens=self.max_tokens)
         elif "gemini" in self.provider.lower():
             tokenizer = GeminiTokenizer(model=model, max_tokens=self.max_tokens)
+        elif "mistral" in self.provider.lower():
+            tokenizer = MistralTokenizer(model=model, max_tokens=self.max_tokens)
         else:
             tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
 

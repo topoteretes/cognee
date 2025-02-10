@@ -1,4 +1,4 @@
-name: ruff lint
+name: lint | ruff lint
 on: [ pull_request ]
 
 jobs:

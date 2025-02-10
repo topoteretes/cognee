@@ -23,7 +23,7 @@ async def query_completion(query: str) -> list:
     """
     vector_engine = get_vector_engine()
 
-    found_chunks = await vector_engine.search("document_chunk_text", query, limit=1)
+    found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=1)
 
     if len(found_chunks) == 0:
         raise NoRelevantDataFound

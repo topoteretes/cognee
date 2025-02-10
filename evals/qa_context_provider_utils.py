@@ -110,7 +110,7 @@ async def get_context_with_simple_rag(instance: dict) -> str:
     await cognify_instance(instance)
 
     vector_engine = get_vector_engine()
-    found_chunks = await vector_engine.search("document_chunk_text", instance["question"], limit=5)
+    found_chunks = await vector_engine.search("DocumentChunk_text", instance["question"], limit=5)
 
     search_results_str = "\n".join([context_item.payload["text"] for context_item in found_chunks])
 
