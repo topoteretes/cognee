@@ -61,7 +61,7 @@ class SQLAlchemyAdapter:
             await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
             await connection.execute(
                 text(
-                    f"CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} ({', '.join(fields_query_parts)});"
+                    f'CREATE TABLE IF NOT EXISTS {schema_name}."{table_name}" ({", ".join(fields_query_parts)});'
                 )
             )
             await connection.close()
@@ -71,10 +71,10 @@ class SQLAlchemyAdapter:
             if self.engine.dialect.name == "sqlite":
                 # SQLite doesn’t support schema namespaces and the CASCADE keyword.
                 # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
-                await connection.execute(text(f"DROP TABLE IF EXISTS {table_name};"))
+                await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}";'))
             else:
                 await connection.execute(
-                    text(f"DROP TABLE IF EXISTS {schema_name}.{table_name} CASCADE;")
+                    text(f'DROP TABLE IF EXISTS {schema_name}."{table_name}" CASCADE;')
                 )
 
     async def insert_data(
@@ -252,7 +252,7 @@ class SQLAlchemyAdapter:
 
     async def get_data(self, table_name: str, filters: dict = None):
         async with self.engine.begin() as connection:
-            query = f"SELECT * FROM {table_name}"
+            query = f'SELECT * FROM "{table_name}"'
             if filters:
                 filter_conditions = " AND ".join(
                     [
@@ -336,7 +336,7 @@ class SQLAlchemyAdapter:
                         await connection.run_sync(metadata.reflect, schema=schema_name)
                         for table in metadata.sorted_tables:
                             drop_table_query = text(
-                                f"DROP TABLE IF EXISTS {schema_name}.{table.name} CASCADE"
+                                f'DROP TABLE IF EXISTS {schema_name}."{table.name}" CASCADE'
                             )
                             await connection.execute(drop_table_query)
                         metadata.clear()

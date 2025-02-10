@@ -36,7 +36,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
         data_point_type = type(graphiti_node)
 
-        for field_name in graphiti_node._metadata["index_fields"]:
+        for field_name in graphiti_node.metadata["index_fields"]:
             index_name = f"{data_point_type.__tablename__}.{field_name}"
 
             if index_name not in created_indexes:
@@ -48,7 +48,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
             if getattr(graphiti_node, field_name, None) is not None:
                 indexed_data_point = graphiti_node.model_copy()
-                indexed_data_point._metadata["index_fields"] = [field_name]
+                indexed_data_point.metadata["index_fields"] = [field_name]
                 index_points[index_name].append(indexed_data_point)
 
     for index_name, indexable_points in index_points.items():
@@ -65,7 +65,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
         edge = EdgeType(relationship_name=text, number_of_edges=count)
         data_point_type = type(edge)
 
-        for field_name in edge._metadata["index_fields"]:
+        for field_name in edge.metadata["index_fields"]:
             index_name = f"{data_point_type.__tablename__}.{field_name}"
 
             if index_name not in created_indexes:
@@ -76,7 +76,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
                 index_points[index_name] = []
 
             indexed_data_point = edge.model_copy()
-            indexed_data_point._metadata["index_fields"] = [field_name]
+            indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
     for index_name, indexable_points in index_points.items():

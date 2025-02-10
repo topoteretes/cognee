@@ -87,7 +87,9 @@ async def get_context_with_cognee(
 
     search_results = []
     for search_type in search_types:
-        raw_search_results = await cognee.search(search_type, query_text=instance["question"])
+        raw_search_results = await cognee.search(
+            query_type=search_type, query_text=instance["question"]
+        )
 
         if search_type == SearchType.INSIGHTS:
             res_list = [_insight_to_string(edge) for edge in raw_search_results]
@@ -119,7 +121,7 @@ async def get_context_with_simple_rag(instance: dict, task_getter=None) -> str:
     await cognify_instance(instance, task_getter=task_getter)
 
     vector_engine = get_vector_engine()
-    found_chunks = await vector_engine.search("document_chunk_text", instance["question"], limit=5)
+    found_chunks = await vector_engine.search("DocumentChunk_text", instance["question"], limit=5)
 
     search_results_str = "\n".join([context_item.payload["text"] for context_item in found_chunks])
 

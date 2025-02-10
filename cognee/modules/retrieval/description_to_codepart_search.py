@@ -101,7 +101,6 @@ async def code_description_to_code_part(
                 "text",
                 "file_path",
                 "source_code",
-                "pydantic_type",
             ],
             edge_properties_to_project=["relationship_name"],
         )
@@ -117,13 +116,13 @@ async def code_description_to_code_part(
                 continue
 
             for code_file in node_to_search_from.get_skeleton_neighbours():
-                if code_file.get_attribute("pydantic_type") == "SourceCodeChunk":
+                if code_file.get_attribute("type") == "SourceCodeChunk":
                     for code_file_edge in code_file.get_skeleton_edges():
                         if code_file_edge.get_attribute("relationship_name") == "code_chunk_of":
                             code_pieces_to_return.add(code_file_edge.get_destination_node())
-                elif code_file.get_attribute("pydantic_type") == "CodePart":
+                elif code_file.get_attribute("type") == "CodePart":
                     code_pieces_to_return.add(code_file)
-                elif code_file.get_attribute("pydantic_type") == "CodeFile":
+                elif code_file.get_attribute("type") == "CodeFile":
                     for code_file_edge in code_file.get_skeleton_edges():
                         if code_file_edge.get_attribute("relationship_name") == "contains":
                             code_pieces_to_return.add(code_file_edge.get_destination_node())
