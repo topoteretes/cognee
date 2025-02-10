@@ -368,11 +368,8 @@ def setup_logging(log_level=logging.INFO):
     root_logger.setLevel(log_level)
 
 
-
 def start_visualization_server(
-        host="0.0.0.0",
-        port=8001,
-        handler_class=http.server.SimpleHTTPRequestHandler
+    host="0.0.0.0", port=8001, handler_class=http.server.SimpleHTTPRequestHandler
 ):
     """
     Spin up a simple HTTP server in a background thread to serve files.
