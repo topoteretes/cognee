@@ -10,7 +10,9 @@ import graphistry
 import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import http.server
+import socketserver
+from threading import Thread
 import logging
 import sys
 
@@ -364,3 +366,44 @@ def setup_logging(log_level=logging.INFO):
 
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(log_level)
+
+
+
+def start_visualization_server(
+        host="0.0.0.0",
+        port=8001,
+        handler_class=http.server.SimpleHTTPRequestHandler
+):
+    """
+    Spin up a simple HTTP server in a background thread to serve files.
+    This is especially handy for quick demos or visualization purposes.
+
+    Returns a shutdown() function that can be called to stop the server.
+
+    :param host: Host/IP to bind to. Defaults to '0.0.0.0'.
+    :param port: Port to listen on. Defaults to 8001.
+    :param handler_class: A handler class, defaults to SimpleHTTPRequestHandler.
+    :return: A no-argument function `shutdown` which, when called, stops the server.
+    """
+    # Create the server
+    server = socketserver.TCPServer((host, port), handler_class)
+
+    def _serve_forever():
+        print(f"Visualization server running at: http://{host}:{port}")
+        server.serve_forever()
+
+    # Start the server in a background thread
+    thread = Thread(target=_serve_forever, daemon=True)
+    thread.start()
+
+    def shutdown():
+        """
+        Shuts down the server and blocks until the thread is joined.
+        """
+        server.shutdown()  # Signals the serve_forever() loop to stop
+        server.server_close()  # Frees up the socket
+        thread.join()
+        print(f"Visualization server on port {port} has been shut down.")
+
+    # Return only the shutdown function (the server runs in the background)
+    return shutdown
