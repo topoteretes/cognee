@@ -10,8 +10,6 @@ import graphistry
 import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
-import tiktoken
-import time
 
 import logging
 import sys
@@ -100,15 +98,6 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
-
-    # tiktoken.get_encoding("cl100k_base")
-    encoding = tiktoken.encoding_for_model(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
-
-
 def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
     h = hashlib.md5()
 
@@ -132,34 +121,6 @@ def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
         return h.hexdigest()
     except IOError as e:
         raise IngestionError(message=f"Failed to load data from {file}: {e}")
-
-
-def trim_text_to_max_tokens(text: str, max_tokens: int, encoding_name: str) -> str:
-    """
-    Trims the text so that the number of tokens does not exceed max_tokens.
-
-    Args:
-    text (str): Original text string to be trimmed.
-    max_tokens (int): Maximum number of tokens allowed.
-    encoding_name (str): The name of the token encoding to use.
-
-    Returns:
-    str: Trimmed version of text or original text if under the limit.
-    """
-    # First check the number of tokens
-    num_tokens = num_tokens_from_string(text, encoding_name)
-
-    # If the number of tokens is within the limit, return the text as is
-    if num_tokens <= max_tokens:
-        return text
-
-    # If the number exceeds the limit, trim the text
-    # This is a simple trim, it may cut words in half; consider using word boundaries for a cleaner cut
-    encoded_text = tiktoken.get_encoding(encoding_name).encode(text)
-    trimmed_encoded_text = encoded_text[:max_tokens]
-    # Decoding the trimmed text
-    trimmed_text = tiktoken.get_encoding(encoding_name).decode(trimmed_encoded_text)
-    return trimmed_text
 
 
 def generate_color_palette(unique_layers):
@@ -202,6 +163,7 @@ def prepare_nodes(graph, include_size=False):
             continue
 
         node_data = {
+            **node_info,
             "id": str(node),
             "name": node_info["name"] if "name" in node_info else str(node),
         }
@@ -221,7 +183,7 @@ def prepare_nodes(graph, include_size=False):
 
 
 async def render_graph(
-    graph, include_nodes=False, include_color=False, include_size=False, include_labels=False
+    graph=None, include_nodes=True, include_color=False, include_size=False, include_labels=True
 ):
     await register_graphistry()
 
@@ -375,86 +337,6 @@ def style_and_render_graph(p, G, layout_positions, node_attribute, node_colors, 
     return graph_renderer
 
 
-async def create_cognee_style_network_with_logo(
-    G,
-    output_filename="cognee_network_with_logo.html",
-    title="Cognee-Style Network",
-    label="group",
-    layout_func=nx.spring_layout,
-    layout_scale=3.0,
-    logo_alpha=0.1,
-    bokeh_object=False,
-):
-    """
-    Create a Cognee-inspired network visualization with an embedded logo.
-    """
-    from bokeh.plotting import figure, from_networkx
-    from bokeh.models import Circle, MultiLine, HoverTool, ColumnDataSource, Range1d
-    from bokeh.plotting import output_file, show
-
-    from bokeh.embed import file_html
-    from bokeh.resources import CDN
-    from bokeh.io import export_png
-
-    logging.info("Converting graph to serializable format...")
-    G = await convert_to_serializable_graph(G)
-
-    logging.info("Generating layout positions...")
-    layout_positions = generate_layout_positions(G, layout_func, layout_scale)
-
-    logging.info("Assigning node colors...")
-    palette = ["#6510F4", "#0DFF00", "#FFFFFF"]
-    node_colors, color_map = assign_node_colors(G, label, palette)
-
-    logging.info("Calculating centrality...")
-    centrality = nx.degree_centrality(G)
-
-    logging.info("Preparing Bokeh output...")
-    output_file(output_filename)
-    p = figure(
-        title=title,
-        tools="pan,wheel_zoom,save,reset,hover",
-        active_scroll="wheel_zoom",
-        width=1200,
-        height=900,
-        background_fill_color="#F4F4F4",
-        x_range=Range1d(-layout_scale, layout_scale),
-        y_range=Range1d(-layout_scale, layout_scale),
-    )
-    p.toolbar.logo = None
-    p.axis.visible = False
-    p.grid.visible = False
-
-    logging.info("Embedding logo into visualization...")
-    embed_logo(p, layout_scale, logo_alpha, "bottom_right")
-    embed_logo(p, layout_scale, logo_alpha, "top_left")
-
-    logging.info("Styling and rendering graph...")
-    style_and_render_graph(p, G, layout_positions, label, node_colors, centrality)
-
-    logging.info("Adding hover tool...")
-    hover_tool = HoverTool(
-        tooltips=[
-            ("Node", "@index"),
-            (label.capitalize(), f"@{label}"),
-            ("Centrality", "@radius{0.00}"),
-        ],
-    )
-    p.add_tools(hover_tool)
-
-    logging.info(f"Saving visualization to {output_filename}...")
-    html_content = file_html(p, CDN, title)
-
-    home_dir = os.path.expanduser("~")
-
-    # Construct the final output file path
-    output_filepath = os.path.join(home_dir, output_filename)
-    with open(output_filepath, "w") as f:
-        f.write(html_content)
-
-    return html_content
-
-
 def graph_to_tuple(graph):
     """
     Converts a networkx graph to a tuple of (nodes, edges).
@@ -482,68 +364,3 @@ def setup_logging(log_level=logging.INFO):
 
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(log_level)
-
-
-# ---------------- Example Usage ----------------
-if __name__ == "__main__":
-    import networkx as nx
-
-    # Create a sample graph
-    nodes = [
-        (1, {"group": "A"}),
-        (2, {"group": "A"}),
-        (3, {"group": "B"}),
-        (4, {"group": "B"}),
-        (5, {"group": "C"}),
-    ]
-    edges = [(1, 2), (2, 3), (3, 4), (4, 5), (5, 1)]
-
-    # Create a NetworkX graph
-    G = nx.Graph()
-    G.add_nodes_from(nodes)
-    G.add_edges_from(edges)
-
-    G = graph_to_tuple(G)
-
-    import asyncio
-
-    output_html = asyncio.run(
-        create_cognee_style_network_with_logo(
-            G,
-            output_filename="example_network.html",
-            title="Example Cognee Network",
-            label="group",  # Attribute to use for coloring nodes
-            layout_func=nx.spring_layout,  # Layout function
-            layout_scale=3.0,  # Scale for the layout
-            logo_alpha=0.2,
-        )
-    )
-
-    # Call the function
-    # output_html = await create_cognee_style_network_with_logo(
-    #     G=G,
-    #     output_filename="example_network.html",
-    #     title="Example Cognee Network",
-    #     node_attribute="group",  # Attribute to use for coloring nodes
-    #     layout_func=nx.spring_layout,  # Layout function
-    #     layout_scale=3.0,  # Scale for the layout
-    #     logo_alpha=0.2,  # Transparency of the logo
-    # )
-
-    # Print the output filename
-    print("Network visualization saved as example_network.html")
-
-#     # Create a random geometric graph
-#     G = nx.random_geometric_graph(50, 0.3)
-#     # Assign random group attributes for coloring
-#     for i, node in enumerate(G.nodes()):
-#         G.nodes[node]["group"] = f"Group {i % 3 + 1}"
-#
-#     create_cognee_graph(
-#         G,
-#         output_filename="cognee_style_network_with_logo.html",
-#         title="Cognee-Graph Network",
-#         node_attribute="group",
-#         layout_func=nx.spring_layout,
-#         layout_scale=3.0,  # Replace with your logo file path
-#     )

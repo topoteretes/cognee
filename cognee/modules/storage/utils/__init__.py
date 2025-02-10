@@ -36,7 +36,7 @@ def get_own_properties(data_point: DataPoint):
 
     for field_name, field_value in data_point:
         if (
-            field_name == "_metadata"
+            field_name == "metadata"
             or isinstance(field_value, dict)
             or isinstance(field_value, DataPoint)
             or (isinstance(field_value, list) and isinstance(field_value[0], DataPoint))

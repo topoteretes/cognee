@@ -23,6 +23,8 @@ class OpenAIAdapter(LLMInterface):
     api_key: str
     api_version: str
 
+    MAX_RETRIES = 5
+
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
 
     def __init__(
@@ -32,6 +34,7 @@ class OpenAIAdapter(LLMInterface):
         api_version: str,
         model: str,
         transcription_model: str,
+        max_tokens: int,
         streaming: bool = False,
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
@@ -41,6 +44,7 @@ class OpenAIAdapter(LLMInterface):
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
+        self.max_tokens = max_tokens
         self.streaming = streaming
 
     @observe(as_type="generation")
@@ -66,7 +70,7 @@ class OpenAIAdapter(LLMInterface):
             api_base=self.endpoint,
             api_version=self.api_version,
             response_model=response_model,
-            max_retries=5,
+            max_retries=self.MAX_RETRIES,
         )
 
     @observe
@@ -92,7 +96,7 @@ class OpenAIAdapter(LLMInterface):
             api_base=self.endpoint,
             api_version=self.api_version,
             response_model=response_model,
-            max_retries=5,
+            max_retries=self.MAX_RETRIES,
         )
 
     def create_transcript(self, input):
@@ -110,7 +114,7 @@ class OpenAIAdapter(LLMInterface):
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
-            max_retries=5,
+            max_retries=self.MAX_RETRIES,
         )
 
         return transcription
@@ -142,7 +146,7 @@ class OpenAIAdapter(LLMInterface):
             api_base=self.endpoint,
             api_version=self.api_version,
             max_tokens=300,
-            max_retries=5,
+            max_retries=self.MAX_RETRIES,
         )
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:

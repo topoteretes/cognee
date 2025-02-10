@@ -2,7 +2,7 @@ from uuid import UUID
 from datetime import datetime
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
-from cognee.api.v1.search import SearchType
+from cognee.modules.search.types import SearchType
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history

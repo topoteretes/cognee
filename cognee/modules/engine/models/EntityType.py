@@ -7,4 +7,4 @@ class EntityType(DataPoint):
     description: str
     pydantic_type: str = "EntityType"
 
-    _metadata: dict = {"index_fields": ["name"], "type": "EntityType"}
+    metadata: dict = {"index_fields": ["name"]}

@@ -1,5 +1,5 @@
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee.modules.search.types import SearchType
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
 from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
@@ -76,7 +76,9 @@ async def get_context_with_cognee(
 
     search_results = []
     for search_type in search_types:
-        raw_search_results = await cognee.search(search_type, query_text=instance["question"])
+        raw_search_results = await cognee.search(
+            query_type=search_type, query_text=instance["question"]
+        )
 
         if search_type == SearchType.INSIGHTS:
             res_list = [_insight_to_string(edge) for edge in raw_search_results]
@@ -108,7 +110,7 @@ async def get_context_with_simple_rag(instance: dict) -> str:
     await cognify_instance(instance)
 
     vector_engine = get_vector_engine()
-    found_chunks = await vector_engine.search("document_chunk_text", instance["question"], limit=5)
+    found_chunks = await vector_engine.search("DocumentChunk_text", instance["question"], limit=5)
 
     search_results_str = "\n".join([context_item.payload["text"] for context_item in found_chunks])
 

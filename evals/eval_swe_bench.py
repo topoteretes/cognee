@@ -8,7 +8,6 @@ from swebench.harness.utils import load_swebench_dataset
 from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
-from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.retrieval.description_to_codepart_search import (

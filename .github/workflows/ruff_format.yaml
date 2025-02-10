@@ -1,4 +1,4 @@
-name: ruff format
+name: lint | ruff format
 on: [ pull_request ]
 
 jobs:

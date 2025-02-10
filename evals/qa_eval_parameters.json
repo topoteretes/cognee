@@ -4,7 +4,6 @@
     ],
     "rag_option": [
         "cognee_incremental",
-        "cognee",
         "no_rag",
         "simple_rag",
         "brute_force"
@@ -14,10 +13,6 @@
     ],
     "metric_names": [
         "Correctness",
-        "Comprehensiveness",
-        "Directness",
-        "Diversity",
-        "Empowerment",
-        "promptfoo.directness"
+        "Comprehensiveness"
     ]
 }

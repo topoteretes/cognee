@@ -5,8 +5,8 @@ import asyncio
 import cognee
 import signal
 
-from cognee.api.v1.search import SearchType
 from cognee.shared.utils import setup_logging
+from cognee.modules.search.types import SearchType
 
 app = modal.App("cognee-runner")
 
@@ -27,7 +27,7 @@ async def entry(text: str, query: str):
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(text)
     await cognee.cognify()
-    search_results = await cognee.search(SearchType.GRAPH_COMPLETION, query_text=query)
+    search_results = await cognee.search(query_type=SearchType.GRAPH_COMPLETION, query_text=query)
 
     return {
         "text": text,

@@ -17,7 +17,7 @@ logger = logging.getLogger("QDrantAdapter")
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 # class CollectionConfig(BaseModel, extra = "forbid"):
@@ -131,7 +131,7 @@ class QDrantAdapter(VectorDBInterface):
             [
                 IndexSchema(
                     id=data_point.id,
-                    text=getattr(data_point, data_point._metadata["index_fields"][0]),
+                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
                 )
                 for data_point in data_points
             ],

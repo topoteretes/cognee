@@ -37,7 +37,8 @@ def test_TextDocument(input_file, chunk_size):
     )
 
     for ground_truth, paragraph_data in zip(
-        GROUND_TRUTH[input_file], document.read(chunk_size=chunk_size, chunker="text_chunker")
+        GROUND_TRUTH[input_file],
+        document.read(chunk_size=chunk_size, chunker="text_chunker", max_chunk_tokens=1024),
     ):
         assert ground_truth["word_count"] == paragraph_data.word_count, (
             f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'

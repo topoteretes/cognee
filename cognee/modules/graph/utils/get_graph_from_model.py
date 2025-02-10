@@ -8,7 +8,6 @@ async def get_graph_from_model(
     added_nodes: dict,
     added_edges: dict,
     visited_properties: dict = None,
-    only_root=False,
     include_root=True,
 ):
     if str(data_point.id) in added_nodes:
@@ -18,12 +17,14 @@ async def get_graph_from_model(
     edges = []
     visited_properties = visited_properties or {}
 
-    data_point_properties = {}
+    data_point_properties = {
+        "type": type(data_point).__name__,
+    }
     excluded_properties = set()
     properties_to_visit = set()
 
     for field_name, field_value in data_point:
-        if field_name == "_metadata":
+        if field_name == "metadata":
             continue
 
         if isinstance(field_value, DataPoint):
@@ -61,7 +62,6 @@ async def get_graph_from_model(
         SimpleDataPointModel = copy_model(
             type(data_point),
             include_fields={
-                "_metadata": (dict, data_point._metadata),
                 "__tablename__": (str, data_point.__tablename__),
             },
             exclude_fields=list(excluded_properties),
@@ -98,7 +98,7 @@ async def get_graph_from_model(
             )
             added_edges[str(edge_key)] = True
 
-        if str(field_value.id) in added_nodes or only_root:
+        if str(field_value.id) in added_nodes:
             continue
 
         property_nodes, property_edges = await get_graph_from_model(

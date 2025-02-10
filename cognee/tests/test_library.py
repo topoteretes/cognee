@@ -2,7 +2,7 @@ import os
 import logging
 import pathlib
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee.modules.search.types import SearchType
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -44,22 +44,26 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("entity_name", "AI"))[0]
+    random_node = (await vector_engine.search("Entity_name", "AI"))[0]
     random_node_name = random_node.payload["text"]
 
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.INSIGHTS, query_text=random_node_name
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.CHUNKS, query_text=random_node_name)
+    search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(SearchType.SUMMARIES, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.SUMMARIES, query_text=random_node_name
+    )
     assert len(search_results) != 0, "Query related summaries don't exist."
     print("\nExtracted summaries are:\n")
     for result in search_results:

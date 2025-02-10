@@ -25,11 +25,24 @@ class GraphConfig(BaseSettings):
         return {
             "graph_filename": self.graph_filename,
             "graph_database_provider": self.graph_database_provider,
-            "graph_file_path": self.graph_file_path,
             "graph_database_url": self.graph_database_url,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
+            "graph_file_path": self.graph_file_path,
+            "graph_model": self.graph_model,
+            "graph_topology": self.graph_topology,
+            "model_config": self.model_config,
+        }
+
+    def to_hashable_dict(self) -> dict:
+        return {
+            "graph_database_provider": self.graph_database_provider,
+            "graph_database_url": self.graph_database_url,
+            "graph_database_username": self.graph_database_username,
+            "graph_database_password": self.graph_database_password,
+            "graph_database_port": self.graph_database_port,
+            "graph_file_path": self.graph_file_path,
         }
 
 

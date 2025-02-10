@@ -186,7 +186,7 @@ async def main(enable_steps):
     # Step 4: Query insights
     if enable_steps.get("retriever"):
         search_results = await cognee.search(
-            SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
+            query_type=SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
         )
         print(search_results)
 

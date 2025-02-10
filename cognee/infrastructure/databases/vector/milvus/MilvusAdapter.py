@@ -17,7 +17,7 @@ logger = logging.getLogger("MilvusAdapter")
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class MilvusAdapter(VectorDBInterface):
@@ -133,7 +133,7 @@ class MilvusAdapter(VectorDBInterface):
         formatted_data_points = [
             IndexSchema(
                 id=data_point.id,
-                text=getattr(data_point, data_point._metadata["index_fields"][0]),
+                text=getattr(data_point, data_point.metadata["index_fields"][0]),
             )
             for data_point in data_points
         ]

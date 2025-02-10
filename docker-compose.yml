@@ -19,7 +19,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          cpus: "2.0"
           memory: 8GB
 
   frontend:
@@ -60,25 +60,27 @@ services:
       - 3001:3000
     networks:
       - cognee-network
-
-  postgres:
-    image: pgvector/pgvector:pg17
-    container_name: postgres
-    environment:
-      POSTGRES_USER: cognee
-      POSTGRES_PASSWORD: cognee
-      POSTGRES_DB: cognee_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - 5432:5432
-    networks:
-      - cognee-network
-
+  # UNCOMMENT IF USING POSTGRES
+  # postgres:
+  #   image: pgvector/pgvector:pg17
+  #   container_name: postgres
+  #   environment:
+  #     POSTGRES_USER: cognee
+  #     POSTGRES_PASSWORD: cognee
+  #     POSTGRES_DB: cognee_db
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - 5432:5432
+  #   networks:
+  #     - cognee-network
+  # UNCOMMENT THE VOLUES SECTION BELOW AS WELL TO USE POSTGRES
 networks:
   cognee-network:
     name: cognee-network
 
-volumes:
-  postgres_data:
+# UNCOMMENT IF USING POSTGRES         
+# volumes:                           
+#   postgres_data:                  
+
 

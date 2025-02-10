@@ -18,7 +18,7 @@ from cognee.infrastructure.engine import DataPoint
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):

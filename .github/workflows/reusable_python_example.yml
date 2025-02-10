@@ -16,8 +16,10 @@ on:
         required: true
       GRAPHISTRY_PASSWORD:
         required: true
-      OPENAI_API_KEY:
+      LLM_API_KEY:
         required: true
+      OPENAI_API_KEY:
+        required: false
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -55,6 +57,7 @@ jobs:
           ENV: 'dev'
           PYTHONFAULTHANDLER: 1
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ${{ inputs.example-location }} ${{ inputs.arguments }}

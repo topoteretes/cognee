@@ -84,10 +84,10 @@ async def brute_force_search(
 
     if collections is None:
         collections = [
-            "entity_name",
-            "text_summary_text",
-            "entity_type_name",
-            "document_chunk_text",
+            "Entity_name",
+            "TextSummary_text",
+            "EntityType_name",
+            "DocumentChunk_text",
         ]
 
     try:
@@ -127,9 +127,14 @@ async def brute_force_search(
 
         return results
 
-    except Exception as e:
+    except Exception as error:
         logging.error(
-            "Error during brute force search for user: %s, query: %s. Error: %s", user.id, query, e
+            "Error during brute force search for user: %s, query: %s. Error: %s",
+            user.id,
+            query,
+            error,
         )
-        send_telemetry("cognee.brute_force_triplet_search EXECUTION FAILED", user.id)
-        raise RuntimeError("An error occurred during brute force search") from e
+        send_telemetry(
+            "cognee.brute_force_triplet_search EXECUTION FAILED", user.id, {"error": str(error)}
+        )
+        raise RuntimeError("An error occurred during brute force search") from error

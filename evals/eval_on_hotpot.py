@@ -114,7 +114,7 @@ async def eval_on_QA_dataset(
     if not out_path.exists():
         out_path.mkdir(parents=True, exist_ok=True)
 
-    random.seed(42)
+    random.seed(43)
     instances = dataset if not num_samples else random.sample(dataset, num_samples)
 
     contexts_filename = out_path / Path(

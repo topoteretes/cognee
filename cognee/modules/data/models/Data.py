@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import UUID, Column, DateTime, String, JSON
+from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer
 from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
@@ -20,6 +20,7 @@ class Data(Base):
     owner_id = Column(UUID, index=True)
     content_hash = Column(String)
     external_metadata = Column(JSON)
+    token_count = Column(Integer)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 

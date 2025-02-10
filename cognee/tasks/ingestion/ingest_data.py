@@ -30,9 +30,6 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
-            warnings.warn(
-                f"Data of type {type(data_item)}... does not have dict method. Returning empty metadata."
-            )
             return {}
 
     @dlt.resource(standalone=True, primary_key="id", merge_key="id")
@@ -107,6 +104,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                             owner_id=user.id,
                             content_hash=file_metadata["content_hash"],
                             external_metadata=get_external_metadata_dict(data_item),
+                            token_count=-1,
                         )
 
                     # Check if data is already in dataset

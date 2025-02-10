@@ -188,6 +188,7 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")
         # Here you could add any cleanup code or error recovery code.
+        raise e
 
 
 if __name__ == "__main__":

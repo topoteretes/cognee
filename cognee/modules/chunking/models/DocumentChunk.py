@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 from pydantic import Field
 
@@ -11,6 +11,7 @@ class DocumentChunk(DataPoint):
     __tablename__ = "document_chunk"
     text: str
     word_count: int
+    token_count: int
     chunk_index: int
     cut_type: str
     is_part_of: Document
@@ -19,4 +20,4 @@ class DocumentChunk(DataPoint):
     # potential_nodes: List[str] = Field(default_factory=list)
     # potential_relationships: List[str] = Field(default_factory=list)
 
-    _metadata: dict = {"index_fields": ["text"], "type": "DocumentChunk"}
+    metadata: dict = {"index_fields": ["text"]}

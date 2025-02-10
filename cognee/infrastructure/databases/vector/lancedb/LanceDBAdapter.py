@@ -21,7 +21,7 @@ class IndexSchema(DataPoint):
     id: str
     text: str
 
-    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -245,7 +245,7 @@ class LanceDBAdapter(VectorDBInterface):
             [
                 IndexSchema(
                     id=str(data_point.id),
-                    text=getattr(data_point, data_point._metadata["index_fields"][0]),
+                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
                 )
                 for data_point in data_points
             ],
@@ -269,5 +269,5 @@ class LanceDBAdapter(VectorDBInterface):
             include_fields={
                 "id": (str, ...),
             },
-            exclude_fields=["_metadata"],
+            exclude_fields=["metadata"],
         )
