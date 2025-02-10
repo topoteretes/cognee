@@ -16,9 +16,7 @@ class AnswerGeneratorExecutor:
 
     search_type = None
 
-    async def question_answering_non_parallel(
-        self, questions: list[dict[str, Any]], qa_engine=None
-    ):
+    async def question_answering_non_parallel(self, questions: list[dict[str, str]], qa_engine):
         if not questions:
             raise ValueError("Questions list cannot be empty")
         if qa_engine not in self.question_answering_engine_options:

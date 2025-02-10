@@ -7,9 +7,7 @@ class EvaluationExecutor:
 
     eval_adapter = None
 
-    async def execute(
-        self, answers: List[Dict[str, Any]], evaluator_engine=None, evaluator_metrics=None
-    ):
+    async def execute(self, answers: List[Dict[str, str]], evaluator_engine, evaluator_metrics):
         if evaluator_engine not in self.evaluator_options:
             raise ValueError(f"Unsupported evaluator: {evaluator_engine}")
 
