@@ -25,7 +25,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     for node_id, node_info in nodes_data:
         node_info = node_info.copy()
         node_info["id"] = str(node_id)
-        node_info["color"] = color_map.get(node_info.get("pydantic_type", "default"), "#D3D3D3")
+        node_info["color"] = color_map.get(node_info.get("type", "default"), "#D3D3D3")
         node_info["name"] = node_info.get("name", str(node_id))
 
         try:
