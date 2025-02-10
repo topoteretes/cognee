@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
@@ -169,7 +170,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             results = results.all()
 
             return [
-                ScoredResult(id=UUID(result.id), payload=result.payload, score=0)
+                ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
                 for result in results
             ]
 
@@ -208,7 +209,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(id=UUID(str(row.id)), payload=row.payload, score=row.similarity)
+            ScoredResult(id=parse_id(str(row.id)), payload=row.payload, score=row.similarity)
             for row in vector_list
         ]
 
@@ -249,7 +250,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         for vector in closest_items:
             vector_list.append(
                 {
-                    "id": UUID(str(vector.id)),
+                    "id": parse_id(str(vector.id)),
                     "payload": vector.payload,
                     "_distance": vector.similarity,
                 }
