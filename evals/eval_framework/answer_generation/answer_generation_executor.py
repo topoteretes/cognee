@@ -1,36 +1,45 @@
 import cognee
-from typing import Any
+from typing import List, Dict, Callable, Awaitable
 from cognee.api.v1.search import SearchType
 
 
 class AnswerGeneratorExecutor:
-    # Note: not all search has generation at the end, only completions
-    question_answering_engine_options = {
-        "cognee_graph_completion": SearchType.GRAPH_COMPLETION,
-        "cognee_completion": SearchType.COMPLETION,
-        "cognee_summaries": SearchType.SUMMARIES,
-        "cognee_insights": SearchType.INSIGHTS,
-        "cognee_chunks": SearchType.CHUNKS,
-        "cognee_code": SearchType.CODE,
+    # Each option is a function that takes a query (str) and returns an awaitable list of answers.
+    question_answering_engine_options: Dict[str, Callable[[str], Awaitable[List[str]]]] = {
+        "cognee_graph_completion": lambda query: cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION, query_text=query
+        ),
+        "cognee_completion": lambda query: cognee.search(
+            query_type=SearchType.COMPLETION, query_text=query
+        ),
+        "cognee_summaries": lambda query: cognee.search(
+            query_type=SearchType.SUMMARIES, query_text=query
+        ),
+        "cognee_insights": lambda query: cognee.search(
+            query_type=SearchType.INSIGHTS, query_text=query
+        ),
+        "cognee_chunks": lambda query: cognee.search(
+            query_type=SearchType.CHUNKS, query_text=query
+        ),
+        "cognee_code": lambda query: cognee.search(query_type=SearchType.CODE, query_text=query),
     }
 
-    search_type = None
-
-    async def question_answering_non_parallel(self, questions: list[dict[str, str]], qa_engine):
+    async def question_answering_non_parallel(
+        self, questions: List[Dict[str, str]], qa_engine: str
+    ) -> List[Dict[str, str]]:
         if not questions:
             raise ValueError("Questions list cannot be empty")
         if qa_engine not in self.question_answering_engine_options:
             raise ValueError(f"Unsupported QA engine: {qa_engine}")
 
-        search_type = self.question_answering_engine_options[qa_engine]
+        answer_resolver = self.question_answering_engine_options[qa_engine]
 
         answers = []
-
         for instance in questions:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            search_results = await cognee.search(query_type=search_type, query_text=query_text)
+            search_results = await answer_resolver(query_text)
 
             answers.append(
                 {

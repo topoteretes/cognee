@@ -18,6 +18,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
     async def evaluate_answers(
         self, answers: List[Dict[str, Any]], evaluator_metrics: List[str]
     ) -> List[Dict[str, Any]]:
+        # evaluator_metrics contains all the necessary metrics that are gonna be evaluated dynamically
         for metric in evaluator_metrics:
             if metric not in self.g_eval_metrics:
                 raise ValueError(f"Unsupported metric: {metric}")
