@@ -36,7 +36,7 @@ async def index_data_points(data_points: list[DataPoint]):
     for index_name_and_field, indexable_points in index_points.items():
         first_occurence = index_name_and_field.index("_")
         index_name = index_name_and_field[:first_occurence]
-        field_name = index_name_and_field[first_occurence + 1:]
+        field_name = index_name_and_field[first_occurence + 1 :]
         try:
             await vector_engine.index_data_points(index_name, field_name, indexable_points)
         except EmbeddingException as e:
