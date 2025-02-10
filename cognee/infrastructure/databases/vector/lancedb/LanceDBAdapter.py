@@ -1,6 +1,5 @@
 import asyncio
 from typing import Generic, List, Optional, TypeVar, get_type_hints
-from uuid import UUID
 
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
@@ -8,6 +7,7 @@ from pydantic import BaseModel
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 
@@ -133,7 +133,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result["id"]),
+                id=parse_id(result["id"]),
                 payload=result["payload"],
                 score=0,
             )
@@ -162,7 +162,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result["id"]),
+                id=parse_id(result["id"]),
                 payload=result["payload"],
                 score=normalized_values[value_index],
             )
@@ -195,7 +195,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result["id"]),
+                id=parse_id(result["id"]),
                 payload=result["payload"],
                 score=normalized_values[value_index],
             )
