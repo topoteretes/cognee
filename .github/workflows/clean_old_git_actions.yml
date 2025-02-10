@@ -1,0 +1,47 @@
+name: clean | Cleanup Old Workflow Runs
+
+on:
+  schedule:
+    - cron: '0 3 * * 0' # Runs every Sunday at 03:00 UTC
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete old workflow runs
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+          DAYS: 100  # Adjust the number of days if needed
+        run: |
+          # Get current timestamp
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Fetch all workflow runs
+          runs=$(curl -s -H "Authorization: token $GH_PAT" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/$REPO/actions/runs" | jq -c '.workflow_runs[]')
+
+          # Loop through each run
+          echo "$runs" | while read -r run; do
+            created_at=$(echo "$run" | jq -r '.created_at')
+            run_id=$(echo "$run" | jq -r '.id')
+
+            # Convert timestamps to seconds
+            created_seconds=$(date -d "$created_at" +%s)
+            now_seconds=$(date -d "$NOW" +%s)
+
+            # Calculate age of workflow run
+            age_days=$(( (now_seconds - created_seconds) / 86400 ))
+
+            if [ "$age_days" -gt "$DAYS" ]; then
+              echo "Deleting workflow run ID: $run_id (Created: $created_at, Age: $age_days days)"
+              curl -X DELETE -H "Authorization: token $GH_PAT" \
+                   -H "Accept: application/vnd.github.v3+json" \
+                   "https://api.github.com/repos/$REPO/actions/runs/$run_id"
+            else
+              echo "Skipping workflow run ID: $run_id (Created: $created_at, Age: $age_days days)"
+            fi
+          done
