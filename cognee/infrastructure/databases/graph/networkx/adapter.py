@@ -5,7 +5,6 @@ import os
 import json
 import asyncio
 import logging
-from re import A
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
@@ -13,6 +12,7 @@ import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
 import numpy as np
 
@@ -268,7 +268,11 @@ class NetworkXAdapter(GraphDBInterface):
                     for node in graph_data["nodes"]:
                         try:
                             if not isinstance(node["id"], UUID):
-                                node["id"] = UUID(node["id"])
+                                try:
+                                    node["id"] = UUID(node["id"])
+                                except Exception:
+                                    # If conversion fails, keep the original id
+                                    pass
                         except Exception as e:
                             logger.error(e)
                             raise e
@@ -285,12 +289,12 @@ class NetworkXAdapter(GraphDBInterface):
                     for edge in graph_data["links"]:
                         try:
                             if not isinstance(edge["source"], UUID):
-                                source_id = UUID(edge["source"])
+                                source_id = parse_id(edge["source"])
                             else:
                                 source_id = edge["source"]
 
                             if not isinstance(edge["target"], UUID):
-                                target_id = UUID(edge["target"])
+                                target_id = parse_id(edge["target"])
                             else:
                                 target_id = edge["target"]
 
