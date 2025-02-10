@@ -27,7 +27,7 @@ class AnswerGeneratorExecutor:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            search_results = await cognee.search(search_type, query_text=query_text)
+            search_results = await cognee.search(query_type=search_type, query_text=query_text)
 
             answers.append(
                 {
