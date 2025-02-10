@@ -37,7 +37,7 @@ async def main():
 
     # Query cognee for summaries of the data in the multimedia files
     search_results = await cognee.search(
-        SearchType.SUMMARIES,
+        query_type=SearchType.SUMMARIES,
         query_text="What is in the multimedia files?",
     )
 

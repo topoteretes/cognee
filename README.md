@@ -12,14 +12,16 @@ We build for developers who need a reliable, production-ready data layer for AI 
 
 ## What is cognee?
 
-Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost. 
+Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
 
-Cognee merges graph and vector databases to uncover hidden relationships and new patterns in your data. You can automatically model, load and retrieve entities and objects representing your business domain and analyze their relationships, uncovering insights that neither vector stores nor graph stores alone can provide. Learn more about use-cases [here](https://docs.cognee.ai/use_cases)
+Cognee merges graph and vector databases to uncover hidden relationships and new patterns in your data. You can automatically model, load and retrieve entities and objects representing your business domain and analyze their relationships, uncovering insights that neither vector stores nor graph stores alone can provide. Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
 
 
-Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://docs.cognee.ai">documentation</a>
+Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://docs.cognee.ai">documentation</a>.
 
-If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community
+If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community.
+
+Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? Check it out!
 
 <div align="center">
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
@@ -170,7 +172,7 @@ async def main():
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
     search_results = await cognee.search(
-        SearchType.INSIGHTS, query_text=query_text
+        query_text=query_text, query_type=SearchType.INSIGHTS
     )
 
     print("Search results:")
@@ -200,7 +202,7 @@ cognee framework consists of tasks that can be grouped into pipelines.
 Each task can be an independent part of business logic, that can be tied to other tasks to form a pipeline.
 These tasks persist data into your memory store enabling you to search for relevant context of past conversations, documents, or any other data you have stored.
 <div align="center">
-<img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="50%" />
+<img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
 </div>
 
 

@@ -1,5 +1,5 @@
 from cognee.infrastructure.engine import DataPoint
-from typing import ClassVar, Optional
+from typing import Optional
 
 
 class GraphitiNode(DataPoint):
@@ -9,4 +9,4 @@ class GraphitiNode(DataPoint):
     summary: Optional[str] = None
     pydantic_type: str = "GraphitiNode"
 
-    _metadata: dict = {"index_fields": ["name", "summary", "content"], "type": "GraphitiNode"}
+    metadata: dict = {"index_fields": ["name", "summary", "content"]}
