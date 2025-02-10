@@ -12,7 +12,7 @@ random.seed(1500)
 
 class Repository(DataPoint):
     path: str
-    _metadata = {"index_fields": [], "type": "Repository"}
+    metadata: dict = {"index_fields": []}
 
 
 class CodeFile(DataPoint):
@@ -20,13 +20,13 @@ class CodeFile(DataPoint):
     contains: List["CodePart"] = []
     depends_on: List["CodeFile"] = []
     source_code: str
-    _metadata = {"index_fields": [], "type": "CodeFile"}
+    metadata: dict = {"index_fields": []}
 
 
 class CodePart(DataPoint):
     part_of: CodeFile
     source_code: str
-    _metadata = {"index_fields": [], "type": "CodePart"}
+    metadata: dict = {"index_fields": []}
 
 
 CodeFile.model_rebuild()

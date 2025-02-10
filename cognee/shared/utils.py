@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 
 import logging
 import sys
-import json
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -164,6 +163,7 @@ def prepare_nodes(graph, include_size=False):
             continue
 
         node_data = {
+            **node_info,
             "id": str(node),
             "name": node_info["name"] if "name" in node_info else str(node),
         }
@@ -183,7 +183,7 @@ def prepare_nodes(graph, include_size=False):
 
 
 async def render_graph(
-    graph, include_nodes=False, include_color=False, include_size=False, include_labels=False
+    graph=None, include_nodes=True, include_color=False, include_size=False, include_labels=True
 ):
     await register_graphistry()
 

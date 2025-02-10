@@ -8,8 +8,8 @@ from cognee.modules.search.methods import search as search_function
 
 
 async def search(
-    query_type: SearchType,
     query_text: str,
+    query_type: SearchType = SearchType.GRAPH_COMPLETION,
     user: User = None,
     datasets: Union[list[str], str, None] = None,
 ) -> list:

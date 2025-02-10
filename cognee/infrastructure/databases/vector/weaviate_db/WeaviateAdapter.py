@@ -16,7 +16,7 @@ logger = logging.getLogger("WeaviateAdapter")
 class IndexSchema(DataPoint):
     text: str
 
-    _metadata: dict = {"index_fields": ["text"], "type": "IndexSchema"}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class WeaviateAdapter(VectorDBInterface):

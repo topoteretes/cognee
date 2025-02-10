@@ -16,25 +16,27 @@ async def index_data_points(data_points: list[DataPoint]):
     for data_point in data_points:
         data_point_type = type(data_point)
 
-        for field_name in data_point._metadata["index_fields"]:
+        for field_name in data_point.metadata["index_fields"]:
             if getattr(data_point, field_name, None) is None:
                 continue
 
-            index_name = f"{data_point_type.__tablename__}.{field_name}"
+            index_name = f"{data_point_type.__name__}_{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__tablename__, field_name)
+                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
                 created_indexes[index_name] = True
 
             if index_name not in index_points:
                 index_points[index_name] = []
 
             indexed_data_point = data_point.model_copy()
-            indexed_data_point._metadata["index_fields"] = [field_name]
+            indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
-    for index_name, indexable_points in index_points.items():
-        index_name, field_name = index_name.split(".")
+    for index_name_and_field, indexable_points in index_points.items():
+        first_occurence = index_name_and_field.index("_")
+        index_name = index_name_and_field[:first_occurence]
+        field_name = index_name_and_field[first_occurence + 1:]
         try:
             await vector_engine.index_data_points(index_name, field_name, indexable_points)
         except EmbeddingException as e:
@@ -101,13 +103,13 @@ if __name__ == "__main__":
     class Car(DataPoint):
         model: str
         color: str
-        _metadata = {"index_fields": ["name"], "type": "Car"}
+        metadata: dict = {"index_fields": ["name"]}
 
     class Person(DataPoint):
         name: str
         age: int
         owns_car: list[Car]
-        _metadata = {"index_fields": ["name"], "type": "Person"}
+        metadata: dict = {"index_fields": ["name"]}
 
     car1 = Car(model="Tesla Model S", color="Blue")
     car2 = Car(model="Toyota Camry", color="Red")

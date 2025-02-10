@@ -1,4 +1,5 @@
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.engine import ExtendableDataPoint
+from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
@@ -34,9 +35,20 @@ async def graph_query_completion(query: str) -> list:
     - The `brute_force_triplet_search` is used to retrieve relevant graph data.
     - Prompts are dynamically rendered and provided to the LLM for contextual understanding.
     - Ensure that the LLM client and graph database are properly configured and accessible.
-
     """
-    found_triplets = await brute_force_triplet_search(query, top_k=10)
+
+    subclasses = get_all_subclasses(ExtendableDataPoint)
+
+    vector_index_collections = []
+
+    for subclass in subclasses:
+        index_fields = subclass.model_fields["metadata"].default.get("index_fields", [])
+        for field_name in index_fields:
+            vector_index_collections.append(f"{subclass.__name__}_{field_name}")
+
+    found_triplets = await brute_force_triplet_search(
+        query, top_k=5, collections=vector_index_collections or None
+    )
 
     if len(found_triplets) == 0:
         raise NoRelevantDataFound
