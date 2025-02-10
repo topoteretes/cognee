@@ -1,19 +1,29 @@
 from collections import Counter
 from deepeval.test_case import LLMTestCase
 import re
+from typing import Optional, Any
 
 
 class F1ScoreMetric:
-    def __init__(self):
-        self.score = None
-        self.reason = None
+    def __init__(self) -> None:
+        self.score: Optional[float] = None
+        self.reason: Optional[str] = None
 
-    def measure(self, test_case: LLMTestCase):
+    def measure(self, test_case: "LLMTestCase") -> float:
         actual = (test_case.actual_output or "").lower()
         expected = (test_case.expected_output or "").lower()
 
-        actual_tokens = [re.sub(r"\W+", "", token.strip()) for token in actual.split()]
-        expected_tokens = [re.sub(r"\W+", "", token.strip()) for token in expected.split()]
+        actual_tokens = [
+            re.sub(r"\W+", "", token.strip())
+            for token in actual.split()
+            if re.sub(r"\W+", "", token.strip())
+        ]
+
+        expected_tokens = [
+            re.sub(r"\W+", "", token.strip())
+            for token in expected.split()
+            if re.sub(r"\W+", "", token.strip())
+        ]
 
         if not actual_tokens and not expected_tokens:
             self.score = 1.0
