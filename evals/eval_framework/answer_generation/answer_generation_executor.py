@@ -4,9 +4,14 @@ from cognee.api.v1.search import SearchType
 
 
 class AnswerGeneratorExecutor:
+    # Note: not all search has generation at the end, only completions
     question_answering_engine_options = {
         "cognee_graph_completion": SearchType.GRAPH_COMPLETION,
         "cognee_completion": SearchType.COMPLETION,
+        "cognee_summaries": SearchType.SUMMARIES,
+        "cognee_insights": SearchType.INSIGHTS,
+        "cognee_chunks": SearchType.CHUNKS,
+        "cognee_code": SearchType.CODE,
     }
 
     search_type = None
