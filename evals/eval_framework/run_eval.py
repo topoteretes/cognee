@@ -7,7 +7,7 @@ from evals.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
 )
 from evals.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
-from evals.eval_framework.summarize import generate_metrics_dashboard
+from evals.eval_framework.metrics_dashboard import generate_metrics_dashboard
 from cognee.shared.utils import setup_logging
 
 
