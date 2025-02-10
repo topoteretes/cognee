@@ -86,10 +86,9 @@ async def main():
 
         print(f"Loaded {len(answers)} questions from {answers_file}")
 
-        evaluator = EvaluationExecutor()
+        evaluator = EvaluationExecutor(evaluator_engine=eval_params["evaluation_engine"])
         metrics = await evaluator.execute(
             answers=answers,
-            evaluator_engine=eval_params["evaluation_engine"],
             evaluator_metrics=eval_params["evaluation_metrics"],
         )
 
