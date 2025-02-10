@@ -6,4 +6,4 @@ Rules:
     •  What/Who/Where questions → Answer with a single word or phrase (no full sentences).
     •  When questions → Give only the relevant date, time, or period.
     •  How/Why questions → Answer with the shortest possible phrase.
-    •   No punctuation, just the answer, preferably in dry, concise lowercase
+    •  No punctuation, just the answer, preferably in dry, concise lowercase
