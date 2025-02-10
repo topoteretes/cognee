@@ -39,9 +39,9 @@ async def main():
     if eval_params["building_corpus_from_scratch"]:
         logging.info("Corpus Builder started...")
 
-        corpus_builder = CorpusBuilderExecutor()
+        corpus_builder = CorpusBuilderExecutor(benchmark=eval_params["benchmark"])
         questions = await corpus_builder.build_corpus(
-            limit=eval_params["number_of_samples_in_corpus"], benchmark=eval_params["benchmark"]
+            limit=eval_params["number_of_samples_in_corpus"]
         )
 
         with open(questions_file, "w", encoding="utf-8") as f:
