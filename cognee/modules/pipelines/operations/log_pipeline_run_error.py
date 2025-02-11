@@ -5,7 +5,9 @@ from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from typing import Any
 
 
-async def logPipelineRunError(pipeline_id: str, dataset_id: UUID, data: Any, e: Exception):
+async def log_pipeline_run_error(
+    pipeline_run_id: UUID, pipeline_id: str, dataset_id: UUID, data: Any, e: Exception
+):
     if not data:
         data_info = "None"
     elif isinstance(data, list) and all(isinstance(item, Data) for item in data):
@@ -13,14 +15,12 @@ async def logPipelineRunError(pipeline_id: str, dataset_id: UUID, data: Any, e: 
     else:
         data_info = str(data)
 
-    pipeline_run_id = uuid4()
-
     pipeline_run = PipelineRun(
-        id=pipeline_run_id,
+        pipeline_run_id=pipeline_run_id,
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        dataset_id=dataset_id,
         run_info={
-            "dataset_id": str(dataset_id),
             "data": data_info,
             "error": str(e),
         },

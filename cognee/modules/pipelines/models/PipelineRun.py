@@ -19,6 +19,7 @@ class PipelineRun(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     status = Column(Enum(PipelineRunStatus))
-
-    pipeline_id = Column(String, index=True)
+    pipeline_run_id = Column(UUID, index=True)
+    pipeline_id = Column(UUID, index=True)
+    dataset_id = Column(UUID, index=True)
     run_info = Column(JSON)

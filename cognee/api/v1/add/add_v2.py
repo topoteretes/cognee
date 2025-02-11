@@ -39,7 +39,9 @@ async def add(
     tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user)]
 
     dataset_id = uuid5(NAMESPACE_OID, dataset_name)
-    pipeline = run_tasks(tasks=tasks, dataset_id=dataset_id, data=data, pipeline_id="add_pipeline")
+    pipeline = run_tasks(
+        tasks=tasks, dataset_id=dataset_id, data=data, pipeline_name="add_pipeline"
+    )
 
     async for result in pipeline:
         print(result)
