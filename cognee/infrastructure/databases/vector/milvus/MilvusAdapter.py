@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import List, Optional
-from uuid import UUID
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -193,7 +193,7 @@ class MilvusAdapter(VectorDBInterface):
 
             return [
                 ScoredResult(
-                    id=UUID(result["id"]),
+                    id=parse_id(result["id"]),
                     score=result["distance"],
                     payload=result.get("entity", {}),
                 )

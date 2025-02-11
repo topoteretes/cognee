@@ -61,9 +61,6 @@ async def get_graph_from_model(
     if include_root and str(data_point.id) not in added_nodes:
         SimpleDataPointModel = copy_model(
             type(data_point),
-            include_fields={
-                "__tablename__": (str, data_point.__tablename__),
-            },
             exclude_fields=list(excluded_properties),
         )
         nodes.append(SimpleDataPointModel(**data_point_properties))
