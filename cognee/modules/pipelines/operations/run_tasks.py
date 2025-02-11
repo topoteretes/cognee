@@ -234,7 +234,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
             "Pipeline Run Started",
             user.id,
             additional_properties={
-                "pipeline_name": pipeline_name,
+                "pipeline_name": str(pipeline_name),
             }
             | config,
         )
@@ -247,7 +247,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
             "Pipeline Run Completed",
             user.id,
             additional_properties={
-                "pipeline_name": pipeline_name,
+                "pipeline_name": str(pipeline_name),
             },
         )
     except Exception as error:
@@ -261,7 +261,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
             "Pipeline Run Errored",
             user.id,
             additional_properties={
-                "pipeline_name": pipeline_name,
+                "pipeline_name": str(pipeline_name),
             }
             | config,
         )
