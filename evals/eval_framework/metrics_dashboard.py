@@ -1,9 +1,22 @@
 import json
 from collections import defaultdict
 import plotly.graph_objects as go
+import numpy as np
 
 
-def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmark=""):
+def bootstrap_ci(scores, num_samples=10000, confidence_level=0.95):
+    means = []
+    n = len(scores)
+    for _ in range(num_samples):
+        sample = np.random.choice(scores, size=n, replace=True)
+        means.append(np.mean(sample))
+
+    lower_bound = np.percentile(means, (1 - confidence_level) / 2 * 100)
+    upper_bound = np.percentile(means, (1 + confidence_level) / 2 * 100)
+    return np.mean(scores), lower_bound, upper_bound
+
+
+def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", benchmark=""):
     try:
         with open(json_data, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -45,15 +58,32 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
         )
         figures.append(fig.to_html(full_html=False))
 
-    avg_scores = {metric: sum(scores) / len(scores) for metric, scores in metrics_data.items()}
+    ci_results = {}
+    for metric, scores in metrics_data.items():
+        mean_score, lower, upper = bootstrap_ci(scores)
+        ci_results[metric] = (mean_score, lower, upper)
+
+    # Bar chart with confidence intervals
     fig = go.Figure()
-    fig.add_trace(
-        go.Bar(x=list(avg_scores.keys()), y=list(avg_scores.values()), marker_color="#2ca02c")
-    )
+    for metric, (mean_score, lower, upper) in ci_results.items():
+        fig.add_trace(
+            go.Bar(
+                x=[metric],
+                y=[mean_score],
+                error_y=dict(
+                    type="data",
+                    array=[upper - mean_score],
+                    arrayminus=[mean_score - lower],
+                    visible=True,
+                ),
+                name=metric,
+            )
+        )
+
     fig.update_layout(
-        title="Average Scores by Metric",
-        yaxis_title="Average Score",
+        title="95% confidence interval for all the metrics",
         xaxis_title="Metric",
+        yaxis_title="Score",
         template="seaborn",
     )
     figures.append(fig.to_html(full_html=False))
@@ -105,6 +135,9 @@ def generate_metrics_dashboard(json_data, output_file="dashboard.html", benchmar
         {"".join([f'<div class="chart">{fig}</div>' for fig in figures[: len(metrics_data)]])}
 
         <h2>Average Scores</h2>
+        <div class="chart">{figures[-2]}</div>
+
+        <h2>95% confidence interval for all the metrics</h2>
         <div class="chart">{figures[-1]}</div>
 
         <h2>Detailed Explanations</h2>
