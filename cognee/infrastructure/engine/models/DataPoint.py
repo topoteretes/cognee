@@ -15,7 +15,6 @@ class MetaData(TypedDict):
 
 # Updated DataPoint model with versioning and new fields
 class DataPoint(BaseModel):
-    __tablename__ = "data_point"
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(
         default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -26,6 +25,11 @@ class DataPoint(BaseModel):
     version: int = 1  # Default version
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
+    type: str = Field(default_factory=lambda: DataPoint.__name__)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        object.__setattr__(self, "type", self.__class__.__name__)
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):

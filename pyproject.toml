@@ -80,6 +80,7 @@ nltk = "3.9.1"
 google-generativeai = {version = "^0.8.4", optional = true}
 parso = {version = "^0.8.4", optional = true}
 jedi =  {version = "^0.19.2", optional = true}
+plotly = "^6.0.0"
 mistral-common = {version = "^1.5.2", optional = true}
 
 

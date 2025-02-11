@@ -1,11 +1,19 @@
 import inspect
 import json
 import logging
+from uuid import UUID
 
+from typing import Any
+from cognee.modules.pipelines.operations import (
+    log_pipeline_run_start,
+    log_pipeline_run_complete,
+    log_pipeline_run_error,
+)
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
+from uuid import uuid5, NAMESPACE_OID
 
 from ..tasks.Task import Task
 
@@ -226,7 +234,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
             "Pipeline Run Started",
             user.id,
             additional_properties={
-                "pipeline_name": pipeline_name,
+                "pipeline_name": str(pipeline_name),
             }
             | config,
         )
@@ -239,7 +247,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
             "Pipeline Run Completed",
             user.id,
             additional_properties={
-                "pipeline_name": pipeline_name,
+                "pipeline_name": str(pipeline_name),
             },
         )
     except Exception as error:
@@ -253,7 +261,7 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
             "Pipeline Run Errored",
             user.id,
             additional_properties={
-                "pipeline_name": pipeline_name,
+                "pipeline_name": str(pipeline_name),
             }
             | config,
         )
@@ -261,6 +269,20 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
         raise error
 
 
-async def run_tasks(tasks: list[Task], data=None, pipeline_name: str = "default_pipeline"):
-    async for result in run_tasks_with_telemetry(tasks, data, pipeline_name):
-        yield result
+async def run_tasks(tasks: list[Task], dataset_id: UUID, data: Any, pipeline_name: str):
+    pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
+
+    pipeline_run = await log_pipeline_run_start(pipeline_id, dataset_id, data)
+
+    yield pipeline_run
+    pipeline_run_id = pipeline_run.pipeline_run_id
+
+    try:
+        async for _ in run_tasks_with_telemetry(tasks, data, pipeline_id):
+            pass
+
+        yield await log_pipeline_run_complete(pipeline_run_id, pipeline_id, dataset_id, data)
+
+    except Exception as e:
+        yield await log_pipeline_run_error(pipeline_run_id, pipeline_id, dataset_id, data, e)
+        raise e
