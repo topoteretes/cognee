@@ -11,7 +11,7 @@ async def logPipelineRunError(pipeline_id: str, dataset_id: UUID, data: Any, e: 
     elif isinstance(data, list) and all(isinstance(item, Data) for item in data):
         data_info = [str(item.id) for item in data]
     else:
-        data_info = data
+        data_info = str(data)
 
     pipeline_run_id = uuid4()
 
