@@ -7,8 +7,7 @@ from cognee.shared.utils import setup_logging
 
 
 async def main(repo_path, include_docs):
-    async for result in run_code_graph_pipeline(repo_path, include_docs):
-        print(result)
+    return await run_code_graph_pipeline(repo_path, include_docs)
 
 
 def parse_args():
