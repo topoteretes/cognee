@@ -25,6 +25,11 @@ class DataPoint(BaseModel):
     version: int = 1  # Default version
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
+    type: str = Field(default_factory=lambda: DataPoint.__name__)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        object.__setattr__(self, "type", self.__class__.__name__)
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):
