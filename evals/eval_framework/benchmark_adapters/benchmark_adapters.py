@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Type
 
 from evals.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from evals.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
 from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from evals.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
 
@@ -9,6 +10,7 @@ from evals.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoW
 class BenchmarkAdapter(Enum):
     DUMMY = ("Dummy", DummyAdapter)
     HOTPOTQA = ("HotPotQA", HotpotQAAdapter)
+    MUSIQUE = ('Musique', MusiqueQAAdapter)
     TWOWIKIMULTIHOP = ("TwoWikiMultiHop", TwoWikiMultihopAdapter)
 
     def __new__(cls, adapter_name: str, adapter_class: Type):
