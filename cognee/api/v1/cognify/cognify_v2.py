@@ -12,7 +12,6 @@ from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.pipelines.operations.log_pipeline_status import log_pipeline_status
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -71,8 +70,6 @@ async def cognify(
 async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
     data_documents: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
-    document_ids_str = [str(document.id) for document in data_documents]
-
     dataset_id = dataset.id
     dataset_name = generate_dataset_name(dataset.name)
 
@@ -82,20 +79,11 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
     task_status = await get_pipeline_status([dataset_id])
 
     if (
-        dataset_id in task_status
-        and task_status[dataset_id] == PipelineRunStatus.DATASET_PROCESSING_STARTED
+        str(dataset_id) in task_status
+        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
     ):
         logger.info("Dataset %s is already being processed.", dataset_name)
         return
-
-    await log_pipeline_status(
-        dataset_id,
-        PipelineRunStatus.DATASET_PROCESSING_STARTED,
-        {
-            "dataset_name": dataset_name,
-            "files": document_ids_str,
-        },
-    )
 
     try:
         if not isinstance(tasks, list):
@@ -105,32 +93,17 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
             if not isinstance(task, Task):
                 raise ValueError(f"Task {task} is not an instance of Task")
 
-        pipeline = run_tasks(tasks, data_documents, "cognify_pipeline")
+        pipeline_run = run_tasks(tasks, dataset.id, data_documents, "cognify_pipeline")
+        pipeline_run_status = None
 
-        async for result in pipeline:
-            print(result)
+        async for run_status in pipeline_run:
+            pipeline_run_status = run_status
 
         send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
+        return pipeline_run_status
 
-        await log_pipeline_status(
-            dataset_id,
-            PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-            {
-                "dataset_name": dataset_name,
-                "files": document_ids_str,
-            },
-        )
     except Exception as error:
         send_telemetry("cognee.cognify EXECUTION ERRORED", user.id)
-
-        await log_pipeline_status(
-            dataset_id,
-            PipelineRunStatus.DATASET_PROCESSING_ERRORED,
-            {
-                "dataset_name": dataset_name,
-                "files": document_ids_str,
-            },
-        )
         raise error
 
 
