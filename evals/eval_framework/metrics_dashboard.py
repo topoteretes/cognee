@@ -134,9 +134,6 @@ def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", 
         <h2>Metrics Distribution</h2>
         {"".join([f'<div class="chart">{fig}</div>' for fig in figures[: len(metrics_data)]])}
 
-        <h2>Average Scores</h2>
-        <div class="chart">{figures[-2]}</div>
-
         <h2>95% confidence interval for all the metrics</h2>
         <div class="chart">{figures[-1]}</div>
 
