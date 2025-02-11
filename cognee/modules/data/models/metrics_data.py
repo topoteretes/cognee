@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import Column, DateTime, JSON, UUID
 
-from evals.eval_framework.evaluation.metrics_base import MetricsBase
+from cognee.modules.data.models.metrics_base import MetricsBase
 
 
 class Metrics(MetricsBase):
@@ -13,10 +13,3 @@ class Metrics(MetricsBase):
     payload = Column(JSON, nullable=False)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    def to_json(self) -> dict:
-        return {
-            "id": str(self.id),
-            "payload": self.payload,
-            "createdAt": self.created_at.isoformat() if self.created_at else None,
-        }

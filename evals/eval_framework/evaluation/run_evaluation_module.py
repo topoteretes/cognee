@@ -7,8 +7,8 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
     get_relational_config,
 )
-from evals.eval_framework.evaluation.metrics_data import Metrics
-from evals.eval_framework.evaluation.metrics_base import MetricsBase
+from cognee.modules.data.models.metrics_data import Metrics
+from cognee.modules.data.models.metrics_base import MetricsBase
 
 
 async def create_and_insert_metrics_table(questions_payload):

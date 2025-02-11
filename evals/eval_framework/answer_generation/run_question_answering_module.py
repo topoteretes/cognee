@@ -1,17 +1,16 @@
 import logging
 import json
-from uuid import uuid4
-from datetime import datetime, timezone
 from evals.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
+    question_answering_engine_options,
 )
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
     get_relational_config,
 )
-from evals.eval_framework.answer_generation.answers_base import AnswersBase
-from evals.eval_framework.answer_generation.answers_data import Answers
+from cognee.modules.data.models.answers_base import AnswersBase
+from cognee.modules.data.models.answers_data import Answers
 
 
 async def create_and_insert_answers_table(questions_payload):
@@ -45,7 +44,8 @@ async def run_question_answering(params: dict) -> None:
         logging.info(f"Loaded {len(questions)} questions from {params['questions_path']}")
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
-            questions=questions, qa_engine=params["qa_engine"]
+            questions=questions,
+            answer_resolver=question_answering_engine_options[params["qa_engine"]],
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
