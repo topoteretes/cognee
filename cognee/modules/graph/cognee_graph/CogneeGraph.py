@@ -137,7 +137,7 @@ class CogneeGraph(CogneeAbstractGraph):
                 raise ValueError("Failed to generate query embedding.")
 
             edge_distances = await vector_engine.get_distance_from_collection_elements(
-                "edge_type_relationship_name", query_text=query
+                "EdgeType_relationship_name", query_text=query
             )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}

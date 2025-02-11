@@ -69,7 +69,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         return ",".join([f"{key}:{parse_value(value)}" for key, value in properties.items()])
 
     async def create_data_point_query(self, data_point: DataPoint, vectorized_values: dict):
-        node_label = type(data_point).__tablename__
+        node_label = type(data_point).__name__
         property_names = DataPoint.get_embeddable_property_names(data_point)
 
         node_properties = await self.stringify_properties(
