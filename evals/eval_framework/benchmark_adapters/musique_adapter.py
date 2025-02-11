@@ -80,6 +80,8 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
             # If you have a known 'answer' key, or sometimes it's "answer_aliases", adapt accordingly
             answer = item.get("answer", "")
 
+
+
             question_answer_pairs.append(
                 {
                     "id": item.get("id", ""),

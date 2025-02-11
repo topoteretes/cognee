@@ -7,6 +7,7 @@ from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from evals.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
 
 
+
 class BenchmarkAdapter(Enum):
     DUMMY = ("Dummy", DummyAdapter)
     HOTPOTQA = ("HotPotQA", HotpotQAAdapter)
