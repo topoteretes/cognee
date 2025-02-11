@@ -3,6 +3,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
 from .index_data_points import index_data_points
+from .index_graph_edges import index_graph_edges
 
 
 async def add_data_points(data_points: list[DataPoint]):
@@ -37,5 +38,8 @@ async def add_data_points(data_points: list[DataPoint]):
 
     await graph_engine.add_nodes(nodes)
     await graph_engine.add_edges(edges)
+
+    # This step has to happen after adding nodes and edges because we query the graph.
+    await index_graph_edges()
 
     return data_points
