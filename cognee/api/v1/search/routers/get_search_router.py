@@ -10,7 +10,7 @@ from cognee.modules.users.methods import get_authenticated_user
 
 
 class SearchPayloadDTO(InDTO):
-    searchType: SearchType  
+    search_type: SearchType  
     query: str
 
 
