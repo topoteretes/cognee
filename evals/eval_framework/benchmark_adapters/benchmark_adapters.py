@@ -10,7 +10,7 @@ from evals.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoW
 class BenchmarkAdapter(Enum):
     DUMMY = ("Dummy", DummyAdapter)
     HOTPOTQA = ("HotPotQA", HotpotQAAdapter)
-    MUSIQUE = ('Musique', MusiqueQAAdapter)
+    MUSIQUE = ("Musique", MusiqueQAAdapter)
     TWOWIKIMULTIHOP = ("TwoWikiMultiHop", TwoWikiMultihopAdapter)
 
     def __new__(cls, adapter_name: str, adapter_class: Type):
