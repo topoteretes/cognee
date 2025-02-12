@@ -13,7 +13,7 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.experimental.cascade_extract.extract_graph_from_data_chunks import (
+from cognee.tasks.experimental.cascade_extract.cascade_extract_graph import (
     extract_graph_from_data_chunks,
 )
 from cognee.tasks.storage import add_data_points
