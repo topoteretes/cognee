@@ -18,10 +18,8 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
     dataset_info = {
         # Name of the final file we want to load
         "filename": "musique_ans_v1.0_dev.jsonl",
-
         # A Google Drive URL (or share link) to the ZIP containing this file
         "download_url": "https://drive.google.com/file/d/1tGdADlNjWFaHLeZZGShh2IRcpO6Lv24h/view?usp=sharing",
-
         # The name of the ZIP archive we expect after downloading
         "zip_filename": "musique_v1.0.zip",
     }
@@ -69,9 +67,7 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         for item in data:
             # Each 'paragraphs' is a list of dicts; we can concatenate their 'paragraph_text'
             paragraphs = item.get("paragraphs", [])
-            combined_paragraphs = " ".join(
-                paragraph["paragraph_text"] for paragraph in paragraphs
-            )
+            combined_paragraphs = " ".join(paragraph["paragraph_text"] for paragraph in paragraphs)
             corpus_list.append(combined_paragraphs)
 
             # Example question & answer
