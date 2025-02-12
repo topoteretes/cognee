@@ -8,6 +8,7 @@ class EvalConfig(BaseSettings):
     building_corpus_from_scratch: bool = True
     number_of_samples_in_corpus: int = 1
     benchmark: str = "Dummy"  # Options: 'HotPotQA', 'Dummy', 'TwoWikiMultiHop'
+    task_getter_type: str = "Default"
 
     # Question answering params
     answering_questions: bool = True
@@ -48,6 +49,7 @@ class EvalConfig(BaseSettings):
             "metrics_path": self.metrics_path,
             "dashboard_path": self.dashboard_path,
             "deepeval_model": self.deepeval_model,
+            "task_getter_type": self.task_getter_type,
         }
 
 
