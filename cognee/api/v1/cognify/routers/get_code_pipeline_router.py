@@ -1,10 +1,8 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
-from cognee.modules.retrieval.description_to_codepart_search import (
-    code_description_to_code_part_search,
-)
-from fastapi.responses import JSONResponse
+from cognee.modules.retrieval import code_graph_retrieval
 
 
 class CodePipelineIndexPayloadDTO(InDTO):
@@ -39,17 +37,15 @@ def get_code_pipeline_router() -> APIRouter:
                 else payload.full_input
             )
 
-            retrieved_codeparts, __ = await code_description_to_code_part_search(
-                query, include_docs=False
-            )
+            retrieved_files = await code_graph_retrieval(query)
 
             return [
                 {
-                    "name": codepart.attributes["file_path"],
-                    "description": codepart.attributes["file_path"],
-                    "content": codepart.attributes["source_code"],
+                    "name": file_path,
+                    "description": file_path,
+                    "content": source_code,
                 }
-                for codepart in retrieved_codeparts
+                for file_path, source_code in retrieved_files.items()
             ]
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})

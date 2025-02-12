@@ -30,7 +30,10 @@ async def create_and_insert_questions_table(questions_payload):
 async def run_corpus_builder(params: dict) -> None:
     if params.get("building_corpus_from_scratch"):
         logging.info("Corpus Builder started...")
-        corpus_builder = CorpusBuilderExecutor(benchmark=params["benchmark"])
+        corpus_builder = CorpusBuilderExecutor(
+            benchmark=params["benchmark"],
+            task_getter_type=params.get("task_getter_type", "Default"),
+        )
         questions = await corpus_builder.build_corpus(
             limit=params.get("number_of_samples_in_corpus")
         )

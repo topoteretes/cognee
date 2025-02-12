@@ -86,7 +86,7 @@ async def code_description_to_code_part(
             )
 
         code_summaries = await vector_engine.search(
-            "code_summary_text", query_text=query, limit=top_k
+            "CodeSummary_text", query_text=query, limit=top_k
         )
         if not code_summaries:
             logging.warning("No results found for query: '%s' by user: %s", query, user.id)
