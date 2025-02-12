@@ -150,24 +150,31 @@ class LanceDBAdapter(VectorDBInterface):
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
         connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
 
-        collection_size = await collection.count_rows()
+        try:
+            collection = await connection.open_table(collection_name)
 
-        results = await collection.vector_search(query_vector).limit(collection_size).to_pandas()
+            collection_size = await collection.count_rows()
 
-        result_values = list(results.to_dict("index").values())
-
-        normalized_values = normalize_distances(result_values)
-
-        return [
-            ScoredResult(
-                id=parse_id(result["id"]),
-                payload=result["payload"],
-                score=normalized_values[value_index],
+            results = (
+                await collection.vector_search(query_vector).limit(collection_size).to_pandas()
             )
-            for value_index, result in enumerate(result_values)
-        ]
+
+            result_values = list(results.to_dict("index").values())
+
+            normalized_values = normalize_distances(result_values)
+
+            return [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    payload=result["payload"],
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
+        except ValueError:
+            # Ignore if collection doesn't exist
+            return []
 
     async def search(
         self,

@@ -1,26 +1,17 @@
 import asyncio
+import math
 import os
-from concurrent.futures import ProcessPoolExecutor
+
+# from concurrent.futures import ProcessPoolExecutor
 from typing import AsyncGenerator
 from uuid import NAMESPACE_OID, uuid5
 
-import aiofiles
-
+from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, Repository
 from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
 
 
-async def get_py_path_and_source(file_path):
-    try:
-        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
-            source_code = await f.read()
-        return file_path, source_code
-    except Exception as e:
-        print(f"Error reading file {file_path}: {e}")
-        return file_path, None
-
-
-async def get_py_files_dict(repo_path):
+async def get_source_code_files(repo_path):
     """Get .py files and their source code"""
     if not os.path.exists(repo_path):
         return {}
@@ -32,26 +23,16 @@ async def get_py_files_dict(repo_path):
         if file.endswith(".py")
     )
 
-    py_files_dict = {}
+    source_code_files = set()
     for file_path in py_files_paths:
-        absolute_path = os.path.abspath(file_path)
+        file_path = os.path.abspath(file_path)
 
-        if os.path.getsize(absolute_path) == 0:
+        if os.path.getsize(file_path) == 0:
             continue
 
-        relative_path, source_code = await get_py_path_and_source(absolute_path)
-        py_files_dict[relative_path] = {"source_code": source_code}
+        source_code_files.add(file_path)
 
-    return py_files_dict
-
-
-def get_edge(
-    file_path: str, dependency: str, repo_path: str, relative_paths: bool = False
-) -> tuple:
-    if relative_paths:
-        file_path = os.path.relpath(file_path, repo_path)
-        dependency = os.path.relpath(dependency, repo_path)
-    return (file_path, dependency, {"relation": "depends_directly_on"})
+    return list(source_code_files)
 
 
 def run_coroutine(coroutine_func, *args, **kwargs):
@@ -62,60 +43,52 @@ def run_coroutine(coroutine_func, *args, **kwargs):
     return result
 
 
-async def get_repo_file_dependencies(repo_path: str) -> AsyncGenerator[list, None]:
+async def get_repo_file_dependencies(
+    repo_path: str, detailed_extraction: bool = False
+) -> AsyncGenerator[DataPoint, None]:
     """Generate a dependency graph for Python files in the given repository path."""
 
     if not os.path.exists(repo_path):
         raise FileNotFoundError(f"Repository path {repo_path} does not exist.")
 
-    py_files_dict = await get_py_files_dict(repo_path)
+    source_code_files = await get_source_code_files(repo_path)
 
     repo = Repository(
         id=uuid5(NAMESPACE_OID, repo_path),
         path=repo_path,
     )
 
-    yield [repo]
+    yield repo
 
-    with ProcessPoolExecutor(max_workers=12) as executor:
-        loop = asyncio.get_event_loop()
+    chunk_size = 100
+    number_of_chunks = math.ceil(len(source_code_files) / chunk_size)
+    chunk_ranges = [
+        (
+            chunk_number * chunk_size,
+            min((chunk_number + 1) * chunk_size, len(source_code_files)) - 1,
+        )
+        for chunk_number in range(number_of_chunks)
+    ]
 
+    for start_range, end_range in chunk_ranges:
+        # with ProcessPoolExecutor(max_workers=12) as executor:
         tasks = [
-            loop.run_in_executor(
-                executor,
-                run_coroutine,
-                get_local_script_dependencies,
-                os.path.join(repo_path, file_path),
-                repo_path,
-            )
-            for file_path, metadata in py_files_dict.items()
-            if metadata.get("source_code") is not None
+            get_local_script_dependencies(repo_path, file_path, detailed_extraction)
+            for file_path in source_code_files[start_range:end_range]
         ]
 
-        results = await asyncio.gather(*tasks)
+        results: list[CodeFile] = await asyncio.gather(*tasks)
 
-        code_files = []
-        for (file_path, metadata), dependencies in zip(py_files_dict.items(), results):
-            source_code = metadata.get("source_code")
+        for source_code_file in results:
+            source_code_file.part_of = repo
 
-            code_files.append(
-                CodeFile(
-                    id=uuid5(NAMESPACE_OID, file_path),
-                    source_code=source_code,
-                    extracted_id=file_path,
-                    part_of=repo,
-                    depends_on=[
-                        CodeFile(
-                            id=uuid5(NAMESPACE_OID, dependency),
-                            extracted_id=dependency,
-                            part_of=repo,
-                            source_code=py_files_dict.get(dependency, {}).get("source_code"),
-                        )
-                        for dependency in dependencies
-                    ]
-                    if dependencies
-                    else None,
-                )
-            )
+            yield source_code_file
 
-        yield code_files
+
+if __name__ == "__main__":
+
+    async def main():
+        async for data_point in get_repo_file_dependencies("/Users/borisarzentar/Projects/django"):
+            print(data_point)
+
+    asyncio.run(main())

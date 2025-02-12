@@ -1,7 +1,5 @@
 import os
 
-import jedi
-import parso
 from tqdm import tqdm
 
 import logging
@@ -60,6 +58,8 @@ def _parse_node(node):
 def extract_importable_objects_with_positions_from_source_code(source_code):
     """Extract top-level objects in a Python source code string with their positions (line/column)."""
     try:
+        import parso
+
         tree = parso.parse(source_code)
     except Exception as e:
         logger.error(f"Error parsing source code: {e}")
@@ -137,6 +137,8 @@ def parse_file_with_references(project, file_path):
         return []
 
     try:
+        import jedi
+
         script = jedi.Script(path=file_path, project=project)
     except Exception as e:
         logger.error(f"Error initializing Jedi Script: {e}")
@@ -156,6 +158,8 @@ def parse_file_with_references(project, file_path):
 def parse_repo(repo_path):
     """Parse a repository to extract object names, types, and references for all Python files."""
     try:
+        import jedi
+
         project = jedi.Project(path=repo_path)
     except Exception as e:
         logger.error(f"Error creating Jedi project for repository at {repo_path}: {e}")
