@@ -57,11 +57,11 @@ async def get_local_script_dependencies(
     async for part in extract_code_parts(source_code_tree.root_node):
         part.file_path = relative_file_path
 
-        if type(part) == FunctionDefinition:
+        if isinstance(part, FunctionDefinition):
             code_file_node.provides_function_definition.append(part)
-        if type(part) == ClassDefinition:
+        if isinstance(part, ClassDefinition):
             code_file_node.provides_class_definition.append(part)
-        if type(part) == ImportStatement:
+        if isinstance(part, ImportStatement):
             code_file_node.depends_on.append(part)
 
     return code_file_node
