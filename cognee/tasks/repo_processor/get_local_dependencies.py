@@ -1,6 +1,4 @@
-import asyncio
-
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator
 from uuid import NAMESPACE_OID, uuid5
 import tree_sitter_python as tspython
 from tree_sitter import Language, Node, Parser
@@ -35,7 +33,7 @@ async def get_source_code(file_path: str):
 
 async def get_local_script_dependencies(
     repo_path: str, script_path: str, detailed_extraction: bool = False
-) -> List[str]:
+) -> CodeFile:
     source_code = await get_source_code(script_path)
 
     relative_file_path = script_path[len(repo_path) + 1 :]
@@ -116,12 +114,3 @@ async def extract_code_parts(tree_root: Node) -> AsyncGenerator[DataPoint, None]
                 end_point=child_node.end_point,
                 source_code=child_node.text,
             )
-
-
-if __name__ == "__main__":
-    asyncio.run(
-        get_local_script_dependencies(
-            "/Users/borisarzentar/Projects/django",
-            "/Users/borisarzentar/Projects/django/django/core/servers/basehttp.py",
-        )
-    )

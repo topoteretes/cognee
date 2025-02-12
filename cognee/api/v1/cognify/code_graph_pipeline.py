@@ -72,22 +72,19 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 
     dataset_id = uuid5(NAMESPACE_OID, "codebase")
 
-    pipeline_run_status = None
     if include_docs:
         non_code_pipeline_run = run_tasks(non_code_tasks, dataset_id, repo_path, "cognify_pipeline")
         async for run_status in non_code_pipeline_run:
-            pipeline_run_status = run_status
+            yield run_status
 
     async for run_status in run_tasks(tasks, dataset_id, repo_path, "cognify_code_pipeline"):
-        pipeline_run_status = run_status
-
-    return pipeline_run_status
+        yield run_status
 
 
 if __name__ == "__main__":
 
     async def main():
-        async for data_points in run_code_graph_pipeline("/Users/borisarzentar/Projects/django"):
+        async for data_points in run_code_graph_pipeline("REPO_PATH"):
             print(data_points)
 
         await render_graph()

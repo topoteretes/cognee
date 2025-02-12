@@ -83,12 +83,3 @@ async def get_repo_file_dependencies(
             source_code_file.part_of = repo
 
             yield source_code_file
-
-
-if __name__ == "__main__":
-
-    async def main():
-        async for data_point in get_repo_file_dependencies("/Users/borisarzentar/Projects/django"):
-            print(data_point)
-
-    asyncio.run(main())

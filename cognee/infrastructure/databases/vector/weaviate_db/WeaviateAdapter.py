@@ -196,7 +196,7 @@ class WeaviateAdapter(VectorDBInterface):
                 )
                 for result in search_result.objects
             ]
-        except weaviate.exceptions.UnexpectedStatusCodeError as error:
+        except weaviate.exceptions.UnexpectedStatusCodeError:
             # Ignore if the collection doesn't exist
             return []
 
