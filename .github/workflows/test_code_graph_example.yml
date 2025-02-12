@@ -19,5 +19,9 @@ jobs:
       secrets:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        EMBEDDING_PROVIDER: "fastembed"
+        EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+        EMBEDDING_DIMENSIONS: 384
+        EMBEDDING_MAX_TOKENS: 256
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
