@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Optional
-from uuid import UUID
 
+from cognee.infrastructure.engine.utils import parse_id
 from qdrant_client import AsyncQdrantClient, models
 
 from cognee.exceptions import InvalidValueError
@@ -155,30 +155,34 @@ class QDrantAdapter(VectorDBInterface):
 
         client = self.get_qdrant_client()
 
-        results = await client.search(
-            collection_name=collection_name,
-            query_vector=models.NamedVector(
-                name="text",
-                vector=query_vector
-                if query_vector is not None
-                else (await self.embed_data([query_text]))[0],
-            ),
-            with_vectors=with_vector,
-        )
-
-        await client.close()
-
-        return [
-            ScoredResult(
-                id=UUID(result.id),
-                payload={
-                    **result.payload,
-                    "id": UUID(result.id),
-                },
-                score=1 - result.score,
+        try:
+            results = await client.search(
+                collection_name=collection_name,
+                query_vector=models.NamedVector(
+                    name="text",
+                    vector=query_vector
+                    if query_vector is not None
+                    else (await self.embed_data([query_text]))[0],
+                ),
+                with_vectors=with_vector,
             )
-            for result in results
-        ]
+
+            return [
+                ScoredResult(
+                    id=parse_id(result.id),
+                    payload={
+                        **result.payload,
+                        "id": parse_id(result.id),
+                    },
+                    score=1 - result.score,
+                )
+                for result in results
+            ]
+        except ValueError:
+            # Ignore if the collection doesn't exist
+            return []
+        finally:
+            await client.close()
 
     async def search(
         self,
@@ -209,10 +213,10 @@ class QDrantAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result.id),
+                id=parse_id(result.id),
                 payload={
                     **result.payload,
-                    "id": UUID(result.id),
+                    "id": parse_id(result.id),
                 },
                 score=1 - result.score,
             )

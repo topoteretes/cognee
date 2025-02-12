@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from typing import List, Optional
-from uuid import UUID
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -172,6 +172,7 @@ class WeaviateAdapter(VectorDBInterface):
         with_vector: bool = False,
     ) -> List[ScoredResult]:
         import weaviate.classes as wvc
+        import weaviate.exceptions
 
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
@@ -179,21 +180,25 @@ class WeaviateAdapter(VectorDBInterface):
         if query_vector is None:
             query_vector = (await self.embed_data([query_text]))[0]
 
-        search_result = self.get_collection(collection_name).query.hybrid(
-            query=None,
-            vector=query_vector,
-            include_vector=with_vector,
-            return_metadata=wvc.query.MetadataQuery(score=True),
-        )
-
-        return [
-            ScoredResult(
-                id=UUID(str(result.uuid)),
-                payload=result.properties,
-                score=1 - float(result.metadata.score),
+        try:
+            search_result = self.get_collection(collection_name).query.hybrid(
+                query=None,
+                vector=query_vector,
+                include_vector=with_vector,
+                return_metadata=wvc.query.MetadataQuery(score=True),
             )
-            for result in search_result.objects
-        ]
+
+            return [
+                ScoredResult(
+                    id=parse_id(str(result.uuid)),
+                    payload=result.properties,
+                    score=1 - float(result.metadata.score),
+                )
+                for result in search_result.objects
+            ]
+        except weaviate.exceptions.UnexpectedStatusCodeError:
+            # Ignore if the collection doesn't exist
+            return []
 
     async def search(
         self,
@@ -221,7 +226,7 @@ class WeaviateAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(str(result.uuid)),
+                id=parse_id(str(result.uuid)),
                 payload=result.properties,
                 score=1 - float(result.metadata.score),
             )

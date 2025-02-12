@@ -1,6 +1,5 @@
 import asyncio
 from typing import Generic, List, Optional, TypeVar, get_type_hints
-from uuid import UUID
 
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
@@ -8,6 +7,7 @@ from pydantic import BaseModel
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 
@@ -133,7 +133,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result["id"]),
+                id=parse_id(result["id"]),
                 payload=result["payload"],
                 score=0,
             )
@@ -150,24 +150,31 @@ class LanceDBAdapter(VectorDBInterface):
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
         connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
 
-        collection_size = await collection.count_rows()
+        try:
+            collection = await connection.open_table(collection_name)
 
-        results = await collection.vector_search(query_vector).limit(collection_size).to_pandas()
+            collection_size = await collection.count_rows()
 
-        result_values = list(results.to_dict("index").values())
-
-        normalized_values = normalize_distances(result_values)
-
-        return [
-            ScoredResult(
-                id=UUID(result["id"]),
-                payload=result["payload"],
-                score=normalized_values[value_index],
+            results = (
+                await collection.vector_search(query_vector).limit(collection_size).to_pandas()
             )
-            for value_index, result in enumerate(result_values)
-        ]
+
+            result_values = list(results.to_dict("index").values())
+
+            normalized_values = normalize_distances(result_values)
+
+            return [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    payload=result["payload"],
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
+        except ValueError:
+            # Ignore if collection doesn't exist
+            return []
 
     async def search(
         self,
@@ -195,7 +202,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return [
             ScoredResult(
-                id=UUID(result["id"]),
+                id=parse_id(result["id"]),
                 payload=result["payload"],
                 score=normalized_values[value_index],
             )

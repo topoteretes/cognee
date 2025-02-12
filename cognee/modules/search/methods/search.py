@@ -1,8 +1,8 @@
 import json
-from uuid import UUID
 from typing import Callable
 
 from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.retrieval.code_graph_retrieval import code_graph_retrieval
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
@@ -32,7 +32,7 @@ async def search(
 
     for search_result in search_results:
         document_id = search_result["document_id"] if "document_id" in search_result else None
-        document_id = UUID(document_id) if isinstance(document_id, str) else document_id
+        document_id = parse_id(document_id)
 
         if document_id is None or document_id in own_document_ids:
             filtered_search_results.append(search_result)
