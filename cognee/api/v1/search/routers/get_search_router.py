@@ -38,7 +38,7 @@ def get_search_router() -> APIRouter:
         from cognee.api.v1.search import search as cognee_search
 
         try:
-            results = await cognee_search(payload.query, payload.searchType, user)
+            results = await cognee_search(payload.query, payload.search_type, user)
 
             return results
         except Exception as error:
