@@ -215,7 +215,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 ScoredResult(id=parse_id(str(row.id)), payload=row.payload, score=row.similarity)
                 for row in vector_list
             ]
-        except EntityNotFoundError as e:
+        except EntityNotFoundError:
             # Ignore if collection does not exist
             return []
 
