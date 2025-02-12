@@ -1,8 +1,6 @@
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.llm.config import get_llm_config
 from .EmbeddingEngine import EmbeddingEngine
-from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
-from .FastembedEmbeddingEngine import FastembedEmbeddingEngine
 
 
 def get_embedding_engine() -> EmbeddingEngine:
@@ -10,11 +8,15 @@ def get_embedding_engine() -> EmbeddingEngine:
     llm_config = get_llm_config()
 
     if config.embedding_provider == "fastembed":
+        from .FastembedEmbeddingEngine import FastembedEmbeddingEngine
+
         return FastembedEmbeddingEngine(
             model=config.embedding_model,
             dimensions=config.embedding_dimensions,
             max_tokens=config.embedding_max_tokens,
         )
+
+    from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 
     return LiteLLMEmbeddingEngine(
         # If OpenAI API is used for embeddings, litellm needs only the api_key.
