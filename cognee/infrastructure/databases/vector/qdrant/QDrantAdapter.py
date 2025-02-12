@@ -178,7 +178,7 @@ class QDrantAdapter(VectorDBInterface):
                 )
                 for result in results
             ]
-        except ValueError as error:
+        except ValueError:
             # Ignore if the collection doesn't exist
             return []
         finally:

@@ -24,8 +24,12 @@ async def code_graph_retrieval(query: str) -> dict[str, str]:
 
     for triplet in found_triplets:
         if triplet.node1.attributes["source_code"]:
-            retrieved_files[triplet.node1.attributes["file_path"]] = triplet.node1.attributes["source_code"]
+            retrieved_files[triplet.node1.attributes["file_path"]] = triplet.node1.attributes[
+                "source_code"
+            ]
         if triplet.node2.attributes["source_code"]:
-            retrieved_files[triplet.node2.attributes["file_path"]] = triplet.node2.attributes["source_code"]
+            retrieved_files[triplet.node2.attributes["file_path"]] = triplet.node2.attributes[
+                "source_code"
+            ]
 
     return retrieved_files
