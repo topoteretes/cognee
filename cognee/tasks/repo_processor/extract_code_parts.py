@@ -1,5 +1,4 @@
 from typing import Dict, List
-import parso
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,6 +47,8 @@ def extract_code_parts(source_code: str) -> Dict[str, List[str]]:
         return parts_dict
 
     try:
+        import parso
+
         module = parso.parse(source_code)
     except Exception as e:
         logger.error(f"Error parsing source code: {e}")
