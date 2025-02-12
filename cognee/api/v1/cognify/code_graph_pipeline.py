@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from uuid import NAMESPACE_OID, uuid5
 
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
@@ -69,12 +70,18 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
             ),
         ]
 
-    if include_docs:
-        async for result in run_tasks(non_code_tasks, repo_path):
-            yield result
+    dataset_id = uuid5(NAMESPACE_OID, "codebase")
 
-    async for result in run_tasks(tasks, repo_path, "cognify_code_pipeline"):
-        yield result
+    pipeline_run_status = None
+    if include_docs:
+        non_code_pipeline_run = run_tasks(non_code_tasks, dataset_id, repo_path, "cognify_pipeline")
+        async for run_status in non_code_pipeline_run:
+            pipeline_run_status = run_status
+
+    async for run_status in run_tasks(tasks, dataset_id, repo_path, "cognify_code_pipeline"):
+        pipeline_run_status = run_status
+
+    return pipeline_run_status
 
 
 if __name__ == "__main__":

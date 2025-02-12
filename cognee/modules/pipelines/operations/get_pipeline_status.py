@@ -1,11 +1,11 @@
 from uuid import UUID
-from sqlalchemy import func, select
-from sqlalchemy.orm import aliased
+from sqlalchemy import select, func
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import PipelineRun
+from sqlalchemy.orm import aliased
 
 
-async def get_pipeline_status(pipeline_ids: list[UUID]):
+async def get_pipeline_status(dataset_ids: list[UUID]):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
@@ -14,12 +14,12 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
                 PipelineRun,
                 func.row_number()
                 .over(
-                    partition_by=PipelineRun.run_id,
+                    partition_by=PipelineRun.dataset_id,
                     order_by=PipelineRun.created_at.desc(),
                 )
                 .label("rn"),
             )
-            .filter(PipelineRun.run_id.in_(pipeline_ids))
+            .filter(PipelineRun.dataset_id.in_(dataset_ids))
             .subquery()
         )
 
@@ -29,16 +29,6 @@ async def get_pipeline_status(pipeline_ids: list[UUID]):
 
         runs = (await session.execute(latest_runs)).scalars().all()
 
-        pipeline_statuses = {str(run.run_id): run.status for run in runs}
+        pipeline_statuses = {str(run.dataset_id): run.status for run in runs}
 
         return pipeline_statuses
-
-        # f"""SELECT data_id, status
-        # FROM (
-        #     SELECT data_id, status, ROW_NUMBER() OVER (PARTITION BY data_id ORDER BY created_at DESC) as rn
-        #     FROM cognee.cognee.task_runs
-        #     WHERE data_id IN ({formatted_data_ids})
-        # ) t
-        # WHERE rn = 1;"""
-
-    # return { dataset["data_id"]: dataset["status"] for dataset in datasets_statuses }
