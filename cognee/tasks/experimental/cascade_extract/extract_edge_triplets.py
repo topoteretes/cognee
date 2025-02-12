@@ -2,6 +2,7 @@ from typing import List, Tuple
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.root_dir import get_absolute_path
 
 
 async def extract_edge_triplets(
@@ -27,8 +28,13 @@ async def extract_edge_triplets(
             "total_rounds": n_rounds,
         }
 
-        text_input = render_prompt("prompts/extract_graph_edge_triplets_prompt_input.txt", context)
-        system_prompt = read_query_prompt("prompts/extract_graph_edge_triplets_prompt_system.txt")
+        base_directory = get_absolute_path("./tasks/experimental/cascade_extract/prompts")
+        text_input = render_prompt(
+            "extract_graph_edge_triplets_prompt_input.txt", context, base_directory=base_directory
+        )
+        system_prompt = read_query_prompt(
+            "extract_graph_edge_triplets_prompt_system.txt", base_directory=base_directory
+        )
         round_graph = await llm_client.acreate_structured_output(
             text_input=text_input, system_prompt=system_prompt, response_model=KnowledgeGraph
         )

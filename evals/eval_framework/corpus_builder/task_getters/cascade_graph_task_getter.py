@@ -14,7 +14,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.experimental.cascade_extract.cascade_extract_graph import (
-    extract_graph_from_data_chunks,
+    cascade_extract_graph_from_chunks,
 )
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
@@ -41,7 +41,7 @@ class CascadeGraphTaskGetter(BaseTaskGetter):
                     extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
                 ),  # Extract text chunks based on the document type.
                 Task(
-                    extract_graph_from_data_chunks, task_config={"batch_size": 10}
+                    cascade_extract_graph_from_chunks, task_config={"batch_size": 10}
                 ),  # Generate knowledge graphs using cascade extraction
                 Task(
                     summarize_text,

@@ -11,7 +11,7 @@ from cognee.tasks.experimental.cascade_extract.extract_edge_triplets import extr
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 
-async def extract_graph_from_data_chunks(
+async def cascade_extract_graph_from_chunks(
     data_chunks: List[DocumentChunk], n_rounds: int = 1
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks in multiple steps."""
