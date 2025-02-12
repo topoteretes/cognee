@@ -10,7 +10,7 @@ from cognee.modules.users.methods import get_authenticated_user
 
 
 class SearchPayloadDTO(InDTO):
-    search_type: SearchType
+    searchType: SearchType  # Match the exact field name from JSON payload
     query: str
 
 
@@ -38,7 +38,7 @@ def get_search_router() -> APIRouter:
         from cognee.api.v1.search import search as cognee_search
 
         try:
-            results = await cognee_search(payload.search_type, payload.query, user)
+            results = await cognee_search(payload.query, payload.searchType, user)
 
             return results
         except Exception as error:
