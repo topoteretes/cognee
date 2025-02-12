@@ -10,7 +10,7 @@ from cognee.modules.users.methods import get_authenticated_user
 
 
 class SearchPayloadDTO(InDTO):
-    searchType: SearchType  # Match the exact field name from JSON payload
+    searchType: SearchType  
     query: str
 
 
