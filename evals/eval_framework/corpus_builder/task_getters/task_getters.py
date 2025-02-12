@@ -11,9 +11,9 @@ class TaskGetters(Enum):
 
     def __new__(cls, getter_name: str, getter_class: Type):
         obj = object.__new__(cls)
-        obj._value_ = getter_name  # Set the string representation
-        obj.getter_class = getter_class  # Store the corresponding class
+        obj._value_ = getter_name
+        obj.getter_class = getter_class
         return obj
 
     def __str__(self):
-        return self.value  # Returns the string name instead of Enum member name
+        return self.value
