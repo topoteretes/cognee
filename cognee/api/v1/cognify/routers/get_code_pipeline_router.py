@@ -1,8 +1,14 @@
+import json
+import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.retrieval import code_graph_retrieval
+from cognee.modules.storage.utils import JSONEncoder
+
+
+logger = logging.getLogger(__name__)
 
 
 class CodePipelineIndexPayloadDTO(InDTO):
@@ -23,7 +29,7 @@ def get_code_pipeline_router() -> APIRouter:
         """This endpoint is responsible for running the indexation on code repo."""
         try:
             async for result in run_code_graph_pipeline(payload.repo_path, payload.include_docs):
-                print(result)
+                logger.info(result)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 
@@ -39,14 +45,7 @@ def get_code_pipeline_router() -> APIRouter:
 
             retrieved_files = await code_graph_retrieval(query)
 
-            return [
-                {
-                    "name": file_path,
-                    "description": file_path,
-                    "content": source_code,
-                }
-                for file_path, source_code in retrieved_files.items()
-            ]
+            return json.dumps(retrieved_files, cls=JSONEncoder)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

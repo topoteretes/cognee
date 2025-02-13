@@ -38,7 +38,7 @@ async def run():
             toolResult = await session.call_tool("prune", arguments={})
 
             toolResult = await session.call_tool(
-                "codify", arguments={"repo_path": "/Users/borisarzentar/Projects/django"}
+                "codify", arguments={"repo_path": "SOME_REPO_PATH"}
             )
 
             toolResult = await session.call_tool(

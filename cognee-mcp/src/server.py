@@ -135,7 +135,7 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
 
 async def codify(repo_path: str):
     async for result in run_code_graph_pipeline(repo_path, False):
-        print(result)
+        logger.info(result)
 
 
 async def search(search_query: str, search_type: str) -> str:
