@@ -33,10 +33,10 @@ async def code_graph_retrieval(query: str) -> dict[str, str]:
             ]
 
     return [
-          {
-              "name": file_path,
-              "description": file_path,
-              "content": source_code,
-          }
-          for file_path, source_code in retrieved_files.items()
-      ]
+        {
+            "name": file_path,
+            "description": file_path,
+            "content": source_code,
+        }
+        for file_path, source_code in retrieved_files.items()
+    ]
