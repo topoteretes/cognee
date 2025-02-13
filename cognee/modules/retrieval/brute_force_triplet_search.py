@@ -50,7 +50,11 @@ def format_triplets(edges):
 
 
 async def brute_force_triplet_search(
-    query: str, user: User = None, top_k=5, collections=None
+    query: str,
+    user: User = None,
+    top_k: int = 5,
+    collections: List[str] = None,
+    properties_to_project: List[str] = None,
 ) -> list:
     if user is None:
         user = await get_default_user()
@@ -58,12 +62,18 @@ async def brute_force_triplet_search(
     if user is None:
         raise PermissionError("No user found in the system. Please create a user.")
 
-    retrieved_results = await brute_force_search(query, user, top_k, collections=collections)
+    retrieved_results = await brute_force_search(
+        query, user, top_k, collections=collections, properties_to_project=properties_to_project
+    )
     return retrieved_results
 
 
 async def brute_force_search(
-    query: str, user: User, top_k: int, collections: List[str] = None
+    query: str,
+    user: User,
+    top_k: int,
+    collections: List[str] = None,
+    properties_to_project: List[str] = None,
 ) -> list:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -113,7 +123,8 @@ async def brute_force_search(
 
         await memory_fragment.project_graph_from_db(
             graph_engine,
-            node_properties_to_project=["id", "description", "name", "type", "text"],
+            node_properties_to_project=properties_to_project
+            or ["id", "description", "name", "type", "text"],
             edge_properties_to_project=["relationship_name"],
         )
 
