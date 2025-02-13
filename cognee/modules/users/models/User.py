@@ -1,5 +1,5 @@
 from uuid import UUID as uuid_UUID
-from sqlalchemy import ForeignKey, Column, UUID
+from sqlalchemy import ForeignKey, Column, UUID, String
 from sqlalchemy.orm import relationship, Mapped
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from .Principal import Principal
