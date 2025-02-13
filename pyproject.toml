@@ -84,6 +84,8 @@ tree-sitter = {version = "^0.24.0", optional = true}
 tree-sitter-python = {version = "^0.23.6", optional = true}
 plotly = {version = "^6.0.0", optional = true}
 gdown = {version = "^5.2.0", optional = true}
+pyside6 = "^6.8.2.1"
+qasync = "^0.27.1"
 
 
 [tool.poetry.extras]

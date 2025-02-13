@@ -1,7 +1,7 @@
 import sys
 import asyncio
 import cognee
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QWidget,
     QPushButton,
@@ -12,11 +12,13 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QTextEdit,
 )
+from qasync import QEventLoop  # Import QEventLoop from qasync
 
 
 class FileSearchApp(QWidget):
     def __init__(self):
         super().__init__()
+        self.selected_file = None
         self.init_ui()
 
     def init_ui(self):
@@ -31,9 +33,9 @@ class FileSearchApp(QWidget):
         self.search_input = QLineEdit(self)
         self.search_input.setPlaceholderText("Enter text to search...")
 
-        # Button to perform search
+        # Button to perform search; schedule the async search on click
         self.search_button = QPushButton("Cognee Search", self)
-        self.search_button.clicked.connect(self.cognee_search)
+        self.search_button.clicked.connect(lambda: asyncio.ensure_future(self._cognee_search()))
 
         # Text output area for search results
         self.result_output = QTextEdit(self)
@@ -52,9 +54,6 @@ class FileSearchApp(QWidget):
         self.setWindowTitle("Cognee")
         self.resize(500, 300)
 
-        # Initialize selected file path
-        self.selected_file = None
-
     def open_file_dialog(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select a File", "", "All Files (*.*);;Text Files (*.txt)"
@@ -62,52 +61,46 @@ class FileSearchApp(QWidget):
         if file_path:
             self.selected_file = file_path
             self.file_label.setText(f"Selected: {file_path}")
-
-            # Ensure an event loop is running before creating the async task
-            loop = asyncio.get_event_loop()
-            if not loop.is_running():
-                asyncio.run(self.process_file_async())  # Run coroutine in blocking mode
-            else:
-                asyncio.create_task(self.process_file_async())
+            asyncio.ensure_future(self.process_file_async())
 
     async def process_file_async(self):
-        """Handles async calls within PyQt."""
+        """Asynchronously add and process the selected file."""
+        # Disable the entire window
+        self.setEnabled(False)
         try:
             await cognee.add(self.selected_file)
             await cognee.cognify()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"File processing failed: {str(e)}")
+        # Once finished, re-enable the window
+        self.setEnabled(True)
 
-    def cognee_search(self):
+    async def _cognee_search(self):
+        """Performs an async search and updates the result output."""
+        # Disable the entire window
+        self.setEnabled(False)
+
         try:
             search_text = self.search_input.text().strip()
-            # Ensure an event loop is running before creating the async task
-            loop = asyncio.get_event_loop()
-            if not loop.is_running():
-                query = asyncio.run(
-                    self.async_search(search_text)
-                )  # Run coroutine in blocking mode
-            else:
-                query = asyncio.create_task(self.async_search(search_text))
-
-            self.result_output.setText(query[0])
+            result = await cognee.search(query_text=search_text)
+            print(result)
+            # Assuming result is a list-like object; adjust if necessary
+            self.result_output.setText(result[0])
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not read file: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Search failed: {str(e)}")
 
-    async def async_search(self, search_text):
-        return await cognee.search(query_text=search_text)
+        # Once finished, re-enable the window
+        self.setEnabled(True)
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    # Ensure an asyncio event loop is running for PyQt
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    # Create a qasync event loop and set it as the current event loop
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
 
     window = FileSearchApp()
     window.show()
-    sys.exit(app.exec_())
+
+    with loop:
+        loop.run_forever()
