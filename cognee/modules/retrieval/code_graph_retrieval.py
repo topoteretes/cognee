@@ -32,4 +32,11 @@ async def code_graph_retrieval(query: str) -> dict[str, str]:
                 "source_code"
             ]
 
-    return retrieved_files
+    return [
+          {
+              "name": file_path,
+              "description": file_path,
+              "content": source_code,
+          }
+          for file_path, source_code in retrieved_files.items()
+      ]
