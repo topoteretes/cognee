@@ -10,7 +10,7 @@ from cognee.modules.users.methods import get_authenticated_user
 
 
 class SearchPayloadDTO(InDTO):
-    search_type: SearchType
+    search_type: SearchType  
     query: str
 
 
@@ -38,7 +38,8 @@ def get_search_router() -> APIRouter:
         from cognee.api.v1.search import search as cognee_search
 
         try:
-            results = await cognee_search(payload.query, payload.search_type, user)
+
+            results = await cognee_search(query_text = payload.query, query_type = payload.search_type, user=user)
 
             return results
         except Exception as error:
