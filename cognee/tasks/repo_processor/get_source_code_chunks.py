@@ -2,8 +2,6 @@ import logging
 from typing import AsyncGenerator, Generator
 from uuid import NAMESPACE_OID, uuid5
 
-import parso
-
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
@@ -46,6 +44,8 @@ def _get_subchunk_token_counts(
         return _get_naive_subchunk_token_counts(source_code, max_subchunk_tokens)
 
     try:
+        import parso
+
         module = parso.parse(source_code)
     except Exception as e:
         logger.error(f"Error parsing source code: {e}")

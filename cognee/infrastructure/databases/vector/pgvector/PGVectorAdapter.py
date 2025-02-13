@@ -187,31 +187,37 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
-        # Get PGVectorDataPoint Table from database
-        PGVectorDataPoint = await self.get_table(collection_name)
+        try:
+            # Get PGVectorDataPoint Table from database
+            PGVectorDataPoint = await self.get_table(collection_name)
 
-        # Use async session to connect to the database
-        async with self.get_async_session() as session:
-            # Find closest vectors to query_vector
-            closest_items = await session.execute(
-                select(
-                    PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
-            )
+            # Use async session to connect to the database
+            async with self.get_async_session() as session:
+                # Find closest vectors to query_vector
+                closest_items = await session.execute(
+                    select(
+                        PGVectorDataPoint,
+                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
+                            "similarity"
+                        ),
+                    ).order_by("similarity")
+                )
 
-        vector_list = []
+            vector_list = []
 
-        # Extract distances and find min/max for normalization
-        for vector in closest_items:
-            # TODO: Add normalization of similarity score
-            vector_list.append(vector)
+            # Extract distances and find min/max for normalization
+            for vector in closest_items:
+                # TODO: Add normalization of similarity score
+                vector_list.append(vector)
 
-        # Create and return ScoredResult objects
-        return [
-            ScoredResult(id=parse_id(str(row.id)), payload=row.payload, score=row.similarity)
-            for row in vector_list
-        ]
+            # Create and return ScoredResult objects
+            return [
+                ScoredResult(id=parse_id(str(row.id)), payload=row.payload, score=row.similarity)
+                for row in vector_list
+            ]
+        except EntityNotFoundError:
+            # Ignore if collection does not exist
+            return []
 
     async def search(
         self,
