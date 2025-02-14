@@ -1,18 +1,34 @@
 import sys
 import asyncio
 import cognee
-from PySide6.QtWidgets import (
-    QApplication,
-    QWidget,
-    QPushButton,
-    QLineEdit,
-    QFileDialog,
-    QVBoxLayout,
-    QLabel,
-    QMessageBox,
-    QTextEdit,
-)
-from qasync import QEventLoop  # Import QEventLoop from qasync
+
+try:
+    from PySide6.QtWidgets import (
+        QApplication,
+        QWidget,
+        QPushButton,
+        QLineEdit,
+        QFileDialog,
+        QVBoxLayout,
+        QLabel,
+        QMessageBox,
+        QTextEdit,
+        QProgressDialog,
+    )
+    from PySide6.QtCore import Qt
+
+    from qasync import QEventLoop  # Import QEventLoop from qasync
+except ImportError as e:
+    print(
+        "\nPlease install Cognee with optional gui dependencies or manually install missing dependencies.\n"
+    )
+    print("\nTo install with poetry use:")
+    print("\npoetry install -E gui\n")
+    print("\nOr to install with poetry and all dependencies use:")
+    print("\npoetry install --all-extras\n")
+    print("\nTo install with pip use: ")
+    print('\npip install ".[gui]"\n')
+    raise e
 
 
 class FileSearchApp(QWidget):
@@ -23,24 +39,30 @@ class FileSearchApp(QWidget):
 
     def init_ui(self):
         # Button to open file dialog
-        self.file_button = QPushButton("Upload File to Cognee", self)
+        self.file_button = QPushButton("Upload File to Cognee", parent=self)
         self.file_button.clicked.connect(self.open_file_dialog)
 
         # Label to display selected file path
-        self.file_label = QLabel("No file selected", self)
+        self.file_label = QLabel("No file selected", parent=self)
 
         # Line edit for search input
-        self.search_input = QLineEdit(self)
+        self.search_input = QLineEdit(parent=self)
         self.search_input.setPlaceholderText("Enter text to search...")
 
         # Button to perform search; schedule the async search on click
-        self.search_button = QPushButton("Cognee Search", self)
+        self.search_button = QPushButton("Cognee Search", parent=self)
         self.search_button.clicked.connect(lambda: asyncio.ensure_future(self._cognee_search()))
 
         # Text output area for search results
-        self.result_output = QTextEdit(self)
+        self.result_output = QTextEdit(parent=self)
         self.result_output.setReadOnly(True)
         self.result_output.setPlaceholderText("Search results will appear here...")
+
+        # Progress dialog
+        self.progress_dialog = QProgressDialog("Processing..", None, 0, 0, parent=self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        # self.progress_dialog.setAttribute(Qt.WA_DeleteOnClose)
+        self.progress_dialog.setCancelButton(None)  # Remove the cancel button
 
         # Layout setup
         layout = QVBoxLayout()
@@ -66,6 +88,7 @@ class FileSearchApp(QWidget):
     async def process_file_async(self):
         """Asynchronously add and process the selected file."""
         # Disable the entire window
+        self.progress_dialog.show()
         self.setEnabled(False)
         try:
             await cognee.add(self.selected_file)
@@ -74,11 +97,13 @@ class FileSearchApp(QWidget):
             QMessageBox.critical(self, "Error", f"File processing failed: {str(e)}")
         # Once finished, re-enable the window
         self.setEnabled(True)
+        self.progress_dialog.close()
 
     async def _cognee_search(self):
         """Performs an async search and updates the result output."""
         # Disable the entire window
         self.setEnabled(False)
+        self.progress_dialog.show()
 
         try:
             search_text = self.search_input.text().strip()
@@ -91,6 +116,7 @@ class FileSearchApp(QWidget):
 
         # Once finished, re-enable the window
         self.setEnabled(True)
+        self.progress_dialog.close()
 
 
 if __name__ == "__main__":

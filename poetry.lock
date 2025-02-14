@@ -6692,7 +6692,7 @@ dev = ["build", "flake8", "mypy", "pytest", "twine"]
 name = "pyside6"
 version = "6.8.2.1"
 description = "Python bindings for the Qt cross-platform application and UI framework"
-optional = false
+optional = true
 python-versions = "<3.14,>=3.9"
 files = [
     {file = "PySide6-6.8.2.1-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:3fcb551729f235475b2abe7d919027de54a65d850e744f60716f890202273720"},
@@ -6710,7 +6710,7 @@ shiboken6 = "6.8.2.1"
 name = "pyside6-addons"
 version = "6.8.2.1"
 description = "Python bindings for the Qt cross-platform application and UI framework (Addons)"
-optional = false
+optional = true
 python-versions = "<3.14,>=3.9"
 files = [
     {file = "PySide6_Addons-6.8.2.1-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:5558816018042fecd0d782111ced529585a23ea9a010b518f8495764f578a01f"},
@@ -6727,7 +6727,7 @@ shiboken6 = "6.8.2.1"
 name = "pyside6-essentials"
 version = "6.8.2.1"
 description = "Python bindings for the Qt cross-platform application and UI framework (Essentials)"
-optional = false
+optional = true
 python-versions = "<3.14,>=3.9"
 files = [
     {file = "PySide6_Essentials-6.8.2.1-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:ae5cc48f7e9a08e73e3ec2387ce245c8150e620b8d5a87548ebd4b8e3aeae49b"},
@@ -7206,7 +7206,7 @@ cffi = {version = "*", markers = "implementation_name == \"pypy\""}
 name = "qasync"
 version = "0.27.1"
 description = "Python library for using asyncio in Qt-based applications"
-optional = false
+optional = true
 python-versions = ">=3.8,<4.0"
 files = [
     {file = "qasync-0.27.1-py3-none-any.whl", hash = "sha256:5d57335723bc7d9b328dadd8cb2ed7978640e4bf2da184889ce50ee3ad2602c7"},
@@ -8102,7 +8102,7 @@ files = [
 name = "shiboken6"
 version = "6.8.2.1"
 description = "Python/C++ bindings helper module"
-optional = false
+optional = true
 python-versions = "<3.14,>=3.9"
 files = [
     {file = "shiboken6-6.8.2.1-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:d3dedeb3732ecfc920c9f97da769c0022a1c3bda99346a9eba56fbf093deaa75"},
@@ -9745,6 +9745,7 @@ falkordb = ["falkordb"]
 filesystem = ["botocore"]
 gemini = ["google-generativeai"]
 groq = ["groq"]
+gui = ["pyside6", "qasync"]
 huggingface = ["transformers"]
 langchain = ["langchain_text_splitters", "langsmith"]
 llama-index = ["llama-index-core"]
@@ -9760,4 +9761,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10.0,<3.13"
-content-hash = "084b64005c9f39e988e08b01fb8c3ad4e4a2f0e09014bfd49a350489649ef587"
+content-hash = "d384b6028d84b344b40b6c7e047d592700227409aa3a4d961e157cd824fa50b5"
