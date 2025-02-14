@@ -97,6 +97,7 @@ class FileSearchApp(QWidget):
 
     async def process_file_async(self):
         """Asynchronously add and process the selected file."""
+        # Disable the entire window
         self.progress_dialog.show()
         self.setEnabled(False)
         try:
@@ -104,11 +105,13 @@ class FileSearchApp(QWidget):
             await cognee.cognify()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"File processing failed: {str(e)}")
+        # Once finished, re-enable the window
         self.setEnabled(True)
         self.progress_dialog.close()
 
     async def _cognee_search(self):
         """Performs an async search and updates the result output."""
+        # Disable the entire window
         self.setEnabled(False)
         self.progress_dialog.show()
 
@@ -116,10 +119,12 @@ class FileSearchApp(QWidget):
             search_text = self.search_input.text().strip()
             result = await cognee.search(query_text=search_text)
             print(result)
+            # Assuming result is a list-like object; adjust if necessary
             self.result_output.setText(result[0])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Search failed: {str(e)}")
 
+        # Once finished, re-enable the window
         self.setEnabled(True)
         self.progress_dialog.close()
 
@@ -137,6 +142,7 @@ class FileSearchApp(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    # Create a qasync event loop and set it as the current event loop
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
 
