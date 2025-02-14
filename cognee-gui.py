@@ -10,6 +10,7 @@ try:
         QLineEdit,
         QFileDialog,
         QVBoxLayout,
+        QHBoxLayout,
         QLabel,
         QMessageBox,
         QTextEdit,
@@ -38,9 +39,18 @@ class FileSearchApp(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        # Horizontal layout for file upload and visualization buttons
+        button_layout = QHBoxLayout()
+
         # Button to open file dialog
         self.file_button = QPushButton("Upload File to Cognee", parent=self)
         self.file_button.clicked.connect(self.open_file_dialog)
+        button_layout.addWidget(self.file_button)
+
+        # Button to visualize data
+        self.visualize_button = QPushButton("Visualize Data", parent=self)
+        self.visualize_button.clicked.connect(lambda: asyncio.ensure_future(self.visualize_data()))
+        button_layout.addWidget(self.visualize_button)
 
         # Label to display selected file path
         self.file_label = QLabel("No file selected", parent=self)
@@ -61,13 +71,12 @@ class FileSearchApp(QWidget):
         # Progress dialog
         self.progress_dialog = QProgressDialog("Processing..", None, 0, 0, parent=self)
         self.progress_dialog.setWindowModality(Qt.WindowModal)
-        # self.progress_dialog.setAttribute(Qt.WA_DeleteOnClose)
         self.progress_dialog.setCancelButton(None)  # Remove the cancel button
         self.progress_dialog.close()
 
         # Layout setup
         layout = QVBoxLayout()
-        layout.addWidget(self.file_button)
+        layout.addLayout(button_layout)
         layout.addWidget(self.file_label)
         layout.addWidget(self.search_input)
         layout.addWidget(self.search_button)
@@ -88,7 +97,6 @@ class FileSearchApp(QWidget):
 
     async def process_file_async(self):
         """Asynchronously add and process the selected file."""
-        # Disable the entire window
         self.progress_dialog.show()
         self.setEnabled(False)
         try:
@@ -96,13 +104,11 @@ class FileSearchApp(QWidget):
             await cognee.cognify()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"File processing failed: {str(e)}")
-        # Once finished, re-enable the window
         self.setEnabled(True)
         self.progress_dialog.close()
 
     async def _cognee_search(self):
         """Performs an async search and updates the result output."""
-        # Disable the entire window
         self.setEnabled(False)
         self.progress_dialog.show()
 
@@ -110,19 +116,27 @@ class FileSearchApp(QWidget):
             search_text = self.search_input.text().strip()
             result = await cognee.search(query_text=search_text)
             print(result)
-            # Assuming result is a list-like object; adjust if necessary
             self.result_output.setText(result[0])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Search failed: {str(e)}")
 
-        # Once finished, re-enable the window
         self.setEnabled(True)
         self.progress_dialog.close()
+
+    async def visualize_data(self):
+        """Async slot for handling visualize data button press."""
+        import webbrowser
+        from cognee.api.v1.visualize.visualize import visualize_graph
+        import os
+        import pathlib
+
+        html_file = os.path.join(pathlib.Path(__file__).parent, ".data", "graph_visualization.html")
+        await visualize_graph(html_file)
+        webbrowser.open(f"file://{html_file}")
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # Create a qasync event loop and set it as the current event loop
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
 
