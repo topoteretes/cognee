@@ -63,6 +63,7 @@ class FileSearchApp(QWidget):
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         # self.progress_dialog.setAttribute(Qt.WA_DeleteOnClose)
         self.progress_dialog.setCancelButton(None)  # Remove the cancel button
+        self.progress_dialog.close()
 
         # Layout setup
         layout = QVBoxLayout()
