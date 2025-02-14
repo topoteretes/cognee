@@ -15,6 +15,6 @@ from .modules import pipelines
 try:
     import dotenv
 
-    dotenv.load_dotenv()
+    dotenv.load_dotenv(override=True)
 except ImportError:
     pass
