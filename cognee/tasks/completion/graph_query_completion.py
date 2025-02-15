@@ -58,7 +58,7 @@ async def graph_query_completion(query: str) -> list:
         "context": retrieved_edges_to_string(found_triplets),
     }
     user_prompt = render_prompt("graph_context_for_question.txt", args)
-    system_prompt = read_query_prompt("answer_simple_question_restricted.txt")
+    system_prompt = read_query_prompt("answer_simple_question.txt")
 
     llm_client = get_llm_client()
     computed_answer = await llm_client.acreate_structured_output(
