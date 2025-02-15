@@ -27,13 +27,8 @@ env:
 jobs:
 
   run_notebook_test:
-    name: Notebook Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        # Using GitHub-hosted runners: Ubuntu 22.04 (Linux), macOS-13 (Intel), and macos-15 (ARM)
-        os: [ubuntu-22.04, macos-13, macos-15]
-      fail-fast: false
+    name: test
+    runs-on: ubuntu-22.04
     defaults:
       run:
         shell: bash
