@@ -1,13 +1,16 @@
 from enum import Enum
 from typing import Type
 from evals.eval_framework.corpus_builder.task_getters.default_task_getter import DefaultTaskGetter
+from evals.eval_framework.corpus_builder.task_getters.cascade_graph_task_getter import (
+    CascadeGraphTaskGetter,
+)
 
 
 class TaskGetters(Enum):
     """Enum mapping task getter types to their respective classes."""
 
     DEFAULT = ("Default", DefaultTaskGetter)
-    # CUSTOM = ("Custom", CustomTaskGetter)
+    CASCADE_GRAPH = ("CascadeGraph", CascadeGraphTaskGetter)
 
     def __new__(cls, getter_name: str, getter_class: Type):
         obj = object.__new__(cls)

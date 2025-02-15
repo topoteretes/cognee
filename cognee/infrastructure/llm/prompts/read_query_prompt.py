@@ -3,10 +3,13 @@ import logging
 from cognee.root_dir import get_absolute_path
 
 
-def read_query_prompt(prompt_file_name: str):
+def read_query_prompt(prompt_file_name: str, base_directory: str = None):
     """Read a query prompt from a file."""
     try:
-        file_path = path.join(get_absolute_path("./infrastructure/llm/prompts"), prompt_file_name)
+        if base_directory is None:
+            base_directory = get_absolute_path("./infrastructure/llm/prompts")
+
+        file_path = path.join(base_directory, prompt_file_name)
 
         with open(file_path, "r", encoding="utf-8") as file:
             return file.read()

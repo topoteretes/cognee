@@ -8,7 +8,7 @@ class EvalConfig(BaseSettings):
     building_corpus_from_scratch: bool = True
     number_of_samples_in_corpus: int = 1
     benchmark: str = "Dummy"  # Options: 'HotPotQA', 'Dummy', 'TwoWikiMultiHop'
-    task_getter_type: str = "Default"
+    task_getter_type: str = "Default"  # Options: 'Default', 'CascadeGraph'
 
     # Question answering params
     answering_questions: bool = True
