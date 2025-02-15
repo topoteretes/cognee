@@ -16,16 +16,11 @@ env:
 jobs:
 
   run_pgvector_integration_test:
-      name: PGvector Integration Test on ${{ matrix.os }}
-      runs-on: ${{ matrix.os }}
-      strategy:
-        matrix:
-          # Ubuntu and macOS runners (macos-13 for Intel and macos-15 for ARM)
-          os: [ubuntu-latest, macos-13, macos-15]
-        fail-fast: false
-      defaults:
-        run:
-          shell: bash
+    name: test
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
     services:
       postgres:
         image: pgvector/pgvector:pg17

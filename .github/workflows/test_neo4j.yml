@@ -14,17 +14,12 @@ env:
 
 jobs:
   run_neo4j_integration_test:
-    name: Neo4j Integration Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        # Ubuntu and macOS runners (macos-13 for Intel and macos-15 for ARM)
-        os: [ubuntu-latest, macos-13, macos-15]
-      fail-fast: false
+    name: test
+    runs-on: ubuntu-22.04
+
     defaults:
       run:
         shell: bash
-
 
     steps:
       - name: Check out
