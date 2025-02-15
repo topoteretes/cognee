@@ -15,10 +15,16 @@ env:
 
 jobs:
   run_common:
-    name: test
-    runs-on: ubuntu-22.04
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      matrix:
+        # These labels correspond to:
+        # - ubuntu-22.04: Linux
+        # - macos-13: macOS Intel
+        # - macos-15: macOS ARM (public preview)
+        os: [ubuntu-22.04, macos-13, macos-15]
     defaults:
       run:
         shell: bash
