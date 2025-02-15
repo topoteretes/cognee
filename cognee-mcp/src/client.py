@@ -37,9 +37,13 @@ async def run():
 
             toolResult = await session.call_tool("prune", arguments={})
 
-            toolResult = await session.call_tool("cognify", arguments={"text": text})
+            toolResult = await session.call_tool(
+                "codify", arguments={"repo_path": "SOME_REPO_PATH"}
+            )
 
-            toolResult = await session.call_tool("search", arguments={"search_query": "AI"})
+            toolResult = await session.call_tool(
+                "search", arguments={"search_type": "CODE", "search_query": "exceptions"}
+            )
 
             print(f"Cognify result: {toolResult.content}")
 
