@@ -40,8 +40,18 @@ pip install cognee
 
 ### With poetry
 
-```bash
+If adding to you project
+```
 poetry add cognee
+```
+
+If installing inside cloned repository
+
+```bash
+poetry config virtualenvs.in-project true
+poetry self add poetry-plugin-shell
+poetry install
+poetry shell
 ```
 
 ### With pip with specific database support
