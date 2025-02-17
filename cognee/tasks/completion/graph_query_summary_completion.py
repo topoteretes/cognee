@@ -23,4 +23,4 @@ async def retrieved_edges_to_summary(retrieved_edges: list) -> str:
 
 
 async def graph_query_summary_completion(query: str) -> list:
-    return await graph_query_completion(query, edges_to_string_converter=retrieved_edges_to_summary)
+    return await graph_query_completion(query, context_resolver=retrieved_edges_to_summary)

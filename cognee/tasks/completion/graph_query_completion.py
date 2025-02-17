@@ -22,9 +22,7 @@ async def retrieved_edges_to_string(retrieved_edges: list) -> str:
     return "\n---\n".join(edge_strings)
 
 
-async def graph_query_completion(
-    query: str, edges_to_string_converter: Callable = retrieved_edges_to_string
-) -> list:
+async def graph_query_completion(query: str, context_resolver: Callable = None) -> list:
     """
     Executes a query on the graph database and retrieves a relevant completion based on the found data.
 
@@ -56,9 +54,12 @@ async def graph_query_completion(
     if len(found_triplets) == 0:
         raise NoRelevantDataFound
 
+    if not context_resolver:
+        context_resolver = retrieved_edges_to_string
+
     args = {
         "question": query,
-        "context": await edges_to_string_converter(found_triplets),
+        "context": await context_resolver(found_triplets),
     }
     user_prompt = render_prompt("graph_context_for_question.txt", args)
     system_prompt = read_query_prompt("answer_simple_question.txt")
