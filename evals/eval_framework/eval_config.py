@@ -18,9 +18,10 @@ class EvalConfig(BaseSettings):
 
     # Evaluation params
     evaluating_answers: bool = True
-    evaluation_engine: str = "DeepEval"
+    evaluation_engine: str = "DeepEval"  # Options: 'DeepEval', 'Naive'
     evaluation_metrics: List[str] = ["correctness", "EM", "f1"]
-    deepeval_model: str = "gpt-4o-mini"
+    deepeval_model: str = "gpt-4o"  # Used by DeepEval adapter
+    naive_model: str = "gpt-4o"  # Used by Naive adapter for correctness evaluation
 
     # Visualization
     dashboard: bool = True
@@ -49,6 +50,7 @@ class EvalConfig(BaseSettings):
             "metrics_path": self.metrics_path,
             "dashboard_path": self.dashboard_path,
             "deepeval_model": self.deepeval_model,
+            "naive_model": self.naive_model,
             "task_getter_type": self.task_getter_type,
         }
 
