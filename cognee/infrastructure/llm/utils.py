@@ -43,9 +43,10 @@ def get_model_max_tokens(model_name: str):
 async def test_llm_connection():
     try:
         llm_adapter = get_llm_client()
-        system_prompt = render_prompt("generate_graph_prompt.txt", {})
         await llm_adapter.acreate_structured_output(
-            "This is a test prompt", system_prompt, KnowledgeGraph
+            text_input="test",
+            system_prompt='Respond to me with the following string: "test"',
+            response_model=str,
         )
 
     except Exception as e:
