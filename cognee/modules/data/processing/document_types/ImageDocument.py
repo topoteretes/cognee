@@ -10,7 +10,7 @@ class ImageDocument(Document):
         result = get_llm_client().transcribe_image(self.raw_data_location)
         return result.choices[0].message.content
 
-    def read(self, chunk_size: int, chunker_cls, max_chunk_tokens: int):
+    def read(self, chunk_size: int, chunker_cls: type, max_chunk_tokens: int):
         # Transcribe the image file
         text = self.transcribe_image()
 

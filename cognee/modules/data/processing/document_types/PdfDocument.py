@@ -6,7 +6,7 @@ from .Document import Document
 class PdfDocument(Document):
     type: str = "pdf"
 
-    def read(self, chunk_size: int, chunker_cls, max_chunk_tokens: int):
+    def read(self, chunk_size: int, chunker_cls: type, max_chunk_tokens: int):
         file = PdfReader(self.raw_data_location)
 
         def get_text():

@@ -4,7 +4,7 @@ from .Document import Document
 class TextDocument(Document):
     type: str = "text"
 
-    def read(self, chunk_size: int, chunker_cls: str, max_chunk_tokens: int):
+    def read(self, chunk_size: int, chunker_cls: type, max_chunk_tokens: int):
         def get_text():
             with open(self.raw_data_location, mode="r", encoding="utf-8") as file:
                 while True:
