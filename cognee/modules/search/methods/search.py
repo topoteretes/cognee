@@ -20,11 +20,11 @@ from ..operations import log_query, log_result
 
 async def search(
     query_text: str,
-    query_type: str,
+    query_type: SearchType,
     datasets: list[str],
     user: User,
 ):
-    query = await log_query(query_text, str(query_type), user.id)
+    query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(query_type, query_text, user)

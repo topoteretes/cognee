@@ -8,7 +8,7 @@ async def create_default_user():
     user = await create_user(
         email=default_user_email,
         password=default_user_password,
-        is_superuser=False,
+        is_superuser=True,
         is_active=True,
         is_verified=True,
         auto_login=True,
