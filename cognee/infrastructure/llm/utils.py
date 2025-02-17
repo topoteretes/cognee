@@ -3,8 +3,6 @@ import litellm
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
