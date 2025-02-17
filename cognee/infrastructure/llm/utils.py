@@ -3,6 +3,8 @@ import litellm
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.llm.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +43,11 @@ def get_model_max_tokens(model_name: str):
 async def test_llm_connection():
     try:
         llm_adapter = get_llm_client()
+        system_prompt = render_prompt("generate_graph_prompt.txt", {})
         await llm_adapter.acreate_structured_output(
-            text_input="test",
-            system_prompt='Respond to me with the following string: "test"',
-            response_model=str,
+            "This is a test prompt", system_prompt, KnowledgeGraph
         )
+
     except Exception as e:
         logger.error(e)
         logger.error("Connection to LLM could not be established.")
