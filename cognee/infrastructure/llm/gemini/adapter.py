@@ -128,7 +128,7 @@ class GeminiAdapter(LLMInterface):
                     max_tokens=self.max_tokens,
                     temperature=0.1,
                     response_format={"type": "json_object", "schema": response_schema},
-                    timeout=10,
+                    timeout=100,
                     num_retries=self.MAX_RETRIES,
                 )
 
