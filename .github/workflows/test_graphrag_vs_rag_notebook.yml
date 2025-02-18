@@ -1,0 +1,25 @@
+name: test | graphrag vs rag notebook
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run_notebook_test:
+      uses: ./.github/workflows/reusable_notebook.yml
+      with:
+        notebook-location: notebooks/graphrag_vs_rag.ipynb
+      secrets:
+        LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+        EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+        EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+        GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
