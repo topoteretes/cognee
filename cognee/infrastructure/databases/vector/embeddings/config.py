@@ -11,6 +11,7 @@ class EmbeddingConfig(BaseSettings):
     embedding_api_key: Optional[str] = None
     embedding_api_version: Optional[str] = None
     embedding_max_tokens: Optional[int] = 8191
+    huggingface_tokenizer: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
