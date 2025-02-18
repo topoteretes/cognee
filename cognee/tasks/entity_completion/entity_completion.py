@@ -1,23 +1,17 @@
-from typing import List, Type
+from typing import List, Union
 import logging
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
-from cognee.tasks.entity_completion.context_providers.dummy_context_provider import (
-    DummyContextProvider,
-)
 from cognee.tasks.entity_completion.entity_completion_config import EntityCompletionConfig
-from cognee.tasks.entity_completion.entity_extractors.base_entity_extractor import (
-    BaseEntityExtractor,
+from cognee.tasks.entity_completion.entity_extractors.entity_extractor_adapters import (
+    EntityExtractorAdapter,
 )
-from cognee.tasks.entity_completion.context_providers.base_context_provider import (
-    BaseContextProvider,
-)
-from cognee.tasks.entity_completion.entity_extractors.dummy_entity_extractor import (
-    DummyEntityExtractor,
+from cognee.tasks.entity_completion.context_providers.context_provider_adapters import (
+    ContextProviderAdapter,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("entity_completion")
 
 entity_completion_config = EntityCompletionConfig()
 
@@ -43,8 +37,40 @@ async def get_llm_response(query: str, context: str) -> str:
         raise
 
 
+def _get_entity_extractor(
+    extractor: Union[str, EntityExtractorAdapter, None],
+) -> EntityExtractorAdapter:
+    """Get entity extractor adapter from string or enum, using config default if None."""
+    if extractor is None:
+        extractor = entity_completion_config.entity_extractor
+
+    if isinstance(extractor, str):
+        try:
+            return EntityExtractorAdapter(extractor)
+        except ValueError:
+            raise ValueError(f"Unsupported entity extractor: {extractor}")
+    return extractor
+
+
+def _get_context_provider(
+    getter: Union[str, ContextProviderAdapter, None],
+) -> ContextProviderAdapter:
+    """Get context provider adapter from string or enum, using config default if None."""
+    if getter is None:
+        getter = entity_completion_config.context_getter
+
+    if isinstance(getter, str):
+        try:
+            return ContextProviderAdapter(getter)
+        except ValueError:
+            raise ValueError(f"Unsupported context provider: {getter}")
+    return getter
+
+
 async def entity_completion(
-    query: str, extractor: Type[BaseEntityExtractor], getter: Type[BaseContextProvider]
+    query: str,
+    extractor: Union[str, EntityExtractorAdapter] = None,
+    getter: Union[str, ContextProviderAdapter] = None,
 ) -> List[str]:
     """Execute entity-based completion using configurable components."""
     if not query or not isinstance(query, str):
@@ -52,15 +78,18 @@ async def entity_completion(
         return ["Invalid query input"]
 
     try:
+        extractor = _get_entity_extractor(extractor)
+        getter = _get_context_provider(getter)
+
         logger.info(f"Processing query: {query[:100]}")
-        entities = await extractor().extract_entities(query)
+        entities = await extractor.adapter_class().extract_entities(query)
         logger.debug(f"Extracted entities: {[e.name for e in entities]}")
 
         if not entities:
             logger.info("No entities extracted")
             return ["No entities found"]
 
-        context = await getter().get_context(entities, query)
+        context = await getter.adapter_class().get_context(entities, query)
 
         if not context:
             logger.info("No context retrieved")
@@ -79,9 +108,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     async def run_entity_completion():
-        result = await entity_completion(
-            "Tell me about Einstein", extractor=DummyEntityExtractor, getter=DummyContextProvider
-        )
+        # Uses config defaults
+        result = await entity_completion("Tell me about Einstein")
         print(f"Query Response: {result[0]}")
 
     asyncio.run(run_entity_completion())
