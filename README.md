@@ -1,3 +1,13 @@
+
+<br />
+<div align="center">
+  <a href="https://github.com/topoteretes/cognee">
+    <img src="./assets/cognee_logo.png" alt="Logo" height="95">
+  </a>
+
+  <br />
+  <br />
+  <p align="center">
 # cognee
 [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
 [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
@@ -6,7 +16,9 @@
 [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
 [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
 [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
+  </p>
 
+  <br />
 
 We build for developers who need a reliable, production-ready data layer for AI applications
 
