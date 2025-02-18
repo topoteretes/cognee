@@ -106,6 +106,7 @@ async def entity_completion(
 
 
 if __name__ == "__main__":
+    # For testing purposes, will be removed by the end of the sprint
     import asyncio
 
     logging.basicConfig(level=logging.INFO)
