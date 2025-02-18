@@ -1,10 +1,11 @@
 from .Document import Document
+from cognee.modules.chunking.Chunker import Chunker
 
 
 class TextDocument(Document):
     type: str = "text"
 
-    def read(self, chunk_size: int, chunker_cls: type, max_chunk_tokens: int):
+    def read(self, chunk_size: int, chunker_cls: Chunker, max_chunk_tokens: int):
         def get_text():
             with open(self.raw_data_location, mode="r", encoding="utf-8") as file:
                 while True:
