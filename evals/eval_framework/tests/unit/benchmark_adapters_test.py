@@ -28,7 +28,9 @@ def test_adapter_can_instantiate_and_load(AdapterClass):
 
     corpus_list, qa_pairs = result
     assert isinstance(corpus_list, list), f"{AdapterClass.__name__} corpus_list is not a list."
-    assert isinstance(qa_pairs, list), f"{AdapterClass.__name__} question_answer_pairs is not a list."
+    assert isinstance(qa_pairs, list), (
+        f"{AdapterClass.__name__} question_answer_pairs is not a list."
+    )
 
 
 @pytest.mark.parametrize("AdapterClass", ADAPTER_CLASSES)

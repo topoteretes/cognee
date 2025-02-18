@@ -70,8 +70,6 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
             question = item.get("question", "")
             answer = item.get("answer", "")
 
-
-
             question_answer_pairs.append(
                 {
                     "id": item.get("id", ""),
@@ -110,5 +108,3 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
                 f"After unzipping, '{target_filename}' not found. "
                 "Check the contents of the extracted files."
             )
-
-
