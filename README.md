@@ -20,11 +20,10 @@ cognee - memory layer for AI apps and Agents
 [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
 [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
-</div>
-
 
 We build for developers who need a reliable, production-ready data layer for AI applications
 
+</div>
 
 ## What is cognee?
 
