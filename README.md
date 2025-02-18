@@ -18,7 +18,7 @@
 [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
 
-
+  <br />
 
 We build for developers who need a reliable, production-ready data layer for AI applications
 
@@ -40,7 +40,7 @@ Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">s
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
 </div>
 
-### Contrbuting
+### Contributing
 
 Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
