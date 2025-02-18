@@ -5,6 +5,9 @@ from cognee.tests.unit.interfaces.graph.get_graph_from_model_test import (
     EntityType,
 )
 from cognee.tasks.storage.add_data_points import add_data_points
+from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
 
 
 async def create_disconnected_test_graph():
@@ -13,8 +16,7 @@ async def create_disconnected_test_graph():
     entity_type = EntityType(name="Person")
     entity = Entity(name="Alice", is_type=entity_type)
     entity2 = Entity(name="Alice2", is_type=entity_type)
-    # the following self-loop is intentional and serves the purpose of testing the self-loop counting functionality
-    doc_chunk.contains.extend([entity, entity2, doc_chunk])
+    doc_chunk.contains.extend([entity, entity2])
 
     doc2 = Document(path="test/path2")
     doc_chunk2 = DocumentChunk(part_of=doc2, text="This is a chunk of text", contains=[])
@@ -23,3 +25,69 @@ async def create_disconnected_test_graph():
     doc_chunk2.contains.extend([entity3])
 
     await add_data_points([doc_chunk, doc_chunk2])
+
+
+async def create_connected_test_graph():
+    doc = Document(path="test/path")
+    doc_chunk = DocumentChunk(part_of=doc, text="This is a chunk of text", contains=[])
+    entity_type = EntityType(name="Person")
+    entity = Entity(name="Alice", is_type=entity_type)
+    entity2 = Entity(name="Alice2", is_type=entity_type)
+    # the following self-loop is intentional and serves the purpose of testing the self-loop counting functionality
+    doc_chunk.contains.extend([entity, entity2, doc_chunk])
+
+    await add_data_points([doc_chunk])
+
+
+async def get_metrics(provider: str, connected_example=True, include_optional=True):
+    create_graph_engine.cache_clear()
+    cognee.config.set_graph_database_provider(provider)
+    graph_engine = await get_graph_engine()
+    await graph_engine.delete_graph()
+    if connected_example:
+        await create_connected_test_graph()
+    else:
+        await create_disconnected_test_graph()
+    graph_metrics = await graph_engine.get_graph_metrics(include_optional=include_optional)
+    return graph_metrics
+
+
+async def assert_metrics(provider, include_optional=True):
+    connected_example = include_optional
+    metrics = await get_metrics(
+        provider=provider, connected_example=connected_example, include_optional=include_optional
+    )
+    if connected_example:
+        ground_truth_metrics = {
+            "num_nodes": 5,
+            "num_edges": 6,
+            "mean_degree": (2 * 6) / 5,
+            "edge_density": 6 / (5 * 4),
+            "num_connected_components": 1,
+            "sizes_of_connected_components": [5],
+            "num_selfloops": 1,
+            "diameter": 3,
+            "avg_shortest_path_length": 1.6,
+            "avg_clustering": 0,
+        }
+    else:
+        ground_truth_metrics = {
+            "num_nodes": 9,
+            "num_edges": 8,
+            "mean_degree": (2 * 8) / 9,
+            "edge_density": 8 / (8 * 9),
+            "num_connected_components": 2,
+            "sizes_of_connected_components": [5, 4],
+            "num_selfloops": -1,
+            "diameter": -1,
+            "avg_shortest_path_length": -1,
+            "avg_clustering": -1,
+        }
+    diff_keys = set(metrics.keys()).symmetric_difference(set(ground_truth_metrics.keys()))
+    if diff_keys:
+        raise AssertionError(f"Metrics dictionaries have different keys: {diff_keys}")
+
+    for key, ground_truth_value in ground_truth_metrics.items():
+        assert metrics[key] == ground_truth_value, (
+            f"Expected {ground_truth_value} for '{key}' with {provider}, got {metrics[key]}"
+        )

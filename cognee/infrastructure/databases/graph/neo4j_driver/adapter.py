@@ -545,7 +545,7 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def project_entire_graph(self, graph_name="myGraph"):
         """
-        Projects all node labels and all relationship types into an in-memory GDS graph.
+        Projects all node labels and all relationship types into an undirected in-memory GDS graph.
         """
         if await self.graph_exists(graph_name):
             return
@@ -564,13 +564,17 @@ class Neo4jAdapter(GraphDBInterface):
             raise ValueError("No node labels or relationship types found in the database.")
 
         node_labels_str = "[" + ", ".join(f"'{label}'" for label in node_labels) + "]"
-        relationship_types_str = "[" + ", ".join(f"'{rel}'" for rel in relationship_types) + "]"
+        relationship_types_undirected_str = (
+            "{"
+            + ", ".join(f"{rel}" + ": {orientation: 'UNDIRECTED'}" for rel in relationship_types)
+            + "}"
+        )
 
         query = f"""
         CALL gds.graph.project(
             '{graph_name}',
             {node_labels_str},
-            {relationship_types_str}
+            {relationship_types_undirected_str}
         ) YIELD graphName;
         """
 
@@ -636,19 +640,31 @@ class Neo4jAdapter(GraphDBInterface):
             result = await self.query(query)
             return result[0]["self_loop_count"] if result else 0
 
-        async def _get_diameter():
-            logging.warning("Diameter calculation is not implemented for neo4j.")
-            return -1
+        async def _get_shortest_path_lengths():
+            await self.drop_graph(graph_name)
+            await self.project_entire_graph(graph_name)
 
-        async def _get_avg_shortest_path_length():
-            logging.warning(
-                "Average shortest path length calculation is not implemented for neo4j."
-            )
-            return -1
+            query = f"""
+            CALL gds.allShortestPaths.stream('{graph_name}')
+            YIELD distance
+            RETURN distance;
+            """
+
+            result = await self.query(query)
+            return [res["distance"] for res in result] if result else []
 
         async def _get_avg_clustering():
-            logging.warning("Average clustering calculation is not implemented for neo4j.")
-            return -1
+            await self.drop_graph(graph_name)
+            await self.project_entire_graph(graph_name)
+
+            query = f"""
+            CALL gds.localClusteringCoefficient.stream('{graph_name}')
+            YIELD localClusteringCoefficient
+            RETURN avg(localClusteringCoefficient) AS avg_clustering;
+            """
+
+            result = await self.query(query)
+            return result[0]["avg_clustering"] if result else 0
 
         num_nodes = len(nodes[0]["nodes"])
         num_edges = len(edges[0]["elements"])
@@ -663,10 +679,11 @@ class Neo4jAdapter(GraphDBInterface):
         }
 
         if include_optional:
+            shortest_path_lengths = await _get_shortest_path_lengths()
             optional_metrics = {
                 "num_selfloops": await _count_self_loops(),
-                "diameter": await _get_diameter(),
-                "avg_shortest_path_length": await _get_avg_shortest_path_length(),
+                "diameter": max(shortest_path_lengths),
+                "avg_shortest_path_length": sum(shortest_path_lengths) / len(shortest_path_lengths),
                 "avg_clustering": await _get_avg_clustering(),
             }
         else:
