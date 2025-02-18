@@ -8,6 +8,8 @@
   <br />
   <br />
 
+</div>
+
 # cognee
 [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
 [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
@@ -18,7 +20,7 @@
 [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
 
-  <br />
+
 
 We build for developers who need a reliable, production-ready data layer for AI applications
 
