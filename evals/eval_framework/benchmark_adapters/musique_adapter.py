@@ -4,7 +4,7 @@ import random
 from typing import Optional, Union, Any, LiteralString
 import zipfile
 
-import gdown  # pip install gdown
+import gdown
 
 from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
@@ -17,7 +17,7 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
     dataset_info = {
         # Name of the final file we want to load
-        "filename": "musique_ans_v1.0_dev.jsonl",
+        "filename": "data/musique_ans_v1.0_dev.jsonl",
         # A Google Drive URL (or share link) to the ZIP containing this file
         "download_url": "https://drive.google.com/file/d/1tGdADlNjWFaHLeZZGShh2IRcpO6Lv24h/view?usp=sharing",
         # The name of the ZIP archive we expect after downloading
@@ -51,16 +51,13 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
                     "Set auto_download=True or manually place the file."
                 )
 
-        # 2. Read the JSONL file
         with open(target_filename, "r", encoding="utf-8") as f:
             data = [json.loads(line) for line in f]
 
-        # 3. (Optional) sample a subset of items
         if limit is not None and 0 < limit < len(data):
             random.seed(seed)
             data = random.sample(data, limit)
 
-        # 4. Build up corpus_list and question_answer_pairs
         corpus_list = []
         question_answer_pairs = []
 
@@ -70,10 +67,7 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
             combined_paragraphs = " ".join(paragraph["paragraph_text"] for paragraph in paragraphs)
             corpus_list.append(combined_paragraphs)
 
-            # Example question & answer
-            # Adjust keys to match your actual JSON structure if needed
             question = item.get("question", "")
-            # If you have a known 'answer' key, or sometimes it's "answer_aliases", adapt accordingly
             answer = item.get("answer", "")
 
             question_answer_pairs.append(
@@ -100,20 +94,15 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
             return
 
         print(f"Attempting to download from Google Drive: {url}")
-        # Using gdown to download the ZIP from a Google Drive link
         gdown.download(url=url, output=zip_filename, quiet=False, fuzzy=True)
 
-        # Unzip the downloaded file
         if os.path.exists(zip_filename):
             print(f"Unzipping {zip_filename} ...")
             with zipfile.ZipFile(zip_filename, "r") as zip_ref:
-                zip_ref.extractall()  # Extract to current directory
-            # Optionally remove the ZIP after extraction
-            os.remove(zip_filename)
+                zip_ref.extractall()
         else:
             raise FileNotFoundError(f"Failed to download the zip file: {zip_filename}")
 
-        # Optional check: ensure the final .jsonl appeared
         if not os.path.exists(target_filename):
             raise FileNotFoundError(
                 f"After unzipping, '{target_filename}' not found. "
