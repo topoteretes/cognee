@@ -682,8 +682,10 @@ class Neo4jAdapter(GraphDBInterface):
             shortest_path_lengths = await _get_shortest_path_lengths()
             optional_metrics = {
                 "num_selfloops": await _count_self_loops(),
-                "diameter": max(shortest_path_lengths),
-                "avg_shortest_path_length": sum(shortest_path_lengths) / len(shortest_path_lengths),
+                "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
+                "avg_shortest_path_length": sum(shortest_path_lengths) / len(shortest_path_lengths)
+                if shortest_path_lengths
+                else -1,
                 "avg_clustering": await _get_avg_clustering(),
             }
         else:
