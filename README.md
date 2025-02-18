@@ -1,14 +1,29 @@
-# cognee
+
+<br />
+<div align="center">
+  <a href="https://github.com/topoteretes/cognee">
+    <img src="./assets/cognee_logo.png" alt="Logo" height="95">
+  </a>
+
+  <br />
+  <br />
+
+
+
+cognee - memory layer for AI apps and Agents
+
 [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
 [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
 [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
 [![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
 [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
-
+[![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
+[![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
 
 We build for developers who need a reliable, production-ready data layer for AI applications
 
+</div>
 
 ## What is cognee?
 
@@ -27,6 +42,14 @@ Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">s
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
 </div>
 
+### Contributing
+
+Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
+
+## Code of Conduct
+
+We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
+
 ## 📦 Installation
 
 You can install Cognee using either **pip** or **poetry**.
@@ -40,8 +63,18 @@ pip install cognee
 
 ### With poetry
 
-```bash
+If adding to you project
+```
 poetry add cognee
+```
+
+If installing inside cloned repository
+
+```bash
+poetry config virtualenvs.in-project true
+poetry self add poetry-plugin-shell
+poetry install
+poetry shell
 ```
 
 ### With pip with specific database support
@@ -99,29 +132,6 @@ cognee.config.set_llm_api_key("YOUR_OPENAI_API_KEY")
 You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
 
-If you are using Network, create an account on Graphistry to visualize results:
-```
-cognee.config.set_graphistry_config({
-    "username": "YOUR_USERNAME",
-    "password": "YOUR_PASSWORD"
-})
-```
-
-(Optional) To run the with an UI, go to cognee-mcp directory and follow the instructions.
-You will be able to use cognee as mcp tool and create graphs and query them.
-
-
-If you want to use Cognee with PostgreSQL, make sure to set the following values in the .env file:
-```
-DB_PROVIDER=postgres
-
-DB_HOST=postgres
-DB_PORT=5432
-
-DB_NAME=cognee_db
-DB_USERNAME=cognee
-DB_PASSWORD=cognee
-```
 
 ### Simple example
 
@@ -196,6 +206,7 @@ if __name__ == '__main__':
 When you run this script, you will see step-by-step messages in the console that help you trace the execution flow and understand what the script is doing at each stage.
 A version of this example is here: `examples/python/simple_example.py`
 
+
 ### Understand our architecture
 
 cognee framework consists of tasks that can be grouped into pipelines.
@@ -223,7 +234,7 @@ Cognee supports a variety of tools and services for different operations:
 
 ## Demo
 
-Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee_demo.ipynb) or watch the Youtube video bellow
+Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee_demo.ipynb) or watch the Youtube video below
 
 
 [<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
@@ -248,28 +259,8 @@ Please see the cognee [Development Guide](https://docs.cognee.ai/quickstart/) fo
 ```bash
 pip install cognee
 ```
-### Deployment at Scale (Modal)
 
-Scale cognee in 4(+1) simple steps to handle enterprise workloads using [Modal](https://modal.com)'s GPU-powered infrastructure
 
-**1. Install the modal python client**
-```bash
-pip install modal
-```
-**2. Create a free account on [Modal](https://modal.com)**
-
-**3. Set Up Modal API Key**
-```bash
-modal token set --token-id TOKEN_ID --token-secret TOKEN_SECRET --profile=PROFILE
-modal profile activate PROFILE
-```
-**4. Run cognee example**
-
-This simple example will deploy separate cognee instances building their own memory stores and answering a list of questions at scale.
-```bash
-modal run -d modal_deployment.py
-```
-**5. Change the modal_deploy script and develop your own AI memory at scale 🚀**
 
 ## 💫 Contributors
 
