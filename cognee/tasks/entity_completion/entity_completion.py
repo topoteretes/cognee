@@ -101,8 +101,8 @@ async def entity_completion(
         return [await get_llm_response(query, context)]
 
     except Exception as e:
-        logger.error(f"Pipeline execution failed: {str(e)}")
-        return ["Pipeline execution failed"]
+        logger.error(f"Entity completion failed: {str(e)}")
+        return ["Entity completion failed"]
 
 
 if __name__ == "__main__":
