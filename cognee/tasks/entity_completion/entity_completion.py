@@ -69,8 +69,8 @@ def _get_context_provider(
 
 async def entity_completion(
     query: str,
-    extractor: Union[str, EntityExtractorAdapter] = None,
-    getter: Union[str, ContextProviderAdapter] = None,
+    extractor_type: Union[str, EntityExtractorAdapter] = None,
+    context_provider_type: Union[str, ContextProviderAdapter] = None,
 ) -> List[str]:
     """Execute entity-based completion using configurable components."""
     if not query or not isinstance(query, str):
@@ -78,18 +78,21 @@ async def entity_completion(
         return ["Invalid query input"]
 
     try:
-        extractor = _get_entity_extractor(extractor)
-        getter = _get_context_provider(getter)
+        extractor_adapter = _get_entity_extractor(extractor_type)
+        context_provider_adapter = _get_context_provider(context_provider_type)
 
         logger.info(f"Processing query: {query[:100]}")
-        entities = await extractor.adapter_class().extract_entities(query)
+
+        extractor_instance = extractor_adapter.adapter_class()
+        entities = await extractor_instance.extract_entities(query)
         logger.debug(f"Extracted entities: {[e.name for e in entities]}")
 
         if not entities:
             logger.info("No entities extracted")
             return ["No entities found"]
 
-        context = await getter.adapter_class().get_context(entities, query)
+        context_provider_instance = context_provider_adapter.adapter_class()
+        context = await context_provider_instance.get_context(entities, query)
 
         if not context:
             logger.info("No context retrieved")
