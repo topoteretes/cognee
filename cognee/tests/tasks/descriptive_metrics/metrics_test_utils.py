@@ -8,6 +8,8 @@ from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
+import json
+from pathlib import Path
 
 
 async def create_disconnected_test_graph():
@@ -39,12 +41,12 @@ async def create_connected_test_graph():
     await add_data_points([doc_chunk])
 
 
-async def get_metrics(provider: str, connected_example=True, include_optional=True):
+async def get_metrics(provider: str, include_optional=True):
     create_graph_engine.cache_clear()
     cognee.config.set_graph_database_provider(provider)
     graph_engine = await get_graph_engine()
     await graph_engine.delete_graph()
-    if connected_example:
+    if include_optional:
         await create_connected_test_graph()
     else:
         await create_disconnected_test_graph()
@@ -53,36 +55,17 @@ async def get_metrics(provider: str, connected_example=True, include_optional=Tr
 
 
 async def assert_metrics(provider, include_optional=True):
-    connected_example = include_optional
-    metrics = await get_metrics(
-        provider=provider, connected_example=connected_example, include_optional=include_optional
-    )
-    if connected_example:
-        ground_truth_metrics = {
-            "num_nodes": 5,
-            "num_edges": 6,
-            "mean_degree": (2 * 6) / 5,
-            "edge_density": 6 / (5 * 4),
-            "num_connected_components": 1,
-            "sizes_of_connected_components": [5],
-            "num_selfloops": 1,
-            "diameter": 3,
-            "avg_shortest_path_length": 1.6,
-            "avg_clustering": 0,
-        }
+    metrics = await get_metrics(provider=provider, include_optional=include_optional)
+
+    gt_path = Path(__file__).parent / "ground_truth_metrics.json"
+    with open(gt_path, "r") as file:
+        ground_truth_metrics = json.load(file)
+
+    if include_optional:
+        ground_truth_metrics = ground_truth_metrics["connected"]
     else:
-        ground_truth_metrics = {
-            "num_nodes": 9,
-            "num_edges": 8,
-            "mean_degree": (2 * 8) / 9,
-            "edge_density": 8 / (8 * 9),
-            "num_connected_components": 2,
-            "sizes_of_connected_components": [5, 4],
-            "num_selfloops": -1,
-            "diameter": -1,
-            "avg_shortest_path_length": -1,
-            "avg_clustering": -1,
-        }
+        ground_truth_metrics = ground_truth_metrics["disconnected"]
+
     diff_keys = set(metrics.keys()).symmetric_difference(set(ground_truth_metrics.keys()))
     if diff_keys:
         raise AssertionError(f"Metrics dictionaries have different keys: {diff_keys}")

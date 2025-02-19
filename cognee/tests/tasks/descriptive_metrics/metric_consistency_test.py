@@ -4,13 +4,8 @@ import asyncio
 
 
 async def check_graph_metrics_consistency_across_adapters(include_optional=False):
-    connected_example = include_optional
-    neo4j_metrics = await get_metrics(
-        provider="neo4j", connected_example=connected_example, include_optional=include_optional
-    )
-    networkx_metrics = await get_metrics(
-        provider="networkx", connected_example=connected_example, include_optional=include_optional
-    )
+    neo4j_metrics = await get_metrics(provider="neo4j", include_optional=include_optional)
+    networkx_metrics = await get_metrics(provider="networkx", include_optional=include_optional)
 
     diff_keys = set(neo4j_metrics.keys()).symmetric_difference(set(networkx_metrics.keys()))
     if diff_keys:
