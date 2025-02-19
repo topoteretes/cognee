@@ -8,6 +8,7 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
     run_question_answering,
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
+from cognee.eval_framework.metrics_dashboard import generate_metrics_dashboard
 
 # Configure logging
 setup_logging(logging.INFO)
@@ -30,6 +31,13 @@ async def main():
 
     # Metrics calculation + dashboard
     await run_evaluation(eval_params)
+
+    if eval_params.get("dashboard"):
+        generate_metrics_dashboard(
+            json_data=eval_params["metrics_path"],
+            output_file=eval_params["dashboard_path"],
+            benchmark=eval_params["benchmark"],
+        )
 
 
 if __name__ == "__main__":
