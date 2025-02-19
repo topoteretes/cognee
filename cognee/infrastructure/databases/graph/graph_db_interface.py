@@ -57,4 +57,5 @@ class GraphDBInterface(Protocol):
 
     @abstractmethod
     async def get_graph_metrics(self, include_optional):
+        """ "https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
         raise NotImplementedError

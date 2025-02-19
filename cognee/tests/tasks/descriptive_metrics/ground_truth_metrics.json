@@ -1,0 +1,26 @@
+{
+    "connected": {
+        "num_nodes": 5,
+        "num_edges": 6,
+        "mean_degree": 2.4,
+        "edge_density": 0.3,
+        "num_connected_components": 1,
+        "sizes_of_connected_components": [5],
+        "num_selfloops": 1,
+        "diameter": 3,
+        "avg_shortest_path_length": 1.6,
+        "avg_clustering": 0
+    },
+    "disconnected": {
+        "num_nodes": 9,
+        "num_edges": 8,
+        "mean_degree": 1.7777777777777777,
+        "edge_density": 0.1111111111111111,
+        "num_connected_components": 2,
+        "sizes_of_connected_components": [5, 4],
+        "num_selfloops": -1,
+        "diameter": -1,
+        "avg_shortest_path_length": -1,
+        "avg_clustering": -1
+    }
+}
