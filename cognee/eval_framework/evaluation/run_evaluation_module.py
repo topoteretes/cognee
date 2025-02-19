@@ -1,7 +1,7 @@
 import logging
 import json
-from evals.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
-from evals.eval_framework.metrics_dashboard import generate_metrics_dashboard
+from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
+from cognee.eval_framework.metrics_dashboard import generate_metrics_dashboard
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,

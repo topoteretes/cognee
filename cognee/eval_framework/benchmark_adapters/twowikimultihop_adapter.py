@@ -3,15 +3,13 @@ import os
 import json
 import random
 from typing import Optional, Union, Any, LiteralString
-from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
-class HotpotQAAdapter(BaseBenchmarkAdapter):
+class TwoWikiMultihopAdapter(BaseBenchmarkAdapter):
     dataset_info = {
-        "filename": "hotpot_benchmark.json",
-        "url": "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json",
-        # train: "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_train_v1.1.json" delete file after changing the url
-        # distractor test: "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json" delete file after changing the url
+        "filename": "2wikimultihop_dev.json",
+        "URL": "https://huggingface.co/datasets/voidful/2WikiMultihopQA/resolve/main/dev.json",
     }
 
     def load_corpus(
@@ -23,7 +21,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
             with open(filename, "r", encoding="utf-8") as f:
                 corpus_json = json.load(f)
         else:
-            response = requests.get(self.dataset_info["url"])
+            response = requests.get(self.dataset_info["URL"])
             response.raise_for_status()
             corpus_json = response.json()
 
@@ -36,15 +34,15 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         corpus_list = []
         question_answer_pairs = []
-        for item in corpus_json:
-            for title, sentences in item["context"]:
+        for dict in corpus_json:
+            for title, sentences in dict["context"]:
                 corpus_list.append(" ".join(sentences))
 
             question_answer_pairs.append(
                 {
-                    "question": item["question"],
-                    "answer": item["answer"].lower(),
-                    "level": item["level"],
+                    "question": dict["question"],
+                    "answer": dict["answer"].lower(),
+                    "type": dict["type"],
                 }
             )
 

@@ -1,6 +1,6 @@
 from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
 from typing import List
-from evals.eval_framework.corpus_builder.task_getters.base_task_getter import BaseTaskGetter
+from cognee.eval_framework.corpus_builder.task_getters.base_task_getter import BaseTaskGetter
 from cognee.modules.pipelines.tasks.Task import Task
 
 

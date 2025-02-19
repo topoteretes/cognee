@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Type
-from evals.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
+from cognee.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
 
 
 class EvaluatorAdapter(Enum):

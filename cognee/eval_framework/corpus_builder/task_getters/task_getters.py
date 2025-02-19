@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Type
-from evals.eval_framework.corpus_builder.task_getters.default_task_getter import DefaultTaskGetter
+from cognee.eval_framework.corpus_builder.task_getters.default_task_getter import DefaultTaskGetter
 
 
 class TaskGetters(Enum):

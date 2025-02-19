@@ -2,9 +2,9 @@ import cognee
 import logging
 from typing import Optional, Tuple, List, Dict, Union, Any
 
-from evals.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
-from evals.eval_framework.corpus_builder.task_getters.task_getters import TaskGetters
-from evals.eval_framework.corpus_builder.task_getters.base_task_getter import BaseTaskGetter
+from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
+from cognee.eval_framework.corpus_builder.task_getters.task_getters import TaskGetters
+from cognee.eval_framework.corpus_builder.task_getters.base_task_getter import BaseTaskGetter
 from cognee.shared.utils import setup_logging
 
 

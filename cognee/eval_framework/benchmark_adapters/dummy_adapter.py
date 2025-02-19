@@ -1,6 +1,6 @@
-from typing import Optional, Union, Any, LiteralString
+from typing import Optional, Union, LiteralString
 
-from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
 class DummyAdapter(BaseBenchmarkAdapter):

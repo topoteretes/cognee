@@ -1,6 +1,6 @@
 import logging
 import json
-from evals.eval_framework.answer_generation.answer_generation_executor import (
+from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
     question_answering_engine_options,
 )

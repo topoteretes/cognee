@@ -1,7 +1,7 @@
 import logging
 import json
 from cognee.infrastructure.files.storage import LocalStorage
-from evals.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
+from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.modules.data.models.questions_base import QuestionsBase
 from cognee.modules.data.models.questions_data import Questions
 from cognee.infrastructure.databases.relational.get_relational_engine import (
