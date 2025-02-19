@@ -269,7 +269,12 @@ async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
         raise error
 
 
-async def run_tasks(tasks: list[Task], dataset_id: UUID = uuid4(), data: Any = None, pipeline_name: str = "unknown_pipeline"):
+async def run_tasks(
+    tasks: list[Task],
+    dataset_id: UUID = uuid4(),
+    data: Any = None,
+    pipeline_name: str = "unknown_pipeline",
+):
     pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
 
     pipeline_run = await log_pipeline_run_start(pipeline_id, dataset_id, data)
