@@ -99,6 +99,3 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         )
         logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
         return tokenizer
-
-
-
