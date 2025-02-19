@@ -2,10 +2,9 @@
 <br />
 <div align="center">
   <a href="https://github.com/topoteretes/cognee">
-    <img src="./assets/cognee_logo_transparent.png" alt="Logo" height="95">
+    <img src="./assets/cognee_logo_transparent.png" alt="Logo" height="150">
   </a>
 
-  <br />
   <br />
 
 
