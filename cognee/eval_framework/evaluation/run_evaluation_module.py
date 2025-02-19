@@ -1,7 +1,7 @@
 import logging
 import json
+from typing import List
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
-from cognee.eval_framework.metrics_dashboard import generate_metrics_dashboard
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
@@ -28,7 +28,7 @@ async def create_and_insert_metrics_table(questions_payload):
         await session.commit()
 
 
-async def run_evaluation(params: dict) -> None:
+async def run_evaluation(params: dict) -> List[dict]:
     if params.get("evaluating_answers"):
         logging.info("Evaluation started...")
         try:
@@ -51,9 +51,4 @@ async def run_evaluation(params: dict) -> None:
 
         logging.info("Evaluation End...")
 
-    if params.get("dashboard"):
-        generate_metrics_dashboard(
-            json_data=params["metrics_path"],
-            output_file=params["dashboard_path"],
-            benchmark=params["benchmark"],
-        )
+        return metrics

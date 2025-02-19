@@ -1,5 +1,6 @@
 import logging
 import json
+from typing import List
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
     question_answering_engine_options,
@@ -30,7 +31,7 @@ async def create_and_insert_answers_table(questions_payload):
         await session.commit()
 
 
-async def run_question_answering(params: dict) -> None:
+async def run_question_answering(params: dict) -> List[dict]:
     if params.get("answering_questions"):
         logging.info("Question answering started...")
         try:
@@ -52,3 +53,7 @@ async def run_question_answering(params: dict) -> None:
 
         await create_and_insert_answers_table(answers)
         logging.info("Question answering End...")
+
+        return answers
+    else:
+        logging.info("The question answering module ")

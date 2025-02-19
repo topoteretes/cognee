@@ -1,5 +1,6 @@
 import logging
 import json
+from typing import List
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.modules.data.models.questions_base import QuestionsBase
@@ -27,7 +28,7 @@ async def create_and_insert_questions_table(questions_payload):
         await session.commit()
 
 
-async def run_corpus_builder(params: dict) -> None:
+async def run_corpus_builder(params: dict) -> List[dict]:
     if params.get("building_corpus_from_scratch"):
         logging.info("Corpus Builder started...")
         corpus_builder = CorpusBuilderExecutor(
@@ -43,3 +44,5 @@ async def run_corpus_builder(params: dict) -> None:
         await create_and_insert_questions_table(questions_payload=questions)
 
         logging.info("Corpus Builder End...")
+
+        return questions
