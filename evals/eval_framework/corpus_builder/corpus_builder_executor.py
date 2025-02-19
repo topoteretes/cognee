@@ -10,7 +10,7 @@ from cognee.shared.utils import setup_logging
 
 class CorpusBuilderExecutor:
     def __init__(
-        self, benchmark: Union[str, Any] = "Dummy", task_getter_type: str = "DEFAULT"
+        self, benchmark: Union[str, Any] = "Dummy", task_getter: BaseTaskGetter = None
     ) -> None:
         if isinstance(benchmark, str):
             try:
@@ -23,13 +23,7 @@ class CorpusBuilderExecutor:
 
         self.raw_corpus = None
         self.questions = None
-
-        try:
-            task_enum = TaskGetters(task_getter_type)
-        except KeyError:
-            raise ValueError(f"Invalid task getter type: {task_getter_type}")
-
-        self.task_getter: BaseTaskGetter = task_enum.getter_class()
+        self.task_getter = task_getter
 
     def load_corpus(self, limit: Optional[int] = None) -> Tuple[List[Dict], List[str]]:
         self.raw_corpus, self.questions = self.adapter.load_corpus(limit=limit)
