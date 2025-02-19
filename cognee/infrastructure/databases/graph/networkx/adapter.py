@@ -244,9 +244,7 @@ class NetworkXAdapter(GraphDBInterface):
         await self.save_graph_to_file(self.filename)
 
     async def create_empty_graph(self, file_path: str) -> None:
-        self.graph = (
-            nx.MultiDiGraph()
-        )  # Use MultiDiGraph to keep it consistent with __init__
+        self.graph = nx.MultiDiGraph()
 
         file_dir = os.path.dirname(file_path)
         if not os.path.exists(file_dir):
