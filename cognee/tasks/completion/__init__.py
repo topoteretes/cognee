@@ -1,2 +1,3 @@
 from .query_completion import query_completion
 from .graph_query_completion import graph_query_completion
+from .graph_query_summary_completion import graph_query_summary_completion
