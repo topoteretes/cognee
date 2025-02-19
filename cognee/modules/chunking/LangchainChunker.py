@@ -29,10 +29,6 @@ class LangchainChunker(Chunker):
 
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=chunk_overlap)
 
-    def check_token_count(self, token_count_before, chunk_data):
-        token_count_fits = token_count_before + chunk_data["token_count"] <= self.max_chunk_tokens
-        return token_count_fits
-
     def read(self):
         for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
