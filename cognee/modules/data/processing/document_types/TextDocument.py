@@ -9,7 +9,7 @@ class TextDocument(Document):
         def get_text():
             with open(self.raw_data_location, mode="r", encoding="utf-8") as file:
                 while True:
-                    text = file.read(1024)
+                    text = file.read(1000000)
 
                     if len(text.strip()) == 0:
                         break
