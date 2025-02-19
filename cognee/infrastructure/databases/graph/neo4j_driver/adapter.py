@@ -13,6 +13,14 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.storage.utils import JSONEncoder
+from .neo4j_metrics_utils import (
+    get_avg_clustering,
+    get_edge_density,
+    get_num_connected_components,
+    get_shortest_path_lengths,
+    get_size_of_connected_components,
+    count_self_loops,
+)
 
 logger = logging.getLogger("Neo4jAdapter")
 
@@ -543,34 +551,49 @@ class Neo4jAdapter(GraphDBInterface):
         graph_names = result[0]["graphNames"] if result else []
         return graph_name in graph_names
 
-    async def project_entire_graph(self, graph_name="myGraph"):
-        """
-        Projects all node labels and all relationship types into an in-memory GDS graph.
-        """
-        if await self.graph_exists(graph_name):
-            return
-
+    async def get_node_labels_string(self):
         node_labels_query = "CALL db.labels() YIELD label RETURN collect(label) AS labels;"
         node_labels_result = await self.query(node_labels_query)
         node_labels = node_labels_result[0]["labels"] if node_labels_result else []
 
+        if not node_labels:
+            raise ValueError("No node labels found in the database")
+
+        node_labels_str = "[" + ", ".join(f"'{label}'" for label in node_labels) + "]"
+        return node_labels_str
+
+    async def get_relationship_labels_string(self):
         relationship_types_query = "CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) AS relationships;"
         relationship_types_result = await self.query(relationship_types_query)
         relationship_types = (
             relationship_types_result[0]["relationships"] if relationship_types_result else []
         )
 
-        if not node_labels or not relationship_types:
-            raise ValueError("No node labels or relationship types found in the database.")
+        if not relationship_types:
+            raise ValueError("No relationship types found in the database.")
 
-        node_labels_str = "[" + ", ".join(f"'{label}'" for label in node_labels) + "]"
-        relationship_types_str = "[" + ", ".join(f"'{rel}'" for rel in relationship_types) + "]"
+        relationship_types_undirected_str = (
+            "{"
+            + ", ".join(f"{rel}" + ": {orientation: 'UNDIRECTED'}" for rel in relationship_types)
+            + "}"
+        )
+        return relationship_types_undirected_str
+
+    async def project_entire_graph(self, graph_name="myGraph"):
+        """
+        Projects all node labels and all relationship types into an undirected in-memory GDS graph.
+        """
+        if await self.graph_exists(graph_name):
+            return
+
+        node_labels_str = await self.get_node_labels_string()
+        relationship_types_undirected_str = await self.get_relationship_labels_string()
 
         query = f"""
         CALL gds.graph.project(
             '{graph_name}',
             {node_labels_str},
-            {relationship_types_str}
+            {relationship_types_undirected_str}
         ) YIELD graphName;
         """
 
@@ -582,73 +605,13 @@ class Neo4jAdapter(GraphDBInterface):
             await self.query(drop_query)
 
     async def get_graph_metrics(self, include_optional=False):
+        """For the definition of these metrics, please refer to
+        https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+
         nodes, edges = await self.get_model_independent_graph_data()
         graph_name = "myGraph"
         await self.drop_graph(graph_name)
         await self.project_entire_graph(graph_name)
-
-        async def _get_edge_density():
-            query = """
-            MATCH (n)
-            WITH count(n) AS num_nodes
-            MATCH ()-[r]->()
-            WITH num_nodes, count(r) AS num_edges
-            RETURN CASE
-                WHEN num_nodes < 2 THEN 0
-                ELSE num_edges * 1.0 / (num_nodes * (num_nodes - 1))
-            END AS edge_density;
-            """
-            result = await self.query(query)
-            return result[0]["edge_density"] if result else 0
-
-        async def _get_num_connected_components():
-            await self.drop_graph(graph_name)
-            await self.project_entire_graph(graph_name)
-
-            query = f"""
-            CALL gds.wcc.stream('{graph_name}')
-            YIELD componentId
-            RETURN count(DISTINCT componentId) AS num_connected_components;
-            """
-
-            result = await self.query(query)
-            return result[0]["num_connected_components"] if result else 0
-
-        async def _get_size_of_connected_components():
-            await self.drop_graph(graph_name)
-            await self.project_entire_graph(graph_name)
-
-            query = f"""
-            CALL gds.wcc.stream('{graph_name}')
-            YIELD componentId
-            RETURN componentId, count(*) AS size
-            ORDER BY size DESC;
-            """
-
-            result = await self.query(query)
-            return [record["size"] for record in result] if result else []
-
-        async def _count_self_loops():
-            query = """
-            MATCH (n)-[r]->(n)
-            RETURN count(r) AS self_loop_count;
-            """
-            result = await self.query(query)
-            return result[0]["self_loop_count"] if result else 0
-
-        async def _get_diameter():
-            logging.warning("Diameter calculation is not implemented for neo4j.")
-            return -1
-
-        async def _get_avg_shortest_path_length():
-            logging.warning(
-                "Average shortest path length calculation is not implemented for neo4j."
-            )
-            return -1
-
-        async def _get_avg_clustering():
-            logging.warning("Average clustering calculation is not implemented for neo4j.")
-            return -1
 
         num_nodes = len(nodes[0]["nodes"])
         num_edges = len(edges[0]["elements"])
@@ -657,17 +620,22 @@ class Neo4jAdapter(GraphDBInterface):
             "num_nodes": num_nodes,
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
-            "edge_density": await _get_edge_density(),
-            "num_connected_components": await _get_num_connected_components(),
-            "sizes_of_connected_components": await _get_size_of_connected_components(),
+            "edge_density": await get_edge_density(self),
+            "num_connected_components": await get_num_connected_components(self, graph_name),
+            "sizes_of_connected_components": await get_size_of_connected_components(
+                self, graph_name
+            ),
         }
 
         if include_optional:
+            shortest_path_lengths = await get_shortest_path_lengths(self, graph_name)
             optional_metrics = {
-                "num_selfloops": await _count_self_loops(),
-                "diameter": await _get_diameter(),
-                "avg_shortest_path_length": await _get_avg_shortest_path_length(),
-                "avg_clustering": await _get_avg_clustering(),
+                "num_selfloops": await count_self_loops(self),
+                "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
+                "avg_shortest_path_length": sum(shortest_path_lengths) / len(shortest_path_lengths)
+                if shortest_path_lengths
+                else -1,
+                "avg_clustering": await get_avg_clustering(self, graph_name),
             }
         else:
             optional_metrics = {
