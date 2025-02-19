@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator, Field
 import os
 
+
 class LLMConfig(BaseSettings):
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
@@ -61,9 +62,7 @@ class LLMConfig(BaseSettings):
             "HUGGINGFACE_TOKENIZER": is_env_set("HUGGINGFACE_TOKENIZER"),
         }
         if any(embedding_env_vars.values()) and not all(embedding_env_vars.values()):
-            missing_embed = [
-                key for key, is_set in embedding_env_vars.items() if not is_set
-            ]
+            missing_embed = [key for key, is_set in embedding_env_vars.items() if not is_set]
             raise ValueError(
                 "You have set some but not all of the required environment variables "
                 "for embeddings (EMBEDDING_PROVIDER, EMBEDDING_MODEL, "
