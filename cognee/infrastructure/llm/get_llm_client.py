@@ -4,6 +4,7 @@ from enum import Enum
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm import get_llm_config
+from cognee.infrastructure.llm.ollama.adapter import OllamaAPIAdapter
 
 
 # Define an Enum for LLM Providers
@@ -52,7 +53,7 @@ def get_llm_client():
 
         from .generic_llm_api.adapter import GenericAPIAdapter
 
-        return GenericAPIAdapter(
+        return OllamaAPIAdapter(
             llm_config.llm_endpoint,
             llm_config.llm_api_key,
             llm_config.llm_model,
