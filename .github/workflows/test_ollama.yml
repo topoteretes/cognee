@@ -1,0 +1,59 @@
+name: test | ollama
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # daily schedule
+  workflow_dispatch:
+
+jobs:
+  update-insights:
+    runs-on: ubuntu-latest
+    services:
+      ollama:
+        image: ollama/ollama
+        ports:
+          - 11434:11434
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }} # Use PAT instead of default token
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for Ollama to be ready
+        run: |
+          for i in {1..30}; do
+            curl -s http://localhost:11434/api/tags && break
+            sleep 2
+          done
+
+      - name: Pull Model
+        run: |
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "mistral"}'
+          
+
+  run_simple_example_test:
+      uses: ./.github/workflows/reusable_python_example.yml
+      with:
+        example-location: ./examples/python/simple_example.py
+      secrets:
+        LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+        GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
