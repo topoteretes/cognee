@@ -243,6 +243,17 @@ class NetworkXAdapter(GraphDBInterface):
 
         await self.save_graph_to_file(self.filename)
 
+    async def create_empty_graph(self, file_path: str) -> None:
+        self.graph = (
+            nx.MultiDiGraph()
+        )  # Use MultiDiGraph to keep it consistent with __init__
+
+        file_dir = os.path.dirname(file_path)
+        if not os.path.exists(file_dir):
+            os.makedirs(file_dir, exist_ok=True)
+
+        await self.save_graph_to_file(file_path)
+
     async def save_graph_to_file(self, file_path: str = None) -> None:
         """Asynchronously save the graph to a file in JSON format."""
         if not file_path:
@@ -322,19 +333,12 @@ class NetworkXAdapter(GraphDBInterface):
             else:
                 # Log that the file does not exist and an empty graph is initialized
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
-                self.graph = (
-                    nx.MultiDiGraph()
-                )  # Use MultiDiGraph to keep it consistent with __init__
-
-                file_dir = os.path.dirname(file_path)
-                if not os.path.exists(file_dir):
-                    os.makedirs(file_dir, exist_ok=True)
-
-                await self.save_graph_to_file(file_path)
+                await self.create_empty_graph(file_path)
 
         except Exception as e:
             logger.error("Failed to load graph from file: %s", file_path)
-            raise e
+
+            await self.create_empty_graph(file_path)
 
     async def delete_graph(self, file_path: str = None):
         """Asynchronously delete the graph file from the filesystem."""
