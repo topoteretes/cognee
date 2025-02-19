@@ -1,7 +1,7 @@
 import os
 import json
 import random
-from typing import Optional, Union, Any, LiteralString
+from typing import Optional, Any
 import zipfile
 
 import gdown
