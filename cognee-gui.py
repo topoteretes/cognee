@@ -1,8 +1,8 @@
 import sys
 import asyncio
-import cognee
 
 try:
+    import cognee
     from PySide6.QtWidgets import (
         QApplication,
         QWidget,
