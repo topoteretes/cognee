@@ -25,6 +25,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
+from cognee.modules.chunking.TextChunker import TextChunker
 
 logger = logging.getLogger("cognify.v2")
 
@@ -123,7 +124,9 @@ async def get_default_tasks(
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(
-                extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
+                extract_chunks_from_documents,
+                max_chunk_tokens=get_max_chunk_tokens(),
+                chunker=TextChunker,
             ),  # Extract text chunks based on the document type.
             Task(
                 extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
