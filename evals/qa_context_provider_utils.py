@@ -122,7 +122,7 @@ async def get_context_with_brute_force_triplet_search(instance: dict) -> str:
 
     found_triplets = await brute_force_triplet_search(instance["question"], top_k=5)
 
-    search_results_str = retrieved_edges_to_string(found_triplets)
+    search_results_str = await retrieved_edges_to_string(found_triplets)
 
     return search_results_str
 
