@@ -101,12 +101,4 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         return tokenizer
 
 
-if __name__ == "__main__":
 
-    async def main():
-        engine = OllamaEmbeddingEngine()
-        prompts = ["This is a test prompt for generating an embedding.", "Another example prompt."]
-        embeddings = await engine.embed_text(prompts)
-        print("Embeddings:", embeddings)
-
-    asyncio.run(main())
