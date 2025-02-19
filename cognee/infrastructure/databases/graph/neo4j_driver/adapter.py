@@ -605,6 +605,9 @@ class Neo4jAdapter(GraphDBInterface):
             await self.query(drop_query)
 
     async def get_graph_metrics(self, include_optional=False):
+        """For the definition of these metrics, please refer to
+        https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+
         nodes, edges = await self.get_model_independent_graph_data()
         graph_name = "myGraph"
         await self.drop_graph(graph_name)
