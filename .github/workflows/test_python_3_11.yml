@@ -57,12 +57,8 @@ jobs:
 
       - name: Run unit tests
         env:
-            ENV: 'dev'
-            LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-            EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-            EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-            EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-            EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          ENV: 'dev'
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run pytest cognee/tests/unit/
 
       - name: Run integration tests
