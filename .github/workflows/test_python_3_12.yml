@@ -54,9 +54,6 @@ jobs:
           poetry run python -m nltk.downloader punkt_tab averaged_perceptron_tagger_eng
 
       - name: Run unit tests
-        env:
-          ENV: 'dev'
-          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run pytest cognee/tests/unit/
 
       - name: Run integration tests

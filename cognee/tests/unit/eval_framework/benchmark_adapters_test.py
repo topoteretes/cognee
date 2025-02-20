@@ -39,7 +39,6 @@ def test_adapter_can_instantiate_and_load(AdapterClass):
         adapter = AdapterClass()
         result = adapter.load_corpus()
 
-
     assert isinstance(result, tuple), f"{AdapterClass.__name__} did not return a tuple."
     assert len(result) == 2, f"{AdapterClass.__name__} returned tuple of length != 2."
 
@@ -76,8 +75,6 @@ def test_adapter_returns_some_content(AdapterClass):
         f"{AdapterClass.__name__} returned more QA items than requested limit={limit}."
     )
 
-
     for item in qa_pairs:
         assert "question" in item, f"{AdapterClass.__name__} missing 'question' key in QA pair."
         assert "answer" in item, f"{AdapterClass.__name__} missing 'answer' key in QA pair."
-
