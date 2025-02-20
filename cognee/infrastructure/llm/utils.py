@@ -46,6 +46,7 @@ async def test_llm_connection():
             system_prompt='Respond to me with the following string: "test"',
             response_model=str,
         )
+
     except Exception as e:
         logger.error(e)
         logger.error("Connection to LLM could not be established.")
