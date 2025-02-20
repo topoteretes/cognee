@@ -1,4 +1,4 @@
-from typing import Optional, Union, Any, LiteralString
+from typing import Optional
 
 from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
@@ -6,7 +6,7 @@ from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseB
 class DummyAdapter(BaseBenchmarkAdapter):
     def load_corpus(
         self, limit: Optional[int] = None, seed: int = 42
-    ) -> tuple[list[Union[LiteralString, str]], list[dict[str, str]]]:
+    ) -> tuple[list[str], list[dict[str, str]]]:
         corpus_list = [
             "The cognee is an AI memory engine that supports different vector and graph databases",
             "Neo4j is a graph database supported by cognee",
