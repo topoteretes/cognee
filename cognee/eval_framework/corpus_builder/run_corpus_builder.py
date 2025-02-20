@@ -1,6 +1,9 @@
 import logging
 import json
 from typing import List
+
+from unstructured.chunking.dispatch import chunk
+
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.modules.data.models.questions_base import QuestionsBase
@@ -9,6 +12,7 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
     get_relational_config,
 )
+from cognee.modules.chunking.TextChunker import TextChunker
 
 
 async def create_and_insert_questions_table(questions_payload):
@@ -28,7 +32,7 @@ async def create_and_insert_questions_table(questions_payload):
         await session.commit()
 
 
-async def run_corpus_builder(params: dict) -> List[dict]:
+async def run_corpus_builder(params: dict, chunk_size=1024, chunker=TextChunker) -> List[dict]:
     if params.get("building_corpus_from_scratch"):
         logging.info("Corpus Builder started...")
         corpus_builder = CorpusBuilderExecutor(
@@ -36,7 +40,7 @@ async def run_corpus_builder(params: dict) -> List[dict]:
             task_getter_type=params.get("task_getter_type", "Default"),
         )
         questions = await corpus_builder.build_corpus(
-            limit=params.get("number_of_samples_in_corpus")
+            limit=params.get("number_of_samples_in_corpus"), chunk_size=chunk_size, chunker=chunker
         )
         with open(params["questions_path"], "w", encoding="utf-8") as f:
             json.dump(questions, f, ensure_ascii=False, indent=4)
