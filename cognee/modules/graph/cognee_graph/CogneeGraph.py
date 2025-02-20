@@ -126,8 +126,6 @@ class CogneeGraph(CogneeAbstractGraph):
                 node = self.get_node(node_id)
                 if node:
                     node.add_attribute("vector_distance", score)
-                else:
-                    print(f"Node with id {node_id} not found in the graph.")
 
     async def map_vector_distances_to_graph_edges(self, vector_engine, query) -> None:
         try:
