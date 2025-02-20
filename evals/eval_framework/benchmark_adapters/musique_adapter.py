@@ -1,7 +1,7 @@
 import os
 import json
 import random
-from typing import Optional, Union, Any, LiteralString
+from typing import Optional, Any
 import zipfile
 
 import gdown
@@ -64,8 +64,8 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         for item in data:
             # Each 'paragraphs' is a list of dicts; we can concatenate their 'paragraph_text'
             paragraphs = item.get("paragraphs", [])
-            combined_paragraphs = " ".join(paragraph["paragraph_text"] for paragraph in paragraphs)
-            corpus_list.append(combined_paragraphs)
+            for paragraph in paragraphs:
+                corpus_list.append(paragraph["paragraph_text"])
 
             question = item.get("question", "")
             answer = item.get("answer", "")

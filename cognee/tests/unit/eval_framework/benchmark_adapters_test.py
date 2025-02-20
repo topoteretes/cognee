@@ -1,5 +1,4 @@
 import pytest
-import random
 from evals.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 from evals.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
 from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
@@ -46,12 +45,6 @@ def test_adapter_returns_some_content(AdapterClass):
     assert len(corpus_list) > 0, f"{AdapterClass.__name__} returned an empty corpus_list."
     assert len(qa_pairs) > 0, f"{AdapterClass.__name__} returned an empty question_answer_pairs."
 
-    # Check the shape
-    assert len(corpus_list) == len(qa_pairs), (
-        f"{AdapterClass.__name__} corpus_list and question_answer_pairs "
-        "should typically be the same length. Adjust if your adapter differs."
-    )
-
     for item in qa_pairs:
         assert "question" in item, f"{AdapterClass.__name__} missing 'question' key in QA pair."
         assert "answer" in item, f"{AdapterClass.__name__} missing 'answer' key in QA pair."
@@ -70,9 +63,7 @@ def test_adapter_limit(AdapterClass):
 
     # Confirm that we didn't receive more than 'limit'
     # (Some adapters might be allowed to return fewer if the dataset is small)
-    assert len(corpus_list) <= limit, (
-        f"{AdapterClass.__name__} returned more items than requested limit={limit}."
-    )
+
     assert len(qa_pairs) <= limit, (
         f"{AdapterClass.__name__} returned more QA items than requested limit={limit}."
     )
