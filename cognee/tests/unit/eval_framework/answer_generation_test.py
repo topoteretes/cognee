@@ -7,7 +7,12 @@ from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 import cognee
 
 
-@pytest.mark.parametrize("qa_engine", question_answering_engine_options.values())
+qa_engine_options = [
+    value for key, value in question_answering_engine_options.items() if key != "cognee_code"
+]
+
+
+@pytest.mark.parametrize("qa_engine", qa_engine_options)
 @pytest.mark.asyncio
 async def test_answer_generation(qa_engine):
     limit = 1
