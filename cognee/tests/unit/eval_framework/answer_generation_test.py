@@ -1,15 +1,9 @@
 import pytest
 from evals.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
-    question_answering_engine_options,
 )
 from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from unittest.mock import AsyncMock
-
-
-qa_engine_options = [
-    value for key, value in question_answering_engine_options.items() if key != "cognee_code"
-]
 
 
 @pytest.mark.asyncio
