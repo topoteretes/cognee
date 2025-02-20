@@ -2,7 +2,7 @@ import requests
 import os
 import json
 import random
-from typing import Optional, Union, Any, LiteralString
+from typing import Optional, Any
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
@@ -16,7 +16,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
     def load_corpus(
         self, limit: Optional[int] = None, seed: int = 42
-    ) -> tuple[list[Union[LiteralString, str]], list[dict[str, Any]]]:
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         filename = self.dataset_info["filename"]
 
         if os.path.exists(filename):
