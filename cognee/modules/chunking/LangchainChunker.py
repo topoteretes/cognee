@@ -28,7 +28,9 @@ class LangchainChunker(Chunker):
         super().__init__(document, get_text, max_chunk_tokens, chunk_size)
 
         self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=lambda text: len(text.split()),
         )
 
     def read(self):
