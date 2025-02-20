@@ -51,7 +51,7 @@ async def main():
 
     args = {
         "question": query,
-        "context": retrieved_edges_to_string(triplets),
+        "context": await retrieved_edges_to_string(triplets),
     }
 
     user_prompt = render_prompt("graph_context_for_question.txt", args)
