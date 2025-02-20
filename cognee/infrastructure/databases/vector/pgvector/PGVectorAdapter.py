@@ -157,7 +157,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if collection_name in metadata.tables:
                 return metadata.tables[collection_name]
             else:
-                raise EntityNotFoundError()
+                raise EntityNotFoundError(message=f"Table '{collection_name}' not found.")
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
