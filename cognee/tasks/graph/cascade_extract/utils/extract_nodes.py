@@ -26,7 +26,7 @@ async def extract_nodes(text: str, n_rounds: int = 2) -> List[str]:
             "total_rounds": n_rounds,
             "text": text,
         }
-        base_directory = get_absolute_path("./tasks/experimental/cascade_extract/prompts")
+        base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
         text_input = render_prompt(
             "extract_graph_nodes_prompt_input.txt", context, base_directory=base_directory
         )

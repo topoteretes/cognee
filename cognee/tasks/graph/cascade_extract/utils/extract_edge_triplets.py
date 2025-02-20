@@ -28,7 +28,7 @@ async def extract_edge_triplets(
             "total_rounds": n_rounds,
         }
 
-        base_directory = get_absolute_path("./tasks/experimental/cascade_extract/prompts")
+        base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
         text_input = render_prompt(
             "extract_graph_edge_triplets_prompt_input.txt", context, base_directory=base_directory
         )
