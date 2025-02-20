@@ -56,10 +56,10 @@ jobs:
       with:
         example-location: ./examples/python/simple_example.py
       secrets:
-        LLM_API_KEY: "ollama"
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        LLM_API_KEY: "ollama"
         LLM_PROVIDER: "ollama"
         LLM_ENDPOINT: "http://localhost:11434"
         LLM_MODEL: "ollama/llama3.2"
