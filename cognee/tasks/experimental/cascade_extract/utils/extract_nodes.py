@@ -13,7 +13,7 @@ class PotentialNodes(BaseModel):
     nodes: List[str]
 
 
-async def extract_nodes(content: str, n_rounds: int = 2) -> List[str]:
+async def extract_nodes(text: str, n_rounds: int = 2) -> List[str]:
     """Extracts node names from content through multiple rounds of analysis."""
     llm_client = get_llm_client()
     all_nodes: List[str] = []
@@ -24,6 +24,7 @@ async def extract_nodes(content: str, n_rounds: int = 2) -> List[str]:
             "previous_nodes": all_nodes,
             "round_number": round_num + 1,
             "total_rounds": n_rounds,
+            "text": text,
         }
         base_directory = get_absolute_path("./tasks/experimental/cascade_extract/prompts")
         text_input = render_prompt(

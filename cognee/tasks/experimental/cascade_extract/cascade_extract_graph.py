@@ -14,7 +14,7 @@ from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 
 async def cascade_extract_graph_from_chunks(
-    data_chunks: List[DocumentChunk], n_rounds: int = 1
+    data_chunks: List[DocumentChunk], n_rounds: int = 2
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks in multiple steps."""
     chunk_nodes = await asyncio.gather(
