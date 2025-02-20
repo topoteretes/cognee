@@ -5,6 +5,7 @@ from sqlalchemy import select
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational import get_relational_engine
 from uuid import UUID
+from cognee.modules.chunking.TextChunker import TextChunker
 
 
 async def update_document_token_count(document_id: UUID, token_count: int) -> None:
@@ -26,7 +27,7 @@ async def extract_chunks_from_documents(
     documents: list[Document],
     max_chunk_tokens: int,
     chunk_size: int = 1024,
-    chunker="text_chunker",
+    chunker=TextChunker,
 ) -> AsyncGenerator:
     """
     Extracts chunks of data from a list of documents based on the specified chunking parameters.
@@ -38,7 +39,7 @@ async def extract_chunks_from_documents(
     for document in documents:
         document_token_count = 0
         for document_chunk in document.read(
-            chunk_size=chunk_size, chunker=chunker, max_chunk_tokens=max_chunk_tokens
+            chunk_size=chunk_size, chunker_cls=chunker, max_chunk_tokens=max_chunk_tokens
         ):
             document_token_count += document_chunk.token_count
             yield document_chunk

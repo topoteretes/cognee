@@ -1,6 +1,6 @@
 import os
 import uuid
-
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
 
 GROUND_TRUTH = [
@@ -25,7 +25,7 @@ def test_PdfDocument():
     )
 
     for ground_truth, paragraph_data in zip(
-        GROUND_TRUTH, document.read(chunk_size=1024, chunker="text_chunker", max_chunk_tokens=2048)
+        GROUND_TRUTH, document.read(chunk_size=1024, chunker_cls=TextChunker, max_chunk_tokens=2048)
     ):
         assert ground_truth["word_count"] == paragraph_data.word_count, (
             f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
