@@ -19,6 +19,7 @@ def expand_with_nodes_and_edges(
         existing_edges_map = {}
 
     added_nodes_map = {}
+
     relationships = []
 
     for index, data_chunk in enumerate(data_chunks):
@@ -53,12 +54,14 @@ def expand_with_nodes_and_edges(
                     description=node.description,
                 )
 
-                if data_chunk.contains is None:
-                    data_chunk.contains = []
-
-                data_chunk.contains.append(entity_node)
-
                 added_nodes_map[f"{str(node_id)}_entity"] = entity_node
+            else:
+                entity_node = added_nodes_map[f"{str(node_id)}_entity"]
+
+            if data_chunk.contains is None:
+                data_chunk.contains = []
+
+            data_chunk.contains.append(entity_node)
 
         # Add relationship that came from graphs.
         for edge in graph.edges:
