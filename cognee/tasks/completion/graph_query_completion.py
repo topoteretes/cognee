@@ -1,4 +1,5 @@
 from cognee.infrastructure.engine import ExtendableDataPoint
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
@@ -38,7 +39,7 @@ async def graph_query_completion(query: str, context_resolver: Callable = None) 
     - Ensure that the LLM client and graph database are properly configured and accessible.
     """
 
-    subclasses = get_all_subclasses(ExtendableDataPoint)
+    subclasses = get_all_subclasses(DataPoint)
 
     vector_index_collections = []
 
