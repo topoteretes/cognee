@@ -85,7 +85,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           poetry install ollama-python requests
           poetry install transformers
 
@@ -113,6 +112,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+          PYTHONFAULTHANDLER: 1
           LLM_API_KEY: "ollama"
           LLM_PROVIDER: "ollama"
           LLM_ENDPOINT: "http://localhost:11434"
