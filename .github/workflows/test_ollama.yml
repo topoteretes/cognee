@@ -101,6 +101,12 @@ jobs:
           echo "Ollama failed to start"
           exit 1
 
+      - name: Dump Docker logs
+        run: |
+          docker ps
+          docker logs $(docker ps --filter "ancestor=ollama/ollama" --format "{{.ID}}")
+
+
       - name: Run example test
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
