@@ -14,6 +14,7 @@ from cognee.tasks.graph import query_graph_connections
 from cognee.tasks.summarization import query_summaries
 from cognee.tasks.completion import query_completion
 from cognee.tasks.completion import graph_query_completion
+from cognee.tasks.completion import graph_query_summary_completion
 from ..operations import log_query, log_result
 
 
@@ -49,6 +50,7 @@ async def specific_search(query_type: SearchType, query: str, user: User) -> lis
         SearchType.CHUNKS: query_chunks,
         SearchType.COMPLETION: query_completion,
         SearchType.GRAPH_COMPLETION: graph_query_completion,
+        SearchType.GRAPH_SUMMARY_COMPLETION: graph_query_summary_completion,
         SearchType.CODE: code_graph_retrieval,
     }
 

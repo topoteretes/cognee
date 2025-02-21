@@ -1,14 +1,28 @@
-# cognee
+
+<br />
+<div align="center">
+  <a href="https://github.com/topoteretes/cognee">
+    <img src="./assets/cognee_logo_transparent.png" alt="Logo" height="150">
+  </a>
+
+  <br />
+
+
+
+cognee - memory layer for AI apps and Agents
+
 [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
 [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
 [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
 [![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
 [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
-
+[![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
+[![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
 
 We build for developers who need a reliable, production-ready data layer for AI applications
 
+</div>
 
 ## What is cognee?
 
@@ -27,9 +41,13 @@ Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">s
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
 </div>
 
-### Contrbuting
+### Contributing
 
-We welcome contributions! To get started, please check our Contribution Guidelines
+Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
+
+## Code of Conduct
+
+We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
 
 ## 📦 Installation
 
