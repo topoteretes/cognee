@@ -3,7 +3,7 @@ from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subcla
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from typing import Callable
 
 

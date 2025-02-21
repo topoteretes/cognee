@@ -25,7 +25,7 @@ async def test_code_description_to_code_part_no_results():
             return_value=AsyncMock(),
         ),
     ):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -41,7 +41,7 @@ async def test_code_description_to_code_part_invalid_query():
     mock_user = AsyncMock()
 
     with pytest.raises(ValueError, match="The query must be a non-empty string."):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -55,7 +55,7 @@ async def test_code_description_to_code_part_invalid_top_k():
     mock_user = AsyncMock()
 
     with pytest.raises(ValueError, match="top_k must be a positive integer."):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -78,7 +78,7 @@ async def test_code_description_to_code_part_initialization_error():
             return_value=AsyncMock(),
         ),
     ):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -111,7 +111,7 @@ async def test_code_description_to_code_part_execution_error():
             return_value=AsyncMock(),
         ),
     ):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
