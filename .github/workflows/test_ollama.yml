@@ -86,7 +86,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ollama-python requests
+          poetry install ollama-python requests
+          poetry install transformers
 
       - name: Wait for Ollama to be ready
         run: |
