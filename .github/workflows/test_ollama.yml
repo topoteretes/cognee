@@ -6,7 +6,7 @@ on:
     types: [ labeled, synchronize ]
 
 jobs:
-  update-insights:
+  setup-ollama:
     runs-on: ubuntu-latest
     services:
       ollama:
@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT }} # Use PAT instead of default token
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -39,32 +37,69 @@ jobs:
       - name: Wait for Ollama to be ready
         run: |
           for i in {1..30}; do
-            curl -s http://localhost:11434/api/tags && break
+            if curl -s http://localhost:11434/api/tags > /dev/null; then
+              echo "Ollama is ready"
+              exit 0
+            fi
+            echo "Waiting for Ollama... attempt $i"
             sleep 2
           done
+          echo "Ollama failed to start"
+          exit 1
 
-      - name: Pull Model
+      - name: Pull Models
         run: |
           curl -X POST http://localhost:11434/api/pull -d '{"name": "ollama/llama3.2"}'
-      - name: Pull Embedding Model
-        run: |
           curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
-          
 
   run_simple_example_test:
-      uses: ./.github/workflows/reusable_python_example.yml
-      with:
-        example-location: ./examples/python/simple_example.py
-      secrets:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-        GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        LLM_API_KEY: "ollama"
-        LLM_PROVIDER: "ollama"
-        LLM_ENDPOINT: "http://localhost:11434"
-        LLM_MODEL: "ollama/llama3.2"
-        EMBEDDING_PROVIDER: "ollama"
-        EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-        EMBEDDING_ENDPOINT: "http://localhost:11434/api/embeddings"
-        EMBEDDING_DIMENSIONS: 4096
-        HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
+    needs: setup-ollama
+    runs-on: ubuntu-latest
+    services:
+      ollama:
+        image: ollama/ollama
+        ports:
+          - 11434:11434
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for Ollama to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:11434/api/tags > /dev/null; then
+              echo "Ollama is ready"
+              exit 0
+            fi
+            echo "Waiting for Ollama... attempt $i"
+            sleep 2
+          done
+          echo "Ollama failed to start"
+          exit 1
+
+      - name: Run example test
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+          LLM_API_KEY: "ollama"
+          LLM_PROVIDER: "ollama"
+          LLM_ENDPOINT: "http://localhost:11434"
+          LLM_MODEL: "ollama/llama3.2"
+          EMBEDDING_PROVIDER: "ollama"
+          EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/api/embeddings"
+          EMBEDDING_DIMENSIONS: "4096"
+          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
+        run: python ./examples/python/simple_example.py
