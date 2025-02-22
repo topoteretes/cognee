@@ -6,14 +6,6 @@ on:
     types: [ labeled, synchronize ]
 
 jobs:
-  setup-ollama:
-    runs-on: ubuntu-latest
-
-
-      - name: Pull Models
-        run: |
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "llama3.2"}'
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
 
   run_simple_example_test:
 
@@ -43,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install --no-interaction --all-extras
-        steps:
+
       - name: Install ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
       - name: Run ollama
