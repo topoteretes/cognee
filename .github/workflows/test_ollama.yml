@@ -8,44 +8,7 @@ on:
 jobs:
   setup-ollama:
     runs-on: ubuntu-latest
-    services:
-      ollama:
-        image: ollama/ollama
-        ports:
-          - 11434:11434
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12.x"
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install dependencies
-        run: |
-          poetry install --no-interaction --all-extras
-
-      - name: Wait for Ollama to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:11434/api/tags > /dev/null; then
-              echo "Ollama is ready"
-              exit 0
-            fi
-            echo "Waiting for Ollama... attempt $i"
-            sleep 2
-          done
-          echo "Ollama failed to start"
-          exit 1
 
       - name: Pull Models
         run: |
@@ -53,7 +16,7 @@ jobs:
           curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
 
   run_simple_example_test:
-    needs: setup-ollama
+
     runs-on: ubuntu-latest
     services:
       ollama:
@@ -80,6 +43,17 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install --no-interaction --all-extras
+        steps:
+      - name: Install ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Run ollama
+        run: |
+          ollama serve &
+          ollama pull llama3.2 &
+          ollama pull avr/sfr-embedding-mistral:latest
+      - name: Call ollama API
+        run: |
+          curl -d '{"model": "llama3.2", "stream": false, "prompt":"Whatever I say, asnwer with Yes"}' http://localhost:11434/api/generate
 
       - name: Wait for Ollama to be ready
         run: |
