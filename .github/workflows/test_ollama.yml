@@ -75,11 +75,6 @@ jobs:
         run: |
           poetry install --no-interaction --all-extras
 
-      - name: Install dependencies
-        run: |
-          poetry install requests
-          poetry install transformers
-
       - name: Wait for Ollama to be ready
         run: |
           for i in {1..30}; do
@@ -107,7 +102,7 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_API_KEY: "ollama"
           LLM_PROVIDER: "ollama"
-          LLM_ENDPOINT: "http://localhost:11434"
+          LLM_ENDPOINT: "http://localhost:11434/api/generate"
           LLM_MODEL: "ollama/llama3.2"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
