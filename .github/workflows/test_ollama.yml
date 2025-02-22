@@ -77,7 +77,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          poetry install ollama-python requests
+          poetry install requests
           poetry install transformers
 
       - name: Wait for Ollama to be ready
