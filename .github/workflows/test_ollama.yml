@@ -74,7 +74,7 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_API_KEY: "ollama"
           LLM_PROVIDER: "ollama"
-          LLM_ENDPOINT: "http://127.0.0.1:11434"
+          LLM_ENDPOINT: "http://127.0.0.1:11434/v1/chat/completions"
           LLM_MODEL: "ollama/llama3.2"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
