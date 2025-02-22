@@ -1,4 +1,5 @@
 from pypdf import PdfReader
+from cognee.modules.chunking.Chunker import Chunker
 
 from .Document import Document
 
@@ -6,7 +7,7 @@ from .Document import Document
 class PdfDocument(Document):
     type: str = "pdf"
 
-    def read(self, chunk_size: int, chunker_cls: type, max_chunk_tokens: int):
+    def read(self, chunk_size: int, chunker_cls: Chunker, max_chunk_tokens: int):
         file = PdfReader(self.raw_data_location)
 
         def get_text():
