@@ -49,7 +49,7 @@ jobs:
 
       - name: Pull Models
         run: |
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "ollama/llama3.2"}'
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "llama3.2"}'
           curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
 
   run_simple_example_test:
