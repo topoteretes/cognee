@@ -82,11 +82,11 @@ if __name__ == "__main__":
     # For testing purposes, will be removed by the end of the sprint
     import asyncio
     import logging
-    from cognee.tasks.entity_completion.entity_extractors.entity_extractor_adapters import (
-        EntityExtractorAdapter,
+    from cognee.tasks.entity_completion.entity_extractors.dummy_entity_extractor import (
+        DummyEntityExtractor,
     )
-    from cognee.tasks.entity_completion.context_providers.context_provider_adapters import (
-        ContextProviderAdapter,
+    from cognee.tasks.entity_completion.context_providers.dummy_context_provider import (
+        DummyContextProvider,
     )
 
     logging.basicConfig(level=logging.INFO)
@@ -95,8 +95,8 @@ if __name__ == "__main__":
         # Uses config defaults
         result = await entity_completion(
             "Tell me about Einstein",
-            EntityExtractorAdapter.DUMMY.adapter_class(),
-            ContextProviderAdapter.DUMMY.adapter_class(),
+            DummyEntityExtractor(),
+            DummyContextProvider(),
         )
         print(f"Query Response: {result[0]}")
 
