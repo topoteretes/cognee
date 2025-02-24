@@ -34,10 +34,13 @@ async def query_completion(query: str, save_context_path: str = None) -> list:
     # Get context and optionally dump it
     context = found_chunks[0].payload["text"]
     if save_context_path:
-        os.makedirs(os.path.dirname(save_context_path), exist_ok=True)
-        with open(save_context_path, "w") as f:
-            json.dump(context, f)
-
+        try:
+            os.makedirs(os.path.dirname(save_context_path), exist_ok=True)
+            with open(save_context_path, "w", encoding="utf-8") as f:
+                json.dump(context, f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            logger.error(f"Failed to save context to {save_context_path}: {str(e)}")
+            # Continue execution as context saving is optional
     args = {
         "question": query,
         "context": context,
