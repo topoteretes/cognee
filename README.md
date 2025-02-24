@@ -41,7 +41,7 @@ Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">s
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
 </div>
 
-### Contributing
+## Contributing
 
 Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
