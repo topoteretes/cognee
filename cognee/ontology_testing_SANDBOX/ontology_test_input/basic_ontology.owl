@@ -1,0 +1,344 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://www.w3.org/2002/07/owl#"
+     xml:base="http://www.w3.org/2002/07/owl"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:ontology="http://example.org/ontology#"
+     xmlns:webprotege="http://webprotege.stanford.edu/">
+    <Ontology/>
+
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+
+
+
+    <!-- http://purl.org/dc/elements/1.1/description -->
+
+    <AnnotationProperty rdf:about="http://purl.org/dc/elements/1.1/description"/>
+
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+
+
+
+    <!-- http://example.org/ontology#builds -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#builds">
+        <rdfs:domain rdf:resource="http://example.org/ontology#Company"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#Phone"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://example.org/ontology#developed -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#developed">
+        <rdfs:domain rdf:resource="http://example.org/ontology#Company"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#OperatingSystem"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://example.org/ontology#focusOnTechnology -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#focusOnTechnology">
+        <rdfs:domain rdf:resource="http://example.org/ontology#Company"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#Technology"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://example.org/ontology#isA -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#isA">
+        <rdfs:domain rdf:resource="http://example.org/ontology#Car"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#Vehicle"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://example.org/ontology#isOwnedBy -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#isOwnedBy">
+        <rdfs:domain rdf:resource="http://example.org/ontology#Company"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#Person"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://example.org/ontology#produces -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#produces">
+        <rdfs:domain rdf:resource="http://example.org/ontology#CarManufacturer"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#Car"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://example.org/ontology#transports -->
+
+    <ObjectProperty rdf:about="http://example.org/ontology#transports">
+        <rdfs:domain rdf:resource="http://example.org/ontology#Vehicle"/>
+        <rdfs:range rdf:resource="http://example.org/ontology#Human"/>
+    </ObjectProperty>
+
+
+
+    <!-- http://webprotege.stanford.edu/R8SpoPJaw5hiOnDZh41vaGt -->
+
+    <ObjectProperty rdf:about="http://webprotege.stanford.edu/R8SpoPJaw5hiOnDZh41vaGt">
+        <rdfs:label>type_of</rdfs:label>
+    </ObjectProperty>
+
+
+
+    <!-- http://webprotege.stanford.edu/R9Cd3UPk248EVL1oBAPbG32 -->
+
+    <ObjectProperty rdf:about="http://webprotege.stanford.edu/R9Cd3UPk248EVL1oBAPbG32">
+        <rdfs:label>connects</rdfs:label>
+    </ObjectProperty>
+
+
+
+    <!-- http://webprotege.stanford.edu/RBn0TzJZEdHBK0PSsE0vuc3 -->
+
+    <ObjectProperty rdf:about="http://webprotege.stanford.edu/RBn0TzJZEdHBK0PSsE0vuc3">
+        <rdfs:label>similar</rdfs:label>
+    </ObjectProperty>
+
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+
+
+
+    <!-- http://example.org/ontology#Car -->
+
+    <Class rdf:about="http://example.org/ontology#Car">
+        <rdfs:subClassOf rdf:resource="http://example.org/ontology#Vehicle"/>
+        <rdfs:subClassOf>
+            <Restriction>
+                <onProperty rdf:resource="http://example.org/ontology#isA"/>
+                <someValuesFrom rdf:resource="http://example.org/ontology#Vehicle"/>
+            </Restriction>
+        </rdfs:subClassOf>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#CarManufacturer -->
+
+    <Class rdf:about="http://example.org/ontology#CarManufacturer">
+        <rdfs:subClassOf rdf:resource="http://example.org/ontology#Company"/>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#Company -->
+
+    <Class rdf:about="http://example.org/ontology#Company">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:subClassOf>
+            <Restriction>
+                <onProperty rdf:resource="http://webprotege.stanford.edu/RBn0TzJZEdHBK0PSsE0vuc3"/>
+                <someValuesFrom rdf:resource="http://webprotege.stanford.edu/RCVOEoEJob1AvUpaZsM0Kkj"/>
+            </Restriction>
+        </rdfs:subClassOf>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#Human -->
+
+    <Class rdf:about="http://example.org/ontology#Human">
+        <rdfs:subClassOf>
+            <Restriction>
+                <onProperty rdf:resource="http://webprotege.stanford.edu/RBn0TzJZEdHBK0PSsE0vuc3"/>
+                <someValuesFrom rdf:resource="http://example.org/ontology#Person"/>
+            </Restriction>
+        </rdfs:subClassOf>
+        <dc:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string">blablablalba</dc:description>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#OperatingSystem -->
+
+    <Class rdf:about="http://example.org/ontology#OperatingSystem">
+        <rdfs:subClassOf rdf:resource="http://example.org/ontology#Technology"/>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#Person -->
+
+    <Class rdf:about="http://example.org/ontology#Person">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:subClassOf>
+            <Restriction>
+                <onProperty rdf:resource="http://webprotege.stanford.edu/RBn0TzJZEdHBK0PSsE0vuc3"/>
+                <someValuesFrom rdf:resource="http://example.org/ontology#Human"/>
+            </Restriction>
+        </rdfs:subClassOf>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#Phone -->
+
+    <Class rdf:about="http://example.org/ontology#Phone">
+        <rdfs:subClassOf rdf:resource="http://example.org/ontology#Technology"/>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#SearchEngine -->
+
+    <Class rdf:about="http://example.org/ontology#SearchEngine">
+        <rdfs:subClassOf rdf:resource="http://example.org/ontology#Technology"/>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#Technology -->
+
+    <Class rdf:about="http://example.org/ontology#Technology">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+    </Class>
+
+
+
+    <!-- http://example.org/ontology#Vehicle -->
+
+    <Class rdf:about="http://example.org/ontology#Vehicle">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+    </Class>
+
+
+
+    <!-- http://webprotege.stanford.edu/RCVOEoEJob1AvUpaZsM0Kkj -->
+
+    <Class rdf:about="http://webprotege.stanford.edu/RCVOEoEJob1AvUpaZsM0Kkj">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:subClassOf>
+            <Restriction>
+                <onProperty rdf:resource="http://webprotege.stanford.edu/RBn0TzJZEdHBK0PSsE0vuc3"/>
+                <someValuesFrom rdf:resource="http://example.org/ontology#Company"/>
+            </Restriction>
+        </rdfs:subClassOf>
+        <rdfs:label>Organization</rdfs:label>
+    </Class>
+
+
+
+    <!--
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+
+
+
+    <!-- http://example.org/ontology#Apple -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#Apple">
+        <rdf:type rdf:resource="http://example.org/ontology#Company"/>
+        <ontology:builds rdf:resource="http://example.org/ontology#iPhone"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://example.org/ontology#Google -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#Google">
+        <rdf:type rdf:resource="http://example.org/ontology#Company"/>
+        <rdf:type rdf:resource="http://example.org/ontology#SearchEngine"/>
+        <ontology:developed rdf:resource="http://example.org/ontology#Windows"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://example.org/ontology#MarkZuckerberg -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#MarkZuckerberg">
+        <rdf:type rdf:resource="http://example.org/ontology#Person"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://example.org/ontology#Meta -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#Meta">
+        <rdf:type rdf:resource="http://example.org/ontology#Company"/>
+        <rdf:type rdf:resource="http://webprotege.stanford.edu/RCVOEoEJob1AvUpaZsM0Kkj"/>
+        <ontology:isOwnedBy rdf:resource="http://example.org/ontology#MarkZuckerberg"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://example.org/ontology#Microsoft -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#Microsoft">
+        <rdf:type rdf:resource="http://example.org/ontology#Company"/>
+        <rdf:type rdf:resource="http://webprotege.stanford.edu/RCVOEoEJob1AvUpaZsM0Kkj"/>
+        <ontology:developed rdf:resource="http://example.org/ontology#Windows"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://example.org/ontology#Windows -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#Windows">
+        <rdf:type rdf:resource="http://example.org/ontology#OperatingSystem"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://example.org/ontology#iPhone -->
+
+    <NamedIndividual rdf:about="http://example.org/ontology#iPhone">
+        <rdf:type rdf:resource="http://example.org/ontology#Phone"/>
+    </NamedIndividual>
+
+
+
+    <!-- http://webprotege.stanford.edu/R7NE3O2NPMsi0jeHh5mLPdT -->
+
+    <NamedIndividual rdf:about="http://webprotege.stanford.edu/R7NE3O2NPMsi0jeHh5mLPdT">
+        <webprotege:R8SpoPJaw5hiOnDZh41vaGt rdf:resource="http://example.org/ontology#iPhone"/>
+    </NamedIndividual>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.13) https://github.com/owlcs/owlapi -->
