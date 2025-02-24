@@ -33,7 +33,7 @@ async def run_corpus_builder(params: dict) -> None:
         logging.info("Corpus Builder started...")
 
         try:
-            task_getter = TaskGetters(params.get("task_getter_type", "Default")).getter_class()
+            task_getter = TaskGetters(params.get("task_getter_type", "Default")).getter_func
         except KeyError:
             raise ValueError(f"Invalid task getter type: {params.get('task_getter_type')}")
 

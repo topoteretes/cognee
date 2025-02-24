@@ -1,16 +1,18 @@
 import cognee
 import logging
-from typing import Optional, Tuple, List, Dict, Union, Any
+from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
 from evals.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from evals.eval_framework.corpus_builder.task_getters.task_getters import TaskGetters
-from evals.eval_framework.corpus_builder.task_getters.base_task_getter import BaseTaskGetter
+from cognee.modules.pipelines.tasks.Task import Task
 from cognee.shared.utils import setup_logging
 
 
 class CorpusBuilderExecutor:
     def __init__(
-        self, benchmark: Union[str, Any] = "Dummy", task_getter: BaseTaskGetter = None
+        self,
+        benchmark: Union[str, Any] = "Dummy",
+        task_getter: Callable[..., Awaitable[List[Task]]] = None,
     ) -> None:
         if isinstance(benchmark, str):
             try:
@@ -42,5 +44,5 @@ class CorpusBuilderExecutor:
 
         await cognee.add(self.raw_corpus)
 
-        tasks = await self.task_getter.get_tasks()
+        tasks = await self.task_getter()
         await cognee.cognify(tasks=tasks)
