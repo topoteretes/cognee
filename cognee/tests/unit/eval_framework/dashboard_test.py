@@ -68,3 +68,11 @@ class TestGenerateMetricsDashboard(unittest.TestCase):
         generate_metrics_dashboard(self.temp_json.name, self.output_file)
 
         self.assertGreaterEqual(mock_to_html.call_count, 3)  # 2 metrics + CI chart
+
+        with open(self.output_file, "r", encoding="utf-8") as f:
+            file_content = f.read()
+            self.assertIn(
+                "<div>Plotly Chart</div>",
+                file_content,
+                "The output file does not contain the expected Plotly chart HTML.",
+            )
