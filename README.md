@@ -1,30 +1,24 @@
-
-<br />
-<div align="center">
+<div style="text-align: center">
   <a href="https://github.com/topoteretes/cognee">
-    <img src="./assets/cognee_logo_transparent.png" alt="Logo" height="150">
+    <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee-logo-transparent.png" alt="Cognee Logo" height="60">
   </a>
 
   <br />
 
+  cognee - memory layer for AI apps and Agents
 
+  [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
+  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+  [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
+  [![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
+  [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
+  [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
+  [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
-cognee - memory layer for AI apps and Agents
-
-[![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-[![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
-[![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
-[![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
-[![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
-[![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
-[![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
-
-
-We build for developers who need a reliable, production-ready data layer for AI applications
-
+  We build for developers who need a reliable, production-ready data layer for AI applications
 </div>
 
-## What is cognee?
+# What is cognee?
 
 Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
 
@@ -37,22 +31,14 @@ If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord
 
 Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? Check it out!
 
-<div align="center">
-<img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
+<div style="text-align: center">
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
 </div>
 
-## Contributing
-
-Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
-
-## Code of Conduct
-
-We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
 
 ## 📦 Installation
 
-You can install Cognee using either **pip** or **poetry**.
-Support for various databases and vector stores is available through extras.
+You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
 
 ### With pip
 
@@ -62,55 +48,13 @@ pip install cognee
 
 ### With poetry
 
-If adding to you project
-```
+```bash
 poetry add cognee
 ```
 
-If installing inside cloned repository
-
+### With uv
 ```bash
-poetry config virtualenvs.in-project true
-poetry self add poetry-plugin-shell
-poetry install
-poetry shell
-```
-
-### With pip with specific database support
-
-To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
-```bash
-pip install 'cognee[<database>]'
-```
-
-Replace \<database> with any of the following databases:
-- postgres
-- weaviate
-- qdrant
-- neo4j
-- milvus
-
-Installing Cognee with PostgreSQL and Neo4j support example:
-```bash
-pip install 'cognee[postgres, neo4j]'
-```
-
-### With poetry with specific database support
-
-To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
-```bash
-poetry add cognee -E <database>
-```
-Replace \<database> with any of the following databases:
-- postgres
-- weaviate
-- qdrant
-- neo4j
-- milvus
-
-Installing Cognee with PostgreSQL and Neo4j support example:
-```bash
-poetry add cognee -E postgres -E neo4j
+uv add cognee
 ```
 
 ## 💻 Basic Usage
@@ -119,7 +63,6 @@ poetry add cognee -E postgres -E neo4j
 
 ```
 import os
-
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
@@ -177,7 +120,7 @@ async def main():
     print("Cognify process complete.\n")
 
 
-    query_text = 'Tell me about NLP'
+    query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
     search_results = await cognee.search(
@@ -206,13 +149,13 @@ When you run this script, you will see step-by-step messages in the console that
 A version of this example is here: `examples/python/simple_example.py`
 
 
-### Understand our architecture
+## Understand our architecture
 
-cognee framework consists of tasks that can be grouped into pipelines.
+Cognee consists of tasks that can be grouped into pipelines.
 Each task can be an independent part of business logic, that can be tied to other tasks to form a pipeline.
 These tasks persist data into your memory store enabling you to search for relevant context of past conversations, documents, or any other data you have stored.
-<div align="center">
-<img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
+<div style="text-align: center">
+  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
 </div>
 
 
@@ -239,27 +182,74 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 [<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
 
 
+## Install Cognee with specific database support
+Support for various databases and vector stores is available through extras.
+Please see the [Cognee Quickstart Guide](https://docs.cognee.ai/quickstart/) for important configuration information.
 
-## Get Started
+### With pip
 
-### Install Server
+To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
+```bash
+pip install 'cognee[<database>]'
+```
 
-Please see the [cognee Quick Start Guide](https://docs.cognee.ai/quickstart/) for important configuration information.
+Replace \<database> with any of the following databases:
+- postgres
+- weaviate
+- qdrant
+- neo4j
+- milvus
+
+Installing Cognee with PostgreSQL and Neo4j support example:
+```bash
+pip install 'cognee[postgres, neo4j]'
+```
+
+### With poetry
+
+To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
+```bash
+poetry add cognee -E <database>
+```
+Replace \<database> with any of the following databases:
+- postgres
+- weaviate
+- qdrant
+- neo4j
+- milvus
+
+Installing Cognee with PostgreSQL and Neo4j support example:
+```bash
+poetry add cognee -E postgres -E neo4j
+```
+
+## Working with local Cognee
+
+Install dependencies inside the cloned repository:
+
+```bash
+poetry config virtualenvs.in-project true
+poetry self add poetry-plugin-shell
+poetry install
+poetry shell
+```
+
+
+## Run Cognee API server
+
+Please see the [Cognee Quickstart Guide](https://docs.cognee.ai/quickstart/) for important configuration information.
 
 ```bash
 docker compose up
 ```
 
+## Contributing
 
-### Install SDK
+Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
-Please see the cognee [Development Guide](https://docs.cognee.ai/quickstart/) for important beta information and usage instructions.
+## Code of Conduct
 
-```bash
-pip install cognee
-```
-
-
+We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
 
 ## 💫 Contributors
 
