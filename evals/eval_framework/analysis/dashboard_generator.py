@@ -1,5 +1,7 @@
+import json
 import plotly.graph_objects as go
 from typing import Dict, List, Tuple
+from collections import defaultdict
 
 
 def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]:
@@ -47,9 +49,26 @@ def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
     return fig.to_html(full_html=False)
 
 
-def generate_details_html(metric_details: Dict[str, List[Dict]]) -> List[str]:
+def generate_details_html(metrics_data: List[Dict]) -> List[str]:
     """Generate HTML for detailed metric information."""
     details_html = []
+    metric_details = {}
+
+    # Organize metrics by type
+    for entry in metrics_data:
+        for metric, values in entry["metrics"].items():
+            if metric not in metric_details:
+                metric_details[metric] = []
+            metric_details[metric].append(
+                {
+                    "question": entry["question"],
+                    "answer": entry["answer"],
+                    "golden_answer": entry["golden_answer"],
+                    "reason": values.get("reason", ""),
+                    "score": values["score"],
+                }
+            )
+
     for metric, details in metric_details.items():
         details_html.append(f"<h3>{metric} Details</h3>")
         details_html.append("""
@@ -112,22 +131,38 @@ def get_dashboard_html_template(
 
 
 def create_dashboard(
-    metrics_data: Dict[str, List[float]],
-    metric_details: Dict[str, List[Dict]],
-    ci_results: Dict[str, Tuple[float, float, float]],
+    metrics_path: str,
+    aggregate_metrics_path: str,
     output_file: str = "dashboard_with_ci.html",
     benchmark: str = "",
 ) -> str:
     """Create and save the dashboard with all visualizations."""
+    # Read metrics files
+    with open(metrics_path, "r") as f:
+        metrics_data = json.load(f)
+    with open(aggregate_metrics_path, "r") as f:
+        aggregate_data = json.load(f)
+
+    # Extract data for visualizations
+    metrics_by_type = defaultdict(list)
+    for entry in metrics_data:
+        for metric, values in entry["metrics"].items():
+            metrics_by_type[metric].append(values["score"])
+
     # Generate visualizations
-    distribution_figures = create_distribution_plots(metrics_data)
-    ci_plot = create_ci_plot(ci_results)
+    distribution_figures = create_distribution_plots(metrics_by_type)
+    ci_plot = create_ci_plot(
+        {
+            metric: (data["mean"], data["ci_lower"], data["ci_upper"])
+            for metric, data in aggregate_data.items()
+        }
+    )
 
     # Combine all figures
     figures = distribution_figures + [ci_plot]
 
     # Generate HTML components
-    details_html = generate_details_html(metric_details)
+    details_html = generate_details_html(metrics_data)
     dashboard_html = get_dashboard_html_template(figures, details_html, benchmark)
 
     # Write to file

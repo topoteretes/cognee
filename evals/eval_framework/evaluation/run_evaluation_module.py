@@ -53,37 +53,32 @@ async def execute_evaluation(params: dict) -> None:
 
 
 async def run_evaluation(params: dict) -> None:
-    """Run the evaluation pipeline with early returns if conditions aren't met."""
-    if not params.get("evaluating_answers"):
-        logging.info(
-            "Skipping evaluation, metrics calculation, and dashboard generation as evaluating_answers is False"
+    """Run each step of the evaluation pipeline based on configuration flags."""
+    # Step 1: Evaluate answers if requested
+    if params.get("evaluating_answers"):
+        await execute_evaluation(params)
+    else:
+        logging.info("Skipping evaluation as evaluating_answers is False")
+
+    # Step 2: Calculate metrics if requested
+    if params.get("calculate_metrics"):
+        logging.info("Calculating metrics statistics...")
+        calculate_metrics_statistics(
+            json_data=params["metrics_path"], aggregate_output_path=params["aggregate_metrics_path"]
         )
-        return
+        logging.info("Metrics calculation completed")
+    else:
+        logging.info("Skipping metrics calculation as calculate_metrics is False")
 
-    await execute_evaluation(params)
-
-    if not params.get("calculate_metrics"):
-        logging.info(
-            "Skipping metrics calculation and dashboard generation as calculate_metrics is False"
+    # Step 3: Generate dashboard if requested
+    if params.get("dashboard"):
+        logging.info("Generating dashboard...")
+        create_dashboard(
+            metrics_path=params["metrics_path"],
+            aggregate_metrics_path=params["aggregate_metrics_path"],
+            output_file=params["dashboard_path"],
+            benchmark=params["benchmark"],
         )
-        return
-
-    logging.info("Calculating metrics statistics...")
-    metrics_data, metric_details, ci_results = calculate_metrics_statistics(
-        json_data=params["metrics_path"], aggregate_output_path=params["aggregate_metrics_path"]
-    )
-    logging.info("Metrics calculation completed")
-
-    if not params.get("dashboard"):
+        logging.info(f"Dashboard generated at {params['dashboard_path']}")
+    else:
         logging.info("Skipping dashboard generation as dashboard is False")
-        return
-
-    logging.info("Generating dashboard...")
-    create_dashboard(
-        metrics_data=metrics_data,
-        metric_details=metric_details,
-        ci_results=ci_results,
-        output_file=params["dashboard_path"],
-        benchmark=params["benchmark"],
-    )
-    logging.info(f"Dashboard generated at {params['dashboard_path']}")
