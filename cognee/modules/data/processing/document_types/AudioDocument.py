@@ -1,8 +1,6 @@
-from typing import Optional
-
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.chunking.Chunker import Chunker
 
-from .ChunkerMapping import ChunkerConfig
 from .Document import Document
 
 
@@ -13,13 +11,12 @@ class AudioDocument(Document):
         result = get_llm_client().create_transcript(self.raw_data_location)
         return result.text
 
-    def read(self, chunk_size: int, chunker: str, max_chunk_tokens: int):
+    def read(self, chunk_size: int, chunker_cls: Chunker, max_chunk_tokens: int):
         # Transcribe the audio file
 
         text = self.create_transcript()
 
-        chunker_func = ChunkerConfig.get_chunker(chunker)
-        chunker = chunker_func(
+        chunker = chunker_cls(
             self, chunk_size=chunk_size, get_text=lambda: [text], max_chunk_tokens=max_chunk_tokens
         )
 

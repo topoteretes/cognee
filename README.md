@@ -2,10 +2,9 @@
 <br />
 <div align="center">
   <a href="https://github.com/topoteretes/cognee">
-    <img src="./assets/cognee_logo.png" alt="Logo" height="95">
+    <img src="./assets/cognee_logo_transparent.png" alt="Logo" height="150">
   </a>
 
-  <br />
   <br />
 
 
@@ -42,7 +41,7 @@ Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">s
 <img src="assets/cognee_benefits.png" alt="why cognee" width="80%" />
 </div>
 
-### Contributing
+## Contributing
 
 Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
