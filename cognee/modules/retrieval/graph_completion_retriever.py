@@ -22,7 +22,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k
 
-    def resolve_edges_to_text(self, retrieved_edges: list) -> str:
+    async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """Converts retrieved graph edges into a human-readable string format."""
         edge_strings = []
         for edge in retrieved_edges:
@@ -55,10 +55,17 @@ class GraphCompletionRetriever(BaseRetriever):
     async def get_context(self, query: str) -> Any:
         """Retrieves and resolves graph triplets into context."""
         triplets = await self.get_triplets(query)
-        return self.resolve_edges_to_text(triplets)
+        return await self.resolve_edges_to_text(triplets)
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Returns the graph connections context."""
+        """Generates a completion using graph connections context."""
         if context is None:
             context = await self.get_context(query)
-        return context
+
+        completion = await generate_completion(
+            query=query,
+            context=context,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+        )
+        return [completion]

@@ -25,7 +25,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """Converts retrieved graph edges into a summary without redundancies."""
-        direct_text = super().resolve_edges_to_text(retrieved_edges)
+        direct_text = await super().resolve_edges_to_text(retrieved_edges)
         system_prompt = read_query_prompt(self.summarize_prompt_path)
 
         llm_client = get_llm_client()
