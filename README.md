@@ -77,7 +77,11 @@ To use different LLM providers, for more info check out our <a href="https://doc
 
 ### Simple example
 
-First, copy `.env.template` to `.env` and add your OpenAI API key to the LLM_API_KEY field.
+Add LLM_API_KEY to .env using the command bellow. 
+```
+echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
+```
+You can see available env variables in the repository `.env.template` file.
 
 This script will run the default pipeline:
 
