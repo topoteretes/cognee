@@ -2,7 +2,7 @@ from typing import Union
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
+from cognee.shared.CodeGraphEntities import CodeFile, CodePart
 
 
 class TextSummary(DataPoint):
@@ -14,6 +14,6 @@ class TextSummary(DataPoint):
 
 class CodeSummary(DataPoint):
     text: str
-    summarizes: Union[CodeFile, CodePart, SourceCodeChunk]
+    summarizes: Union[CodeFile, CodePart]
 
     metadata: dict = {"index_fields": ["text"]}

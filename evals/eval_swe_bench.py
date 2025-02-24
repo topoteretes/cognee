@@ -13,7 +13,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.retrieval.description_to_codepart_search import (
     code_description_to_code_part_search,
 )
-from evals.eval_utils import download_github_repo, retrieved_edges_to_string
+from evals.eval_utils import download_github_repo
 
 
 def check_install_package(package_name):

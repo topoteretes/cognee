@@ -2,26 +2,13 @@ import logging
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph
-
+from cognee.modules.chunking.Chunker import Chunker
 from .models.DocumentChunk import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
 
-class TextChunker:
-    document = None
-    max_chunk_size: int
-
-    chunk_index = 0
-    chunk_size = 0
-    token_count = 0
-
-    def __init__(self, document, get_text: callable, max_chunk_tokens: int, chunk_size: int = 1024):
-        self.document = document
-        self.max_chunk_size = chunk_size
-        self.get_text = get_text
-        self.max_chunk_tokens = max_chunk_tokens
-
+class TextChunker(Chunker):
     def check_word_count_and_token_count(self, word_count_before, token_count_before, chunk_data):
         word_count_fits = word_count_before + chunk_data["word_count"] <= self.max_chunk_size
         token_count_fits = token_count_before + chunk_data["token_count"] <= self.max_chunk_tokens

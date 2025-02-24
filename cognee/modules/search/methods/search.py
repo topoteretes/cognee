@@ -14,16 +14,17 @@ from cognee.tasks.graph import query_graph_connections
 from cognee.tasks.summarization import query_summaries
 from cognee.tasks.completion import query_completion
 from cognee.tasks.completion import graph_query_completion
+from cognee.tasks.completion import graph_query_summary_completion
 from ..operations import log_query, log_result
 
 
 async def search(
     query_text: str,
-    query_type: str,
+    query_type: SearchType,
     datasets: list[str],
     user: User,
 ):
-    query = await log_query(query_text, str(query_type), user.id)
+    query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(query_type, query_text, user)
@@ -49,6 +50,7 @@ async def specific_search(query_type: SearchType, query: str, user: User) -> lis
         SearchType.CHUNKS: query_chunks,
         SearchType.COMPLETION: query_completion,
         SearchType.GRAPH_COMPLETION: graph_query_completion,
+        SearchType.GRAPH_SUMMARY_COMPLETION: graph_query_summary_completion,
         SearchType.CODE: code_graph_retrieval,
     }
 
