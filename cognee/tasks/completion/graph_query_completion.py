@@ -1,3 +1,5 @@
+import json
+import os
 from cognee.infrastructure.engine import ExtendableDataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
@@ -22,12 +24,16 @@ async def retrieved_edges_to_string(retrieved_edges: list) -> str:
     return "\n---\n".join(edge_strings)
 
 
-async def graph_query_completion(query: str, context_resolver: Callable = None) -> list:
+async def graph_query_completion(
+    query: str, context_resolver: Callable = None, save_context_path: str = None
+) -> list:
     """
     Executes a query on the graph database and retrieves a relevant completion based on the found data.
 
     Parameters:
     - query (str): The query string to compute.
+    - context_resolver (Callable): A function to convert retrieved edges to a string.
+    - save_context_path (str): Path to save the retrieved context.
 
     Returns:
     - list: Answer to the query.
@@ -57,9 +63,16 @@ async def graph_query_completion(query: str, context_resolver: Callable = None) 
     if not context_resolver:
         context_resolver = retrieved_edges_to_string
 
+    # Get context and optionally dump it
+    context = await context_resolver(found_triplets)
+    if save_context_path:
+        os.makedirs(os.path.dirname(save_context_path), exist_ok=True)
+        with open(save_context_path, "w") as f:
+            json.dump(context, f)
+
     args = {
         "question": query,
-        "context": await context_resolver(found_triplets),
+        "context": context,
     }
     user_prompt = render_prompt("graph_context_for_question.txt", args)
     system_prompt = read_query_prompt("answer_simple_question.txt")

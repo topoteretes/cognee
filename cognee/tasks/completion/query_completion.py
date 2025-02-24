@@ -1,16 +1,19 @@
+import json
+import os
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 
 
-async def query_completion(query: str) -> list:
+async def query_completion(query: str, save_context_path: str = None) -> list:
     """
 
     Executes a query against a vector database and computes a relevant response using an LLM.
 
     Parameters:
     - query (str): The query string to compute.
+    - save_context_path (str): The path to save the context.
 
     Returns:
     - list: Answer to the query.
@@ -28,9 +31,16 @@ async def query_completion(query: str) -> list:
     if len(found_chunks) == 0:
         raise NoRelevantDataFound
 
+    # Get context and optionally dump it
+    context = found_chunks[0].payload["text"]
+    if save_context_path:
+        os.makedirs(os.path.dirname(save_context_path), exist_ok=True)
+        with open(save_context_path, "w") as f:
+            json.dump(context, f)
+
     args = {
         "question": query,
-        "context": found_chunks[0].payload["text"],
+        "context": context,
     }
     user_prompt = render_prompt("context_for_question.txt", args)
     system_prompt = read_query_prompt("answer_simple_question.txt")

@@ -22,5 +22,8 @@ async def retrieved_edges_to_summary(retrieved_edges: list) -> str:
     return summarized_context
 
 
-async def graph_query_summary_completion(query: str) -> list:
-    return await graph_query_completion(query, context_resolver=retrieved_edges_to_summary)
+async def graph_query_summary_completion(query: str, save_context_path: str = None) -> list:
+    """Executes a query on the graph database and retrieves a summarized completion with optional context saving."""
+    return await graph_query_completion(
+        query, context_resolver=retrieved_edges_to_summary, save_context_path=save_context_path
+    )
