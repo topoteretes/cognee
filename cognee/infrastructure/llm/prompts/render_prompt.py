@@ -2,14 +2,15 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from cognee.root_dir import get_absolute_path
 
 
-def render_prompt(filename: str, context: dict) -> str:
+def render_prompt(filename: str, context: dict, base_directory: str = None) -> str:
     """Render a Jinja2 template asynchronously.
     :param filename: The name of the template file to render.
     :param context: The context to render the template with.
     :return: The rendered template as a string."""
 
     # Set the base directory relative to the cognee root directory
-    base_directory = get_absolute_path("./infrastructure/llm/prompts")
+    if base_directory is None:
+        base_directory = get_absolute_path("./infrastructure/llm/prompts")
 
     # Initialize the Jinja2 environment to load templates from the filesystem
     env = Environment(
