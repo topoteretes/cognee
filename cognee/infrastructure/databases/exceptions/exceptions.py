@@ -11,7 +11,10 @@ class EntityNotFoundError(CogneeApiError):
         name: str = "EntityNotFoundError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
-        super().__init__(message, name, status_code)
+        self.message = message
+        self.name = name
+        self.status_code = status_code
+        # super().__init__(message, name, status_code) :TODO: This is not an error anymore with the dynamic exception handling therefore we shouldn't log error
 
 
 class EntityAlreadyExistsError(CogneeApiError):
