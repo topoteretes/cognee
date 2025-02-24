@@ -4,7 +4,7 @@ from typing import List
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
-from cognee.tasks.graph.cascade_extract.utils.extract_relationship_names import (
+from cognee.tasks.graph.cascade_extract.utils.extract_content_nodes_and_relationship_names import (
     extract_content_nodes_and_relationship_names,
 )
 from cognee.tasks.graph.cascade_extract.utils.extract_edge_triplets import (
