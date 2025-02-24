@@ -1,7 +1,7 @@
 from typing import List
 
 from cognee.modules.engine.models import Entity
-from cognee.tasks.entity_completion.context_providers.base_context_provider import (
+from cognee.infrastructure.context.BaseContextProvider import (
     BaseContextProvider,
 )
 

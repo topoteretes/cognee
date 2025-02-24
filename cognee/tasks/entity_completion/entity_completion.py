@@ -1,12 +1,12 @@
-from typing import List, Union
+from typing import List
 import logging
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
-from cognee.tasks.entity_completion.entity_extractors.base_entity_extractor import (
+from cognee.infrastructure.entities.BaseEntityExtractor import (
     BaseEntityExtractor,
 )
-from cognee.tasks.entity_completion.context_providers.base_context_provider import (
+from cognee.infrastructure.context.BaseContextProvider import (
     BaseContextProvider,
 )
 
