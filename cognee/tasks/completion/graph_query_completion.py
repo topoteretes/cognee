@@ -67,10 +67,13 @@ async def graph_query_completion(
     # Get context and optionally dump it
     context = await context_resolver(found_triplets)
     if save_context_path:
-        os.makedirs(os.path.dirname(save_context_path), exist_ok=True)
-        with open(save_context_path, "w") as f:
-            json.dump(context, f)
-
+        try:
+            os.makedirs(os.path.dirname(save_context_path), exist_ok=True)
+            with open(save_context_path, "w") as f:
+                json.dump(context, f, indent=2)
+        except (OSError, TypeError, ValueError) as e:
+            logger.error(f"Failed to save context to {save_context_path}: {str(e)}")
+            # Consider whether to raise or continue silently
     args = {
         "question": query,
         "context": context,
