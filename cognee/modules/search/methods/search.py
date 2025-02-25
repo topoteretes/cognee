@@ -44,6 +44,7 @@ async def search(
 
 
 async def specific_search(query_type: SearchType, query: str, user: User) -> list:
+    # TODO: update after merging COG-1365, see COG-1403
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: query_summaries,
         SearchType.INSIGHTS: query_graph_connections,
