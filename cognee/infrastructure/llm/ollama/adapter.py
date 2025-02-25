@@ -45,9 +45,10 @@ class OllamaAPIAdapter(LLMInterface):
                 {"role": "user", "content": text_input},
             ],
             max_tokens=self.max_tokens,
+            response_model=response_model,
         )
 
-        return response_model.parse_raw(response.choices[0].message.content)
+        return response
 
     def create_transcript(self, input: str):
         """Generate an audio transcript from a user query."""
