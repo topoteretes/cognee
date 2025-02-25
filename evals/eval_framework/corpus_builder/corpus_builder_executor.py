@@ -3,7 +3,7 @@ import logging
 from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
 from evals.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
-from evals.eval_framework.corpus_builder.task_getters.task_getters import TaskGetters
+from evals.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.shared.utils import setup_logging
 
