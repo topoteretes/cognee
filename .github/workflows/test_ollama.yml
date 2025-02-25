@@ -40,17 +40,17 @@ jobs:
         run: curl -fsSL https://ollama.com/install.sh | sh
       - name: Run ollama
         run: |
-          ollama serve &
+          ollama serve --openai &
           ollama pull llama3.2 &
           ollama pull avr/sfr-embedding-mistral:latest
       - name: Call ollama API
         run: |
-          curl -d '{"model": "llama3.2", "stream": false, "prompt":"Whatever I say, asnwer with Yes"}' http://localhost:11434/api/generate
+          curl -d '{"model": "llama3.2", "stream": false, "prompt":"Whatever I say, asnwer with Yes"}' http://localhost:11434/v1/chat/completions
 
       - name: Wait for Ollama to be ready
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:11434/api/tags > /dev/null; then
+            if curl -s http://localhost:11434/v1/models > /dev/null; then
               echo "Ollama is ready"
               exit 0
             fi
@@ -74,11 +74,11 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_API_KEY: "ollama"
           LLM_PROVIDER: "ollama"
-          LLM_ENDPOINT: "http://127.0.0.1:11434/api/generate"
+          LLM_ENDPOINT: "http://127.0.0.1:11434/v1/chat/completions"
           LLM_MODEL: "ollama/llama3.2"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://127.0.0.1:11434/api/embeddings"
+          EMBEDDING_ENDPOINT: "http://127.0.0.1:11434//v1/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: poetry run python ./examples/python/simple_example.py
