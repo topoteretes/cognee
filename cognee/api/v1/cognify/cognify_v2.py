@@ -122,7 +122,7 @@ async def get_default_tasks(
         cognee_config = get_cognify_config()
         default_tasks = [
             Task(classify_documents),
-            Task(check_permissions_on_documents, user=user, permissions=["write"]),
+            # Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(
                 extract_chunks_from_documents,
                 max_chunk_tokens=get_max_chunk_tokens(),

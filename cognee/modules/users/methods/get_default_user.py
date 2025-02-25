@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from sqlalchemy.orm import selectinload
 from sqlalchemy.future import select
 from cognee.modules.users.models import User
@@ -21,4 +23,7 @@ async def get_default_user():
         if user is None:
             return await create_default_user()
 
-        return user
+        # We return a SimpleNamespace to have the same user type as our SaaS
+        # SimpleNamespace is just a dictionary which can be accessed through attributes
+        ret_val = SimpleNamespace(id=user.id, tenant_id=user.tenant, role=user.role)
+        return ret_val
