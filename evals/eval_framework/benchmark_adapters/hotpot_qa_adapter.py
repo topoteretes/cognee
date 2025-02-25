@@ -33,6 +33,10 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_contexts)
 
+    def _get_metadata_field_name(self) -> str:
+        """Returns the name of the metadata field used in QA pairs."""
+        return "level"
+
     def _process_item(
         self,
         item: dict[str, Any],
@@ -47,7 +51,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         qa_pair = {
             "question": item["question"],
             "answer": item["answer"].lower(),
-            "level": item["level"],
+            self._get_metadata_field_name(): item[self._get_metadata_field_name()],
         }
 
         if load_golden_context:
