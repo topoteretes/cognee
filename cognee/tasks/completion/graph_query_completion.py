@@ -1,12 +1,14 @@
 from cognee.infrastructure.engine import ExtendableDataPoint
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from typing import Callable
 
 
-def retrieved_edges_to_string(retrieved_edges: list) -> str:
+async def retrieved_edges_to_string(retrieved_edges: list) -> str:
     """
     Converts a list of retrieved graph edges into a human-readable string format.
 
@@ -21,7 +23,7 @@ def retrieved_edges_to_string(retrieved_edges: list) -> str:
     return "\n---\n".join(edge_strings)
 
 
-async def graph_query_completion(query: str) -> list:
+async def graph_query_completion(query: str, context_resolver: Callable = None) -> list:
     """
     Executes a query on the graph database and retrieves a relevant completion based on the found data.
 
@@ -37,7 +39,7 @@ async def graph_query_completion(query: str) -> list:
     - Ensure that the LLM client and graph database are properly configured and accessible.
     """
 
-    subclasses = get_all_subclasses(ExtendableDataPoint)
+    subclasses = get_all_subclasses(DataPoint)
 
     vector_index_collections = []
 
@@ -53,9 +55,12 @@ async def graph_query_completion(query: str) -> list:
     if len(found_triplets) == 0:
         raise NoRelevantDataFound
 
+    if not context_resolver:
+        context_resolver = retrieved_edges_to_string
+
     args = {
         "question": query,
-        "context": retrieved_edges_to_string(found_triplets),
+        "context": await context_resolver(found_triplets),
     }
     user_prompt = render_prompt("graph_context_for_question.txt", args)
     system_prompt = read_query_prompt("answer_simple_question.txt")

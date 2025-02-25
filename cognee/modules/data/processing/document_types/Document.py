@@ -1,5 +1,6 @@
 from typing import Optional
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.chunking.Chunker import Chunker
 
 
 class Document(DataPoint):
@@ -9,5 +10,7 @@ class Document(DataPoint):
     mime_type: str
     metadata: dict = {"index_fields": ["name"]}
 
-    def read(self, chunk_size: int, chunker=str, max_chunk_tokens: Optional[int] = None) -> str:
+    def read(
+        self, chunk_size: int, chunker_cls: Chunker, max_chunk_tokens: Optional[int] = None
+    ) -> str:
         pass
