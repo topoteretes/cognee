@@ -3,7 +3,6 @@ import asyncio
 import logging
 from typing import Type, List, Dict, Tuple
 
-from jinja2.compiler import generate
 from owlready2 import get_ontology, Thing, Ontology, ClassConstruct
 import difflib
 from collections import deque
@@ -23,8 +22,6 @@ from utils import (
     get_graph_engine,
     DocumentChunk,
     extract_content_graph,
-    expand_with_nodes_and_edges,
-    retrieve_existing_edges,
     KnowledgeGraph,
     add_data_points,
     prune_data,
@@ -36,12 +33,17 @@ from utils import (
     Entity,
     EntityType,
     DataPoint,
+    SearchType,
+    search,
+    index_graph_edges,
 )
 
 
 class OntologyNode(DataPoint):
     name: str
     ontology_origin_type: str
+
+    metadata: dict = {"index_fields": ["name"]}
 
 
 async def main():
@@ -99,6 +101,13 @@ async def owl_testing_pipeline():
 
         async for run_status in pipeline_run:
             print(run_status)
+
+        query = "What are the exact cars produced by Audi and what are their types?"
+
+        print(f"The query is {query}:")
+        search_results = await search(query_type=SearchType.GRAPH_COMPLETION, query_text=query)
+
+        print(search_results[0])
 
 
 def find_closest_match(name: str, category: str, ontology_nodes_lookup: dict) -> str:
@@ -352,6 +361,8 @@ async def owl_ontology_merging_layer(
 
     if graph_edges:
         await graph_engine.add_edges(graph_edges)
+
+    await index_graph_edges()
 
     return data_chunks
 
