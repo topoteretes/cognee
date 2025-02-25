@@ -13,7 +13,7 @@ from typing import Optional
 
 class CustomJWTStrategy(JWTStrategy):
     async def write_token(self, user: str, lifetime_seconds: Optional[int] = None) -> str:
-        data = {"user_id": str(user.id), "tenant_id": user.tenant, "role": user.role}
+        data = {"user_id": str(user.id), "tenant": user.tenant, "role": user.role}
         return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
 
