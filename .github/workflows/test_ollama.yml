@@ -90,6 +90,8 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "ollama"
           LLM_ENDPOINT: "ollama:11434/v1/chat/completions"
+          LLM_API_KEY: "ollama"
+          EMBEDDING_API_KEY: "ollama"
           LLM_MODEL: "llama3"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
