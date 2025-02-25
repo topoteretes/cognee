@@ -88,10 +88,10 @@ jobs:
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
           PYTHONFAULTHANDLER: 1
-          LLM_API_KEY: "ollama"
+          LLM_API_KEY: ""
           LLM_PROVIDER: "ollama"
           LLM_ENDPOINT: "http://localhost:11434/v1/chat/completions"
-          LLM_MODEL: "ollama/llama3.2"
+          LLM_MODEL: "llama3"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
           EMBEDDING_ENDPOINT: "http://localhost:11434/v1/embeddings"
