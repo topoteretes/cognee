@@ -10,6 +10,7 @@ from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
@@ -36,8 +37,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
-        self.engine = create_async_engine(self.db_uri)
-        self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+
+        relational_db = get_relational_engine()
+
+        # If postgreSQL is used we must use the same engine and sessionmaker
+        if relational_db.engine.dialect.name == "postgresql":
+            self.engine = relational_db.engine
+            self.sessionmaker = relational_db.sessionmaker
+        else:
+            # If not create new instances of engine and sessionmaker
+            self.engine = create_async_engine(self.db_uri)
+            self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
