@@ -35,16 +35,16 @@ async def extract_edge_triplets(
         system_prompt = read_query_prompt(
             "extract_graph_edge_triplets_prompt_system.txt", base_directory=base_directory
         )
-        round_graph = await llm_client.acreate_structured_output(
+        extracted_graph = await llm_client.acreate_structured_output(
             text_input=text_input, system_prompt=system_prompt, response_model=KnowledgeGraph
         )
 
-        for node in round_graph.nodes:
+        for node in extracted_graph.nodes:
             if node.name not in existing_nodes:
                 final_graph.nodes.append(node)
                 existing_nodes.add(node.name)
 
-        for edge in round_graph.edges:
+        for edge in extracted_graph.edges:
             edge_key = (edge.source_node_id, edge.target_node_id, edge.relationship_name)
             if edge_key in existing_edge_triplets:
                 continue
