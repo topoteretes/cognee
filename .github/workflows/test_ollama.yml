@@ -45,7 +45,16 @@ jobs:
           ollama pull avr/sfr-embedding-mistral:latest
       - name: Call ollama API
         run: |
-          curl -d '{"model": "llama3.2", "stream": false, "prompt":"Whatever I say, asnwer with Yes"}' http://localhost:11434/v1/chat/completions
+          curl -X POST http://localhost:11434/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "llama3.2",
+              "stream": false,
+              "messages": [
+                { "role": "system", "content": "You are a helpful assistant." },
+                { "role": "user", "content": "Whatever I say, answer with Yes." }
+              ]
+            }'
 
       - name: Wait for Ollama to be ready
         run: |
@@ -78,7 +87,7 @@ jobs:
           LLM_MODEL: "ollama/llama3.2"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://127.0.0.1:11434//v1/embeddings"
+          EMBEDDING_ENDPOINT: "http://127.0.0.1:11434/v1/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: poetry run python ./examples/python/simple_example.py
