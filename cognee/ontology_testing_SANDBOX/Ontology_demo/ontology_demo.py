@@ -341,7 +341,7 @@ async def owl_ontology_merging_layer(
                 )
                 existing_edges_map[edge_key] = True
 
-    # Adding graph nodes and edges to the database
+    # Adding graph nodes and edges to the database :TODO: Should merge the added_nodes_map with added_ont_nodes_map + transitively change the
     graph_nodes = data_chunks + list(added_ont_nodes_map.values())
     graph_edges = relationships
 
