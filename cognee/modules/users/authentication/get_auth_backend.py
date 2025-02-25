@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 from fastapi_users import models
+from fastapi_users.jwt import generate_jwt
 from fastapi_users.authentication import (
     AuthenticationBackend,
     BearerTransport,
@@ -11,16 +12,9 @@ from typing import Optional
 
 
 class CustomJWTStrategy(JWTStrategy):
-    def create_access_token(
-        self, subject: str, tenant: str, role: str, lifetime_seconds: Optional[int] = None
-    ) -> str:
-        lifetime = (
-            timedelta(seconds=lifetime_seconds) if lifetime_seconds else self.lifetime_seconds
-        )
-        expire = datetime.utcnow() + lifetime
-        to_encode = {"sub": subject, "exp": expire, "tenant": tenant, "role": role}
-
-        return self.encode(to_encode)
+    async def write_token(self, user: str, lifetime_seconds: Optional[int] = None) -> str:
+        data = {"user_id": str(user.id), "tenant_id": user.tenant, "role": user.role}
+        return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
 
 @lru_cache

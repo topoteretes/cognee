@@ -12,6 +12,8 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
     __tablename__ = "users"
 
     id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
+    role: str = ""
+    tenant: str = ""
 
     groups: Mapped[list["Group"]] = relationship(
         secondary=UserGroup.__tablename__,

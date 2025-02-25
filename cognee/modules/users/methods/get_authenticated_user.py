@@ -18,7 +18,11 @@ async def get_authenticated_user(authorization: str = Header(...)):
         payload = jwt.decode(
             token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
         )
-        return {"user_id": payload["sub"], "tenant": payload["tenant"], "role": payload["role"]}
+        return {
+            "user_id": payload["user_id"],
+            "tenant_id": payload["tenant_id"],
+            "role": payload["role"],
+        }
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
