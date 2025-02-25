@@ -23,9 +23,7 @@ jobs:
       matrix:
         # These labels correspond to:
         # - ubuntu-22.04: Linux
-        # - macos-13: macOS Intel
-        # - macos-15: macOS ARM (public preview)
-        os: [ubuntu-22.04, macos-13, macos-15]
+        os: [ubuntu-22.04]
     defaults:
       run:
         shell: bash
@@ -49,9 +47,6 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-interaction -E docs -E evals
-      - name: Download NLTK tokenizer data
-        run: |
-          poetry run python -m nltk.downloader punkt_tab averaged_perceptron_tagger_eng
 
       - name: Add telemetry identifier
         run: |
@@ -81,11 +76,3 @@ jobs:
           sudo rm -rf ~/.cache
           sudo rm -rf /tmp/*
           df -h
-
-      - name: Build with Poetry
-        run: poetry build
-
-      - name: Install Package
-        run: |
-         cd dist
-         pip install *.whl
