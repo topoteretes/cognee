@@ -1,3 +1,4 @@
+# TODO: delete after merging COG-1365, see COG-1403
 from cognee.low_level import DataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from .brute_force_triplet_search import brute_force_triplet_search

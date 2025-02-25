@@ -1,4 +1,6 @@
+# TODO: delete after merging COG-1365, see COG-1403
 import json
+import logging
 import os
 from cognee.infrastructure.engine import ExtendableDataPoint
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
@@ -8,6 +10,9 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from typing import Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 async def retrieved_edges_to_string(retrieved_edges: list) -> str:
@@ -44,7 +49,6 @@ async def graph_query_completion(
     - Prompts are dynamically rendered and provided to the LLM for contextual understanding.
     - Ensure that the LLM client and graph database are properly configured and accessible.
     """
-
     subclasses = get_all_subclasses(DataPoint)
 
     vector_index_collections = []

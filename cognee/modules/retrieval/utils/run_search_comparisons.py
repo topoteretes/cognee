@@ -1,3 +1,4 @@
+# TODO: delete after merging COG-1365, see COG-1403
 import asyncio
 import json
 import logging

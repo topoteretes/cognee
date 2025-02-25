@@ -1,3 +1,4 @@
+# TODO: delete after merging COG-1365, see COG-1403
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.tasks.completion.graph_query_completion import (

@@ -1,9 +1,14 @@
+# TODO: delete after merging COG-1365, see COG-1403
 import json
+import logging
 import os
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+
+
+logger = logging.getLogger(__name__)
 
 
 async def query_completion(query: str, save_context_path: str = None) -> list:
