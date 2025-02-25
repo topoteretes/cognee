@@ -60,9 +60,17 @@ async def owl_testing_pipeline():
     user = await get_default_user()
     datasets = await get_datasets(user.id)
 
-    ontology_path = os.path.join(os.path.abspath(os.path.dirname(os.path.abspath(__file__))))
+    ontology_path = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
+    ontology_file = os.path.join(ontology_path, "basic_ontology.owl")
 
-    ontology = get_ontology(ontology_path + "/basic_ontology.owl").load()
+    if os.path.exists(ontology_file):
+        ontology = get_ontology(ontology_file).load()
+        print("Ontology loaded successfully.")
+    else:
+        print(
+            f"Warning: Ontology file not found: {ontology_file}. Proceeding with an empty ontology."
+        )
+        ontology = get_ontology("http://example.org/empty_ontology")
 
     ontology_nodes_lookup = {
         "classes": {cls.name.lower().replace(" ", "_").strip(): cls for cls in ontology.classes()},
