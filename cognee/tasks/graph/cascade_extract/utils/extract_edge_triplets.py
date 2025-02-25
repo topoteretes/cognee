@@ -12,6 +12,7 @@ async def extract_edge_triplets(
     llm_client = get_llm_client()
     final_graph = KnowledgeGraph(nodes=[], edges=[])
     existing_nodes = set()
+    existing_node_ids = set()
     existing_edge_triplets = set()
 
     for round_num in range(n_rounds):
@@ -19,11 +20,8 @@ async def extract_edge_triplets(
             "text": content,
             "potential_nodes": nodes,
             "potential_relationship_names": relationship_names,
-            "previous_nodes": [node.name for node in final_graph.nodes],
-            "previous_edge_triplets": [
-                (edge.source_node_id, edge.target_node_id, edge.relationship_name)
-                for edge in final_graph.edges
-            ],
+            "previous_nodes": existing_nodes,
+            "previous_edge_triplets": existing_edge_triplets,
             "round_number": round_num + 1,
             "total_rounds": n_rounds,
         }
@@ -43,15 +41,17 @@ async def extract_edge_triplets(
             if node.name not in existing_nodes:
                 final_graph.nodes.append(node)
                 existing_nodes.add(node.name)
+                existing_node_ids.add(node.id)
 
         for edge in extracted_graph.edges:
             edge_key = (edge.source_node_id, edge.target_node_id, edge.relationship_name)
             if edge_key in existing_edge_triplets:
                 continue
 
-            source_node_exists = any(node.id == edge.source_node_id for node in final_graph.nodes)
-            target_node_exists = any(node.id == edge.target_node_id for node in final_graph.nodes)
-            if not (source_node_exists and target_node_exists):
+            if not (
+                edge.source_node_id in existing_node_ids
+                and edge.target_node_id in existing_node_ids
+            ):
                 continue
 
             final_graph.edges.append(edge)
