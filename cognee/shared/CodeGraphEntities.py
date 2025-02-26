@@ -8,6 +8,7 @@ class Repository(DataPoint):
 
 class ImportStatement(DataPoint):
     name: str
+    module: str
     start_point: tuple
     end_point: tuple
     source_code: str
@@ -34,6 +35,7 @@ class ClassDefinition(DataPoint):
 
 
 class CodeFile(DataPoint):
+    name: str
     file_path: str
     source_code: Optional[str] = None
     part_of: Optional[Repository] = None

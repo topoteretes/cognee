@@ -161,6 +161,8 @@ async def main():
     try:
         from mcp.server.stdio import stdio_server
 
+        logger.info("Starting Cognee MCP server...")
+
         async with stdio_server() as (read_stream, write_stream):
             await mcp.run(
                 read_stream=read_stream,
