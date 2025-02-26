@@ -10,11 +10,11 @@ jobs:
   run_simple_example_test:
 
     runs-on: ubuntu-latest
-    services:
-      ollama:
-        image: ollama/ollama
-        ports:
-          - 11434:11434
+#    services:
+#      ollama:
+#        image: ollama/ollama
+#        ports:
+#          - 11434:11434
 
     steps:
       - name: Checkout repository
@@ -36,13 +36,37 @@ jobs:
         run: |
           poetry install --no-interaction --all-extras
 
-      - name: Install ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-      - name: Run ollama
+#      - name: Install ollama
+#        run: curl -fsSL https://ollama.com/install.sh | sh
+#      - name: Run ollama
+#        run: |
+#          ollama serve --openai &
+#          ollama pull llama3.2 &
+#          ollama pull avr/sfr-embedding-mistral:latest
+
+      - name: Start Ollama in a Docker container
         run: |
-          ollama serve --openai &
-          ollama pull llama3.2 &
-          ollama pull avr/sfr-embedding-mistral:latest
+          docker run -d --name ollama -p 11434:11434 ollama/ollama serve --openai
+          sleep 5  # Give some time for Ollama to start
+
+      - name: Wait for Ollama to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:11434/v1/models > /dev/null; then
+              echo "Ollama is ready"
+              exit 0
+            fi
+            echo "Waiting for Ollama... attempt $i"
+            sleep 2
+          done
+          echo "Ollama failed to start"
+          exit 1
+
+      - name: Pull required Ollama models
+        run: |
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "llama3.2"}'
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
+
       - name: Call ollama API
         run: |
           curl -X POST http://localhost:11434/v1/chat/completions \
@@ -62,20 +86,6 @@ jobs:
             "input": "This is a test sentence to generate an embedding."
             }'
 
-
-      - name: Wait for Ollama to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:11434/v1/models > /dev/null; then
-              echo "Ollama is ready"
-              exit 0
-            fi
-            echo "Waiting for Ollama... attempt $i"
-            sleep 2
-          done
-          echo "Ollama failed to start"
-          exit 1
-
       - name: Dump Docker logs
         run: |
           docker ps
@@ -90,11 +100,11 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "ollama"
           LLM_API_KEY: "ollama"
-          LLM_ENDPOINT: "http://ollama:11434/v1/chat/completions"
+          LLM_ENDPOINT: "http://localhost:11434/v1/chat/completions"
           LLM_MODEL: "llama3"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://ollama:11434/v1/embeddings"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/v1/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: poetry run python ./examples/python/simple_example.py
