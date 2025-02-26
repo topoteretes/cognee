@@ -180,10 +180,15 @@ async def main(enable_steps):
 
     # Step 3: Create knowledge graph
     if enable_steps.get("cognify"):
-        await cognee.cognify()
+        pipeline_runs = await cognee.cognify()
         print("Knowledge graph created.")
 
-    # Step 4: Query insights
+    # Step 4: Calculate descriptive metrics
+    if enable_steps.get("graph_metrics"):
+        await cognee.store_descriptive_metrics(pipeline_runs, include_optional=True)
+        print("Descriptive graph metrics saved to database.")
+
+    # Step 5: Query insights
     if enable_steps.get("retriever"):
         search_results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
@@ -201,6 +206,7 @@ if __name__ == "__main__":
         "prune_system": rebuild_kg,
         "add_text": rebuild_kg,
         "cognify": rebuild_kg,
+        "graph_metrics": rebuild_kg,
         "retriever": retrieve,
     }
 

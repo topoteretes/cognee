@@ -8,6 +8,7 @@ from .api.v1.visualize import visualize_graph, start_visualization_server
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
+from .modules.data.operations.store_descriptive_metrics import store_descriptive_metrics
 
 # Pipelines
 from .modules import pipelines
