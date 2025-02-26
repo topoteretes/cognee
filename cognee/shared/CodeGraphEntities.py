@@ -13,7 +13,6 @@ class ImportStatement(DataPoint):
     end_point: tuple
     source_code: str
     file_path: Optional[str] = None
-    metadata: dict = {"index_fields": ["name", "source_code"]}
 
 
 class FunctionDefinition(DataPoint):
@@ -22,7 +21,7 @@ class FunctionDefinition(DataPoint):
     end_point: tuple
     source_code: str
     file_path: Optional[str] = None
-    metadata: dict = {"index_fields": ["name", "source_code"]}
+    metadata: dict = {"index_fields": ["source_code"]}
 
 
 class ClassDefinition(DataPoint):
@@ -31,7 +30,7 @@ class ClassDefinition(DataPoint):
     end_point: tuple
     source_code: str
     file_path: Optional[str] = None
-    metadata: dict = {"index_fields": ["name", "source_code"]}
+    metadata: dict = {"index_fields": ["source_code"]}
 
 
 class CodeFile(DataPoint):
@@ -42,7 +41,7 @@ class CodeFile(DataPoint):
     depends_on: Optional[List["ImportStatement"]] = []
     provides_function_definition: Optional[List["FunctionDefinition"]] = []
     provides_class_definition: Optional[List["ClassDefinition"]] = []
-    metadata: dict = {"index_fields": ["source_code"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class CodePart(DataPoint):

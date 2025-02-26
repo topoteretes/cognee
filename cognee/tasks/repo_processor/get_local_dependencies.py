@@ -90,7 +90,7 @@ async def get_local_script_dependencies(
             id=uuid5(NAMESPACE_OID, script_path),
             name=file_path_relative_to_repo,
             source_code=source_code,
-            file_path=file_path_relative_to_repo,
+            file_path=script_path,
         )
         return code_file_node
 
@@ -98,11 +98,11 @@ async def get_local_script_dependencies(
         id=uuid5(NAMESPACE_OID, script_path),
         name=file_path_relative_to_repo,
         source_code=None,
-        file_path=file_path_relative_to_repo,
+        file_path=script_path,
     )
 
-    async for part in extract_code_parts(source_code_tree.root_node):
-        part.file_path = file_path_relative_to_repo
+    async for part in extract_code_parts(source_code_tree.root_node, script_path=script_path):
+        part.file_path = script_path
 
         if isinstance(part, FunctionDefinition):
             code_file_node.provides_function_definition.append(part)
@@ -123,7 +123,7 @@ def find_node(nodes: list[Node], condition: callable) -> Node:
 
 
 async def extract_code_parts(
-    tree_root: Node, existing_nodes: list[DataPoint] = {}
+    tree_root: Node, script_path: str, existing_nodes: list[DataPoint] = {}
 ) -> AsyncGenerator[DataPoint, None]:
     for child_node in tree_root.children:
         if child_node.type == "import_statement" or child_node.type == "import_from_statement":
@@ -148,6 +148,7 @@ async def extract_code_parts(
                     module=module_name,
                     start_point=child_node.start_point,
                     end_point=child_node.end_point,
+                    file_path=script_path,
                     source_code=child_node.text,
                 )
                 existing_nodes["import " + function_name] = import_statement_node
@@ -161,6 +162,7 @@ async def extract_code_parts(
                     module=module_name,
                     start_point=child_node.start_point,
                     end_point=child_node.end_point,
+                    file_path=script_path,
                     source_code=child_node.text,
                 )
                 existing_nodes[module_name] = import_statement_node
@@ -176,6 +178,7 @@ async def extract_code_parts(
                     name=function_node_name,
                     start_point=child_node.start_point,
                     end_point=child_node.end_point,
+                    file_path=script_path,
                     source_code=child_node.text,
                 )
                 existing_nodes[function_node_name] = function_definition_node
@@ -191,6 +194,7 @@ async def extract_code_parts(
                     name=class_name_node_name,
                     start_point=child_node.start_point,
                     end_point=child_node.end_point,
+                    file_path=script_path,
                     source_code=child_node.text,
                 )
                 existing_nodes[class_name_node_name] = class_definition_node

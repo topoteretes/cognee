@@ -2,6 +2,8 @@ import asyncio
 import logging
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.api.v1.search.search_v2 import search
+from cognee.api.v1.search import SearchType
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines import run_tasks
@@ -84,9 +86,17 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 if __name__ == "__main__":
 
     async def main():
-        async for data_points in run_code_graph_pipeline("/Users/borisarzentar/Projects/graphrag"):
+        async for data_points in run_code_graph_pipeline(
+            "/Users/laszlohajdu/Documents/GitHub/cognee-dreamify"
+        ):
             print(data_points)
 
-        await render_graph()
+        search_results = await search(
+            query_type=SearchType.CODE,
+            query_text=""" Unfortunately the data_loader.py doesn't work, could you help me fix it""",
+        )
+
+        for file in search_results:
+            print(file.filename)
 
     asyncio.run(main())
