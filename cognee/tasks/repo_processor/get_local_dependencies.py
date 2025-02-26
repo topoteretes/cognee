@@ -142,7 +142,7 @@ async def extract_code_parts(
             if " as " in module_name:
                 module_name = module_name.split(" as ")[0]
 
-            if function_name and function_name not in existing_nodes:
+            if function_name and "import " + function_name not in existing_nodes:
                 import_statement_node = ImportStatement(
                     name=function_name,
                     module=module_name,
@@ -150,10 +150,10 @@ async def extract_code_parts(
                     end_point=child_node.end_point,
                     source_code=child_node.text,
                 )
-                existing_nodes[function_name] = import_statement_node
+                existing_nodes["import " + function_name] = import_statement_node
 
             if function_name:
-                yield existing_nodes[function_name]
+                yield existing_nodes["import " + function_name]
 
             if module_name not in existing_nodes:
                 import_statement_node = ImportStatement(

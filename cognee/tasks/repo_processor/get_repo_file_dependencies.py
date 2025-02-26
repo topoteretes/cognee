@@ -74,7 +74,7 @@ async def get_repo_file_dependencies(
         # with ProcessPoolExecutor(max_workers=12) as executor:
         tasks = [
             get_local_script_dependencies(repo_path, file_path, detailed_extraction)
-            for file_path in source_code_files[start_range:end_range]
+            for file_path in source_code_files[start_range : end_range + 1]
         ]
 
         results: list[CodeFile] = await asyncio.gather(*tasks)
