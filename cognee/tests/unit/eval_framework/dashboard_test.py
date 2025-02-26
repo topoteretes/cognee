@@ -3,7 +3,8 @@ from unittest.mock import patch
 import json
 import os
 import tempfile
-from evals.eval_framework.metrics_dashboard import generate_metrics_dashboard
+from evals.eval_framework.metrics_dashboard import generate_metrics_dashboard, bootstrap_ci
+import numpy as np
 
 
 class TestGenerateMetricsDashboard(unittest.TestCase):
@@ -76,3 +77,28 @@ class TestGenerateMetricsDashboard(unittest.TestCase):
                 file_content,
                 "The output file does not contain the expected Plotly chart HTML.",
             )
+
+
+class TestBootstrapCI(unittest.TestCase):
+    def test_bootstrap_ci_basic(self):
+        scores = [1, 2, 3, 4, 5]
+        mean, lower, upper = bootstrap_ci(scores, num_samples=1000, confidence_level=0.95)
+
+        self.assertAlmostEqual(mean, np.mean(scores), places=2)
+        self.assertLessEqual(lower, mean)
+        self.assertGreaterEqual(upper, mean)
+
+    def test_bootstrap_ci_single_value(self):
+        scores = [3, 3, 3, 3, 3]
+        mean, lower, upper = bootstrap_ci(scores, num_samples=1000, confidence_level=0.95)
+
+        self.assertEqual(mean, 3)
+        self.assertEqual(lower, 3)
+        self.assertEqual(upper, 3)
+
+    def test_bootstrap_ci_empty_list(self):
+        mean, lower, upper = bootstrap_ci([])
+
+        self.assertTrue(np.isnan(mean))
+        self.assertTrue(np.isnan(lower))
+        self.assertTrue(np.isnan(upper))
