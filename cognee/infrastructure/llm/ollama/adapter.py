@@ -52,6 +52,25 @@ class OllamaAPIAdapter(LLMInterface):
 
         return response  # Already converted into `response_model`
 
+    def create_transcript(self, input_file: str) -> str:
+        """Generate an audio transcript from a user query."""
+
+        if not os.path.isfile(input_file):
+            raise FileNotFoundError(f"The file {input_file} does not exist.")
+
+        with open(input_file, "rb") as audio_file:
+            transcription = self.aclient.audio.transcriptions.create(
+                model="whisper-1",  # ✅ Ensure the correct model for transcription
+                file=audio_file,
+                language="en",
+            )
+
+        # ✅ Ensure the response contains a valid transcript
+        if not hasattr(transcription, "text"):
+            raise ValueError("Transcription failed. No text returned.")
+
+        return transcription.text
+
     def transcribe_image(self, input_file: str) -> str:
         """Transcribe content from an image using base64 encoding."""
 
