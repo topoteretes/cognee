@@ -110,5 +110,5 @@ jobs:
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
           EMBEDDING_ENDPOINT: "http://localhost:11434/v1/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
-          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
+#          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: poetry run python ./examples/python/simple_example.py
