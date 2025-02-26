@@ -1,6 +1,6 @@
 import os
 import importlib
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from uuid import NAMESPACE_OID, uuid5
 import tree_sitter_python as tspython
 from tree_sitter import Language, Node, Parser, Tree
@@ -59,7 +59,7 @@ def resolve_module_path(module_name):
 
 def find_function_location(
     module_path: str, function_name: str, parser: FileParser
-) -> tuple[str, str]:
+) -> Optional[tuple[str, str]]:
     """Find the function definition in the module."""
     if not module_path or not os.path.exists(module_path):
         return None

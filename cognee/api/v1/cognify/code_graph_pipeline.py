@@ -86,14 +86,14 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 if __name__ == "__main__":
 
     async def main():
-        async for data_points in run_code_graph_pipeline(
-            "/Users/laszlohajdu/Documents/GitHub/cognee-dreamify"
-        ):
+        async for data_points in run_code_graph_pipeline("YOUR_REPO_PATH"):
             print(data_points)
+
+        await render_graph()
 
         search_results = await search(
             query_type=SearchType.CODE,
-            query_text=""" Unfortunately the data_loader.py doesn't work, could you help me fix it""",
+            query_text="How is Relationship weight calculated?",
         )
 
         for file in search_results:
