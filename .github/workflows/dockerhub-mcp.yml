@@ -1,4 +1,4 @@
-name: build | Build and Push Docker Image to dockerhub
+name: build | Build and Push Cognee MCP Docker Image to dockerhub
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: cognee/cognee
+          images: cognee/cognee-mcp
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
@@ -41,8 +41,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=cognee/cognee:buildcache
-          cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
+          cache-from: type=registry,ref=cognee/cognee-mcp:buildcache
+          cache-to: type=registry,ref=cognee/cognee-mcp:buildcache,mode=max
 
       - name: Image digest
         run: echo ${{ steps.build.outputs.digest }}

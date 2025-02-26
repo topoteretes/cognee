@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
-    "cognee[codegraph]",
+    "cognee[codegraph,postgres,neo4j]",
     "mcp==1.2.1",
 ]
 
@@ -20,6 +20,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "debugpy>=1.8.12",
+]
 
 [project.scripts]
 cognee = "src:main"
