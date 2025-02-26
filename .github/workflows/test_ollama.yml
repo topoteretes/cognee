@@ -35,6 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install --no-interaction --all-extras
+          poetry add torch
 
 #      - name: Install ollama
 #        run: curl -fsSL https://ollama.com/install.sh | sh

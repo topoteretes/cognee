@@ -1,10 +1,9 @@
-from typing import Type
+from typing import Type, Optional
 from pydantic import BaseModel
 import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
-from openai import OpenAI
+from openai import AsyncOpenAI  # Use AsyncOpenAI for async compatibility
 import base64
-from pathlib import Path
 import os
 
 
@@ -20,7 +19,7 @@ class OllamaAPIAdapter(LLMInterface):
         model: str,
         name: str,
         max_tokens: int,
-        api_version: str = None,
+        api_version: Optional[str] = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -29,14 +28,19 @@ class OllamaAPIAdapter(LLMInterface):
         self.max_tokens = max_tokens
         self.api_version = api_version
 
+        # Use AsyncOpenAI for proper async handling
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
+            AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
         )
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
         """Generate a structured output from the LLM using the provided text and system prompt."""
+
+        # Ensure the function being awaited is actually async
+        if not callable(getattr(self.aclient.chat.completions, "create", None)):
+            raise TypeError("self.aclient.chat.completions.create is not callable!")
 
         response = await self.aclient.chat.completions.create(
             model=self.model,
@@ -45,33 +49,40 @@ class OllamaAPIAdapter(LLMInterface):
                 {"role": "user", "content": text_input},
             ],
             max_tokens=self.max_tokens,
-            response_model=response_model,
         )
 
-        return response
+        # Ensure response is valid before passing to Pydantic model
+        if not isinstance(response, dict):
+            raise ValueError(f"Unexpected response format: {response}")
 
-    def create_transcript(self, input: str):
+        return response_model(**response)
+
+    def create_transcript(self, input_file: str) -> str:
         """Generate an audio transcript from a user query."""
 
-        if not os.path.isfile(input):
-            raise FileNotFoundError(f"The file {input} does not exist.")
+        if not os.path.isfile(input_file):
+            raise FileNotFoundError(f"The file {input_file} does not exist.")
 
-        with open(input, "rb") as audio_file:
+        with open(input_file, "rb") as audio_file:
             transcription = self.aclient.audio.transcriptions.create(
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
                 language="en",
             )
 
+        # Ensure the response contains a valid transcript
+        if not hasattr(transcription, "text"):
+            raise ValueError("Transcription failed. No text returned.")
+
         return transcription.text
 
-    def transcribe_image(self, input: str) -> str:
+    def transcribe_image(self, input_file: str) -> str:
         """Transcribe content from an image using base64 encoding."""
 
-        if not os.path.isfile(input):
-            raise FileNotFoundError(f"The file {input} does not exist.")
+        if not os.path.isfile(input_file):
+            raise FileNotFoundError(f"The file {input_file} does not exist.")
 
-        with open(input, "rb") as image_file:
+        with open(input_file, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = self.aclient.chat.completions.create(
@@ -90,5 +101,9 @@ class OllamaAPIAdapter(LLMInterface):
             ],
             max_tokens=300,
         )
+
+        # Ensure response is valid before accessing .choices[0].message.content
+        if not hasattr(response, "choices") or not response.choices:
+            raise ValueError("Image transcription failed. No response received.")
 
         return response.choices[0].message.content
