@@ -46,17 +46,11 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction -E docs -E evals
+        run: poetry install --no-interaction
 
       - name: Add telemetry identifier
         run: |
           echo "test-machine" > .anon_id
-
-      - name: Run unit tests
-        run: poetry run pytest cognee/tests/unit/
-
-      - name: Run integration tests
-        run: poetry run pytest cognee/tests/integration/
 
       - name: Run default basic pipeline
         env:
