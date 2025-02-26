@@ -20,7 +20,12 @@ async def get_source_code_files(repo_path):
         os.path.join(root, file)
         for root, _, files in os.walk(repo_path)
         for file in files
-        if file.endswith(".py")
+        if (
+            file.endswith(".py")
+            and not file.startswith("test_")
+            and not file.endswith("_test")
+            and ".venv" not in file
+        )
     )
 
     source_code_files = set()
