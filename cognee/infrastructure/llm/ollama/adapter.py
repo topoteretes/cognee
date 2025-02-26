@@ -38,10 +38,11 @@ class OllamaAPIAdapter(LLMInterface):
     ) -> BaseModel:
         """Generate a structured output from the LLM using the provided text and system prompt."""
 
-        # Ensure the function being awaited is actually async
+        # Ensure the API method is async
         if not callable(getattr(self.aclient.chat.completions, "create", None)):
             raise TypeError("self.aclient.chat.completions.create is not callable!")
 
+        # Call the API with the expected parameters
         response = await self.aclient.chat.completions.create(
             model=self.model,
             messages=[
@@ -51,11 +52,12 @@ class OllamaAPIAdapter(LLMInterface):
             max_tokens=self.max_tokens,
         )
 
-        # Ensure response is valid before passing to Pydantic model
+        # Ensure the response is valid before passing to Pydantic model
         if not isinstance(response, dict):
             raise ValueError(f"Unexpected response format: {response}")
 
-        return response_model(**response)
+        # Use instructor's parse_response method instead of passing response_model in API call
+        return instructor.parse_response(response, response_model)
 
     def create_transcript(self, input_file: str) -> str:
         """Generate an audio transcript from a user query."""
