@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 PY_LANGUAGE = Language(tspython.language())
 source_code_parser = Parser(PY_LANGUAGE)
 
-class FileParser():
+
+class FileParser:
     def __init__(self):
         self.parsed_files = {}
 
@@ -34,6 +35,7 @@ class FileParser():
 
         return self.parsed_files[file_path]
 
+
 async def get_source_code(file_path: str):
     try:
         async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
@@ -42,6 +44,7 @@ async def get_source_code(file_path: str):
     except Exception as error:
         logger.error(f"Error reading file {file_path}: {str(error)}")
         return None
+
 
 def resolve_module_path(module_name):
     """Find the file path of a module."""
@@ -53,7 +56,10 @@ def resolve_module_path(module_name):
         return None
     return None
 
-def find_function_location(module_path: str, function_name: str, parser: FileParser) -> tuple[str, str]:
+
+def find_function_location(
+    module_path: str, function_name: str, parser: FileParser
+) -> tuple[str, str]:
     """Find the function definition in the module."""
     if not module_path or not os.path.exists(module_path):
         return None
@@ -116,7 +122,9 @@ def find_node(nodes: list[Node], condition: callable) -> Node:
     return None
 
 
-async def extract_code_parts(tree_root: Node, existing_nodes: list[DataPoint] = {}) -> AsyncGenerator[DataPoint, None]:
+async def extract_code_parts(
+    tree_root: Node, existing_nodes: list[DataPoint] = {}
+) -> AsyncGenerator[DataPoint, None]:
     for child_node in tree_root.children:
         if child_node.type == "import_statement" or child_node.type == "import_from_statement":
             parts = child_node.text.decode("utf-8").split()
@@ -160,9 +168,7 @@ async def extract_code_parts(tree_root: Node, existing_nodes: list[DataPoint] = 
             yield existing_nodes[module_name]
 
         if child_node.type == "function_definition":
-            function_node = find_node(
-                child_node.children, lambda node: node.type == "identifier"
-            )
+            function_node = find_node(child_node.children, lambda node: node.type == "identifier")
             function_node_name = function_node.text
 
             if function_node_name not in existing_nodes:
