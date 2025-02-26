@@ -1,7 +1,10 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from evals.eval_framework.eval_config import EvalConfig
-from evals.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
+import sys
+
+with patch.dict(sys.modules, {"deepeval": MagicMock()}):
+    from evals.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
 
 
 @pytest.fixture
