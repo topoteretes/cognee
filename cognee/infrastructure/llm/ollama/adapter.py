@@ -2,7 +2,7 @@ from typing import Type, Optional
 from pydantic import BaseModel
 import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
-from openai import AsyncOpenAI  # Use AsyncOpenAI for async compatibility
+from openai import AsyncOpenAI
 import base64
 import os
 
@@ -28,55 +28,29 @@ class OllamaAPIAdapter(LLMInterface):
         self.max_tokens = max_tokens
         self.api_version = api_version
 
-        # Use AsyncOpenAI for proper async handling
-        self.aclient = instructor.from_openai(
-            AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
-        )
+        # Properly initialize AsyncOpenAI
+        self.client = AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key)
+
+        # Apply instructor patch (this enables structured output support)
+        instructor.patch(self.client)
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
         """Generate a structured output from the LLM using the provided text and system prompt."""
 
-        # Ensure the API method is async
-        if not callable(getattr(self.aclient.chat.completions, "create", None)):
-            raise TypeError("self.aclient.chat.completions.create is not callable!")
-
-        # Call the API with the expected parameters
-        response = await self.aclient.chat.completions.create(
+        # Directly pass `response_model` inside `.create()`
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text_input},
             ],
             max_tokens=self.max_tokens,
+            response_model=response_model,  # This works after `instructor.patch(self.client)`
         )
 
-        # Ensure the response is valid before passing to Pydantic model
-        if not isinstance(response, dict):
-            raise ValueError(f"Unexpected response format: {response}")
-
-        # Use instructor's parse_response method instead of passing response_model in API call
-        return instructor.parse_response(response, response_model)
-
-    def create_transcript(self, input_file: str) -> str:
-        """Generate an audio transcript from a user query."""
-
-        if not os.path.isfile(input_file):
-            raise FileNotFoundError(f"The file {input_file} does not exist.")
-
-        with open(input_file, "rb") as audio_file:
-            transcription = self.aclient.audio.transcriptions.create(
-                model="whisper-1",  # Ensure the correct model for transcription
-                file=audio_file,
-                language="en",
-            )
-
-        # Ensure the response contains a valid transcript
-        if not hasattr(transcription, "text"):
-            raise ValueError("Transcription failed. No text returned.")
-
-        return transcription.text
+        return response  # Already converted into `response_model`
 
     def transcribe_image(self, input_file: str) -> str:
         """Transcribe content from an image using base64 encoding."""
