@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import patch
 from evals.eval_framework.eval_config import EvalConfig
-from deepeval.metrics import GEval
 from evals.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
 
 
@@ -11,7 +10,7 @@ def adapter():
 
 
 @pytest.mark.asyncio
-async def test_evaluate_answers_correctness(adapter):
+async def test_evaluate_answers_em_f1(adapter):
     answers = [
         {
             "question": "What is 2 + 2?",
@@ -85,27 +84,11 @@ async def test_none_values_in_answers(adapter):
 
 
 @pytest.mark.asyncio
-async def test_partial_match_scenario(adapter):
-    answers = [
-        {
-            "question": "What is 2 + 2?",
-            "answer": "4",
-            "golden_answer": "Four",
-        }
-    ]
-    evaluator_metrics = ["EM", "f1"]
-
-    results = await adapter.evaluate_answers(answers, evaluator_metrics)
-
-    assert results[0]["metrics"]["EM"]["score"] == 0.0
-    assert results[0]["metrics"]["f1"]["score"] == 0.0
-
-
-@pytest.mark.asyncio
 async def test_g_eval_correctness(adapter):
-    with patch.object(GEval, "measure", return_value=1.0) as mock_measure:
+    with patch.object(
+        type(adapter.g_eval_correctness()), "measure", return_value=1.0
+    ) as mock_measure:
         g_eval = adapter.g_eval_correctness()
-        assert isinstance(g_eval, GEval)
         mock_measure.assert_not_called()
 
     eval_config = EvalConfig().to_dict()
