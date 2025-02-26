@@ -29,6 +29,9 @@ from cognee.api.v1.prune.prune import prune_data, prune_system
 from cognee.api.v1.add.add_v2 import add
 from cognee.shared.data_models import KnowledgeGraph as KnowledgeGraph
 from cognee.tasks.storage import add_data_points as add_data_points
+from cognee.api.v1.visualize import visualize_graph
+
+
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
