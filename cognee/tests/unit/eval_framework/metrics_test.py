@@ -1,7 +1,14 @@
 import pytest
 from typing import Optional
-from evals.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
-from evals.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
+import sys
+from unittest.mock import patch, MagicMock
+
+with patch.dict(
+    sys.modules,
+    {"deepeval": MagicMock(), "deepeval.test_case": MagicMock()},
+):
+    from evals.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
+    from evals.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 
 
 class MockTestCase:
