@@ -44,10 +44,14 @@ jobs:
 #          ollama pull llama3.2 &
 #          ollama pull avr/sfr-embedding-mistral:latest
 
-      - name: Start Ollama in a Docker container
+      - name: Start Ollama container
         run: |
-          docker run -d --name ollama -p 11434:11434 ollama/ollama serve --openai
-          sleep 5  # Give some time for Ollama to start
+          docker run -d --name ollama -p 11434:11434 ollama/ollama
+          sleep 5
+          docker exec -d ollama bash -c "ollama serve --openai"
+
+      - name: Check Ollama logs
+        run: docker logs ollama
 
       - name: Wait for Ollama to be ready
         run: |
