@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
     get_relational_config,
 )
+from evals.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 
 
 async def create_and_insert_questions_table(questions_payload):
@@ -30,9 +31,15 @@ async def create_and_insert_questions_table(questions_payload):
 async def run_corpus_builder(params: dict) -> None:
     if params.get("building_corpus_from_scratch"):
         logging.info("Corpus Builder started...")
+
+        try:
+            task_getter = TaskGetters(params.get("task_getter_type", "Default")).getter_func
+        except KeyError:
+            raise ValueError(f"Invalid task getter type: {params.get('task_getter_type')}")
+
         corpus_builder = CorpusBuilderExecutor(
             benchmark=params["benchmark"],
-            task_getter_type=params.get("task_getter_type", "Default"),
+            task_getter=task_getter,
         )
         questions = await corpus_builder.build_corpus(
             limit=params.get("number_of_samples_in_corpus")
