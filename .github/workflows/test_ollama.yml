@@ -89,6 +89,7 @@ jobs:
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "ollama"
+          LLM_API_KEY: "ollama"
           LLM_ENDPOINT: "http://ollama:11434/v1/chat/completions"
           LLM_MODEL: "llama3"
           EMBEDDING_PROVIDER: "ollama"
