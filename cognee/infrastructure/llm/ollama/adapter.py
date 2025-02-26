@@ -5,6 +5,7 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from openai import AsyncOpenAI
 import base64
 import os
+import json
 
 
 class OllamaAPIAdapter(LLMInterface):
@@ -28,18 +29,14 @@ class OllamaAPIAdapter(LLMInterface):
         self.max_tokens = max_tokens
         self.api_version = api_version
 
-        # Properly initialize AsyncOpenAI
+        # ✅ Properly initialize AsyncOpenAI and patch with instructor
         self.client = AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key)
-
-        # Apply instructor patch (this enables structured output support)
-        instructor.patch(self.client)
+        instructor.patch(self.client)  # ✅ Patch OpenAI with instructor for structured output
 
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
         """Generate a structured output from the LLM using the provided text and system prompt."""
-
-        # Directly pass `response_model` inside `.create()`
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -47,10 +44,10 @@ class OllamaAPIAdapter(LLMInterface):
                 {"role": "user", "content": text_input},
             ],
             max_tokens=self.max_tokens,
-            response_model=response_model,  # This works after `instructor.patch(self.client)`
+            response_model=response_model,
         )
 
-        return response  # Already converted into `response_model`
+        return response_model(response)
 
     def create_transcript(self, input_file: str) -> str:
         """Generate an audio transcript from a user query."""
@@ -60,12 +57,12 @@ class OllamaAPIAdapter(LLMInterface):
 
         with open(input_file, "rb") as audio_file:
             transcription = self.aclient.audio.transcriptions.create(
-                model="whisper-1",  # ✅ Ensure the correct model for transcription
+                model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
                 language="en",
             )
 
-        # ✅ Ensure the response contains a valid transcript
+        # Ensure the response contains a valid transcript
         if not hasattr(transcription, "text"):
             raise ValueError("Transcription failed. No text returned.")
 
