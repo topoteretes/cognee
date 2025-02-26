@@ -92,7 +92,7 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 if name == "cognify":
-                    cognify(
+                    await cognify(
                         text=arguments["text"],
                         graph_model_file=arguments.get("graph_model_file", None),
                         graph_model_name=arguments.get("graph_model_name", None),
