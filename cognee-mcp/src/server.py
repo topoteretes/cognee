@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import cognee
@@ -251,6 +252,4 @@ def load_class(model_file, model_name):
 
 if __name__ == "__main__":
     # Initialize and run the server
-    import asyncio
-
     asyncio.run(main())
