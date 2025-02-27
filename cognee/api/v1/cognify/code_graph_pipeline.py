@@ -2,6 +2,8 @@ import asyncio
 import logging
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.api.v1.search.search_v2 import search
+from cognee.api.v1.search import SearchType
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines import run_tasks
@@ -42,7 +44,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 
     cognee_config = get_cognify_config()
     user = await get_default_user()
-    detailed_extraction = False
+    detailed_extraction = True
 
     tasks = [
         Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
@@ -50,7 +52,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
         # Task(expand_dependency_graph, task_config={"batch_size": 50}),
         # Task(get_source_code_chunks, task_config={"batch_size": 50}),
         # Task(summarize_code, task_config={"batch_size": 50}),
-        Task(add_data_points, task_config={"batch_size": 100 if detailed_extraction else 500}),
+        Task(add_data_points, task_config={"batch_size": 500}),
     ]
 
     if include_docs:
@@ -84,9 +86,17 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 if __name__ == "__main__":
 
     async def main():
-        async for data_points in run_code_graph_pipeline("REPO_PATH"):
+        async for data_points in run_code_graph_pipeline("YOUR_REPO_PATH"):
             print(data_points)
 
         await render_graph()
+
+        search_results = await search(
+            query_type=SearchType.CODE,
+            query_text="How is Relationship weight calculated?",
+        )
+
+        for file in search_results:
+            print(file.filename)
 
     asyncio.run(main())
