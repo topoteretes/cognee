@@ -11,5 +11,3 @@ from .get_data import get_data
 # Delete
 from .delete_dataset import delete_dataset
 from .delete_data import delete_data
-
-from .store_descriptive_metrics import store_descriptive_metrics
