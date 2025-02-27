@@ -6,9 +6,10 @@ from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 
-retriever_options: Dict[str, Callable[[str], Awaitable[List[str]]]] = {
+retriever_options: Dict[str, BaseRetriever] = {
     "cognee_graph_completion": GraphCompletionRetriever,
     "cognee_completion": CompletionRetriever,
     "cognee_summaries": SummariesRetriever,
@@ -22,7 +23,7 @@ class AnswerGeneratorExecutor:
     async def question_answering_non_parallel(
         self,
         questions: List[Dict[str, str]],
-        retriever_cls: Callable[[str], Awaitable[List[str]]],
+        retriever_cls: BaseRetriever,
     ) -> List[Dict[str, str]]:
         retriever = retriever_cls()
         answers = []
