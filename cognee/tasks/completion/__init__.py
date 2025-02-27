@@ -1,6 +1,6 @@
-from cognee.modules.retrieval.base_retriever import (
-    CompletionRetriever,
-    GraphCompletionRetriever,
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.tasks.completion.exceptions import NoRelevantDataFound

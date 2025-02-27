@@ -1,4 +1,4 @@
-from cognee.modules.retrieval.base_retriever import SummariesRetriever
+from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from .summarize_code import summarize_code
 from .summarize_text import summarize_text
 
