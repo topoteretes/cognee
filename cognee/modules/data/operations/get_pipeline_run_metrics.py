@@ -1,10 +1,8 @@
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.relational import get_relational_engine
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from cognee.modules.data.models import Data
 from cognee.modules.data.models import GraphMetrics
-import uuid
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.pipelines.models import PipelineRun
 
@@ -24,7 +22,7 @@ async def fetch_token_count(db_engine) -> int:
     return token_count_sum
 
 
-async def store_descriptive_metrics(pipeline_runs: list[PipelineRun], include_optional: bool):
+async def get_pipeline_run_metrics(pipeline_runs: list[PipelineRun], include_optional: bool):
     db_engine = get_relational_engine()
     graph_engine = await get_graph_engine()
 
