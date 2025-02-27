@@ -41,7 +41,10 @@ async def execute_evaluation(params: dict) -> None:
         raise ValueError(f"Error decoding JSON from {params['answers_path']}: {e}")
 
     logging.info(f"Loaded {len(answers)} answers from {params['answers_path']}")
-    evaluator = EvaluationExecutor(evaluator_engine=params["evaluation_engine"])
+    evaluator = EvaluationExecutor(
+        evaluator_engine=params["evaluation_engine"],
+        evaluate_contexts=params["evaluating_contexts"],
+    )
     metrics = await evaluator.execute(
         answers=answers, evaluator_metrics=params["evaluation_metrics"]
     )

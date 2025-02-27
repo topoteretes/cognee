@@ -1,22 +1,20 @@
 import cognee
 from typing import List, Dict, Callable, Awaitable
-from cognee.api.v1.search import SearchType
+from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+from cognee.modules.retrieval.insights_retriever import InsightsRetriever
+from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 
-question_answering_engine_options: Dict[str, Callable[[str], Awaitable[List[str]]]] = {
-    "cognee_graph_completion": lambda query: cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text=query
-    ),
-    "cognee_completion": lambda query: cognee.search(
-        query_type=SearchType.COMPLETION, query_text=query
-    ),
-    "cognee_summaries": lambda query: cognee.search(
-        query_type=SearchType.SUMMARIES, query_text=query
-    ),
-    "cognee_insights": lambda query: cognee.search(
-        query_type=SearchType.INSIGHTS, query_text=query
-    ),
-    "cognee_chunks": lambda query: cognee.search(query_type=SearchType.CHUNKS, query_text=query),
-    "cognee_code": lambda query: cognee.search(query_type=SearchType.CODE, query_text=query),
+
+retriever_options: Dict[str, Callable[[str], Awaitable[List[str]]]] = {
+    "cognee_graph_completion": GraphCompletionRetriever,
+    "cognee_completion": CompletionRetriever,
+    "cognee_summaries": SummariesRetriever,
+    "cognee_insights": InsightsRetriever,
+    "cognee_chunks": ChunksRetriever,
+    "cognee_code": CodeRetriever,
 }
 
 
@@ -24,20 +22,23 @@ class AnswerGeneratorExecutor:
     async def question_answering_non_parallel(
         self,
         questions: List[Dict[str, str]],
-        answer_resolver: Callable[[str], Awaitable[List[str]]],
+        retriever_cls: Callable[[str], Awaitable[List[str]]],
     ) -> List[Dict[str, str]]:
+        retriever = retriever_cls()
         answers = []
         for instance in questions:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            search_results = await answer_resolver(query_text)
+            retrieval_context = await retriever.get_context(query_text)
+            search_results = await retriever.get_completion(query_text, retrieval_context)
 
             answers.append(
                 {
                     "question": query_text,
                     "answer": search_results[0],
                     "golden_answer": correct_answer,
+                    "retrieval_context": retrieval_context,
                 }
             )
 

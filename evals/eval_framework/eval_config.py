@@ -18,6 +18,7 @@ class EvalConfig(BaseSettings):
 
     # Evaluation params
     evaluating_answers: bool = True
+    evaluating_contexts: bool = True
     evaluation_engine: str = "DeepEval"
     evaluation_metrics: List[str] = ["correctness", "EM", "f1"]
     deepeval_model: str = "gpt-4o-mini"
@@ -45,6 +46,7 @@ class EvalConfig(BaseSettings):
             "answering_questions": self.answering_questions,
             "qa_engine": self.qa_engine,
             "evaluating_answers": self.evaluating_answers,
+            "evaluating_contexts": self.evaluating_contexts,
             "evaluation_engine": self.evaluation_engine,
             "evaluation_metrics": self.evaluation_metrics,
             "calculate_metrics": self.calculate_metrics,
