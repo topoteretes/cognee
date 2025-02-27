@@ -2,7 +2,7 @@ import logging
 import json
 from evals.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
-    question_answering_engine_options,
+    retriever_options,
 )
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
@@ -45,7 +45,7 @@ async def run_question_answering(params: dict) -> None:
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
-            answer_resolver=question_answering_engine_options[params["qa_engine"]],
+            retriever_cls=retriever_options[params["qa_engine"]],
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
