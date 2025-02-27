@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Callable, Awaitable
+from typing import Any, Optional, Callable
 
 
 class BaseRetriever(ABC):
@@ -16,6 +16,6 @@ class BaseRetriever(ABC):
         pass
 
     @classmethod
-    def as_search(cls) -> Callable[[str], Awaitable[Any]]:
+    def as_search(cls) -> Callable:
         """Creates a search function from the retriever class."""
-        return lambda query: await cls().get_completion(query)
+        return lambda query: cls().get_completion(query)
