@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from cognee.infrastructure.engine import ExtendableDataPoint
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
@@ -35,7 +35,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_triplets(self, query: str) -> list:
         """Retrieves relevant graph triplets."""
-        subclasses = get_all_subclasses(ExtendableDataPoint)
+        subclasses = get_all_subclasses(DataPoint)
         vector_index_collections = []
 
         for subclass in subclasses:
