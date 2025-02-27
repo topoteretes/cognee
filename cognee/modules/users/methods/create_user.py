@@ -67,14 +67,14 @@ async def create_user(
                         )
                     )
 
+                    # Explicitly refresh the user and load the roles relationship
+                    await session.commit()
+                    await session.refresh(user, ["roles"])
+
                     # Associate any roles that were provided
                     if roles:
                         user.roles.extend(roles)
-
-                    await session.commit()
-                    await session.refresh(user)
-
-                    if auto_login:
+                        await session.commit()
                         await session.refresh(user)
 
                     return user
