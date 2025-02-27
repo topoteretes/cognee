@@ -13,7 +13,7 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_config,
 )
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.eval_framework.corpus_builder.task_getters import TaskGetters
+from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 
 
 async def create_and_insert_questions_table(questions_payload):
