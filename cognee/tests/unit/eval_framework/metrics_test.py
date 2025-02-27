@@ -7,8 +7,8 @@ with patch.dict(
     sys.modules,
     {"deepeval": MagicMock(), "deepeval.test_case": MagicMock()},
 ):
-    from evals.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
-    from evals.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
+    from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
+    from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 
 
 class MockTestCase:
