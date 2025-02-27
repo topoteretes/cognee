@@ -12,7 +12,7 @@ from cognee.tasks.temporal_awareness.index_graphiti_objects import (
     index_and_transform_graphiti_nodes_and_edges,
 )
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
@@ -49,9 +49,12 @@ async def main():
         collections=["graphitinode_content", "graphitinode_name", "graphitinode_summary"],
     )
 
+    retriever = GraphCompletionRetriever()
+    context = await retriever.resolve_edges_to_text(triplets)
+
     args = {
         "question": query,
-        "context": await retrieved_edges_to_string(triplets),
+        "context": context,
     }
 
     user_prompt = render_prompt("graph_context_for_question.txt", args)
