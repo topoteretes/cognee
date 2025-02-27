@@ -18,9 +18,13 @@ class EvalConfig(BaseSettings):
 
     # Evaluation params
     evaluating_answers: bool = True
+    evaluating_contexts: bool = True
     evaluation_engine: str = "DeepEval"
     evaluation_metrics: List[str] = ["correctness", "EM", "f1"]
     deepeval_model: str = "gpt-4o-mini"
+
+    # Metrics params
+    calculate_metrics: bool = True
 
     # Visualization
     dashboard: bool = True
@@ -29,6 +33,7 @@ class EvalConfig(BaseSettings):
     questions_path: str = "questions_output.json"
     answers_path: str = "answers_output.json"
     metrics_path: str = "metrics_output.json"
+    aggregate_metrics_path: str = "aggregate_metrics.json"
     dashboard_path: str = "dashboard.html"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
@@ -41,12 +46,15 @@ class EvalConfig(BaseSettings):
             "answering_questions": self.answering_questions,
             "qa_engine": self.qa_engine,
             "evaluating_answers": self.evaluating_answers,
+            "evaluating_contexts": self.evaluating_contexts,
             "evaluation_engine": self.evaluation_engine,
             "evaluation_metrics": self.evaluation_metrics,
+            "calculate_metrics": self.calculate_metrics,
             "dashboard": self.dashboard,
             "questions_path": self.questions_path,
             "answers_path": self.answers_path,
             "metrics_path": self.metrics_path,
+            "aggregate_metrics_path": self.aggregate_metrics_path,
             "dashboard_path": self.dashboard_path,
             "deepeval_model": self.deepeval_model,
             "task_getter_type": self.task_getter_type,

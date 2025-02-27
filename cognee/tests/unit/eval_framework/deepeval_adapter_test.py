@@ -22,6 +22,7 @@ async def test_evaluate_answers_em_f1(adapter):
             "question": "What is 2 + 2?",
             "answer": "4",
             "golden_answer": "4",
+            "retrieval_context": "2 + 2 = 4",
         }
     ]
 
@@ -77,6 +78,7 @@ async def test_none_values_in_answers(adapter):
             "question": None,
             "answer": None,
             "golden_answer": None,
+            "retrieval_context": None,
         }
     ]
     evaluator_metrics = ["EM", "f1"]
