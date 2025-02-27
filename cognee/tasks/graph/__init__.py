@@ -1,6 +1,6 @@
 from .extract_graph_from_data import extract_graph_from_data
 from .extract_graph_from_code import extract_graph_from_code
-from cognee.modules.retrieval.retrievers import InsightsRetriever
+from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 
 # Instantiate retriever
 insights_retriever = InsightsRetriever()
