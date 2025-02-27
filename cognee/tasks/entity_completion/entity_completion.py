@@ -82,10 +82,10 @@ if __name__ == "__main__":
     # For testing purposes, will be removed by the end of the sprint
     import asyncio
     import logging
-    from cognee.tasks.entity_completion.entity_extractors.dummy_entity_extractor import (
+    from cognee.modules.data.extraction.entity_extractors import (
         DummyEntityExtractor,
     )
-    from cognee.tasks.entity_completion.context_providers.dummy_context_provider import (
+    from cognee.modules.retrieval.context_providers import (
         DummyContextProvider,
     )
 
