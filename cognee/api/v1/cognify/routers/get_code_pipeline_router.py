@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
-from cognee.modules.retrieval import code_graph_retrieval
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.storage.utils import JSONEncoder
 
 
@@ -43,7 +43,8 @@ def get_code_pipeline_router() -> APIRouter:
                 else payload.full_input
             )
 
-            retrieved_files = await code_graph_retrieval(query)
+            retriever = CodeRetriever()
+            retrieved_files = await retriever.get_context(query)
 
             return json.dumps(retrieved_files, cls=JSONEncoder)
         except Exception as error:

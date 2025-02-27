@@ -3,18 +3,20 @@ from typing import Callable
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.modules.retrieval.utils.code_graph_retrieval import code_graph_retrieval
+from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+from cognee.modules.retrieval.insights_retriever import InsightsRetriever
+from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
-from cognee.tasks.chunks import query_chunks
-from cognee.tasks.graph import query_graph_connections
-from cognee.tasks.summarization import query_summaries
-from cognee.tasks.completion import query_completion
-from cognee.tasks.completion import graph_query_completion
-from cognee.tasks.completion import graph_query_summary_completion
 from ..operations import log_query, log_result
 
 
@@ -44,15 +46,14 @@ async def search(
 
 
 async def specific_search(query_type: SearchType, query: str, user: User) -> list:
-    # TODO: update after merging COG-1365, see COG-1403
     search_tasks: dict[SearchType, Callable] = {
-        SearchType.SUMMARIES: query_summaries,
-        SearchType.INSIGHTS: query_graph_connections,
-        SearchType.CHUNKS: query_chunks,
-        SearchType.COMPLETION: query_completion,
-        SearchType.GRAPH_COMPLETION: graph_query_completion,
-        SearchType.GRAPH_SUMMARY_COMPLETION: graph_query_summary_completion,
-        SearchType.CODE: code_graph_retrieval,
+        SearchType.SUMMARIES: SummariesRetriever.as_search(),
+        SearchType.INSIGHTS: InsightsRetriever.as_search(),
+        SearchType.CHUNKS: ChunksRetriever.as_search(),
+        SearchType.COMPLETION: CompletionRetriever.as_search(),
+        SearchType.GRAPH_COMPLETION: GraphCompletionRetriever.as_search(),
+        SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever.as_search(),
+        SearchType.CODE: CodeRetriever.as_search(),
     }
 
     search_task = search_tasks.get(query_type)
