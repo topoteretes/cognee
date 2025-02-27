@@ -3,7 +3,7 @@ import os
 import json
 import random
 from typing import Optional, Any, List, Tuple
-from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
 class HotpotQAAdapter(BaseBenchmarkAdapter):

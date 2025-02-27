@@ -12,6 +12,7 @@ async def search(
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
     user: User = None,
     datasets: Union[list[str], str, None] = None,
+    system_prompt_path="answer_simple_question.txt",
 ) -> list:
     # We use lists from now on for datasets
     if isinstance(datasets, str):
@@ -23,6 +24,8 @@ async def search(
     if user is None:
         raise UserNotFoundError
 
-    filtered_search_results = await search_function(query_text, query_type, datasets, user)
+    filtered_search_results = await search_function(
+        query_text, query_type, datasets, user, system_prompt_path=system_prompt_path
+    )
 
     return filtered_search_results

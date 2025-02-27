@@ -25,11 +25,14 @@ async def search(
     query_type: SearchType,
     datasets: list[str],
     user: User,
+    system_prompt_path="answer_simple_question.txt",
 ):
     query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
-    search_results = await specific_search(query_type, query_text, user)
+    search_results = await specific_search(
+        query_type, query_text, user, system_prompt_path=system_prompt_path
+    )
 
     filtered_search_results = []
 
@@ -45,15 +48,23 @@ async def search(
     return filtered_search_results
 
 
-async def specific_search(query_type: SearchType, query: str, user: User) -> list:
+async def specific_search(
+    query_type: SearchType, query: str, user: User, system_prompt_path="answer_simple_question.txt"
+) -> list:
     search_tasks: dict[SearchType, Callable] = {
-        SearchType.SUMMARIES: SummariesRetriever.as_search(),
-        SearchType.INSIGHTS: InsightsRetriever.as_search(),
-        SearchType.CHUNKS: ChunksRetriever.as_search(),
-        SearchType.COMPLETION: CompletionRetriever.as_search(),
-        SearchType.GRAPH_COMPLETION: GraphCompletionRetriever.as_search(),
-        SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever.as_search(),
-        SearchType.CODE: CodeRetriever.as_search(),
+        SearchType.SUMMARIES: SummariesRetriever().get_completion,
+        SearchType.INSIGHTS: InsightsRetriever().get_completion,
+        SearchType.CHUNKS: ChunksRetriever().get_completion,
+        SearchType.COMPLETION: CompletionRetriever(
+            system_prompt_path=system_prompt_path
+        ).get_completion,
+        SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
+            system_prompt_path=system_prompt_path
+        ).get_completion,
+        SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
+            system_prompt_path=system_prompt_path
+        ).get_completion,
+        SearchType.CODE: CodeRetriever().get_completion,
     }
 
     search_task = search_tasks.get(query_type)
