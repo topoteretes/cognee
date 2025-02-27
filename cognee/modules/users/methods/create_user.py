@@ -13,7 +13,7 @@ from typing import Optional, List
 async def create_user(
     email: str,
     password: str,
-    tenant_name: Optional[str] = None,
+    tenant_name: Optional[str] = "Default",
     role_names: Optional[List[str]] = None,
     is_superuser: bool = False,
     is_active: bool = True,
@@ -26,10 +26,6 @@ async def create_user(
         async with relational_engine.get_async_session() as session:
             async with get_user_db_context(session) as user_db:
                 async with get_user_manager_context(user_db) as user_manager:
-                    # Determine tenant: use provided name or default
-                    if tenant_name is None:
-                        tenant_name = "Default"
-
                     # Check if the tenant already exists
                     result = await session.execute(select(Tenant).where(Tenant.name == tenant_name))
                     tenant = result.scalars().first()
