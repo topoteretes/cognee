@@ -12,9 +12,9 @@ class TwoWikiMultihopAdapter(HotpotQAAdapter):
         "url": "https://huggingface.co/datasets/voidful/2WikiMultihopQA/resolve/main/dev.json",
     }
 
-    def _get_metadata_field_name(self) -> str:
-        """Returns the name of the metadata field used in QA pairs."""
-        return "type"
+    def __init__(self):
+        super().__init__()
+        self.metadata_field_name = "type"
 
     def _get_golden_context(self, item: dict[str, Any]) -> str:
         """Extracts and formats the golden context from supporting facts and adds evidence if available."""

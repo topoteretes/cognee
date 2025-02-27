@@ -14,6 +14,10 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         # distractor test: "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json" delete file after changing the url
     }
 
+    def __init__(self):
+        super().__init__()
+        self.metadata_field_name = "level"
+
     def _is_valid_supporting_fact(self, sentences: List[str], sentence_idx: Any) -> bool:
         """Validates if a supporting fact index is valid for the given sentences."""
         return sentences and isinstance(sentence_idx, int) and 0 <= sentence_idx < len(sentences)
@@ -33,10 +37,6 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_contexts)
 
-    def _get_metadata_field_name(self) -> str:
-        """Returns the name of the metadata field used in QA pairs."""
-        return "level"
-
     def _process_item(
         self,
         item: dict[str, Any],
@@ -51,7 +51,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         qa_pair = {
             "question": item["question"],
             "answer": item["answer"].lower(),
-            self._get_metadata_field_name(): item[self._get_metadata_field_name()],
+            self.metadata_field_name: item[self.metadata_field_name],
         }
 
         if load_golden_context:
