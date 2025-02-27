@@ -3,7 +3,7 @@ from typing import Callable
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.modules.retrieval.code_graph_retrieval import code_graph_retrieval
+from cognee.modules.retrieval.utils.code_graph_retrieval import code_graph_retrieval
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
@@ -44,6 +44,7 @@ async def search(
 
 
 async def specific_search(query_type: SearchType, query: str, user: User) -> list:
+    # TODO: update after merging COG-1365, see COG-1403
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: query_summaries,
         SearchType.INSIGHTS: query_graph_connections,

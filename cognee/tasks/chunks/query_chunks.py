@@ -1,3 +1,4 @@
+# TODO: delete after merging COG-1365, see COG-1403
 from cognee.infrastructure.databases.vector import get_vector_engine
 
 

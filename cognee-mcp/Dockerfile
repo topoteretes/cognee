@@ -17,7 +17,6 @@ ENV UV_COMPILE_BYTECODE=1
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
 
-
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -30,11 +29,11 @@ ADD . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
-# RUN apt-get update && apt-get install
+RUN apt-get update && apt-get install
 
-# RUN apt-get install -y \
-#   gcc \
-#   libpq-dev
+RUN apt-get install -y \
+    gcc \
+    libpq-dev
 
 FROM python:3.12-slim-bookworm
 

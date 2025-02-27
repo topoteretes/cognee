@@ -13,19 +13,19 @@ async def test_code_description_to_code_part_no_results():
 
     with (
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine",
             return_value=mock_vector_engine,
         ),
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.get_graph_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_graph_engine",
             return_value=AsyncMock(),
         ),
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.CogneeGraph",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.CogneeGraph",
             return_value=AsyncMock(),
         ),
     ):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -41,7 +41,7 @@ async def test_code_description_to_code_part_invalid_query():
     mock_user = AsyncMock()
 
     with pytest.raises(ValueError, match="The query must be a non-empty string."):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -55,7 +55,7 @@ async def test_code_description_to_code_part_invalid_top_k():
     mock_user = AsyncMock()
 
     with pytest.raises(ValueError, match="top_k must be a positive integer."):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -70,15 +70,15 @@ async def test_code_description_to_code_part_initialization_error():
 
     with (
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine",
             side_effect=Exception("Engine init failed"),
         ),
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.get_graph_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_graph_engine",
             return_value=AsyncMock(),
         ),
     ):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
@@ -99,19 +99,19 @@ async def test_code_description_to_code_part_execution_error():
 
     with (
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.get_vector_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_vector_engine",
             return_value=mock_vector_engine,
         ),
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.get_graph_engine",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.get_graph_engine",
             return_value=AsyncMock(),
         ),
         patch(
-            "cognee.modules.retrieval.description_to_codepart_search.CogneeGraph",
+            "cognee.modules.retrieval.utils.description_to_codepart_search.CogneeGraph",
             return_value=AsyncMock(),
         ),
     ):
-        from cognee.modules.retrieval.description_to_codepart_search import (
+        from cognee.modules.retrieval.utils.description_to_codepart_search import (
             code_description_to_code_part,
         )
 
