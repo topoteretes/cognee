@@ -1,8 +1,8 @@
 import pytest
-from evals.eval_framework.answer_generation.answer_generation_executor import (
+from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
 )
-from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
+from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from unittest.mock import AsyncMock
 
 
