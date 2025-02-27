@@ -12,7 +12,7 @@ from cognee.tasks.temporal_awareness.index_graphiti_objects import (
     index_and_transform_graphiti_nodes_and_edges,
 )
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.base_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 

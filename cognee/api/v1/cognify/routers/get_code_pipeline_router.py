@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
-from cognee.modules.retrieval.base_retriever import CodeRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.storage.utils import JSONEncoder
 
 

@@ -2,7 +2,7 @@ import cognee
 from cognee.modules.search.types import SearchType
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.base_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from functools import partial
 from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
 import logging
