@@ -14,9 +14,9 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         # distractor test: "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json" delete file after changing the url
     }
 
-    def _is_valid_supporting_fact(self, sentences: List[str], sent_idx: Any) -> bool:
+    def _is_valid_supporting_fact(self, sentences: List[str], sentence_idx: Any) -> bool:
         """Validates if a supporting fact index is valid for the given sentences."""
-        return sentences and isinstance(sent_idx, int) and 0 <= sent_idx < len(sentences)
+        return sentences and isinstance(sentence_idx, int) and 0 <= sentence_idx < len(sentences)
 
     def _get_golden_context(self, item: dict[str, Any]) -> str:
         """Extracts and formats the golden context from supporting facts."""
@@ -25,11 +25,11 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         # Get all supporting facts in order
         golden_contexts = []
-        for title, sent_idx in item["supporting_facts"]:
+        for title, sentence_idx in item["supporting_facts"]:
             sentences = context_dict.get(title, [])
-            if not self._is_valid_supporting_fact(sentences, sent_idx):
+            if not self._is_valid_supporting_fact(sentences, sentence_idx):
                 continue
-            golden_contexts.append(f"{title}: {sentences[sent_idx]}")
+            golden_contexts.append(f"{title}: {sentences[sentence_idx]}")
 
         return "\n".join(golden_contexts)
 
