@@ -21,5 +21,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[dependency-groups]
+dev = [
+    "debugpy>=1.8.12",
+]
+
 [project.scripts]
 cognee = "src:main"
