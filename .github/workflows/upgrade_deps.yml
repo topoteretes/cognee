@@ -2,8 +2,29 @@ name: Update Poetry Dependencies
 
 on:
   schedule:
-    - cron: '0 3 * * 0'
+    - cron: '0 3 * * 0'  # Runs at 3 AM every Sunday
+  push:
+    paths:
+      - 'poetry.lock'
+      - 'pyproject.toml'
+    branches:
+      - main
+      - dev
+  pull_request:
+    paths:
+      - 'poetry.lock'
+      - 'pyproject.toml'
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - dev
   workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run the update with debug logging'
+        required: false
+        default: false
 
 jobs:
   update-dependencies:
