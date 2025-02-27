@@ -15,5 +15,3 @@ class Permission(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     name = Column(String, unique=True, nullable=False, index=True)
-
-    # acls = relationship("ACL", back_populates = "permission")
