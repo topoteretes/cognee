@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.29"
+version = "0.1.30"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic", "Boris Arzentar"]
 readme = "README.md"
@@ -100,6 +100,7 @@ langchain = ["langsmith", "langchain_text_splitters"]
 llama-index = ["llama-index-core"]
 gemini = ["google-generativeai"]
 huggingface = ["transformers"]
+ollama = ["transformers"]
 mistral = ["mistral-common"]
 deepeval = ["deepeval"]
 posthog = ["posthog"]

@@ -20,7 +20,12 @@ async def get_source_code_files(repo_path):
         os.path.join(root, file)
         for root, _, files in os.walk(repo_path)
         for file in files
-        if file.endswith(".py")
+        if (
+            file.endswith(".py")
+            and not file.startswith("test_")
+            and not file.endswith("_test")
+            and ".venv" not in file
+        )
     )
 
     source_code_files = set()
@@ -74,7 +79,7 @@ async def get_repo_file_dependencies(
         # with ProcessPoolExecutor(max_workers=12) as executor:
         tasks = [
             get_local_script_dependencies(repo_path, file_path, detailed_extraction)
-            for file_path in source_code_files[start_range:end_range]
+            for file_path in source_code_files[start_range : end_range + 1]
         ]
 
         results: list[CodeFile] = await asyncio.gather(*tasks)

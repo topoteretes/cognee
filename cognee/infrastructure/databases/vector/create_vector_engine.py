@@ -1,14 +1,17 @@
+from .embeddings import get_embedding_engine
+
 from functools import lru_cache
 
 
 @lru_cache
 def create_vector_engine(
-    embedding_engine,
     vector_db_url: str,
     vector_db_port: str,
     vector_db_key: str,
     vector_db_provider: str,
 ):
+    embedding_engine = get_embedding_engine()
+
     if vector_db_provider == "weaviate":
         from .weaviate_db import WeaviateAdapter
 
