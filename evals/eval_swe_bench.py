@@ -10,7 +10,7 @@ from swebench.inference.make_datasets.create_instance import PATCH_EXAMPLE
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.modules.retrieval.description_to_codepart_search import (
+from cognee.modules.retrieval.utils.description_to_codepart_search import (
     code_description_to_code_part_search,
 )
 from evals.eval_utils import download_github_repo
