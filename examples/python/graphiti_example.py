@@ -11,7 +11,7 @@ from cognee.infrastructure.databases.relational import (
 from cognee.tasks.temporal_awareness.index_graphiti_objects import (
     index_and_transform_graphiti_nodes_and_edges,
 )
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client

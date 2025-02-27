@@ -2,48 +2,27 @@ import requests
 import os
 import json
 import random
-from typing import Optional, Any
-from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from typing import Optional, Any, List, Tuple
+from evals.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 
 
-class TwoWikiMultihopAdapter(BaseBenchmarkAdapter):
+class TwoWikiMultihopAdapter(HotpotQAAdapter):
     dataset_info = {
         "filename": "2wikimultihop_dev.json",
-        "URL": "https://huggingface.co/datasets/voidful/2WikiMultihopQA/resolve/main/dev.json",
+        "url": "https://huggingface.co/datasets/voidful/2WikiMultihopQA/resolve/main/dev.json",
     }
 
-    def load_corpus(
-        self, limit: Optional[int] = None, seed: int = 42
-    ) -> tuple[list[str], list[dict[str, Any]]]:
-        filename = self.dataset_info["filename"]
+    def __init__(self):
+        super().__init__()
+        self.metadata_field_name = "type"
 
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                corpus_json = json.load(f)
-        else:
-            response = requests.get(self.dataset_info["URL"])
-            response.raise_for_status()
-            corpus_json = response.json()
+    def _get_golden_context(self, item: dict[str, Any]) -> str:
+        """Extracts and formats the golden context from supporting facts and adds evidence if available."""
+        golden_context = super()._get_golden_context(item)
 
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(corpus_json, f, ensure_ascii=False, indent=4)
+        if "evidences" in item:
+            golden_context += "\nEvidence fact triplets:"
+            for subject, relation, obj in item["evidences"]:
+                golden_context += f"\n  • {subject} - {relation} - {obj}"
 
-        if limit is not None and 0 < limit < len(corpus_json):
-            random.seed(seed)
-            corpus_json = random.sample(corpus_json, limit)
-
-        corpus_list = []
-        question_answer_pairs = []
-        for dict in corpus_json:
-            for title, sentences in dict["context"]:
-                corpus_list.append(" ".join(sentences))
-
-            question_answer_pairs.append(
-                {
-                    "question": dict["question"],
-                    "answer": dict["answer"].lower(),
-                    "type": dict["type"],
-                }
-            )
-
-        return corpus_list, question_answer_pairs
+        return golden_context
