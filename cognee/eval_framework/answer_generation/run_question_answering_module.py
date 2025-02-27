@@ -56,4 +56,7 @@ async def run_question_answering(params: dict) -> List[dict]:
 
         return answers
     else:
-        logging.info("The question answering module ")
+        logging.info(
+            "The question answering module was not executed as answering_questions is not enabled"
+        )
+        return []
