@@ -4,6 +4,8 @@ import asyncio
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     brute_force_triplet_search,
     format_triplets,
@@ -17,7 +19,10 @@ class TripletSearchContextProvider(BaseContextProvider):
     """Context provider that uses brute force triplet search for each entity."""
 
     def __init__(
-        self, top_k: int = 3, collections: List[str] = None, properties_to_project: List[str] = None
+        self,
+        top_k: int = 3,
+        collections: List[str] = None,
+        properties_to_project: List[str] = None,
     ):
         self.top_k = top_k
         self.collections = collections
@@ -57,7 +62,12 @@ class TripletSearchContextProvider(BaseContextProvider):
         ]
         return tasks
 
-    def _results_to_context(self, entities: List[DataPoint], results: List) -> str:
+    async def _format_triplets(self, triplets: List, entity_name: str) -> str:
+        """Format triplets into readable text."""
+        direct_text = format_triplets(triplets)
+        return f"Context for {entity_name}:\n{direct_text}\n---\n"
+
+    async def _results_to_context(self, entities: List[DataPoint], results: List) -> str:
         """Formats search results into context string."""
         triplets = []
 
@@ -67,9 +77,7 @@ class TripletSearchContextProvider(BaseContextProvider):
                 or getattr(entity, "description", None)
                 or getattr(entity, "text", str(entity))
             )
-            triplets.append(f"Context for {entity_name}:")
-            triplets.append(format_triplets(entity_triplets))
-            triplets.append("\n---\n")
+            triplets.append(await self._format_triplets(entity_triplets, entity_name))
 
         return "\n".join(triplets) if triplets else "No relevant context found."
 
@@ -86,4 +94,4 @@ class TripletSearchContextProvider(BaseContextProvider):
             return "No valid entities found for context search."
 
         results = await asyncio.gather(*search_tasks)
-        return self._results_to_context(entities, results)
+        return await self._results_to_context(entities, results)
