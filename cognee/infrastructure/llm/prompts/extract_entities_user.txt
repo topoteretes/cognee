@@ -1,3 +1,3 @@
- Extract key entities from this text:
+Extract key entities from this text:
 
-{{ question }}
+{{ text }}
