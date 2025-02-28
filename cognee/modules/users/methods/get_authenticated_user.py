@@ -1,13 +1,11 @@
 from types import SimpleNamespace
 
 from ..get_fastapi_users import get_fastapi_users
-from fastapi import Depends, HTTPException, Header
+from fastapi import HTTPException, Header
 import os
 import jwt
 
 fastapi_users = get_fastapi_users()
-
-# get_authenticated_user = fastapi_users.current_user(active=True, verified=True)
 
 
 async def get_authenticated_user(authorization: str = Header(...)):
