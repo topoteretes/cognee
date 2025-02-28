@@ -1,30 +1,21 @@
-import json
 import logging
-import re
 from typing import List
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.models.EntityType import EntityType
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 logger = logging.getLogger("llm_entity_extractor")
-
-
-class ExtractedEntity(BaseModel):
-    """Model for an entity extracted by the LLM."""
-
-    name: str
-    type: str
-    description: str
 
 
 class EntityList(BaseModel):
     """Response model containing a list of extracted entities."""
 
-    entities: List[ExtractedEntity]
+    entities: List[Entity]
 
 
 class LLMEntityExtractor(BaseEntityExtractor):
@@ -60,41 +51,22 @@ class LLMEntityExtractor(BaseEntityExtractor):
         try:
             logger.info(f"Extracting entities from text: {text[:100]}...")
 
-            raw_response = await generate_completion(
-                query=text,
-                context=text,  # Using the same text as context
-                user_prompt_path=self.user_prompt_template,
-                system_prompt_path=self.system_prompt_template,
+            llm_client = get_llm_client()
+            user_prompt = render_prompt(self.user_prompt_template, {"text": text})
+            system_prompt = read_query_prompt(self.system_prompt_template)
+
+            response = await llm_client.acreate_structured_output(
+                text_input=user_prompt,
+                system_prompt=system_prompt,
+                response_model=EntityList,
             )
 
-            try:
-                if not raw_response.strip().startswith("{"):
-                    json_match = re.search(r"(\{.*\})", raw_response, re.DOTALL)
-                    if json_match:
-                        potential_json = json_match.group(1)
-                        response_dict = json.loads(potential_json)
-                    else:
-                        logger.error("Could not find JSON content in the response")
-                        return []
-                else:
-                    response_dict = json.loads(raw_response)
-
-                response = EntityList.model_validate(response_dict)
-
-            except (json.JSONDecodeError, ValidationError) as e:
-                logger.error(f"Failed to parse LLM response: {str(e)}")
+            if not response.entities:
+                logger.warning("No entities were extracted from the text")
                 return []
 
-            entities = []
-            for extracted in response.entities:
-                entity_type = self._get_entity_type(extracted.type)
-                entity = Entity(
-                    name=extracted.name, is_a=entity_type, description=extracted.description
-                )
-                entities.append(entity)
-
-            logger.info(f"Extracted {len(entities)} entities")
-            return entities
+            logger.info(f"Extracted {len(response.entities)} entities")
+            return response.entities
 
         except Exception as e:
             logger.error(f"Entity extraction failed: {str(e)}")
