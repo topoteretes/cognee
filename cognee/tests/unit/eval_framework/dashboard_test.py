@@ -3,7 +3,7 @@ from unittest.mock import patch
 import json
 import os
 import tempfile
-from evals.eval_framework.metrics_dashboard import generate_metrics_dashboard, bootstrap_ci
+from cognee.eval_framework.metrics_dashboard import generate_metrics_dashboard, bootstrap_ci
 import numpy as np
 
 
@@ -55,7 +55,7 @@ class TestGenerateMetricsDashboard(unittest.TestCase):
             self.assertIn("accuracy", html_content)
             self.assertIn("relevance", html_content)
 
-    @patch("evals.eval_framework.metrics_dashboard.bootstrap_ci", return_value=(0.9, 0.85, 0.95))
+    @patch("cognee.eval_framework.metrics_dashboard.bootstrap_ci", return_value=(0.9, 0.85, 0.95))
     def test_generate_metrics_dashboard_ci_calculation(self, mock_bootstrap_ci):
         """Test if bootstrap_ci is called with the correct parameters."""
         generate_metrics_dashboard(self.temp_json.name, self.output_file)

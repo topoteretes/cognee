@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Union
-from evals.eval_framework.evaluation.evaluator_adapters import EvaluatorAdapter
+from cognee.eval_framework.evaluation.evaluator_adapters import EvaluatorAdapter
 
 
 class EvaluationExecutor:

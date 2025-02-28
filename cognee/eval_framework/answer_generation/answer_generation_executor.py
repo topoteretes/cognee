@@ -3,20 +3,19 @@ from typing import List, Dict, Callable, Awaitable
 from cognee.api.v1.search import SearchType
 
 question_answering_engine_options: Dict[str, Callable[[str], Awaitable[List[str]]]] = {
-    "cognee_graph_completion": lambda query: cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text=query
+    "cognee_graph_completion": lambda query, system_prompt_path: cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text=query,
+        system_prompt_path=system_prompt_path,
     ),
-    "cognee_completion": lambda query: cognee.search(
-        query_type=SearchType.COMPLETION, query_text=query
+    "cognee_completion": lambda query, system_prompt_path: cognee.search(
+        query_type=SearchType.COMPLETION, query_text=query, system_prompt_path=system_prompt_path
     ),
-    "cognee_summaries": lambda query: cognee.search(
-        query_type=SearchType.SUMMARIES, query_text=query
+    "graph_summary_completion": lambda query, system_prompt_path: cognee.search(
+        query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
+        query_text=query,
+        system_prompt_path=system_prompt_path,
     ),
-    "cognee_insights": lambda query: cognee.search(
-        query_type=SearchType.INSIGHTS, query_text=query
-    ),
-    "cognee_chunks": lambda query: cognee.search(query_type=SearchType.CHUNKS, query_text=query),
-    "cognee_code": lambda query: cognee.search(query_type=SearchType.CODE, query_text=query),
 }
 
 
@@ -25,13 +24,14 @@ class AnswerGeneratorExecutor:
         self,
         questions: List[Dict[str, str]],
         answer_resolver: Callable[[str], Awaitable[List[str]]],
+        system_prompt: str = "answer_simple_question.txt",
     ) -> List[Dict[str, str]]:
         answers = []
         for instance in questions:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            search_results = await answer_resolver(query_text)
+            search_results = await answer_resolver(query_text, system_prompt)
 
             answers.append(
                 {

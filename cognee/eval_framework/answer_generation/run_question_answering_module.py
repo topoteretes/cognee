@@ -1,6 +1,7 @@
 import logging
 import json
-from evals.eval_framework.answer_generation.answer_generation_executor import (
+from typing import List
+from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
     question_answering_engine_options,
 )
@@ -30,7 +31,9 @@ async def create_and_insert_answers_table(questions_payload):
         await session.commit()
 
 
-async def run_question_answering(params: dict) -> None:
+async def run_question_answering(
+    params: dict, system_prompt="answer_simple_question.txt"
+) -> List[dict]:
     if params.get("answering_questions"):
         logging.info("Question answering started...")
         try:
@@ -46,9 +49,17 @@ async def run_question_answering(params: dict) -> None:
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
             answer_resolver=question_answering_engine_options[params["qa_engine"]],
+            system_prompt=system_prompt,
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
 
         await create_and_insert_answers_table(answers)
         logging.info("Question answering End...")
+
+        return answers
+    else:
+        logging.info(
+            "The question answering module was not executed as answering_questions is not enabled"
+        )
+        return []
