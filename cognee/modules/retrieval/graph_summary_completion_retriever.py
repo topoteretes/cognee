@@ -1,8 +1,7 @@
 from typing import Optional
 
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.completion import summarize_text
 
 
 class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
@@ -26,11 +25,4 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """Converts retrieved graph edges into a summary without redundancies."""
         direct_text = await super().resolve_edges_to_text(retrieved_edges)
-        system_prompt = read_query_prompt(self.summarize_prompt_path)
-
-        llm_client = get_llm_client()
-        return await llm_client.acreate_structured_output(
-            text_input=direct_text,
-            system_prompt=system_prompt,
-            response_model=str,
-        )
+        return await summarize_text(direct_text, self.summarize_prompt_path)
