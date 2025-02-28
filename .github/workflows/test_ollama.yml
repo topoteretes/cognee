@@ -9,7 +9,8 @@ jobs:
 
   run_simple_example_test:
 
-    runs-on: ubuntu-latest
+    # needs 16 Gb RAM for phi4
+    runs-on: buildjet-4vcpu-ubuntu-2204
 #    services:
 #      ollama:
 #        image: ollama/ollama
