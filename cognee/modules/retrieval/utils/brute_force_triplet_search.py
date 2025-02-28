@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -49,12 +49,32 @@ def format_triplets(edges):
     return "".join(triplets)
 
 
+async def get_memory_fragment(
+    properties_to_project: Optional[List[str]] = None,
+) -> CogneeGraph:
+    """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
+    graph_engine = await get_graph_engine()
+    memory_fragment = CogneeGraph()
+
+    if properties_to_project is None:
+        properties_to_project = ["id", "description", "name", "type", "text"]
+
+    await memory_fragment.project_graph_from_db(
+        graph_engine,
+        node_properties_to_project=properties_to_project,
+        edge_properties_to_project=["relationship_name"],
+    )
+
+    return memory_fragment
+
+
 async def brute_force_triplet_search(
     query: str,
     user: User = None,
     top_k: int = 5,
     collections: List[str] = None,
     properties_to_project: List[str] = None,
+    memory_fragment: Optional[CogneeGraph] = None,
 ) -> list:
     if user is None:
         user = await get_default_user()
@@ -63,7 +83,12 @@ async def brute_force_triplet_search(
         raise PermissionError("No user found in the system. Please create a user.")
 
     retrieved_results = await brute_force_search(
-        query, user, top_k, collections=collections, properties_to_project=properties_to_project
+        query,
+        user,
+        top_k,
+        collections=collections,
+        properties_to_project=properties_to_project,
+        memory_fragment=memory_fragment,
     )
     return retrieved_results
 
@@ -74,6 +99,7 @@ async def brute_force_search(
     top_k: int,
     collections: List[str] = None,
     properties_to_project: List[str] = None,
+    memory_fragment: Optional[CogneeGraph] = None,
 ) -> list:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -82,7 +108,9 @@ async def brute_force_search(
         query (str): The search query.
         user (User): The user performing the search.
         top_k (int): The number of top results to retrieve.
-        collections (Optional[List[str]]): List of collections to query. Defaults to predefined collections.
+        collections (Optional[List[str]]): List of collections to query.
+        properties_to_project (Optional[List[str]]): List of properties to project.
+        memory_fragment (Optional[CogneeGraph]): Existing memory fragment to reuse.
 
     Returns:
         list: The top triplet results.
@@ -102,9 +130,8 @@ async def brute_force_search(
 
     try:
         vector_engine = get_vector_engine()
-        graph_engine = await get_graph_engine()
     except Exception as e:
-        logging.error("Failed to initialize engines: %s", e)
+        logging.error("Failed to initialize vector engine: %s", e)
         raise RuntimeError("Initialization error") from e
 
     send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
@@ -119,22 +146,16 @@ async def brute_force_search(
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
-        memory_fragment = CogneeGraph()
-
-        await memory_fragment.project_graph_from_db(
-            graph_engine,
-            node_properties_to_project=properties_to_project
-            or ["id", "description", "name", "type", "text"],
-            edge_properties_to_project=["relationship_name"],
-        )
+        # Use provided memory fragment or create a new one
+        if memory_fragment is None:
+            memory_fragment = await get_memory_fragment(properties_to_project)
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-
         await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
-        send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
+        send_telemetry("cognee.brute_force_triplet_search EXECUTION COMPLETED", user.id)
 
         return results
 
