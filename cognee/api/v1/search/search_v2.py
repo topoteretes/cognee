@@ -12,7 +12,7 @@ async def search(
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
     user: User = None,
     datasets: Union[list[str], str, None] = None,
-    system_prompt_path="answer_simple_question.txt",
+    system_prompt_path: str = "answer_simple_question.txt",
 ) -> list:
     # We use lists from now on for datasets
     if isinstance(datasets, str):

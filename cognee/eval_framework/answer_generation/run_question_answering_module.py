@@ -31,7 +31,9 @@ async def create_and_insert_answers_table(questions_payload):
         await session.commit()
 
 
-async def run_question_answering(params: dict) -> List[dict]:
+async def run_question_answering(
+    params: dict, system_prompt="answer_simple_question.txt"
+) -> List[dict]:
     if params.get("answering_questions"):
         logging.info("Question answering started...")
         try:
@@ -47,6 +49,7 @@ async def run_question_answering(params: dict) -> List[dict]:
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
             answer_resolver=question_answering_engine_options[params["qa_engine"]],
+            system_prompt=system_prompt,
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
