@@ -23,7 +23,7 @@ async def get_authenticated_user(authorization: str = Header(...)):
 
         # SimpleNamespace lets us access dictionary elements like attributes
         ret_val = SimpleNamespace(
-            id=payload["user_id"], tenant=payload["tenant"], role=payload["role"]
+            id=payload["user_id"], tenant=payload["tenant"], roles=payload["roles"]
         )
         return ret_val
 

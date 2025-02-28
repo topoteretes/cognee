@@ -29,5 +29,5 @@ async def get_default_user():
 
         # We return a SimpleNamespace to have the same user type as our SaaS
         # SimpleNamespace is just a dictionary which can be accessed through attributes
-        ret_val = SimpleNamespace(id=user.id, tenant=tenant.name, role="")
+        ret_val = SimpleNamespace(id=user.id, tenant=tenant.name, roles=[])
         return ret_val
