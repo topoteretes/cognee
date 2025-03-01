@@ -31,7 +31,7 @@ from cognee.shared.data_models import KnowledgeGraph as KnowledgeGraph
 from cognee.tasks.storage import add_data_points as add_data_points
 from cognee.api.v1.visualize import visualize_graph
 
-
+from cognee import cognify as base_graph_rag
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
