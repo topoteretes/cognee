@@ -4,67 +4,36 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
-from cognee.infrastructure.llm.config import get_llm_config
 
-if get_llm_config().llm_provider.lower() == "gemini":
-    """
-    Note: Gemini doesn't allow for an empty dictionary to be a part of the data model
-    so we created new data models to bypass that issue, but other LLMs have slightly worse performance
-    when creating knowledge graphs with these data models compared to the old data models
-    so now there's an if statement here so that the rest of the LLMs can use the old data models.
-    """
 
-    class Node(BaseModel):
-        """Node in a knowledge graph."""
+class Node(BaseModel):
+    """Node in a knowledge graph."""
 
-        id: str
-        name: str
-        type: str
-        description: str
-        label: str
+    id: str
+    name: str
+    type: str
+    description: str
+    properties: Optional[Dict[str, Any]] = Field(
+        None, description="A dictionary of properties associated with the node."
+    )
 
-    class Edge(BaseModel):
-        """Edge in a knowledge graph."""
 
-        source_node_id: str
-        target_node_id: str
-        relationship_name: str
+class Edge(BaseModel):
+    """Edge in a knowledge graph."""
 
-    class KnowledgeGraph(BaseModel):
-        """Knowledge graph."""
+    source_node_id: str
+    target_node_id: str
+    relationship_name: str
+    properties: Optional[Dict[str, Any]] = Field(
+        None, description="A dictionary of properties associated with the edge."
+    )
 
-        summary: str
-        description: str
-        nodes: List[Node] = Field(..., default_factory=list)
-        edges: List[Edge] = Field(..., default_factory=list)
-else:
 
-    class Node(BaseModel):
-        """Node in a knowledge graph."""
+class KnowledgeGraph(BaseModel):
+    """Knowledge graph."""
 
-        id: str
-        name: str
-        type: str
-        description: str
-        properties: Optional[Dict[str, Any]] = Field(
-            None, description="A dictionary of properties associated with the node."
-        )
-
-    class Edge(BaseModel):
-        """Edge in a knowledge graph."""
-
-        source_node_id: str
-        target_node_id: str
-        relationship_name: str
-        properties: Optional[Dict[str, Any]] = Field(
-            None, description="A dictionary of properties associated with the edge."
-        )
-
-    class KnowledgeGraph(BaseModel):
-        """Knowledge graph."""
-
-        nodes: List[Node] = Field(..., default_factory=list)
-        edges: List[Edge] = Field(..., default_factory=list)
+    nodes: List[Node] = Field(..., default_factory=list)
+    edges: List[Edge] = Field(..., default_factory=list)
 
 
 class GraphQLQuery(BaseModel):
