@@ -51,13 +51,14 @@ async def execute_evaluation(params: dict) -> None:
 
     await create_and_insert_metrics_table(metrics)
     logging.info("Evaluation completed")
+    return metrics
 
 
 async def run_evaluation(params: dict) -> List[dict]:
     """Run each step of the evaluation pipeline based on configuration flags."""
     # Step 1: Evaluate answers if requested
     if params.get("evaluating_answers"):
-        await execute_evaluation(params)
+        metrics = await execute_evaluation(params)
     else:
         logging.info("Skipping evaluation as evaluating_answers is False")
 
@@ -68,6 +69,7 @@ async def run_evaluation(params: dict) -> List[dict]:
             json_data=params["metrics_path"], aggregate_output_path=params["aggregate_metrics_path"]
         )
         logging.info("Metrics calculation completed")
+        return metrics
     else:
         logging.info("Skipping metrics calculation as calculate_metrics is False")
         return []
