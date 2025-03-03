@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.future import select
 from cognee.modules.users.models import User, Tenant
 from cognee.infrastructure.databases.relational import get_relational_engine
-from .create_default_user import create_default_user
+from cognee.modules.users.methods.create_default_user import create_default_user
 
 
 async def get_default_user():
