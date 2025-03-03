@@ -112,7 +112,7 @@ def generate_dataset_name(dataset_name: str) -> str:
     return dataset_name.replace(".", "_").replace(" ", "_")
 
 
-async def get_default_tasks(
+async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: User = None, graph_model: BaseModel = KnowledgeGraph, chunk_size=1024, chunker=TextChunker
 ) -> list[Task]:
     if user is None:
