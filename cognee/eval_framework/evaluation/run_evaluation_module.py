@@ -69,16 +69,3 @@ async def run_evaluation(params: dict) -> None:
         logging.info("Metrics calculation completed")
     else:
         logging.info("Skipping metrics calculation as calculate_metrics is False")
-
-    # Step 3: Generate dashboard if requested
-    if params.get("dashboard"):
-        logging.info("Generating dashboard...")
-        create_dashboard(
-            metrics_path=params["metrics_path"],
-            aggregate_metrics_path=params["aggregate_metrics_path"],
-            output_file=params["dashboard_path"],
-            benchmark=params["benchmark"],
-        )
-        logging.info(f"Dashboard generated at {params['dashboard_path']}")
-    else:
-        logging.info("Skipping dashboard generation as dashboard is False")

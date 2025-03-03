@@ -33,8 +33,10 @@ async def main():
     await run_evaluation(eval_params)
 
     if eval_params.get("dashboard"):
+        logging.info("Generating dashboard...")
         create_dashboard(
-            json_data=eval_params["metrics_path"],
+            metrics_path=eval_params["metrics_path"],
+            aggregate_metrics_path=eval_params["aggregate_metrics_path"],
             output_file=eval_params["dashboard_path"],
             benchmark=eval_params["benchmark"],
         )
