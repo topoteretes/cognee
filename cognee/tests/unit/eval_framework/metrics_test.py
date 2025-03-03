@@ -4,7 +4,7 @@ import sys
 from unittest.mock import patch, MagicMock
 import unittest
 import numpy as np
-from evals.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
 
 
 with patch.dict(
