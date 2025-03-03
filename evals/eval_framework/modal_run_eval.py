@@ -14,6 +14,7 @@ from evals.eval_framework.evaluation.run_evaluation_module import run_evaluation
 
 logger = logging.getLogger(__name__)
 
+
 def read_and_combine_metrics(eval_params: dict) -> dict:
     """Read and combine metrics files into a single result dictionary."""
     try:
