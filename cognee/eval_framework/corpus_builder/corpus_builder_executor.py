@@ -2,8 +2,9 @@ import cognee
 import logging
 from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
-from evals.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
-from evals.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
+from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
+from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.shared.utils import setup_logging
 
@@ -31,12 +32,14 @@ class CorpusBuilderExecutor:
         self.raw_corpus, self.questions = self.adapter.load_corpus(limit=limit)
         return self.raw_corpus, self.questions
 
-    async def build_corpus(self, limit: Optional[int] = None) -> List[str]:
+    async def build_corpus(
+        self, limit: Optional[int] = None, chunk_size=1024, chunker=TextChunker
+    ) -> List[str]:
         self.load_corpus(limit=limit)
-        await self.run_cognee()
+        await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
         return self.questions
 
-    async def run_cognee(self) -> None:
+    async def run_cognee(self, chunk_size=1024, chunker=TextChunker) -> None:
         setup_logging(logging.ERROR)
 
         await cognee.prune.prune_data()
@@ -44,5 +47,5 @@ class CorpusBuilderExecutor:
 
         await cognee.add(self.raw_corpus)
 
-        tasks = await self.task_getter()
+        tasks = await self.task_getter(chunk_size=chunk_size, chunker=TextChunker)
         await cognee.cognify(tasks=tasks)

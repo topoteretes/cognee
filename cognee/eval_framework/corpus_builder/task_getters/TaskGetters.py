@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Callable, Awaitable, List
 from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
 from cognee.modules.pipelines.tasks.Task import Task
-from evals.eval_framework.corpus_builder.task_getters.get_cascade_graph_tasks import (
+from cognee.eval_framework.corpus_builder.task_getters.get_cascade_graph_tasks import (
     get_cascade_graph_tasks,
 )
 

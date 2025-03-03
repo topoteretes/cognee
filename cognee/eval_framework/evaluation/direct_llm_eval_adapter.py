@@ -1,9 +1,9 @@
 from typing import Any, Dict, List
 from pydantic import BaseModel
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from evals.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
+from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
-from evals.eval_framework.eval_config import EvalConfig
+from cognee.eval_framework.eval_config import EvalConfig
 
 
 class CorrectnessEvaluation(BaseModel):

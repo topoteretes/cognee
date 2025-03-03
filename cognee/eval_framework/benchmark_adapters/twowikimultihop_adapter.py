@@ -3,7 +3,7 @@ import os
 import json
 import random
 from typing import Optional, Any, List, Tuple
-from evals.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 
 
 class TwoWikiMultihopAdapter(HotpotQAAdapter):
