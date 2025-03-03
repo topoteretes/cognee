@@ -18,6 +18,7 @@ class EvalConfig(BaseSettings):
 
     # Evaluation params
     evaluating_answers: bool = True
+    evaluating_contexts: bool = True
     evaluation_engine: str = "DeepEval"  # Options: 'DeepEval' (uses deepeval_model), 'DirectLLM' (uses default llm from .env)
     evaluation_metrics: List[str] = [
         "correctness",
