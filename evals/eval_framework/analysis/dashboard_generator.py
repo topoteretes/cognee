@@ -1,50 +1,12 @@
 import json
-from collections import defaultdict
 import plotly.graph_objects as go
-import numpy as np
+from typing import Dict, List, Tuple
+from collections import defaultdict
 
 
-def bootstrap_ci(scores, num_samples=10000, confidence_level=0.95):
-    means = []
-    n = len(scores)
-    for _ in range(num_samples):
-        sample = np.random.choice(scores, size=n, replace=True)
-        means.append(np.mean(sample))
-
-    lower_bound = np.percentile(means, (1 - confidence_level) / 2 * 100)
-    upper_bound = np.percentile(means, (1 + confidence_level) / 2 * 100)
-    return np.mean(scores), lower_bound, upper_bound
-
-
-def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", benchmark=""):
-    try:
-        with open(json_data, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Could not find the file: {json_data}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Error decoding JSON from {json_data}: {e}")
-
-    metrics_data = defaultdict(list)
-    metric_details = defaultdict(list)
-
-    for entry in data:
-        for metric, values in entry["metrics"].items():
-            score = values["score"]
-            metrics_data[metric].append(score)
-            if "reason" in values:
-                metric_details[metric].append(
-                    {
-                        "question": entry["question"],
-                        "answer": entry["answer"],
-                        "golden_answer": entry["golden_answer"],
-                        "reason": values["reason"],
-                        "score": score,
-                    }
-                )
-
+def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]:
+    """Create distribution histogram plots for each metric."""
     figures = []
-
     for metric, scores in metrics_data.items():
         fig = go.Figure()
         fig.add_trace(go.Histogram(x=scores, name=metric, nbinsx=10, marker_color="#1f77b4"))
@@ -57,13 +19,11 @@ def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", 
             template="seaborn",
         )
         figures.append(fig.to_html(full_html=False))
+    return figures
 
-    ci_results = {}
-    for metric, scores in metrics_data.items():
-        mean_score, lower, upper = bootstrap_ci(scores)
-        ci_results[metric] = (mean_score, lower, upper)
 
-    # Bar chart with confidence intervals
+def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
+    """Create confidence interval bar plot."""
     fig = go.Figure()
     for metric, (mean_score, lower, upper) in ci_results.items():
         fig.add_trace(
@@ -86,9 +46,29 @@ def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", 
         yaxis_title="Score",
         template="seaborn",
     )
-    figures.append(fig.to_html(full_html=False))
+    return fig.to_html(full_html=False)
 
+
+def generate_details_html(metrics_data: List[Dict]) -> List[str]:
+    """Generate HTML for detailed metric information."""
     details_html = []
+    metric_details = {}
+
+    # Organize metrics by type
+    for entry in metrics_data:
+        for metric, values in entry["metrics"].items():
+            if metric not in metric_details:
+                metric_details[metric] = []
+            metric_details[metric].append(
+                {
+                    "question": entry["question"],
+                    "answer": entry["answer"],
+                    "golden_answer": entry["golden_answer"],
+                    "reason": values.get("reason", ""),
+                    "score": values["score"],
+                }
+            )
+
     for metric, details in metric_details.items():
         details_html.append(f"<h3>{metric} Details</h3>")
         details_html.append("""
@@ -112,8 +92,14 @@ def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", 
                 f"</tr>"
             )
         details_html.append("</table>")
+    return details_html
 
-    html_template = f"""
+
+def get_dashboard_html_template(
+    figures: List[str], details_html: List[str], benchmark: str = ""
+) -> str:
+    """Generate the complete HTML dashboard template."""
+    return f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -132,7 +118,7 @@ def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", 
         <h1>LLM Evaluation Metrics Dashboard {benchmark}</h1>
 
         <h2>Metrics Distribution</h2>
-        {"".join([f'<div class="chart">{fig}</div>' for fig in figures[: len(metrics_data)]])}
+        {"".join([f'<div class="chart">{fig}</div>' for fig in figures[:-1]])}
 
         <h2>95% confidence interval for all the metrics</h2>
         <div class="chart">{figures[-1]}</div>
@@ -143,6 +129,44 @@ def generate_metrics_dashboard(json_data, output_file="dashboard_with_ci.html", 
     </html>
     """
 
+
+def create_dashboard(
+    metrics_path: str,
+    aggregate_metrics_path: str,
+    output_file: str = "dashboard_with_ci.html",
+    benchmark: str = "",
+) -> str:
+    """Create and save the dashboard with all visualizations."""
+    # Read metrics files
+    with open(metrics_path, "r") as f:
+        metrics_data = json.load(f)
+    with open(aggregate_metrics_path, "r") as f:
+        aggregate_data = json.load(f)
+
+    # Extract data for visualizations
+    metrics_by_type = defaultdict(list)
+    for entry in metrics_data:
+        for metric, values in entry["metrics"].items():
+            metrics_by_type[metric].append(values["score"])
+
+    # Generate visualizations
+    distribution_figures = create_distribution_plots(metrics_by_type)
+    ci_plot = create_ci_plot(
+        {
+            metric: (data["mean"], data["ci_lower"], data["ci_upper"])
+            for metric, data in aggregate_data.items()
+        }
+    )
+
+    # Combine all figures
+    figures = distribution_figures + [ci_plot]
+
+    # Generate HTML components
+    details_html = generate_details_html(metrics_data)
+    dashboard_html = get_dashboard_html_template(figures, details_html, benchmark)
+
+    # Write to file
     with open(output_file, "w", encoding="utf-8") as f:
-        f.write(html_template)
+        f.write(dashboard_html)
+
     return output_file
