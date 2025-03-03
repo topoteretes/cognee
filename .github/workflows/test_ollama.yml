@@ -1,0 +1,116 @@
+name: test | ollama
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [ labeled, synchronize ]
+
+jobs:
+
+  run_simple_example_test:
+
+    # needs 16 Gb RAM for phi4
+    runs-on: buildjet-4vcpu-ubuntu-2204
+#    services:
+#      ollama:
+#        image: ollama/ollama
+#        ports:
+#          - 11434:11434
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.x'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --all-extras
+          poetry add torch
+
+#      - name: Install ollama
+#        run: curl -fsSL https://ollama.com/install.sh | sh
+#      - name: Run ollama
+#        run: |
+#          ollama serve --openai &
+#          ollama pull llama3.2 &
+#          ollama pull avr/sfr-embedding-mistral:latest
+
+      - name: Start Ollama container
+        run: |
+          docker run -d --name ollama -p 11434:11434 ollama/ollama
+          sleep 5
+          docker exec -d ollama bash -c "ollama serve --openai"
+
+      - name: Check Ollama logs
+        run: docker logs ollama
+
+      - name: Wait for Ollama to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:11434/v1/models > /dev/null; then
+              echo "Ollama is ready"
+              exit 0
+            fi
+            echo "Waiting for Ollama... attempt $i"
+            sleep 2
+          done
+          echo "Ollama failed to start"
+          exit 1
+
+      - name: Pull required Ollama models
+        run: |
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "phi4"}'
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
+
+      - name: Call ollama API
+        run: |
+          curl -X POST http://localhost:11434/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "phi4",
+              "stream": false,
+              "messages": [
+                { "role": "system", "content": "You are a helpful assistant." },
+                { "role": "user", "content": "Whatever I say, answer with Yes." }
+              ]
+            }'
+          curl -X POST http://127.0.0.1:11434/v1/embeddings \
+            -H "Content-Type: application/json" \
+             -d '{
+              "model": "avr/sfr-embedding-mistral:latest",
+            "input": "This is a test sentence to generate an embedding."
+            }'
+
+      - name: Dump Docker logs
+        run: |
+          docker ps
+          docker logs $(docker ps --filter "ancestor=ollama/ollama" --format "{{.ID}}")
+
+
+      - name: Run example test
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+          PYTHONFAULTHANDLER: 1
+          LLM_PROVIDER: "ollama"
+          LLM_API_KEY: "ollama"
+          LLM_ENDPOINT: "http://localhost:11434/v1/"
+          LLM_MODEL: "phi4"
+          EMBEDDING_PROVIDER: "ollama"
+          EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/v1/"
+          EMBEDDING_DIMENSIONS: "4096"
+          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
+        run: poetry run python ./examples/python/simple_example.py
