@@ -3,12 +3,15 @@ import os
 import json
 import asyncio
 import datetime
+import logging
 from evals.eval_framework.eval_config import EvalConfig
 from evals.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 from evals.eval_framework.answer_generation.run_question_answering_module import (
     run_question_answering,
 )
 from evals.eval_framework.evaluation.run_evaluation_module import run_evaluation
+
+logger = logging.getLogger(__name__)
 
 
 def read_and_combine_metrics(eval_params: dict) -> dict:
@@ -26,7 +29,7 @@ def read_and_combine_metrics(eval_params: dict) -> dict:
             "aggregate_metrics": aggregate_metrics,
         }
     except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Error reading metrics files: {e}")
+        logger.error(f"Error reading metrics files: {e}")
         return None
 
 
@@ -54,7 +57,7 @@ async def modal_run_eval(eval_params=None):
     if eval_params is None:
         eval_params = EvalConfig().to_dict()
 
-    print(f"Running evaluation with params: {eval_params}")
+    logger.info(f"Running evaluation with params: {eval_params}")
 
     # Run the evaluation pipeline
     await run_corpus_builder(eval_params)
@@ -63,7 +66,7 @@ async def modal_run_eval(eval_params=None):
 
     # Early return if metrics calculation wasn't requested
     if not eval_params.get("evaluating_answers") or not eval_params.get("calculate_metrics"):
-        print(
+        logger.info(
             "Skipping metrics collection as either evaluating_answers or calculate_metrics is False"
         )
         return None
@@ -108,6 +111,6 @@ async def main():
         with open(output_file, "w") as f:
             json.dump(results, f, indent=2)
 
-        print(f"Completed parallel evaluation runs. Results saved to {output_file}")
+        logger.info(f"Completed parallel evaluation runs. Results saved to {output_file}")
     else:
-        print("No metrics were collected from any of the evaluation runs")
+        logger.info("No metrics were collected from any of the evaluation runs")
