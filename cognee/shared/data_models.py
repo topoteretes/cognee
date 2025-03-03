@@ -13,9 +13,7 @@ class Node(BaseModel):
     name: str
     type: str
     description: str
-    properties: Optional[Dict[str, Any]] = Field(
-        None, description="A dictionary of properties associated with the node."
-    )
+    label: str
 
 
 class Edge(BaseModel):
@@ -24,14 +22,13 @@ class Edge(BaseModel):
     source_node_id: str
     target_node_id: str
     relationship_name: str
-    properties: Optional[Dict[str, Any]] = Field(
-        None, description="A dictionary of properties associated with the edge."
-    )
 
 
 class KnowledgeGraph(BaseModel):
     """Knowledge graph."""
 
+    summary: str
+    description: str
     nodes: List[Node] = Field(..., default_factory=list)
     edges: List[Edge] = Field(..., default_factory=list)
 
