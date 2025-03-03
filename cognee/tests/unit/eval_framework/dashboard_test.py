@@ -1,104 +1,88 @@
 import unittest
-from unittest.mock import patch
 import json
 import os
-import tempfile
-from cognee.eval_framework.metrics_dashboard import generate_metrics_dashboard, bootstrap_ci
-import numpy as np
 
 
-class TestGenerateMetricsDashboard(unittest.TestCase):
+from cognee.eval_framework.analysis.dashboard_generator import (
+    create_distribution_plots,
+    create_ci_plot,
+    generate_details_html,
+    get_dashboard_html_template,
+    create_dashboard,
+)
+
+
+class TestDashboardFunctions(unittest.TestCase):
     def setUp(self):
-        self.test_data = [
+        """Set up test data."""
+        self.metrics_data = {
+            "accuracy": [0.8, 0.85, 0.9, 0.95, 1.0],
+            "f1_score": [0.7, 0.75, 0.8, 0.85, 0.9],
+        }
+
+        self.ci_data = {
+            "accuracy": (0.9, 0.85, 0.95),
+            "f1_score": (0.8, 0.75, 0.85),
+        }
+
+        self.detail_data = [
             {
                 "question": "What is AI?",
                 "answer": "Artificial Intelligence",
                 "golden_answer": "Artificial Intelligence",
                 "metrics": {
-                    "accuracy": {"score": 0.9, "reason": "Close enough"},
-                    "relevance": {"score": 0.8},
+                    "accuracy": {"score": 1.0, "reason": "Exact match"},
+                    "f1_score": {"score": 0.9, "reason": "High similarity"},
                 },
-            },
-            {
-                "question": "What is ML?",
-                "answer": "Machine Learning",
-                "golden_answer": "Machine Learning",
-                "metrics": {
-                    "accuracy": {"score": 0.95, "reason": "Exact match"},
-                    "relevance": {"score": 0.85},
-                },
-            },
+            }
         ]
 
-        self.temp_json = tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8")
-        json.dump(self.test_data, self.temp_json)
-        self.temp_json.close()
-        self.output_file = "test_dashboard.html"
+    def test_generate_details_html(self):
+        """Test HTML details generation."""
+        html_output = generate_details_html(self.detail_data)
 
-    def tearDown(self):
-        os.remove(self.temp_json.name)
-        if os.path.exists(self.output_file):
-            os.remove(self.output_file)
+        self.assertIn("<h3>accuracy Details</h3>", html_output[0])
+        self.assertIn("<th>Question</th>", html_output[1])
+        self.assertIn("Exact match", "".join(html_output))
 
-    def test_generate_metrics_dashboard_valid_json(self):
-        """Test if the function processes valid JSON correctly and creates an output file."""
-        result = generate_metrics_dashboard(
-            self.temp_json.name, self.output_file, benchmark="Test Benchmark"
+    def test_get_dashboard_html_template(self):
+        """Test full dashboard HTML generation."""
+        figures = create_distribution_plots(self.metrics_data)
+        ci_plot = create_ci_plot(self.ci_data)
+        dashboard_html = get_dashboard_html_template(
+            figures + [ci_plot], generate_details_html(self.detail_data), "Benchmark 1"
         )
 
-        self.assertTrue(os.path.exists(self.output_file))
-        self.assertEqual(result, self.output_file)
+        self.assertIn("<title>LLM Evaluation Dashboard Benchmark 1</title>", dashboard_html)
+        self.assertIn("<h2>Metrics Distribution</h2>", dashboard_html)
+        self.assertIn("<h2>95% confidence interval for all the metrics</h2>", dashboard_html)
+        self.assertIn("Benchmark 1", dashboard_html)
 
-        with open(self.output_file, "r", encoding="utf-8") as f:
-            html_content = f.read()
-            self.assertIn("<title>LLM Evaluation Dashboard Test Benchmark</title>", html_content)
-            self.assertIn("accuracy", html_content)
-            self.assertIn("relevance", html_content)
+    def test_create_dashboard(self):
+        """Test the full dashboard generation and file creation."""
+        metrics_path = "test_metrics.json"
+        aggregate_metrics_path = "test_aggregate.json"
+        output_file = "test_dashboard.html"
 
-    @patch("cognee.eval_framework.metrics_dashboard.bootstrap_ci", return_value=(0.9, 0.85, 0.95))
-    def test_generate_metrics_dashboard_ci_calculation(self, mock_bootstrap_ci):
-        """Test if bootstrap_ci is called with the correct parameters."""
-        generate_metrics_dashboard(self.temp_json.name, self.output_file)
+        with open(metrics_path, "w") as f:
+            json.dump(self.detail_data, f)
 
-        mock_bootstrap_ci.assert_any_call([0.9, 0.95])  # For accuracy
-        mock_bootstrap_ci.assert_any_call([0.8, 0.85])  # For relevance
-
-    @patch("plotly.graph_objects.Figure.to_html", return_value="<div>Plotly Chart</div>")
-    def test_generate_metrics_dashboard_plotly_charts(self, mock_to_html):
-        """Test if Plotly figures are generated correctly."""
-        generate_metrics_dashboard(self.temp_json.name, self.output_file)
-
-        self.assertGreaterEqual(mock_to_html.call_count, 3)  # 2 metrics + CI chart
-
-        with open(self.output_file, "r", encoding="utf-8") as f:
-            file_content = f.read()
-            self.assertIn(
-                "<div>Plotly Chart</div>",
-                file_content,
-                "The output file does not contain the expected Plotly chart HTML.",
+        with open(aggregate_metrics_path, "w") as f:
+            json.dump(
+                {
+                    metric: {"mean": v[0], "ci_lower": v[1], "ci_upper": v[2]}
+                    for metric, v in self.ci_data.items()
+                },
+                f,
             )
 
+        output = create_dashboard(
+            metrics_path, aggregate_metrics_path, output_file, "Test Benchmark"
+        )
 
-class TestBootstrapCI(unittest.TestCase):
-    def test_bootstrap_ci_basic(self):
-        scores = [1, 2, 3, 4, 5]
-        mean, lower, upper = bootstrap_ci(scores, num_samples=1000, confidence_level=0.95)
+        self.assertEqual(output, output_file)
+        self.assertTrue(os.path.exists(output_file))
 
-        self.assertAlmostEqual(mean, np.mean(scores), places=2)
-        self.assertLessEqual(lower, mean)
-        self.assertGreaterEqual(upper, mean)
-
-    def test_bootstrap_ci_single_value(self):
-        scores = [3, 3, 3, 3, 3]
-        mean, lower, upper = bootstrap_ci(scores, num_samples=1000, confidence_level=0.95)
-
-        self.assertEqual(mean, 3)
-        self.assertEqual(lower, 3)
-        self.assertEqual(upper, 3)
-
-    def test_bootstrap_ci_empty_list(self):
-        mean, lower, upper = bootstrap_ci([])
-
-        self.assertTrue(np.isnan(mean))
-        self.assertTrue(np.isnan(lower))
-        self.assertTrue(np.isnan(upper))
+        os.remove(metrics_path)
+        os.remove(aggregate_metrics_path)
+        os.remove(output_file)
