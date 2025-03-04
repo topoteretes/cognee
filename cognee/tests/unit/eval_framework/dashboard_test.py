@@ -3,7 +3,7 @@ import json
 import os
 
 
-from evals.eval_framework.analysis.dashboard_generator import (
+from cognee.eval_framework.analysis.dashboard_generator import (
     create_distribution_plots,
     create_ci_plot,
     generate_details_html,

@@ -1,8 +1,8 @@
 import pytest
-from evals.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
-from evals.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
-from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
-from evals.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
+from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from cognee.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
+from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
+from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
 from unittest.mock import patch, mock_open
 
 

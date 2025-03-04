@@ -1,13 +1,14 @@
 import logging
 import asyncio
 from cognee.shared.utils import setup_logging
-from evals.eval_framework.eval_config import EvalConfig
+from cognee.eval_framework.eval_config import EvalConfig
 
-from evals.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
-from evals.eval_framework.answer_generation.run_question_answering_module import (
+from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
+from cognee.eval_framework.answer_generation.run_question_answering_module import (
     run_question_answering,
 )
-from evals.eval_framework.evaluation.run_evaluation_module import run_evaluation
+from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
+from cognee.eval_framework.metrics_dashboard import create_dashboard
 
 # Configure logging
 setup_logging(logging.INFO)
@@ -30,6 +31,15 @@ async def main():
 
     # Metrics calculation + dashboard
     await run_evaluation(eval_params)
+
+    if eval_params.get("dashboard"):
+        logging.info("Generating dashboard...")
+        create_dashboard(
+            metrics_path=eval_params["metrics_path"],
+            aggregate_metrics_path=eval_params["aggregate_metrics_path"],
+            output_file=eval_params["dashboard_path"],
+            benchmark=eval_params["benchmark"],
+        )
 
 
 if __name__ == "__main__":
