@@ -4,7 +4,7 @@ import logging
 
 from cognee.api.v1.search import SearchType
 from cognee.shared.utils import setup_logging
-from cognee.modules.retrieval.entity_completion_retriever import EntityCompletionRetriever
+from cognee.modules.retrieval.EntityCompletionRetriever import EntityCompletionRetriever
 from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
     TripletSearchContextProvider,
 )
