@@ -1,0 +1,72 @@
+name: test | test telemetry
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'local'
+
+jobs:
+
+  run_common:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # These labels correspond to:
+        # - ubuntu-22.04: Linux
+        os: [ubuntu-22.04]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.x'
+
+      - name: Install Poetry
+        # https://github.com/snok/install-poetry#running-on-windows
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Add telemetry identifier
+        run: |
+          echo "test-machine" > .anon_id
+
+      - name: Run default basic pipeline
+        env:
+          ENV: 'local'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_library.py
+
+      - name: Clean up disk space
+        run: |
+          sudo rm -rf ~/.cache
+          sudo rm -rf /tmp/*
+          df -h

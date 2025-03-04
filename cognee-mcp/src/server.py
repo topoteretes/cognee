@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import cognee
@@ -92,7 +93,7 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 if name == "cognify":
-                    cognify(
+                    await cognify(
                         text=arguments["text"],
                         graph_model_file=arguments.get("graph_model_file", None),
                         graph_model_name=arguments.get("graph_model_name", None),
@@ -161,6 +162,8 @@ async def main():
     try:
         from mcp.server.stdio import stdio_server
 
+        logger.info("Starting Cognee MCP server...")
+
         async with stdio_server() as (read_stream, write_stream):
             await mcp.run(
                 read_stream=read_stream,
@@ -176,6 +179,7 @@ async def main():
                 raise_exceptions=True,
             )
 
+        logger.info("Cognee MCP server started.")
     except Exception as e:
         logger.error(f"Server failed to start: {str(e)}", exc_info=True)
         raise
@@ -249,6 +253,4 @@ def load_class(model_file, model_name):
 
 if __name__ == "__main__":
     # Initialize and run the server
-    import asyncio
-
     asyncio.run(main())

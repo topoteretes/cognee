@@ -112,8 +112,8 @@ def generate_dataset_name(dataset_name: str) -> str:
     return dataset_name.replace(".", "_").replace(" ", "_")
 
 
-async def get_default_tasks(
-    user: User = None, graph_model: BaseModel = KnowledgeGraph
+async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+    user: User = None, graph_model: BaseModel = KnowledgeGraph, chunk_size=1024, chunker=TextChunker
 ) -> list[Task]:
     if user is None:
         user = await get_default_user()
@@ -126,7 +126,8 @@ async def get_default_tasks(
             Task(
                 extract_chunks_from_documents,
                 max_chunk_tokens=get_max_chunk_tokens(),
-                chunker=TextChunker,
+                chunker=chunker,
+                chunk_size=chunk_size,
             ),  # Extract text chunks based on the document type.
             Task(
                 extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
