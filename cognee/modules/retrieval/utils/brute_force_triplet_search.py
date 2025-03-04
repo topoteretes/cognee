@@ -120,6 +120,9 @@ async def brute_force_search(
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
 
+    if memory_fragment is None:
+        memory_fragment = await get_memory_fragment(properties_to_project)
+
     if collections is None:
         collections = [
             "Entity_name",
@@ -145,10 +148,6 @@ async def brute_force_search(
         )
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
-
-        # Use provided memory fragment or create a new one
-        if memory_fragment is None:
-            memory_fragment = await get_memory_fragment(properties_to_project)
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
         await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
