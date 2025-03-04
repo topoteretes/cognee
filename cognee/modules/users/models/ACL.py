@@ -15,8 +15,8 @@ class ACL(Base):
 
     principal_id = Column(UUID, ForeignKey("principals.id"))
     permission_id = Column(UUID, ForeignKey("permissions.id"))
-    data_id = Column(UUID, ForeignKey("data.id"))
+    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"))
 
     principal = relationship("Principal")
     permission = relationship("Permission")
-    data = relationship("Data")
+    data = relationship("Data", back_populates="acls")
