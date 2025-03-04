@@ -48,8 +48,9 @@ async def run_question_answering(
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
-            answer_resolver=question_answering_engine_options[params["qa_engine"]],
-            system_prompt=system_prompt,
+            answer_resolver=lambda query: question_answering_engine_options[params["qa_engine"]](
+                query, system_prompt
+            ),
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
