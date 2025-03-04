@@ -13,9 +13,6 @@ from .modules.data.operations.get_pipeline_run_metrics import get_pipeline_run_m
 # Pipelines
 from .modules import pipelines
 
-try:
-    import dotenv
+import dotenv
 
-    dotenv.load_dotenv(override=True)
-except ImportError:
-    pass
+dotenv.load_dotenv(override=True)
