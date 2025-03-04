@@ -9,6 +9,7 @@ import base64
 from pathlib import Path
 import os
 
+
 class OllamaAPIAdapter(LLMInterface):
     """Adapter for a Ollama API LLM provider using instructor with an OpenAI backend."""
 
@@ -16,13 +17,21 @@ class OllamaAPIAdapter(LLMInterface):
 
     MAX_RETRIES = 5
 
-    def __init__(self, endpoint: str, api_key: str, model: str, name: str, max_tokens: int, api_version: str = None) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        name: str,
+        max_tokens: int,
+        api_version: str = None,
+    ) -> None:
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_tokens = max_tokens
-        self.api_version= api_version
+        self.api_version = api_version
 
         self.aclient = instructor.from_openai(
             OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
@@ -50,7 +59,6 @@ class OllamaAPIAdapter(LLMInterface):
         )
 
         return response
-
 
     def create_transcript(self, input):
         """Generate a audio transcript from a user query."""
