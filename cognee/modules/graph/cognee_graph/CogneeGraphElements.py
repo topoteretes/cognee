@@ -41,13 +41,12 @@ class Node:
             self.skeleton_neighbours.remove(neighbor)
 
     def add_skeleton_edge(self, edge: "Edge") -> None:
-        if edge not in self.skeleton_edges:
-            self.skeleton_edges.append(edge)
-            # Add neighbor
-            if edge.node1 == self:
-                self.add_skeleton_neighbor(edge.node2)
-            elif edge.node2 == self:
-                self.add_skeleton_neighbor(edge.node1)
+        self.skeleton_edges.append(edge)
+        # Add neighbor
+        if edge.node1 == self:
+            self.add_skeleton_neighbor(edge.node2)
+        elif edge.node2 == self:
+            self.add_skeleton_neighbor(edge.node1)
 
     def remove_skeleton_edge(self, edge: "Edge") -> None:
         if edge in self.skeleton_edges:
