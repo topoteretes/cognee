@@ -1,7 +1,7 @@
 from typing import List
 
 from cognee.modules.retrieval.utils.completion import summarize_text
-from cognee.modules.retrieval.context_providers.triplet_search_context_provider import (
+from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
     TripletSearchContextProvider,
 )
 
