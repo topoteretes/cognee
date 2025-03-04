@@ -1,0 +1,60 @@
+name: Auto Update Dependencies
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # Run every Monday at midnight
+  workflow_dispatch:  # Allow manual triggering
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - dev
+    paths:
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}  # Personal Access Token with repo scope
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-tools
+
+      - name: Update dependencies
+        run: |
+          pip-compile --upgrade requirements.txt
+          
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}  # Personal Access Token with repo scope
+          commit-message: "chore: update dependencies"
+          title: "chore: update dependencies"
+          body: "Automated dependency updates"
+          branch: "chore/dependency-updates"
+          delete-branch: true 
