@@ -61,7 +61,7 @@ litellm = "1.57.2"
 groq = {version = "0.8.0", optional = true}
 langfuse = "^2.32.0"
 pydantic-settings = "^2.2.1"
-anthropic = "^0.26.1"
+anthropic = {version = "^0.26.1", extras = ["vertex"]}
 sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
 fastapi-users = {version = "14.0.0", extras = ["sqlalchemy"]}
 alembic = "^1.13.3"

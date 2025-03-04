@@ -12,6 +12,7 @@ class LLMProvider(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
+    ANTHROPIC_VERTEX = "anthropic_vertex"
     CUSTOM = "custom"
     GEMINI = "gemini"
 
@@ -65,6 +66,20 @@ def get_llm_client():
         from .anthropic.adapter import AnthropicAdapter
 
         return AnthropicAdapter(max_tokens=max_tokens, model=llm_config.llm_model)
+        
+    elif provider == LLMProvider.ANTHROPIC_VERTEX:
+        from .anthropic.vertex_adapter import AnthropicVertexAdapter
+
+        # Check for Google Cloud specific configuration
+        project_id = getattr(llm_config, "gcp_project_id", None)
+        location = getattr(llm_config, "gcp_location", None)
+        
+        return AnthropicVertexAdapter(
+            max_tokens=max_tokens, 
+            model=llm_config.llm_model,
+            project_id=project_id,
+            location=location
+        )
 
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
