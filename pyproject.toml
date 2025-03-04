@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.31"
+version = "0.1.32"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic", "Boris Arzentar"]
 readme = "README.md"
@@ -108,7 +108,7 @@ falkordb = ["falkordb"]
 groq = ["groq"]
 milvus = ["pymilvus"]
 docs = ["unstructured"]
-codegraph = ["fastembed", "tree-sitter", "tree-sitter-python"]
+codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 evals = ["plotly", "gdown"]
 gui = ["pyside6", "qasync"]
 graphiti = ["graphiti-core"]
