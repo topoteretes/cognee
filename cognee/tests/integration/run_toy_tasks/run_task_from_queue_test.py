@@ -1,6 +1,7 @@
 import asyncio
 from queue import Queue
 
+import cognee
 from cognee.modules.pipelines.operations.run_tasks import run_tasks_base
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
@@ -8,6 +9,9 @@ from cognee.infrastructure.databases.relational import create_db_and_tables
 
 
 async def pipeline(data_queue):
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
     async def queue_consumer():
         while not data_queue.is_closed:
             if not data_queue.empty():
