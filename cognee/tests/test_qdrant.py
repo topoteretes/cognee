@@ -3,7 +3,7 @@ import logging
 import pathlib
 import cognee
 from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 
 logging.basicConfig(level=logging.DEBUG)
 

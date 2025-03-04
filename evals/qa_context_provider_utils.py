@@ -1,8 +1,8 @@
 import cognee
 from cognee.modules.search.types import SearchType
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.brute_force_triplet_search import brute_force_triplet_search
-from cognee.tasks.completion.graph_query_completion import retrieved_edges_to_string
+from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from functools import partial
 from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
 import logging
@@ -122,7 +122,8 @@ async def get_context_with_brute_force_triplet_search(instance: dict) -> str:
 
     found_triplets = await brute_force_triplet_search(instance["question"], top_k=5)
 
-    search_results_str = await retrieved_edges_to_string(found_triplets)
+    retriever = GraphCompletionRetriever()
+    search_results_str = await retriever.resolve_edges_to_text(found_triplets)
 
     return search_results_str
 

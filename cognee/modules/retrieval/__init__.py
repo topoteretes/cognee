@@ -1,1 +1,1 @@
-from .code_graph_retrieval import code_graph_retrieval
+from cognee.modules.retrieval.code_retriever import CodeRetriever
