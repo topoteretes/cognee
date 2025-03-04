@@ -12,9 +12,6 @@ from cognee.modules.visualization.cognee_network_visualization import (
 # Pipelines
 from .modules import pipelines
 
-try:
-    import dotenv
+import dotenv
 
-    dotenv.load_dotenv(override=True)
-except ImportError:
-    pass
+dotenv.load_dotenv(override=True)
