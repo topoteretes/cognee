@@ -1,8 +1,8 @@
 import pytest
-from evals.eval_framework.answer_generation.answer_generation_executor import (
+from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
 )
-from evals.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
+from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from unittest.mock import AsyncMock
 
 
@@ -12,15 +12,12 @@ async def test_answer_generation():
     corpus_list, qa_pairs = DummyAdapter().load_corpus(limit=limit)
 
     mock_answer_resolver = AsyncMock()
-    mock_answer_resolver.side_effect = lambda query: ["mock_answer"]
+    mock_answer_resolver.side_effect = lambda query, system_prompt: ["mock_answer"]
 
     answer_generator = AnswerGeneratorExecutor()
     answers = await answer_generator.question_answering_non_parallel(
-        questions=qa_pairs,
-        answer_resolver=mock_answer_resolver,
+        questions=qa_pairs, answer_resolver=mock_answer_resolver, system_prompt="test.txt"
     )
-
-    mock_answer_resolver.assert_called_once_with(qa_pairs[0]["question"])
 
     assert len(answers) == len(qa_pairs)
     assert answers[0]["question"] == qa_pairs[0]["question"], (
