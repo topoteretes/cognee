@@ -4,15 +4,15 @@ import sys
 from unittest.mock import patch, MagicMock
 import unittest
 import numpy as np
-from evals.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
 
 
 with patch.dict(
     sys.modules,
     {"deepeval": MagicMock(), "deepeval.test_case": MagicMock()},
 ):
-    from evals.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
-    from evals.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
+    from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
+    from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 
 
 class MockTestCase:

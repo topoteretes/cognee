@@ -6,7 +6,7 @@ import zipfile
 
 import gdown
 
-from evals.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
 class MusiqueQAAdapter(BaseBenchmarkAdapter):
