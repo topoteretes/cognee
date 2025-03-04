@@ -2,7 +2,7 @@ import cognee
 from typing import List, Dict, Callable, Awaitable
 from cognee.api.v1.search import SearchType
 
-question_answering_engine_options: Dict[str, Callable[[str], Awaitable[List[str]]]] = {
+question_answering_engine_options: Dict[str, Callable[[str, str], Awaitable[List[str]]]] = {
     "cognee_graph_completion": lambda query, system_prompt_path: cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=query,
@@ -24,14 +24,13 @@ class AnswerGeneratorExecutor:
         self,
         questions: List[Dict[str, str]],
         answer_resolver: Callable[[str], Awaitable[List[str]]],
-        system_prompt: str = "answer_simple_question.txt",
     ) -> List[Dict[str, str]]:
         answers = []
         for instance in questions:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            search_results = await answer_resolver(query_text, system_prompt)
+            search_results = await answer_resolver(query_text)
 
             answers.append(
                 {
