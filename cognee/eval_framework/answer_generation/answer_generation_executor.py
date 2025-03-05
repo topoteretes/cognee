@@ -1,21 +1,17 @@
-import cognee
-from typing import List, Dict, Callable, Awaitable
-from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
-from cognee.modules.retrieval.insights_retriever import InsightsRetriever
-from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+from typing import List, Dict
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
+
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 
 retriever_options: Dict[str, BaseRetriever] = {
     "cognee_graph_completion": GraphCompletionRetriever,
     "cognee_completion": CompletionRetriever,
-    "cognee_summaries": SummariesRetriever,
-    "cognee_insights": InsightsRetriever,
-    "cognee_chunks": ChunksRetriever,
-    "cognee_code": CodeRetriever,
+    "graph_summary_completion": GraphSummaryCompletionRetriever,
 }
 
 
@@ -23,9 +19,8 @@ class AnswerGeneratorExecutor:
     async def question_answering_non_parallel(
         self,
         questions: List[Dict[str, str]],
-        retriever_cls: BaseRetriever,
+        retriever: BaseRetriever,
     ) -> List[Dict[str, str]]:
-        retriever = retriever_cls()
         answers = []
         for instance in questions:
             query_text = instance["question"]
