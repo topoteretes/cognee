@@ -17,7 +17,12 @@ class CustomJWTStrategy(JWTStrategy):
     async def write_token(self, user: str, lifetime_seconds: Optional[int] = None) -> str:
         # JoinLoad tenant and role information to user object
         user = await get_user(user.id)
-        data = {"user_id": str(user.id), "tenant_id": str(user.tenant.id), "roles": user.roles}
+
+        if user.tenant:
+            data = {"user_id": str(user.id), "tenant_id": str(user.tenant.id), "roles": user.roles}
+        else:
+            # The default tenant is None
+            data = {"user_id": str(user.id), "tenant_id": None, "roles": user.roles}
         return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
 
