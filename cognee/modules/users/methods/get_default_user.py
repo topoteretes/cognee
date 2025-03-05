@@ -23,11 +23,7 @@ async def get_default_user():
         if user is None:
             return await create_default_user()
 
-        # Get tenant from user
-        result = await session.execute(select(Tenant).where(Tenant.id == user.tenant_id))
-        tenant = result.scalars().first()
-
         # We return a SimpleNamespace to have the same user type as our SaaS
         # SimpleNamespace is just a dictionary which can be accessed through attributes
-        ret_val = SimpleNamespace(id=user.id, tenant=tenant.name, roles=[])
+        ret_val = SimpleNamespace(id=user.id, tenant_id=user.tenant_id, roles=[])
         return ret_val

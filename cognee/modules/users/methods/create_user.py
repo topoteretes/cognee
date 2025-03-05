@@ -1,10 +1,10 @@
 from fastapi_users.exceptions import UserAlreadyExists
 from cognee.infrastructure.databases.relational import get_relational_engine
-from ..get_user_manager import get_user_manager_context
-from ..get_user_db import get_user_db_context
-from ..models.User import UserCreate
-from ..models.Tenant import Tenant
-from ..models.Role import Role
+from cognee.modules.users.get_user_manager import get_user_manager_context
+from cognee.modules.users.get_user_db import get_user_db_context
+from cognee.modules.users.models.User import UserCreate
+from cognee.modules.users.models.Tenant import Tenant
+from cognee.modules.users.models.Role import Role
 
 from sqlalchemy import select
 from typing import Optional, List

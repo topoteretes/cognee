@@ -5,11 +5,11 @@ import datetime
 SECRET_KEY = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
 
 
-def create_jwt(user_id: str, tenant: str, role: str):
+def create_jwt(user_id: str, tenant: str, roles: list[str]):
     payload = {
         "user_id": user_id,
-        "tenant": tenant,
-        "role": role,
+        "tenant_id": tenant,
+        "roles": roles,
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1),  # 1 hour expiry
     }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
@@ -17,5 +17,5 @@ def create_jwt(user_id: str, tenant: str, role: str):
 
 if __name__ == "__main__":
     # Example token generation
-    token = create_jwt("6763554c-91bd-432c-aba8-d42cd72ed659", "tenant_456", "admin")
+    token = create_jwt("6763554c-91bd-432c-aba8-d42cd72ed659", "tenant_456", ["admin"])
     print(token)

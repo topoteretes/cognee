@@ -10,10 +10,14 @@ from fastapi_users.authentication import (
 from datetime import datetime, timedelta
 from typing import Optional
 
+from cognee.modules.users.methods import get_user
+
 
 class CustomJWTStrategy(JWTStrategy):
     async def write_token(self, user: str, lifetime_seconds: Optional[int] = None) -> str:
-        data = {"user_id": str(user.id), "tenant": user.tenant, "roles": user.roles}
+        # JoinLoad tenant and role information to user object
+        user = await get_user(user.id)
+        data = {"user_id": str(user.id), "tenant_id": str(user.tenant.id), "roles": user.roles}
         return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
 

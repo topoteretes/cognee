@@ -13,15 +13,15 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 
     id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
 
+    # Foreign key to Tenant (Many-to-One relationship)
+    tenant_id = Column(UUID, ForeignKey("tenants.id"), nullable=False)
+
     # Many-to-Many Relationship with Roles
     roles: Mapped[list["Role"]] = relationship(
         "Role",
         secondary=UserRole.__tablename__,
         back_populates="users",
     )
-
-    # Foreign key to Tenant (Many-to-One relationship)
-    tenant_id = Column(UUID, ForeignKey("tenants.id"), nullable=False)
 
     # Relationship to Tenant
     tenant = relationship(

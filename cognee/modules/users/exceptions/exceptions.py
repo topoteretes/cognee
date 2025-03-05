@@ -2,13 +2,13 @@ from cognee.exceptions import CogneeApiError
 from fastapi import status
 
 
-class GroupNotFoundError(CogneeApiError):
+class RoleNotFoundError(CogneeApiError):
     """User group not found"""
 
     def __init__(
         self,
-        message: str = "User group not found.",
-        name: str = "GroupNotFoundError",
+        message: str = "User role not found.",
+        name: str = "RoleNotFoundError",
         status_code=status.HTTP_404_NOT_FOUND,
     ):
         super().__init__(message, name, status_code)
