@@ -1,5 +1,20 @@
 FROM python:3.11-slim
 
+# Define Poetry extras to install
+ARG POETRY_EXTRAS="\
+# Storage & Databases \
+filesystem postgres weaviate qdrant neo4j falkordb milvus \
+# Notebooks & Interactive Environments \
+notebook \
+# LLM & AI Frameworks \
+langchain llama-index gemini huggingface ollama mistral groq \
+# Evaluation & Monitoring \
+deepeval evals posthog \
+# Graph Processing & Code Analysis \
+codegraph graphiti \
+# Document Processing \
+docs"
+
 # Set build argument
 ARG DEBUG
 
@@ -25,7 +40,7 @@ RUN pip install poetry
 RUN poetry config virtualenvs.create false
 
 # Install the dependencies
-RUN poetry install --all-extras --no-root --no-dev
+RUN poetry install --extras "${POETRY_EXTRAS}" --no-root --without dev
 
 
 # Set the PYTHONPATH environment variable to include the /app directory
