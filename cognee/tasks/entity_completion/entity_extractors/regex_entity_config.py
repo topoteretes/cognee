@@ -29,37 +29,44 @@ class RegexEntityConfig:
                 f"Missing required fields in entity configuration: {', '.join(missing_fields)}"
             )
 
+    def _compile_regex(self, pattern: str, entity_name: str) -> Pattern:
+        """Compile a regex pattern safely, with error handling."""
+        try:
+            return re.compile(pattern)
+        except re.error as e:
+            logger.error(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
+            raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
+
     def _load_config(self) -> None:
         """Load and process the configuration from the JSON file."""
         try:
             with open(self.config_path, "r") as f:
                 config_list = json.load(f)
-
-            for config in config_list:
-                self._validate_config_fields(config)
-
-                entity_name = config["entity_name"]
-                entity_type = EntityType(name=entity_name, description=config["entity_description"])
-
-                try:
-                    compiled_pattern = re.compile(config["regex"])
-                except re.error as e:
-                    raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
-
-                self.entity_configs[entity_name] = {
-                    "entity_type": entity_type,
-                    "regex": config["regex"],
-                    "compiled_pattern": compiled_pattern,
-                    "description_template": config["description_template"],
-                }
-
-            logger.info(
-                f"Loaded {len(self.entity_configs)} entity configurations from {self.config_path}"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to load entity configuration from {self.config_path}: {str(e)}")
+        except FileNotFoundError:
+            logger.error(f"Config file not found: {self.config_path}")
             raise
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in config file {self.config_path}: {str(e)}")
+            raise ValueError(f"Invalid JSON in config file: {str(e)}")
+
+        for config in config_list:
+            self._validate_config_fields(config)
+            entity_name = config["entity_name"]
+
+            entity_type = EntityType(name=entity_name, description=config["entity_description"])
+
+            compiled_pattern = self._compile_regex(config["regex"], entity_name)
+
+            self.entity_configs[entity_name] = {
+                "entity_type": entity_type,
+                "regex": config["regex"],
+                "compiled_pattern": compiled_pattern,
+                "description_template": config["description_template"],
+            }
+
+        logger.info(
+            f"Loaded {len(self.entity_configs)} entity configurations from {self.config_path}"
+        )
 
     def get_entity_names(self) -> List[str]:
         """Return a list of all configured entity names."""
