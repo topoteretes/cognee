@@ -76,11 +76,14 @@ class Neo4jAdapter(GraphDBInterface):
             """MERGE (node {id: $node_id})
                 ON CREATE SET node += $properties, node.updated_at = timestamp()
                 ON MATCH SET node += $properties, node.updated_at = timestamp()
-                RETURN ID(node) AS internal_id, node.id AS nodeId"""
+                WITH node, $node_label AS label
+                CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
+                RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
         )
 
         params = {
             "node_id": str(node.id),
+            "node_label": type(node).__name__,
             "properties": serialized_properties,
         }
 
@@ -92,7 +95,7 @@ class Neo4jAdapter(GraphDBInterface):
         MERGE (n {id: node.node_id})
         ON CREATE SET n += node.properties, n.updated_at = timestamp()
         ON MATCH SET n += node.properties, n.updated_at = timestamp()
-        WITH n, node.node_id AS label
+        WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
         """
@@ -100,6 +103,7 @@ class Neo4jAdapter(GraphDBInterface):
         nodes = [
             {
                 "node_id": str(node.id),
+                "label": type(node).__name__,
                 "properties": self.serialize_properties(node.model_dump()),
             }
             for node in nodes
