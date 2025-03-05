@@ -3,7 +3,7 @@ import json
 from typing import List
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
-    question_answering_engine_options,
+    retriever_options,
 )
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
@@ -48,9 +48,7 @@ async def run_question_answering(
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
-            answer_resolver=lambda query: question_answering_engine_options[params["qa_engine"]](
-                query, system_prompt
-            ),
+            retriever=retriever_options[params["qa_engine"]](system_prompt_path=system_prompt),
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
