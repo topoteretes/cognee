@@ -1,9 +1,9 @@
 from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
-from evals.eval_framework.eval_config import EvalConfig
-from evals.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
-from evals.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
-from evals.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
+from cognee.eval_framework.eval_config import EvalConfig
+from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
+from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
+from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 from typing import Any, Dict, List
 from deepeval.metrics import ContextualRelevancyMetric
 

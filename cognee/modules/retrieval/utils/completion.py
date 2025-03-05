@@ -21,3 +21,18 @@ async def generate_completion(
         system_prompt=system_prompt,
         response_model=str,
     )
+
+
+async def summarize_text(
+    text: str,
+    prompt_path: str = "summarize_search_results.txt",
+) -> str:
+    """Summarizes text using LLM with the specified prompt."""
+    system_prompt = read_query_prompt(prompt_path)
+    llm_client = get_llm_client()
+
+    return await llm_client.acreate_structured_output(
+        text_input=text,
+        system_prompt=system_prompt,
+        response_model=str,
+    )

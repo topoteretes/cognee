@@ -1,8 +1,9 @@
 import logging
 import json
-from evals.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
-from evals.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
-from evals.eval_framework.analysis.dashboard_generator import create_dashboard
+from typing import List
+from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
+from cognee.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
+from cognee.eval_framework.analysis.dashboard_generator import create_dashboard
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
@@ -53,13 +54,14 @@ async def execute_evaluation(params: dict) -> None:
 
     await create_and_insert_metrics_table(metrics)
     logging.info("Evaluation completed")
+    return metrics
 
 
-async def run_evaluation(params: dict) -> None:
+async def run_evaluation(params: dict) -> List[dict]:
     """Run each step of the evaluation pipeline based on configuration flags."""
     # Step 1: Evaluate answers if requested
     if params.get("evaluating_answers"):
-        await execute_evaluation(params)
+        metrics = await execute_evaluation(params)
     else:
         logging.info("Skipping evaluation as evaluating_answers is False")
 
@@ -70,18 +72,7 @@ async def run_evaluation(params: dict) -> None:
             json_data=params["metrics_path"], aggregate_output_path=params["aggregate_metrics_path"]
         )
         logging.info("Metrics calculation completed")
+        return metrics
     else:
         logging.info("Skipping metrics calculation as calculate_metrics is False")
-
-    # Step 3: Generate dashboard if requested
-    if params.get("dashboard"):
-        logging.info("Generating dashboard...")
-        create_dashboard(
-            metrics_path=params["metrics_path"],
-            aggregate_metrics_path=params["aggregate_metrics_path"],
-            output_file=params["dashboard_path"],
-            benchmark=params["benchmark"],
-        )
-        logging.info(f"Dashboard generated at {params['dashboard_path']}")
-    else:
-        logging.info("Skipping dashboard generation as dashboard is False")
+        return []
