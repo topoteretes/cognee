@@ -36,10 +36,9 @@ jobs:
           token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}  # Personal Access Token with repo scope
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
