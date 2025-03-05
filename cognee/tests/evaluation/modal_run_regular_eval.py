@@ -1,6 +1,5 @@
 from cognee.eval_framework.modal_run_eval import read_and_combine_metrics, image
 from cognee.eval_framework.eval_config import EvalConfig
-import datetime
 import modal
 import logging
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
@@ -40,7 +39,6 @@ async def modal_run_eval(eval_params=None):
 
 @app.local_entrypoint()
 async def main():
-    today = datetime.date.today()
     config = EvalConfig(
         task_getter_type="Default",
         benchmark="HotPotQA",
@@ -54,7 +52,7 @@ async def main():
     )
 
     results = await modal_run_eval.remote.aio(config.to_dict())
-    output_file = f"results_{today}.json"
+    output_file = "results.json"
 
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)
