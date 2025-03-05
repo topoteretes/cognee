@@ -4,6 +4,7 @@ import asyncio
 from neo4j import exceptions
 
 from cognee import prune
+
 # from cognee import visualize_graph
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup, DataPoint
@@ -15,7 +16,9 @@ from cognee.shared.utils import render_graph
 class Products(DataPoint):
     name: str = "Products"
 
+
 products_aggregator_node = Products()
+
 
 class Product(DataPoint):
     id: str
@@ -25,10 +28,13 @@ class Product(DataPoint):
     colors: list[str]
     is_type: Products = products_aggregator_node
 
+
 class Preferences(DataPoint):
     name: str = "Preferences"
 
+
 preferences_aggregator_node = Preferences()
+
 
 class Preference(DataPoint):
     id: str
@@ -36,10 +42,13 @@ class Preference(DataPoint):
     value: str
     is_type: Preferences = preferences_aggregator_node
 
+
 class Customers(DataPoint):
     name: str = "Customers"
 
+
 customers_aggregator_node = Customers()
+
 
 class Customer(DataPoint):
     id: str
@@ -115,7 +124,8 @@ async def main():
 
     graph_engine = await get_graph_engine()
 
-    products_results = await graph_engine.query("""
+    products_results = await graph_engine.query(
+        """
         // Step 1: Use new customers's preferences from input
         UNWIND $preferences AS pref_input
 
@@ -136,17 +146,19 @@ async def main():
         RETURN product, count(*) AS recommendation_score
           ORDER BY recommendation_score DESC
           LIMIT 10
-    """, {
-        "preferences": ["White", "Navy Blue", "Regular Sneakers"],
-    })
+    """,
+        {
+            "preferences": ["White", "Navy Blue", "Regular Sneakers"],
+        },
+    )
 
     print("Top 10 recommended products:")
     for result in products_results:
         print(f"{result['product']['id']}: {result['product']['name']}")
 
-
     try:
-        await graph_engine.query("""
+        await graph_engine.query(
+            """
             // Match the customer and their stored shoe size preference
             MATCH (customer:Customer {id: $customer_id})
             OPTIONAL MATCH (customer)-[:has_preference]->(preference:Preference {name: 'ShoeSize'})
@@ -165,13 +177,14 @@ async def main():
             // If no conflict, continue with the update or further processing
             // ...
             RETURN customer
-        """, {
-            "customer_id": "customer_1",
-            "new_size": "42",
-        })
+        """,
+            {
+                "customer_id": "customer_1",
+                "new_size": "42",
+            },
+        )
     except exceptions.ClientError as error:
         print(f"Anomaly detected: {str(error.message)}")
-
 
     # # Or use our simple graph preview
     # graph_file_path = str(
