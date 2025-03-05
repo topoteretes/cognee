@@ -1,4 +1,4 @@
-from sqlalchemy.orm import relationship, Mapped
+from sqlalchemy.orm import relationship
 from sqlalchemy import Column, String, ForeignKey, UUID
 from .Principal import Principal
 from .User import User
