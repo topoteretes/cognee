@@ -96,16 +96,44 @@ async def test_extract_money(regex_extractor):
 
 @pytest.mark.asyncio
 async def test_extract_person_names(regex_extractor):
-    """Test extraction of person names."""
-    text = "John Smith and Sarah Johnson will be attending the conference."
+    """Test extraction of person names with various formats."""
+    text = """
+    Standard names: John Smith and Sarah Johnson will be attending.
+    Names with titles: Dr. Jane Wilson and Prof Michael Brown will present.
+    Names with middle initials: James T. Kirk and William H Gates are invited.
+    Names with prefixes: Jean de la Fontaine and Ludwig van Beethoven are famous.
+
+    Single names like Mary or Robert should not be extracted as they could be
+    confused with regular capitalized words at the beginning of sentences.
+    """
     entities = await regex_extractor.extract_entities(text)
 
     # Filter only PERSON entities
     person_entities = [e for e in entities if e.is_a.name == "PERSON"]
+    entity_names = [e.name for e in person_entities]
 
-    assert len(person_entities) == 2
-    assert "John Smith" in [e.name for e in person_entities]
-    assert "Sarah Johnson" in [e.name for e in person_entities]
+    # Standard two-part names
+    assert "John Smith" in entity_names
+    assert "Sarah Johnson" in entity_names
+
+    # Names with titles
+    assert "Dr. Jane Wilson" in entity_names
+    assert "Prof Michael Brown" in entity_names
+
+    # Names with middle initials
+    assert "James T. Kirk" in entity_names
+    assert "William H Gates" in entity_names
+
+    # Names with prefixes
+    assert "Jean de la Fontaine" in entity_names
+    assert "Ludwig van Beethoven" in entity_names
+
+    # Verify single names are not extracted
+    assert "Mary" not in entity_names
+    assert "Robert" not in entity_names
+
+    # Verify we have the expected number of names
+    assert len(person_entities) == 8
 
 
 @pytest.mark.asyncio
@@ -138,16 +166,38 @@ async def test_extract_mentions(regex_extractor):
 
 @pytest.mark.asyncio
 async def test_extract_ip_addresses(regex_extractor):
-    """Test extraction of IP addresses."""
-    text = "The server IPs are 192.168.1.1 and 10.0.0.1."
+    """Test extraction of IP addresses with proper validation of octet ranges."""
+    # Test with valid IP addresses
+    text = "The server IPs are 192.168.1.1, 10.0.0.1, 255.255.255.255, and 0.0.0.0."
     entities = await regex_extractor.extract_entities(text)
 
     # Filter only IP_ADDRESS entities
     ip_entities = [e for e in entities if e.is_a.name == "IP_ADDRESS"]
 
-    assert len(ip_entities) == 2
+    assert len(ip_entities) == 4
     assert "192.168.1.1" in [e.name for e in ip_entities]
     assert "10.0.0.1" in [e.name for e in ip_entities]
+    assert "255.255.255.255" in [e.name for e in ip_entities]
+    assert "0.0.0.0" in [e.name for e in ip_entities]
+
+
+@pytest.mark.asyncio
+async def test_invalid_ip_addresses(regex_extractor):
+    """Test that invalid IP addresses are not extracted."""
+    # Test with invalid IP addresses
+    text = "Invalid IPs: 999.999.999.999, 256.256.256.256, 1.2.3.4.5, 01.102.103.104"
+    entities = await regex_extractor.extract_entities(text)
+
+    # Filter only IP_ADDRESS entities
+    ip_entities = [e for e in entities if e.is_a.name == "IP_ADDRESS"]
+
+    # None of these should be extracted as valid IPs
+    assert len(ip_entities) == 1
+    assert "999.999.999.999" not in [e.name for e in ip_entities]
+    assert "256.256.256.256" not in [e.name for e in ip_entities]
+    assert "1.2.3.4.5" not in [e.name for e in ip_entities]
+    assert "01.102.103.104" not in [e.name for e in ip_entities]
+    assert "1.102.103.104" in [e.name for e in ip_entities]
 
 
 @pytest.mark.asyncio
