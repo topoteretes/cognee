@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.modules.engine.models import Entity
+from cognee.root_dir import get_absolute_path
 from cognee.tasks.entity_completion.entity_extractors.regex_entity_config import RegexEntityConfig
 
 logger = logging.getLogger("regex_entity_extractor")
@@ -13,6 +14,11 @@ class RegexEntityExtractor(BaseEntityExtractor):
 
     def __init__(self, config_path: Optional[str] = None):
         """Initialize the regex entity extractor with an optional custom config path."""
+        if config_path is None:
+            config_path = get_absolute_path(
+                "tasks/entity_completion/entity_extractors/regex_entity_config.json"
+            )
+
         self.config = RegexEntityConfig(config_path)
         logger.info(
             f"Initialized RegexEntityExtractor with {len(self.config.get_entity_names())} entity types"

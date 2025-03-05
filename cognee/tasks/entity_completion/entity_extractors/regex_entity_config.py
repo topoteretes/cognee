@@ -5,6 +5,7 @@ import re
 from typing import Dict, List, Pattern, Any
 
 from cognee.modules.engine.models.EntityType import EntityType
+from cognee.root_dir import get_absolute_path
 
 logger = logging.getLogger("regex_entity_config")
 
@@ -12,16 +13,21 @@ logger = logging.getLogger("regex_entity_config")
 class RegexEntityConfig:
     """Class to load and process regex entity extraction configuration."""
 
-    def __init__(self, config_path: str = None):
-        """Initialize the regex entity configuration with an optional custom config path."""
-        if config_path is None:
-            # Use default path relative to this file
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            config_path = os.path.join(current_dir, "regex_entity_config.json")
-
+    def __init__(self, config_path: str):
+        """Initialize the regex entity configuration with the config path."""
         self.config_path = config_path
         self.entity_configs = {}
         self._load_config()
+
+    def _validate_config_fields(self, config: Dict[str, Any]) -> None:
+        """Validate that all required fields are present in the configuration."""
+        required_fields = ["entity_name", "entity_description", "regex", "description_template"]
+        missing_fields = [field for field in required_fields if field not in config]
+
+        if missing_fields:
+            raise ValueError(
+                f"Missing required fields in entity configuration: {', '.join(missing_fields)}"
+            )
 
     def _load_config(self) -> None:
         """Load and process the configuration from the JSON file."""
@@ -29,17 +35,17 @@ class RegexEntityConfig:
             with open(self.config_path, "r") as f:
                 config_list = json.load(f)
 
-            # Process each entity configuration
             for config in config_list:
-                entity_name = config["entity_name"]
+                self._validate_config_fields(config)
 
-                # Create EntityType instance
+                entity_name = config["entity_name"]
                 entity_type = EntityType(name=entity_name, description=config["entity_description"])
 
-                # Compile regex pattern
-                compiled_pattern = re.compile(config["regex"])
+                try:
+                    compiled_pattern = re.compile(config["regex"])
+                except re.error as e:
+                    raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
 
-                # Store in dictionary
                 self.entity_configs[entity_name] = {
                     "entity_type": entity_type,
                     "regex": config["regex"],
@@ -56,24 +62,23 @@ class RegexEntityConfig:
             raise
 
     def get_entity_names(self) -> List[str]:
-        """Get a list of all entity names in the configuration."""
+        """Return a list of all configured entity names."""
         return list(self.entity_configs.keys())
 
     def get_entity_config(self, entity_name: str) -> Dict[str, Any]:
-        """Get the configuration dictionary for a specific entity name."""
+        """Get the configuration for a specific entity type."""
         if entity_name not in self.entity_configs:
-            raise KeyError(f"Entity name '{entity_name}' not found in configuration")
-
+            raise KeyError(f"Unknown entity type: {entity_name}")
         return self.entity_configs[entity_name]
 
     def get_entity_type(self, entity_name: str) -> EntityType:
-        """Get the EntityType instance for a specific entity name."""
+        """Get the EntityType object for a specific entity type."""
         return self.get_entity_config(entity_name)["entity_type"]
 
     def get_compiled_pattern(self, entity_name: str) -> Pattern:
-        """Get the compiled regex pattern for a specific entity name."""
+        """Get the compiled regex pattern for a specific entity type."""
         return self.get_entity_config(entity_name)["compiled_pattern"]
 
     def get_description_template(self, entity_name: str) -> str:
-        """Get the description template for a specific entity name."""
+        """Get the description template for a specific entity type."""
         return self.get_entity_config(entity_name)["description_template"]
