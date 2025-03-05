@@ -1,5 +1,6 @@
 from uuid import UUID as uuid_UUID
-from sqlalchemy import ForeignKey, Column, UUID, String
+from typing import Optional
+from sqlalchemy import ForeignKey, Column, UUID
 from sqlalchemy.orm import relationship, Mapped
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from .Principal import Principal
@@ -14,7 +15,7 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
     id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
 
     # Foreign key to Tenant (Many-to-One relationship)
-    tenant_id = Column(UUID, ForeignKey("tenants.id"), nullable=False)
+    tenant_id = Column(UUID, ForeignKey("tenants.id"))
 
     # Many-to-Many Relationship with Roles
     roles: Mapped[list["Role"]] = relationship(
@@ -39,11 +40,11 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 
 
 class UserRead(schemas.BaseUser[uuid_UUID]):
-    pass
+    tenant_id: Optional[uuid_UUID] = None
 
 
 class UserCreate(schemas.BaseUserCreate):
-    tenant_id: uuid_UUID
+    tenant_id: Optional[uuid_UUID] = None
 
 
 class UserUpdate(schemas.BaseUserUpdate):

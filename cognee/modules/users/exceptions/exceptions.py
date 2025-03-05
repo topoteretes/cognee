@@ -14,6 +14,18 @@ class RoleNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
+class TenantNotFoundError(CogneeApiError):
+    """User group not found"""
+
+    def __init__(
+        self,
+        message: str = "Tenant not found.",
+        name: str = "TenantNotFoundError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class UserNotFoundError(CogneeApiError):
     """User not found"""
 
