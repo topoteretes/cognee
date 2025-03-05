@@ -15,13 +15,10 @@ async def test_answer_generation():
     mock_retriever.get_context = AsyncMock(return_value="Mocked retrieval context")
     mock_retriever.get_completion = AsyncMock(return_value=["Mocked answer"])
 
-    def mock_retriever_cls():
-        return mock_retriever
-
     answer_generator = AnswerGeneratorExecutor()
     answers = await answer_generator.question_answering_non_parallel(
         questions=qa_pairs,
-        retriever_cls=mock_retriever_cls,
+        retriever=mock_retriever,
     )
 
     mock_retriever.get_context.assert_any_await(qa_pairs[0]["question"])
