@@ -47,7 +47,7 @@ image = (
         }
     )
     .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
-    .pip_install("protobuf", "h2", "deepeval", "gdown", "plotly")
+    .pip_install("protobuf", "h2", "deepeval", "gdown", "plotly", "unstructured")
 )
 
 
