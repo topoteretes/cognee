@@ -1,5 +1,20 @@
 FROM python:3.11-slim
 
+# Define Poetry extras to install
+ARG POETRY_EXTRAS="\
+# Storage & Databases \
+filesystem postgres weaviate qdrant neo4j falkordb milvus \
+# Notebooks & Interactive Environments \
+notebook \
+# LLM & AI Frameworks \
+langchain llama-index gemini huggingface ollama mistral groq \
+# Evaluation & Monitoring \
+deepeval evals posthog \
+# Graph Processing & Code Analysis \
+codegraph graphiti \
+# Document Processing \
+docs"
+
 # Set build argument
 ARG DEBUG
 
@@ -14,19 +29,16 @@ RUN apt-get install -y \
   gcc \
   libpq-dev
 
-
 WORKDIR /app
 COPY pyproject.toml poetry.lock /app/
 
-
 RUN pip install poetry
 
-# Don't create virtualenv since docker is already isolated
+# Don't create virtualenv since Docker is already isolated
 RUN poetry config virtualenvs.create false
 
-# Install the dependencies
-RUN poetry install --all-extras --no-root --without dev
-
+# Install the dependencies using the defined extras
+RUN poetry install --extras "${POETRY_EXTRAS}" --no-root --without dev
 
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
