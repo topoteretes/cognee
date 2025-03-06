@@ -36,14 +36,14 @@ jobs:
           token: ${{ secrets.PAT_FOR_CROSS_REPOS_CICD_TRIGGERING }}  # Personal Access Token with repo scope
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.12'
 
       - name: Install Poetry
         run: |
           pip install --upgrade pip
-          pip install "poetry>=1.2"
+          pip install "poetry>=2.0.0"
 
       - name: Update dependencies with Poetry
         run: |
