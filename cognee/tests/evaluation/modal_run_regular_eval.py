@@ -9,6 +9,7 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 import json
 
+
 logger = logging.getLogger(__name__)
 
 app = modal.App("cognee-regular-eval")
@@ -52,9 +53,9 @@ async def main():
     )
 
     results = await modal_run_eval.remote.aio(config.to_dict())
-    output_file = "results.json"
 
+    output_file = "metrics_output.json"
     with open(output_file, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=4)
 
     logger.info(f"Completed parallel evaluation runs. Results saved to {output_file}")
