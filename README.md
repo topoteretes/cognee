@@ -159,11 +159,6 @@ What is AI memory:
 
 [<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
 
-cognee in 4 minutes: 
-
-
-[<img src="https://img.youtube.com/vi/1bezuvLwJmw/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=1bezuvLwJmw "cognee in 4 minutes: 55")
-
 
 
 ## Contributing
