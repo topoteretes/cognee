@@ -22,6 +22,11 @@
 Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
 More on [use-cases](https://docs.cognee.ai/use_cases).
+
+<div style="text-align: center">
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
+</div>
+
 </div>
 
 
@@ -41,9 +46,6 @@ Get started quickly with a Google Colab  <a href="https://colab.research.google.
 Confused? Ask questions on our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a>.
 
 
-<div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
-</div>
 
 
 ## 📦 Installation
