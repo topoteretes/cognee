@@ -12,6 +12,8 @@ class LLMProvider(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
+    ANTHROPIC_VERTEX = "anthropic_vertex"
+    ANTHROPIC_BEDROCK = "anthropic_bedrock"
     CUSTOM = "custom"
     GEMINI = "gemini"
 
@@ -65,6 +67,40 @@ def get_llm_client():
         from .anthropic.adapter import AnthropicAdapter
 
         return AnthropicAdapter(max_tokens=max_tokens, model=llm_config.llm_model)
+        
+    elif provider == LLMProvider.ANTHROPIC_VERTEX:
+        from .anthropic.vertex_adapter import AnthropicVertexAdapter
+
+        # Check for Google Cloud specific configuration
+        project_id = getattr(llm_config, "gcp_project_id", None)
+        location = getattr(llm_config, "gcp_location", None)
+        
+        return AnthropicVertexAdapter(
+            max_tokens=max_tokens, 
+            model=llm_config.llm_model,
+            project_id=project_id,
+            location=location
+        )
+        
+    elif provider == LLMProvider.ANTHROPIC_BEDROCK:
+        from .anthropic.bedrock_adapter import AnthropicBedrockAdapter
+
+        # Check for AWS specific configuration
+        aws_profile = getattr(llm_config, "aws_profile", None)
+        aws_region = getattr(llm_config, "aws_region", None)
+        aws_access_key = getattr(llm_config, "aws_access_key", None)
+        aws_secret_key = getattr(llm_config, "aws_secret_key", None)
+        aws_session_token = getattr(llm_config, "aws_session_token", None)
+        
+        return AnthropicBedrockAdapter(
+            max_tokens=max_tokens, 
+            model=llm_config.llm_model,
+            aws_profile=aws_profile,
+            aws_region=aws_region,
+            aws_access_key=aws_access_key,
+            aws_secret_key=aws_secret_key,
+            aws_session_token=aws_session_token
+        )
 
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
