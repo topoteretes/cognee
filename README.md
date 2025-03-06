@@ -77,7 +77,7 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
 
-You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
+You can also set the variables by creating .env file, using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
 
 
