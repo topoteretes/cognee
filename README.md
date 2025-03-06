@@ -33,7 +33,7 @@ Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) 
 More on [use-cases](https://docs.cognee.ai/use_cases).
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="100%" />
 </div>
 
 </div>
@@ -83,7 +83,7 @@ To use different LLM providers, for more info check out our <a href="https://doc
 
 ### Simple example
 
-Add LLM_API_KEY to .env using the command bellow. 
+Add LLM_API_KEY to .env using the command bellow.
 ```
 echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
 ```
@@ -147,7 +147,7 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 ## Understand our architecture
 
 <div style="text-align: center">
-  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
+  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="100%" />
 </div>
 
 
@@ -179,5 +179,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
-
