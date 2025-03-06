@@ -146,9 +146,6 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 ## Understand our architecture
 
-Cognee consists of tasks that can be grouped into pipelines.
-Each task can be an independent part of business logic, that can be tied to other tasks to form a pipeline.
-These tasks persist data into your memory store enabling you to search for relevant context of past conversations, documents, or any other data you have stored.
 <div style="text-align: center">
   <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
 </div>
