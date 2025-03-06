@@ -15,21 +15,28 @@
   [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
   [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
-  We build for developers who need a reliable, production-ready data layer for AI applications
+  AI Agent responses you can rely on
 </div>
 
-# What is cognee?
 
-Cognee implements scalable, modular ECL (Extract, Cognify, Load) pipelines that allow you to interconnect and retrieve past conversations, documents, and audio transcriptions while reducing hallucinations, developer effort, and cost.
-
-Cognee merges graph and vector databases to uncover hidden relationships and new patterns in your data. You can automatically model, load and retrieve entities and objects representing your business domain and analyze their relationships, uncovering insights that neither vector stores nor graph stores alone can provide. Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
+Cognee improves AI apps and Assistants with scalable, modular ECL (Extract, Cognify, Load) pipelines that let you build custom Agent Memory.
 
 
-Try it in a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or have a look at our <a href="https://docs.cognee.ai">documentation</a>.
+Features:
 
-If you have questions, join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community.
+1. Interconnect and retrieve your past conversations, documents, images and audio transcriptions
+2. Reduce hallucinations, developer effort, and cost.
+3. Load data to graph and vector databases using only Pydantic
+4. Manipulate your data while ingesting from 30+ data sources
 
-Have you seen cognee's <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? Check it out!
+Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
+
+## Get Started
+
+Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? Otherwise have a look at our <a href="https://docs.cognee.ai">QuickStart quide</a>.
+
+Confused? Join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community.
+
 
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
@@ -163,20 +170,6 @@ These tasks persist data into your memory store enabling you to search for relev
 </div>
 
 
-## Vector retrieval, Graphs and LLMs
-
-Cognee supports a variety of tools and services for different operations:
-- **Modular**: Cognee is modular by nature, using tasks grouped into pipelines
-
-- **Local Setup**: By default, LanceDB runs locally with NetworkX and OpenAI.
-
-- **Vector Stores**: Cognee supports LanceDB, Qdrant, PGVector and Weaviate for vector storage.
-
-- **Language Models (LLMs)**: You can use either Anyscale or Ollama as your LLM provider.
-
-- **Graph Stores**: In addition to NetworkX, Neo4j is also supported for graph storage.
-
-- **User management**: Create individual user graphs and manage permissions
 
 ## Demo
 
@@ -186,66 +179,7 @@ Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/ma
 [<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
 
 
-## Install Cognee with specific database support
-Support for various databases and vector stores is available through extras.
-Please see the [Cognee Quickstart Guide](https://docs.cognee.ai/quickstart/) for important configuration information.
 
-### With pip
-
-To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
-```bash
-pip install 'cognee[<database>]'
-```
-
-Replace \<database> with any of the following databases:
-- postgres
-- weaviate
-- qdrant
-- neo4j
-- milvus
-
-Installing Cognee with PostgreSQL and Neo4j support example:
-```bash
-pip install 'cognee[postgres, neo4j]'
-```
-
-### With poetry
-
-To install Cognee with support for specific databases use the appropriate command below. Replace \<database> with the name of the database you need.
-```bash
-poetry add cognee -E <database>
-```
-Replace \<database> with any of the following databases:
-- postgres
-- weaviate
-- qdrant
-- neo4j
-- milvus
-
-Installing Cognee with PostgreSQL and Neo4j support example:
-```bash
-poetry add cognee -E postgres -E neo4j
-```
-
-## Working with local Cognee
-
-Install dependencies inside the cloned repository:
-
-```bash
-poetry config virtualenvs.in-project true
-poetry self add poetry-plugin-shell
-poetry install
-poetry shell
-```
-
-
-## Run Cognee API server
-
-Please see the [Cognee Quickstart Guide](https://docs.cognee.ai/quickstart/) for important configuration information.
-
-```bash
-docker compose up
-```
 
 ## Contributing
 
@@ -267,17 +201,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
 
 
-## Vector & Graph Databases Implementation State
-
-
-
-| Name     | Type               | Current state (Mac/Linux) | Known Issues | Current state (Windows) | Known Issues |
-|----------|--------------------|---------------------------|--------------|-------------------------|--------------|
-| Qdrant   | Vector             | Stable &#x2705;           |              | Unstable &#x274C;       |              |
-| Weaviate | Vector             | Stable &#x2705;           |              | Unstable &#x274C;       |              |
-| LanceDB  | Vector             | Stable &#x2705;           |              | Stable &#x2705;         |              |
-| Neo4j    | Graph              | Stable &#x2705;           |              | Stable &#x2705;         |              |
-| NetworkX | Graph              | Stable &#x2705;           |              | Stable &#x2705;         |              |
-| FalkorDB | Vector/Graph       | Stable &#x2705;         |              | Unstable &#x274C;       |              |
-| PGVector | Vector             | Stable &#x2705;           |              | Unstable &#x274C;       |              |
-| Milvus   | Vector             | Stable &#x2705;           |              | Unstable &#x274C;       |              |
