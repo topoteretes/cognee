@@ -15,7 +15,7 @@
   [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
   [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
-  AI Agent responses you can rely on
+  AI Agent responses you can rely on.
 </div>
 
 
@@ -35,7 +35,7 @@ Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? 
 
-Confused? Join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community.
+Confused? Ask questions on our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a>.
 
 
 <div style="text-align: center">
