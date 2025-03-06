@@ -42,14 +42,7 @@ image = (
     .env(
         {
             "ENV": os.getenv("ENV"),
-            "LLM_MODEL": os.getenv("LLM_MODEL"),
-            "LLM_ENDPOINT": os.getenv("LLM_ENDPOINT"),
             "LLM_API_KEY": os.getenv("LLM_API_KEY"),
-            "LLM_API_VERSION": os.getenv("LLM_API_VERSION"),
-            "EMBEDDING_MODEL": os.getenv("EMBEDDING_MODEL"),
-            "EMBEDDING_ENDPOINT": os.getenv("EMBEDDING_ENDPOINT"),
-            "EMBEDDING_API_KEY": os.getenv("EMBEDDING_API_KEY"),
-            "EMBEDDING_API_VERSION": os.getenv("EMBEDDING_API_VERSION"),
             "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
         }
     )

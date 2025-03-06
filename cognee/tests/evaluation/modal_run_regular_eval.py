@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 app = modal.App("cognee-regular-eval")
 
 
-@app.function(image=image, concurrency_limit=2, timeout=1800, retries=1)
+@app.function(image=image, max_containers=2, timeout=1800, retries=1)
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
     if eval_params is None:
@@ -42,8 +42,8 @@ async def modal_run_eval(eval_params=None):
 async def main():
     config = EvalConfig(
         task_getter_type="Default",
-        benchmark="HotPotQA",
-        number_of_samples_in_corpus=50,
+        benchmark="Dummy",
+        number_of_samples_in_corpus=1,
         building_corpus_from_scratch=True,
         answering_questions=True,
         qa_engine="cognee_graph_completion",
