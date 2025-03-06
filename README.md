@@ -29,10 +29,10 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
 
 ## Features
 
-1. Interconnect and retrieve your past conversations, documents, images and audio transcriptions
-2. Reduce hallucinations, developer effort, and cost.
-3. Load data to graph and vector databases using only Pydantic
-4. Manipulate your data while ingesting from 30+ data sources
+- Interconnect and retrieve your past conversations, documents, images and audio transcriptions
+- Reduce hallucinations, developer effort, and cost.
+- Load data to graph and vector databases using only Pydantic
+- Manipulate your data while ingesting from 30+ data sources
 
 ## Get Started
 
