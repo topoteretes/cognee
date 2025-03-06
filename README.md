@@ -22,14 +22,15 @@
 Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 </div>
 
+
+Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
+
 Features:
 
 1. Interconnect and retrieve your past conversations, documents, images and audio transcriptions
 2. Reduce hallucinations, developer effort, and cost.
 3. Load data to graph and vector databases using only Pydantic
 4. Manipulate your data while ingesting from 30+ data sources
-
-Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
 
 ## Get Started
 
