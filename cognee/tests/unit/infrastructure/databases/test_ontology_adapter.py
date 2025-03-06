@@ -1,0 +1,160 @@
+import pytest
+from owlready2 import get_ontology, Thing
+from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyAdapter
+
+
+def test_ontology_adapter_initialization_success():
+    """Test successful initialization of OntologyAdapter."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    assert adapter.ontology is not None
+    assert isinstance(adapter.lookup, dict)
+
+
+def test_ontology_adapter_initialization_file_not_found():
+    """Test OntologyAdapter initialization with nonexistent file."""
+    adapter = OntologyAdapter(ontology_file="nonexistent.owl")
+    assert adapter.ontology.base_iri == "http://example.org/empty_ontology#"
+
+
+def test_build_lookup():
+    """Test the lookup dictionary is correctly built."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    with ontology:
+
+        class Car(Thing):
+            pass
+
+        Car("Audi")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    assert isinstance(adapter.lookup, dict)
+    assert "car" in adapter.lookup["classes"]
+    assert "audi" in adapter.lookup["individuals"]
+
+
+def test_find_closest_match_exact():
+    """Test finding exact match in lookup."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    with ontology:
+
+        class Car(Thing):
+            pass
+
+        Car("Audi")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    result = adapter.find_closest_match("Audi", "individuals")
+
+    assert result is not None
+    assert result == "audi"
+
+
+def test_find_closest_match_fuzzy():
+    """Test fuzzy matching for lookup."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    with ontology:
+
+        class Car(Thing):
+            pass
+
+        Car("Audi")
+        Car("BMW")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    result = adapter.find_closest_match("Audii", "individuals")
+
+    assert result == "audi"
+
+
+def test_find_closest_match_no_match():
+    """Test no match found in lookup."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    result = adapter.find_closest_match("Nonexistent", "individuals")
+
+    assert result is None
+
+
+def test_get_subgraph_no_match():
+    """Test get_subgraph with no matching node."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    nodes, relationships = adapter.get_subgraph("Nonexistent", "individuals")
+
+    assert nodes == []
+    assert relationships == []
+
+
+def test_get_subgraph_success():
+    """Test successful retrieval of subgraph."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    with ontology:
+
+        class Company(Thing):
+            pass
+
+        class Vehicle(Thing):
+            pass
+
+        class Car(Vehicle):
+            pass
+
+        audi = Car("Audi")
+        porsche = Car("Porsche")
+        vw = Company("VW")
+
+        vw.owns = [audi, porsche]
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    nodes, relationships = adapter.get_subgraph("Audi", "individuals")
+
+    assert "Audi" in nodes
+    assert "Car" in nodes
+    assert "Vehicle" in nodes
+    assert "Thing" in nodes
+    assert ("Audi", "is_a", "Car") in relationships
+    assert ("Car", "is_a", "Vehicle") in relationships
+    assert ("Vehicle", "is_a", "Thing") in relationships
+
+
+def test_refresh_lookup():
+    """Test refreshing lookup rebuilds the dictionary."""
+    ontology = get_ontology("http://example.org/test_ontology")
+
+    adapter = OntologyAdapter()
+    adapter.ontology = ontology
+    adapter._build_lookup()
+
+    original_lookup = adapter.lookup.copy()
+    adapter.refresh_lookup()
+
+    assert adapter.lookup is not original_lookup
