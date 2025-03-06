@@ -33,7 +33,7 @@ Learn more about use-cases [here](https://docs.cognee.ai/use_cases).
 
 ## Get Started
 
-Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? Otherwise have a look at our <a href="https://docs.cognee.ai">QuickStart quide</a>.
+Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? 
 
 Confused? Join our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a> community.
 
@@ -53,17 +53,6 @@ You can install Cognee using either **pip**, **poetry**, **uv** or any other pyt
 pip install cognee
 ```
 
-### With poetry
-
-```bash
-poetry add cognee
-```
-
-### With uv
-```bash
-uv add cognee
-```
-
 ## 💻 Basic Usage
 
 ### Setup
@@ -73,11 +62,7 @@ import os
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
-or
-```
-import cognee
-cognee.config.set_llm_api_key("YOUR_OPENAI_API_KEY")
-```
+
 You can also set the variables by creating .env file, here is our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
 
@@ -156,8 +141,7 @@ if __name__ == '__main__':
     asyncio.run(main())
 
 ```
-When you run this script, you will see step-by-step messages in the console that help you trace the execution flow and understand what the script is doing at each stage.
-A version of this example is here: `examples/python/simple_example.py`
+For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
 
 
 ## Understand our architecture
@@ -171,13 +155,17 @@ These tasks persist data into your memory store enabling you to search for relev
 
 
 
-## Demo
+## Demos
 
-Check out our demo notebook [here](https://github.com/topoteretes/cognee/blob/main/notebooks/cognee_demo.ipynb) or watch the Youtube video below
+What is AI memory:
 
 
 [<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
 
+cognee in 4 minutes: 
+
+
+[<img src="https://img.youtube.com/vi/1bezuvLwJmw/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=1bezuvLwJmw "cognee in 4 minutes: 55")
 
 
 
