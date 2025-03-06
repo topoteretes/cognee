@@ -19,7 +19,7 @@
 </div>
 
 
-Cognee improves AI apps and Assistants with scalable, modular ECL (Extract, Cognify, Load) pipelines that let you build custom Agent Memory.
+Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
 
 Features:
