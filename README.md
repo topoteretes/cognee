@@ -1,4 +1,3 @@
-
 <p align="center">
 <div style="text-align: center">
   <a href="https://github.com/topoteretes/cognee">
