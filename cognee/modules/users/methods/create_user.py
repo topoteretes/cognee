@@ -7,7 +7,7 @@ from cognee.modules.users.models.User import UserCreate
 from cognee.modules.users.models.Tenant import Tenant
 
 from sqlalchemy import select
-from typing import Optional, List
+from typing import Optional
 
 
 async def create_user(

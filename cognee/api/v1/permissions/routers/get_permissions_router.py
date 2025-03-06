@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
 from sqlalchemy import insert
@@ -11,7 +12,7 @@ from cognee.modules.users.exceptions import (
     RoleNotFoundError,
     TenantNotFoundError,
 )
-from cognee.modules.users import get_user_db
+from cognee.modules.users import get_user_db, get_async_session
 from cognee.modules.users.models import (
     User,
     Permission,
@@ -29,31 +30,31 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/roles/{role_id}/permissions")
     async def give_default_permission_to_role(
-        role_id: str, permission: str, db: Session = Depends(get_user_db)
+        role_id: str, permission: str, db: Session = Depends(get_async_session)
     ):
-        role = (await db.session.execute(select(Role).where(Role.id == role_id))).scalars().first()
+        role = (await db.execute(select(Role).where(Role.id == role_id))).scalars().first()
 
         if not role:
             raise RoleNotFoundError
 
         permission_entity = (
-            (await db.session.execute(select(Permission).where(Permission.name == permission)))
+            (await db.execute(select(Permission).where(Permission.name == permission)))
             .scalars()
             .first()
         )
 
         if not permission_entity:
             stmt = insert(Permission).values(name=permission)
-            await db.session.execute(stmt)
+            await db.execute(stmt)
             permission_entity = (
-                (await db.session.execute(select(Permission).where(Permission.name == permission)))
+                (await db.execute(select(Permission).where(Permission.name == permission)))
                 .scalars()
                 .first()
             )
 
         try:
             # add default permission to role
-            await db.session.execute(
+            await db.execute(
                 insert(RoleDefaultPermission).values(
                     role_id=role.id, permission_id=permission_entity.id
                 )
@@ -61,41 +62,37 @@ def get_permissions_router() -> APIRouter:
         except IntegrityError:
             raise EntityAlreadyExistsError(message="Role permission already exists.")
 
-        await db.session.commit()
+        await db.commit()
 
         return JSONResponse(status_code=200, content={"message": "Permission assigned to role"})
 
     @permissions_router.post("/tenants/{tenant_id}/permissions")
     async def give_default_permission_to_tenant(
-        tenant_id: str, permission: str, db: Session = Depends(get_user_db)
+        tenant_id: str, permission: str, db: Session = Depends(get_async_session)
     ):
-        tenant = (
-            (await db.session.execute(select(Tenant).where(Tenant.id == tenant_id)))
-            .scalars()
-            .first()
-        )
+        tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalars().first()
 
         if not tenant:
             raise TenantNotFoundError
 
         permission_entity = (
-            (await db.session.execute(select(Permission).where(Permission.name == permission)))
+            (await db.execute(select(Permission).where(Permission.name == permission)))
             .scalars()
             .first()
         )
 
         if not permission_entity:
             stmt = insert(Permission).values(name=permission)
-            await db.session.execute(stmt)
+            await db.execute(stmt)
             permission_entity = (
-                (await db.session.execute(select(Permission).where(Permission.name == permission)))
+                (await db.execute(select(Permission).where(Permission.name == permission)))
                 .scalars()
                 .first()
             )
 
         try:
             # add default permission to tenant
-            await db.session.execute(
+            await db.execute(
                 insert(TenantDefaultPermission).values(
                     tenant_id=tenant.id, permission_id=permission_entity.id
                 )
@@ -103,7 +100,7 @@ def get_permissions_router() -> APIRouter:
         except IntegrityError:
             raise EntityAlreadyExistsError(message="Tenant permission already exists.")
 
-        await db.session.commit()
+        await db.commit()
 
         return JSONResponse(status_code=200, content={"message": "Permission assigned to tenant"})
 
@@ -165,5 +162,66 @@ def get_permissions_router() -> APIRouter:
         await db.session.commit()
 
         return JSONResponse(status_code=200, content={"message": "User added to group"})
+
+    @permissions_router.post("/roles")
+    async def create_role(
+        role_name: str,
+        tenant_id: str,
+        permissions: Optional[list[str]] = None,
+        db: Session = Depends(get_async_session),
+    ):
+        try:
+            # Add association directly to the association table
+            role = Role(name=role_name, tenant_id=tenant_id)
+            db.add(role)
+        except IntegrityError:
+            raise EntityAlreadyExistsError(message="Role already exists for tenant.")
+
+        await db.commit()
+        await db.refresh(role)
+
+        role = (
+            (
+                await db.execute(
+                    select(Role).where(Role.name == role_name).where(Tenant.id == tenant_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+
+        if permissions:
+            for permission in permissions:
+                await give_default_permission_to_role(role_id=role.id, permission=permission, db=db)
+
+        return JSONResponse(status_code=200, content={"message": "Role created for tenant"})
+
+    @permissions_router.post("/tenants")
+    async def create_tenant(
+        tenant_name: str,
+        permissions: Optional[list[str]] = None,
+        db: Session = Depends(get_async_session),
+    ):
+        try:
+            # Add association directly to the association table
+            tenant = Tenant(name=tenant_name)
+            db.add(tenant)
+        except IntegrityError:
+            raise EntityAlreadyExistsError(message="Tenant already exists.")
+
+        await db.commit()
+        await db.refresh(tenant)
+
+        tenant = (
+            (await db.execute(select(Tenant).where(Tenant.name == tenant_name))).scalars().first()
+        )
+
+        if permissions:
+            for permission in permissions:
+                await give_default_permission_to_tenant(
+                    tenant_id=tenant.id, permission=permission, db=db
+                )
+
+        return JSONResponse(status_code=200, content={"message": "Tenant created."})
 
     return permissions_router
