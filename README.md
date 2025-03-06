@@ -1,5 +1,4 @@
-<p align="center">
-<div style="text-align: center">
+<div align="center">
   <a href="https://github.com/topoteretes/cognee">
     <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee-logo-transparent.png" alt="Cognee Logo" height="60">
   </a>
@@ -19,7 +18,6 @@
   AI Agent responses you can rely on.
 </div>
 
-</p>
 
 Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
