@@ -16,11 +16,11 @@
   [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
   AI Agent responses you can rely on.
-</div>
+
 
 
 Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
-
+</div>
 
 Features:
 
