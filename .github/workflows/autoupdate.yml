@@ -1,4 +1,4 @@
-name: Auto Update Dependencies
+name: clean | Auto Update Dependencies
 
 on:
   schedule:
