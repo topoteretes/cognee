@@ -84,11 +84,8 @@ from cognee.modules.search.types import SearchType
 
 async def main():
     # Create a clean slate for cognee -- reset data and system state
-    print("Resetting cognee data...")
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    print("Data reset complete.\n")
-
     # cognee knowledge graph will be created based on this text
     text = """
     Natural language processing (NLP) is an interdisciplinary
@@ -99,17 +96,6 @@ async def main():
     print(text.strip())
     # Add the text, and make it available for cognify
     await cognee.add(text)
-    print("Text added successfully.\n")
-
-
-    print("Running cognify to create knowledge graph...\n")
-    print("Cognify process steps:")
-    print("1. Classifying the document: Determining the type and category of the input text.")
-    print("2. Checking permissions: Ensuring the user has the necessary rights to process the text.")
-    print("3. Extracting text chunks: Breaking down the text into sentences or phrases for analysis.")
-    print("4. Adding data points: Storing the extracted chunks for processing.")
-    print("5. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph.")
-    print("6. Summarizing text: Creating concise summaries of the content for quick insights.\n")
 
     # Use LLMs and cognee to create knowledge graph
     await cognee.cognify()
