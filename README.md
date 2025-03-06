@@ -7,6 +7,15 @@
 
   cognee - memory layer for AI apps and Agents
 
+    <p align="center">
+    <a href="https://cognee.ai">Learn more</a>
+    ·
+    <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
+    ·
+    <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  </p>
+</p>
+
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
   [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
   [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
@@ -43,7 +52,7 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>? 
 
-Confused? Ask questions on our  <a href="https://discord.gg/NQPKmU5CCg">Discord</a>.
+
 
 
 
