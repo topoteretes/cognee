@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def initialize_posthog_client():
     posthog = Posthog(
-        api_key=os.getenv("POSTHOG_API_KEY_COMPETITORS"),
+        api_key=os.getenv("POSTHOG_API_KEY"),
         host="https://eu.i.posthog.com",
     )
     posthog.debug = True
