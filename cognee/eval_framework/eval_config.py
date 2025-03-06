@@ -18,6 +18,7 @@ class EvalConfig(BaseSettings):
 
     # Evaluation params
     evaluating_answers: bool = True
+    evaluating_contexts: bool = True
     evaluation_engine: str = "DeepEval"  # Options: 'DeepEval' (uses deepeval_model), 'DirectLLM' (uses default llm from .env)
     evaluation_metrics: List[str] = [
         "correctness",
@@ -51,6 +52,7 @@ class EvalConfig(BaseSettings):
             "answering_questions": self.answering_questions,
             "qa_engine": self.qa_engine,
             "evaluating_answers": self.evaluating_answers,
+            "evaluating_contexts": self.evaluating_contexts,  # Controls whether context evaluation should be performed
             "evaluation_engine": self.evaluation_engine,
             "evaluation_metrics": self.evaluation_metrics,
             "calculate_metrics": self.calculate_metrics,

@@ -5,6 +5,7 @@ from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
 from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 from typing import Any, Dict, List
+from deepeval.metrics import ContextualRelevancyMetric
 
 
 class DeepEvalAdapter(BaseEvalAdapter):
@@ -13,6 +14,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
             "correctness": self.g_eval_correctness(),
             "EM": ExactMatchMetric(),
             "f1": F1ScoreMetric(),
+            "contextual_relevancy": ContextualRelevancyMetric(),
         }
 
     async def evaluate_answers(
@@ -29,6 +31,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
                 input=answer["question"],
                 actual_output=answer["answer"],
                 expected_output=answer["golden_answer"],
+                retrieval_context=[answer["retrieval_context"]],
             )
             metric_results = {}
             for metric in evaluator_metrics:
