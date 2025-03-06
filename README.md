@@ -7,12 +7,12 @@
 
   cognee - memory layer for AI apps and Agents
 
-    <p align="center">
-    <a href="https://cognee.ai">Learn more</a>
-    ·
-    <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
-    ·
-    <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  <p align="center">
+  <a href="https://cognee.ai">Learn more</a>
+  ·
+  <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
+  ·
+  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
   </p>
 
 
