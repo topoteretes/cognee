@@ -13,17 +13,18 @@ class CompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        top_k: int = 1,
+        top_k: Optional[int] = 1,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
-        self.top_k = top_k
+        self.top_k = top_k if top_k is not None else 1
 
     async def get_context(self, query: str) -> Any:
         """Retrieves relevant document chunks as context."""
         vector_engine = get_vector_engine()
-        found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+        limit = self.top_k if self.top_k is not None else 5
+        found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=limit)
         if len(found_chunks) == 0:
             raise NoRelevantDataFound
         return found_chunks[0].payload["text"]
