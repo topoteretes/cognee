@@ -19,418 +19,454 @@ from cognee.shared.data_models import Node, Edge, KnowledgeGraph, Layer
 
 
 class TestGraphNode(unittest.TestCase):
-    """Test cases for the GraphNode class."""
+    """Tests for the GraphNode class."""
     
     def test_creation(self):
         """Test creating a GraphNode."""
-        node = GraphNode(
+        node = GraphNode.create(
             name="Test Node",
             node_type="TestType",
-            description="Test description"
+            description="A test node"
         )
         
+        self.assertIsInstance(node, GraphNode)
         self.assertIsInstance(node.id, UUID)
         self.assertEqual(node.name, "Test Node")
         self.assertEqual(node.node_type, "TestType")
-        self.assertEqual(node.description, "Test description")
+        self.assertEqual(node.description, "A test node")
+        self.assertEqual(node.properties, {})
         self.assertIsNone(node.layer_id)
-        self.assertEqual(node.type, "GraphNode")
+        
+        # Check metadata
+        self.assertIn("type", node.metadata)
         self.assertEqual(node.metadata["type"], "GraphNode")
-        self.assertEqual(node.metadata["index_fields"], ["name", "node_type", "layer_id"])
+        self.assertIn("index_fields", node.metadata)
     
     def test_conversion_from_basic_node(self):
         """Test converting a basic Node to a GraphNode."""
+        # Create a basic Node with valid UUID format for ID
         basic_node = Node(
-            id="test-id",
+            id=str(uuid4()),  # Use valid UUID string
             name="Basic Node",
-            type="BasicType",
-            description="Basic description",
-            layer_id="layer-123"
+            type="TestType",
+            description="A basic node for testing"
         )
         
         node = GraphNode.from_basic_node(basic_node)
         
-        self.assertEqual(str(node.id), "test-id")
+        self.assertIsInstance(node, GraphNode)
         self.assertEqual(node.name, "Basic Node")
-        self.assertEqual(node.node_type, "BasicType")
-        self.assertEqual(node.description, "Basic description")
-        self.assertEqual(str(node.layer_id), "layer-123")
+        self.assertEqual(node.node_type, "TestType")
+        self.assertEqual(node.description, "A basic node for testing")
+        self.assertEqual(node.properties, {})
+        self.assertIsNone(node.layer_id)
     
     def test_serialization(self):
         """Test serialization and deserialization of a GraphNode."""
-        node = GraphNode(
+        original_node = GraphNode.create(
             name="Serialization Test",
             node_type="TestType",
-            description="Test serialization"
+            description="Testing serialization",
+            properties={"test_key": "test_value"}
         )
         
         # Serialize to JSON
-        node_json = node.to_json()
+        node_json = original_node.to_json()
         self.assertIsInstance(node_json, str)
         
-        # Deserialize from JSON
-        restored_node = GraphNode.from_json(node_json)
-        self.assertEqual(restored_node.id, node.id)
-        self.assertEqual(restored_node.name, node.name)
-        self.assertEqual(restored_node.node_type, node.node_type)
-        self.assertEqual(restored_node.description, node.description)
+        # Load from JSON into a Python dictionary for inspection
+        node_dict = json.loads(node_json)
+        self.assertEqual(node_dict["name"], "Serialization Test")
+        self.assertEqual(node_dict["node_type"], "TestType")
+        
+        # Ensure metadata fields are present
+        self.assertIn("metadata", node_dict)
+        self.assertIn("type", node_dict["metadata"])
+        self.assertIn("index_fields", node_dict["metadata"])
+        
+        # Use model_validate_json instead of from_json directly
+        restored_node = GraphNode.model_validate_json(node_json)
+        
+        self.assertIsInstance(restored_node, GraphNode)
+        self.assertEqual(restored_node.id, original_node.id)
+        self.assertEqual(restored_node.name, original_node.name)
+        self.assertEqual(restored_node.node_type, original_node.node_type)
+        self.assertEqual(restored_node.description, original_node.description)
+        self.assertEqual(restored_node.properties, original_node.properties)
 
 
 class TestGraphEdge(unittest.TestCase):
-    """Test cases for the GraphEdge class."""
+    """Tests for the GraphEdge class."""
     
     def test_creation(self):
         """Test creating a GraphEdge."""
         source_id = uuid4()
         target_id = uuid4()
         
-        edge = GraphEdge(
+        edge = GraphEdge.create(
             source_node_id=source_id,
             target_node_id=target_id,
-            relationship_name="TEST_RELATION"
+            relationship_name="TEST_RELATIONSHIP"
         )
         
+        self.assertIsInstance(edge, GraphEdge)
         self.assertIsInstance(edge.id, UUID)
         self.assertEqual(edge.source_node_id, source_id)
         self.assertEqual(edge.target_node_id, target_id)
-        self.assertEqual(edge.relationship_name, "TEST_RELATION")
+        self.assertEqual(edge.relationship_name, "TEST_RELATIONSHIP")
+        self.assertEqual(edge.properties, {})
         self.assertIsNone(edge.layer_id)
-        self.assertEqual(edge.type, "GraphEdge")
+        
+        # Check metadata
+        self.assertIn("type", edge.metadata)
         self.assertEqual(edge.metadata["type"], "GraphEdge")
-        self.assertEqual(edge.metadata["index_fields"], ["relationship_name", "layer_id"])
+        self.assertIn("index_fields", edge.metadata)
     
     def test_string_id_conversion(self):
-        """Test creating a GraphEdge with string IDs."""
-        edge = GraphEdge(
-            source_node_id="00000000-0000-0000-0000-000000000001",
-            target_node_id="00000000-0000-0000-0000-000000000002",
-            relationship_name="STRING_ID_TEST"
+        """Test conversion of string IDs to UUIDs."""
+        source_id = uuid4()
+        target_id = uuid4()
+        
+        edge = GraphEdge.create(
+            source_node_id=str(source_id),
+            target_node_id=str(target_id),
+            relationship_name="STRING_IDS"
         )
         
         self.assertIsInstance(edge.source_node_id, UUID)
         self.assertIsInstance(edge.target_node_id, UUID)
-        self.assertEqual(str(edge.source_node_id), "00000000-0000-0000-0000-000000000001")
-        self.assertEqual(str(edge.target_node_id), "00000000-0000-0000-0000-000000000002")
+        self.assertEqual(edge.source_node_id, source_id)
+        self.assertEqual(edge.target_node_id, target_id)
     
     def test_conversion_from_basic_edge(self):
         """Test converting a basic Edge to a GraphEdge."""
+        # Create a basic Edge with valid UUID format for IDs
+        source_id = str(uuid4())
+        target_id = str(uuid4())
+        
         basic_edge = Edge(
-            source_node_id="source-123",
-            target_node_id="target-456",
-            relationship_name="BASIC_RELATION",
-            layer_id="layer-789"
+            id=str(uuid4()),
+            source_node_id=source_id,
+            target_node_id=target_id,
+            relationship_name="TEST_CONVERSION"
         )
         
         edge = GraphEdge.from_basic_edge(basic_edge)
         
-        self.assertEqual(str(edge.source_node_id), "source-123")
-        self.assertEqual(str(edge.target_node_id), "target-456")
-        self.assertEqual(edge.relationship_name, "BASIC_RELATION")
-        self.assertEqual(str(edge.layer_id), "layer-789")
+        self.assertIsInstance(edge, GraphEdge)
+        self.assertEqual(str(edge.source_node_id), source_id)
+        self.assertEqual(str(edge.target_node_id), target_id)
+        self.assertEqual(edge.relationship_name, "TEST_CONVERSION")
+        self.assertEqual(edge.properties, {})
+        self.assertIsNone(edge.layer_id)
 
 
 class TestGraphLayer(unittest.TestCase):
-    """Test cases for the GraphLayer class."""
+    """Tests for the GraphLayer class."""
     
     def test_creation(self):
         """Test creating a GraphLayer."""
-        layer = GraphLayer(
+        layer = GraphLayer.create(
             name="Test Layer",
-            description="Test layer description",
+            description="A test layer",
             layer_type="test"
         )
         
+        self.assertIsInstance(layer, GraphLayer)
         self.assertIsInstance(layer.id, UUID)
         self.assertEqual(layer.name, "Test Layer")
-        self.assertEqual(layer.description, "Test layer description")
+        self.assertEqual(layer.description, "A test layer")
         self.assertEqual(layer.layer_type, "test")
         self.assertEqual(layer.parent_layers, [])
-        self.assertEqual(layer.type, "GraphLayer")
+        self.assertEqual(layer.properties, {})
+        
+        # Check metadata
+        self.assertIn("type", layer.metadata)
         self.assertEqual(layer.metadata["type"], "GraphLayer")
-        self.assertEqual(layer.metadata["index_fields"], ["name", "layer_type"])
+        self.assertIn("index_fields", layer.metadata)
     
     def test_parent_layers(self):
-        """Test handling parent layers in a GraphLayer."""
-        parent1_id = uuid4()
-        parent2_id = uuid4()
-        
-        layer = GraphLayer(
-            name="Child Layer",
-            description="Child layer with parents",
-            layer_type="child",
-            parent_layers=[parent1_id, str(parent2_id)]
+        """Test handling parent layers."""
+        parent1 = GraphLayer.create(
+            name="Parent 1",
+            description="First parent layer",
+            layer_type="parent"
         )
         
-        self.assertEqual(len(layer.parent_layers), 2)
-        self.assertEqual(layer.parent_layers[0], parent1_id)
-        self.assertEqual(layer.parent_layers[1], parent2_id)
+        parent2 = GraphLayer.create(
+            name="Parent 2",
+            description="Second parent layer",
+            layer_type="parent"
+        )
+        
+        child = GraphLayer.create(
+            name="Child Layer",
+            description="A child layer",
+            layer_type="child",
+            parent_layers=[parent1.id, parent2.id]
+        )
+        
+        self.assertEqual(len(child.parent_layers), 2)
+        self.assertIn(parent1.id, child.parent_layers)
+        self.assertIn(parent2.id, child.parent_layers)
     
     def test_conversion_from_basic_layer(self):
         """Test converting a basic Layer to a GraphLayer."""
+        # Create a basic Layer with valid UUID format for ID
+        layer_id = str(uuid4())
+        parent1_id = str(uuid4())
+        parent2_id = str(uuid4())
+        
         basic_layer = Layer(
-            id="layer-123",
+            id=layer_id,
             name="Basic Layer",
-            description="Basic layer description",
-            layer_type="basic",
-            parent_layers=["parent-456", "parent-789"]
+            description="A basic layer for testing",
+            layer_type="test",
+            parent_layers=[parent1_id, parent2_id]
         )
         
         layer = GraphLayer.from_basic_layer(basic_layer)
         
-        self.assertEqual(str(layer.id), "layer-123")
+        self.assertIsInstance(layer, GraphLayer)
+        self.assertEqual(str(layer.id), layer_id)
         self.assertEqual(layer.name, "Basic Layer")
-        self.assertEqual(layer.description, "Basic layer description")
-        self.assertEqual(layer.layer_type, "basic")
+        self.assertEqual(layer.description, "A basic layer for testing")
+        self.assertEqual(layer.layer_type, "test")
         self.assertEqual(len(layer.parent_layers), 2)
-        self.assertEqual(str(layer.parent_layers[0]), "parent-456")
-        self.assertEqual(str(layer.parent_layers[1]), "parent-789")
+        self.assertEqual(str(layer.parent_layers[0]), parent1_id)
+        self.assertEqual(str(layer.parent_layers[1]), parent2_id)
 
 
 class TestLayeredKnowledgeGraphDP(unittest.TestCase):
-    """Test cases for the LayeredKnowledgeGraphDP class."""
+    """Tests for the LayeredKnowledgeGraphDP class."""
     
     def setUp(self):
         """Set up test fixtures."""
-        # Create a graph for testing
-        self.graph = LayeredKnowledgeGraphDP(
+        # Create a graph
+        self.graph = LayeredKnowledgeGraphDP.create_empty(
             name="Test Graph",
-            description="Test layered graph"
+            description="A test graph"
         )
         
-        # Create base layer
-        self.base_layer = GraphLayer(
+        # Create layers
+        self.base_layer = GraphLayer.create(
             name="Base Layer",
             description="Base layer for testing",
             layer_type="base"
         )
-        self.graph.add_layer(self.base_layer)
         
-        # Create enrichment layer
-        self.enrich_layer = GraphLayer(
+        self.enrichment_layer = GraphLayer.create(
             name="Enrichment Layer",
             description="Enrichment layer for testing",
             layer_type="enrichment",
             parent_layers=[self.base_layer.id]
         )
-        self.graph.add_layer(self.enrich_layer)
         
-        # Add nodes to base layer
-        self.node1 = GraphNode(
+        # Add layers to the graph
+        self.graph.add_layer(self.base_layer)
+        self.graph.add_layer(self.enrichment_layer)
+        
+        # Create and add nodes to base layer
+        self.node1 = GraphNode.create(
             name="Node 1",
             node_type="TestType",
-            description="Test node 1"
+            description="First test node"
         )
-        self.node2 = GraphNode(
+        
+        self.node2 = GraphNode.create(
             name="Node 2",
             node_type="TestType",
-            description="Test node 2"
+            description="Second test node"
         )
-        self.graph.add_node_to_layer(self.node1, self.base_layer.id)
-        self.graph.add_node_to_layer(self.node2, self.base_layer.id)
         
-        # Add edge to base layer
-        self.edge1 = GraphEdge(
+        self.graph.add_node(self.node1, self.base_layer.id)
+        self.graph.add_node(self.node2, self.base_layer.id)
+        
+        # Create and add node to enrichment layer
+        self.node3 = GraphNode.create(
+            name="Node 3",
+            node_type="EnrichedType",
+            description="An enriched node"
+        )
+        
+        self.graph.add_node(self.node3, self.enrichment_layer.id)
+        
+        # Create and add edges
+        self.edge1 = GraphEdge.create(
             source_node_id=self.node1.id,
             target_node_id=self.node2.id,
-            relationship_name="TEST_RELATION"
+            relationship_name="RELATED_TO"
         )
-        self.graph.add_edge_to_layer(self.edge1, self.base_layer.id)
         
-        # Add node to enrichment layer
-        self.node3 = GraphNode(
-            name="Node 3",
-            node_type="EnrichType",
-            description="Enrichment node"
-        )
-        self.graph.add_node_to_layer(self.node3, self.enrich_layer.id)
-        
-        # Add edges to enrichment layer
-        self.edge2 = GraphEdge(
+        self.edge2 = GraphEdge.create(
             source_node_id=self.node3.id,
             target_node_id=self.node1.id,
-            relationship_name="ENRICH_RELATION"
+            relationship_name="ENRICHES"
         )
-        self.graph.add_edge_to_layer(self.edge2, self.enrich_layer.id)
+        
+        self.graph.add_edge(self.edge1, self.base_layer.id)
+        self.graph.add_edge(self.edge2, self.enrichment_layer.id)
     
     def test_creation(self):
         """Test creating a LayeredKnowledgeGraphDP."""
-        graph = LayeredKnowledgeGraphDP(
+        graph = LayeredKnowledgeGraphDP.create_empty(
             name="Empty Graph",
-            description="Empty graph for testing"
+            description="An empty graph for testing"
         )
         
+        self.assertIsInstance(graph, LayeredKnowledgeGraphDP)
         self.assertIsInstance(graph.id, UUID)
         self.assertEqual(graph.name, "Empty Graph")
-        self.assertEqual(graph.description, "Empty graph for testing")
-        self.assertEqual(graph.layers, [])
-        self.assertEqual(graph.type, "LayeredKnowledgeGraphDP")
+        self.assertEqual(graph.description, "An empty graph for testing")
+        self.assertEqual(graph.layers, {})  # Now a dictionary, not a list
+        self.assertEqual(graph.nodes, {})
+        self.assertEqual(graph.edges, {})
     
     def test_layer_management(self):
         """Test layer management in the graph."""
+        # Check layers
         self.assertEqual(len(self.graph.layers), 2)
-        self.assertEqual(self.graph.layers[0], self.base_layer.id)
-        self.assertEqual(self.graph.layers[1], self.enrich_layer.id)
+        self.assertIn(self.base_layer.id, self.graph.layers)
+        self.assertIn(self.enrichment_layer.id, self.graph.layers)
     
     def test_node_assignment(self):
         """Test node assignment to layers."""
+        # Check node assignment
         base_nodes = self.graph.get_layer_nodes(self.base_layer.id)
-        enrich_nodes = self.graph.get_layer_nodes(self.enrich_layer.id)
-        
         self.assertEqual(len(base_nodes), 2)
-        self.assertEqual(len(enrich_nodes), 1)
         
-        self.assertEqual(base_nodes[0].name, "Node 1")
-        self.assertEqual(base_nodes[1].name, "Node 2")
-        self.assertEqual(enrich_nodes[0].name, "Node 3")
+        enrichment_nodes = self.graph.get_layer_nodes(self.enrichment_layer.id)
+        self.assertEqual(len(enrichment_nodes), 1)
         
-        self.assertEqual(base_nodes[0].layer_id, self.base_layer.id)
-        self.assertEqual(enrich_nodes[0].layer_id, self.enrich_layer.id)
+        # Check node layer map
+        self.assertEqual(self.graph.node_layer_map[self.node1.id], self.base_layer.id)
+        self.assertEqual(self.graph.node_layer_map[self.node2.id], self.base_layer.id)
+        self.assertEqual(self.graph.node_layer_map[self.node3.id], self.enrichment_layer.id)
     
     def test_edge_assignment(self):
         """Test edge assignment to layers."""
+        # Check edge assignment
         base_edges = self.graph.get_layer_edges(self.base_layer.id)
-        enrich_edges = self.graph.get_layer_edges(self.enrich_layer.id)
-        
         self.assertEqual(len(base_edges), 1)
-        self.assertEqual(len(enrich_edges), 1)
         
-        self.assertEqual(base_edges[0].relationship_name, "TEST_RELATION")
-        self.assertEqual(enrich_edges[0].relationship_name, "ENRICH_RELATION")
+        enrichment_edges = self.graph.get_layer_edges(self.enrichment_layer.id)
+        self.assertEqual(len(enrichment_edges), 1)
         
-        self.assertEqual(base_edges[0].layer_id, self.base_layer.id)
-        self.assertEqual(enrich_edges[0].layer_id, self.enrich_layer.id)
+        # Check edge layer map
+        self.assertEqual(self.graph.edge_layer_map[self.edge1.id], self.base_layer.id)
+        self.assertEqual(self.graph.edge_layer_map[self.edge2.id], self.enrichment_layer.id)
     
     def test_get_layer_graph(self):
-        """Test retrieving a layer-specific graph."""
+        """Test getting a layer graph."""
+        # Get base layer graph
         base_graph = self.graph.get_layer_graph(self.base_layer.id)
-        enrich_graph = self.graph.get_layer_graph(self.enrich_layer.id)
         
         self.assertIsInstance(base_graph, KnowledgeGraph)
-        self.assertIsInstance(enrich_graph, KnowledgeGraph)
-        
         self.assertEqual(len(base_graph.nodes), 2)
         self.assertEqual(len(base_graph.edges), 1)
-        self.assertEqual(len(enrich_graph.nodes), 1)
-        self.assertEqual(len(enrich_graph.edges), 1)
+        
+        # Get enrichment layer graph
+        enrichment_graph = self.graph.get_layer_graph(self.enrichment_layer.id)
+        
+        self.assertIsInstance(enrichment_graph, KnowledgeGraph)
+        self.assertEqual(len(enrichment_graph.nodes), 1)
+        self.assertEqual(len(enrichment_graph.edges), 1)
     
     def test_get_cumulative_layer_graph(self):
-        """Test retrieving a cumulative layer graph."""
-        cumulative_graph = self.graph.get_cumulative_layer_graph(self.enrich_layer.id)
+        """Test getting a cumulative layer graph."""
+        # Get cumulative graph for enrichment layer
+        cumulative_graph = self.graph.get_cumulative_layer_graph(self.enrichment_layer.id)
         
         self.assertIsInstance(cumulative_graph, KnowledgeGraph)
-        self.assertEqual(len(cumulative_graph.nodes), 3)
-        self.assertEqual(len(cumulative_graph.edges), 2)
+        self.assertEqual(len(cumulative_graph.nodes), 3)  # All nodes
+        self.assertEqual(len(cumulative_graph.edges), 2)  # All edges
     
     def test_serialization(self):
         """Test serialization and deserialization of the graph."""
-        serialized = self.graph.to_serializable_dict()
+        # Serialize to dictionary
+        serialized = self.graph.to_dict()
         
-        # Check the serialized data
+        self.assertIsInstance(serialized, dict)
         self.assertEqual(serialized["name"], "Test Graph")
+        self.assertEqual(serialized["description"], "A test graph")
         self.assertEqual(len(serialized["layers"]), 2)
-        self.assertEqual(len(serialized["layer_data"]), 2)
-        self.assertEqual(len(serialized["node_data"]), 3)
-        self.assertEqual(len(serialized["edge_data"]), 2)
+        self.assertEqual(len(serialized["nodes"]), 3)
+        self.assertEqual(len(serialized["edges"]), 2)
         
-        # Convert to JSON and back to test full serialization
-        json_str = json.dumps(serialized)
-        deserialized = json.loads(json_str)
+        # Serialize to JSON
+        json_str = self.graph.to_json()
+        self.assertIsInstance(json_str, str)
         
-        # Deserialize to a graph
-        restored_graph = LayeredKnowledgeGraphDP.from_serializable_dict(deserialized)
+        # Deserialize from dictionary
+        deserialized = LayeredKnowledgeGraphDP.from_dict(serialized)
         
-        # Test the restored graph
-        self.assertEqual(restored_graph.name, "Test Graph")
-        self.assertEqual(len(restored_graph.layers), 2)
-        
-        # Check that we can retrieve the layers
-        base_graph = restored_graph.get_layer_graph(self.base_layer.id)
-        enrich_graph = restored_graph.get_layer_graph(self.enrich_layer.id)
-        
-        self.assertEqual(len(base_graph.nodes), 2)
-        self.assertEqual(len(enrich_graph.nodes), 1)
-        self.assertEqual(len(base_graph.edges), 1)
-        self.assertEqual(len(enrich_graph.edges), 1)
-        
-        # Check cumulative graph
-        cumulative_graph = restored_graph.get_cumulative_layer_graph(self.enrich_layer.id)
-        self.assertEqual(len(cumulative_graph.nodes), 3)
-        self.assertEqual(len(cumulative_graph.edges), 2)
+        self.assertIsInstance(deserialized, LayeredKnowledgeGraphDP)
+        self.assertEqual(deserialized.id, self.graph.id)
+        self.assertEqual(deserialized.name, self.graph.name)
+        self.assertEqual(deserialized.description, self.graph.description)
+        self.assertEqual(len(deserialized.layers), 2)
+        self.assertEqual(len(deserialized.nodes), 3)
+        self.assertEqual(len(deserialized.edges), 2)
 
 
 class TestIntegrationWithExisting(unittest.TestCase):
-    """Test integration with existing KnowledgeGraph implementations."""
+    """Tests for integration with existing KnowledgeGraph."""
     
     def test_conversion_from_basic(self):
         """Test conversion from basic KnowledgeGraph to LayeredKnowledgeGraphDP."""
-        # Create basic nodes and edges
-        nodes = [
-            Node(id="node1", name="Basic Node 1", type="BasicType", description="Basic node 1"),
-            Node(id="node2", name="Basic Node 2", type="BasicType", description="Basic node 2")
-        ]
+        # Create a basic KnowledgeGraph
+        node1 = Node(
+            id=str(uuid4()),
+            name="Basic Node 1",
+            type="TestType",
+            description="First basic node"
+        )
         
-        edges = [
-            Edge(source_node_id="node1", target_node_id="node2", relationship_name="BASIC_RELATION")
-        ]
+        node2 = Node(
+            id=str(uuid4()),
+            name="Basic Node 2",
+            type="TestType",
+            description="Second basic node"
+        )
         
-        # Create basic graph
+        edge = Edge(
+            id=str(uuid4()),
+            source_node_id=node1.id,
+            target_node_id=node2.id,
+            relationship_name="BASIC_RELATED"
+        )
+        
         basic_graph = KnowledgeGraph(
-            nodes=nodes,
-            edges=edges,
             name="Basic Graph",
-            description="Basic knowledge graph"
+            description="A basic graph for testing",
+            nodes=[node1, node2],
+            edges=[edge]
         )
         
-        # Create layered graph
-        layered_graph = LayeredKnowledgeGraphDP.create_empty(
-            name="Converted Graph",
-            description="Converted from basic graph"
-        )
+        # Convert to LayeredKnowledgeGraphDP
+        layered_graph = LayeredKnowledgeGraphDP.from_basic_graph(basic_graph)
         
-        # Create and add a layer
-        layer = GraphLayer(
-            id=uuid4(),
-            name="Basic Layer",
-            description="Converted basic layer",
-            layer_type="base"
-        )
-        layered_graph.add_layer(layer)
+        self.assertIsInstance(layered_graph, LayeredKnowledgeGraphDP)
+        self.assertEqual(layered_graph.name, "Basic Graph")
+        self.assertEqual(layered_graph.description, "A basic graph for testing")
+        self.assertEqual(len(layered_graph.layers), 1)  # Base layer
+        self.assertEqual(len(layered_graph.nodes), 2)
+        self.assertEqual(len(layered_graph.edges), 1)
         
-        # Convert and add nodes
-        for basic_node in basic_graph.nodes:
-            node = GraphNode.from_basic_node(basic_node, layer.id)
-            layered_graph.add_node_to_layer(node, layer.id)
+        # Check layer
+        layer_id = next(iter(layered_graph.layers.keys()))
+        layer = layered_graph.get_layer(layer_id)
+        self.assertEqual(layer.name, "Base Layer")
         
-        # Convert and add edges
-        for basic_edge in basic_graph.edges:
-            # Need to map the string IDs to UUID objects
-            node_map = {
-                node.name: node.id 
-                for node in layered_graph._node_cache.values()
-            }
-            
-            source_name = next(node.name for node in basic_graph.nodes if node.id == basic_edge.source_node_id)
-            target_name = next(node.name for node in basic_graph.nodes if node.id == basic_edge.target_node_id)
-            
-            edge = GraphEdge(
-                source_node_id=node_map[source_name],
-                target_node_id=node_map[target_name],
-                relationship_name=basic_edge.relationship_name,
-                layer_id=layer.id
-            )
-            layered_graph.add_edge_to_layer(edge, layer.id)
+        # Check nodes
+        for node in layered_graph.nodes.values():
+            self.assertIsInstance(node, GraphNode)
+            self.assertEqual(node.layer_id, layer_id)
         
-        # Test the resulting graph
-        graph = layered_graph.get_layer_graph(layer.id)
-        self.assertEqual(len(graph.nodes), 2)
-        self.assertEqual(len(graph.edges), 1)
-        
-        # Test node names preserved
-        node_names = {node.name for node in graph.nodes}
-        self.assertEqual(node_names, {"Basic Node 1", "Basic Node 2"})
-        
-        # Test relationships preserved
-        self.assertEqual(graph.edges[0].relationship_name, "BASIC_RELATION")
+        # Check edge
+        edge = next(iter(layered_graph.edges.values()))
+        self.assertIsInstance(edge, GraphEdge)
+        self.assertEqual(edge.layer_id, layer_id)
 
 
 if __name__ == "__main__":

@@ -74,12 +74,16 @@ class GraphNode(DataPoint):
             A new GraphNode instance
         """
         node_id = UUID(node.id) if isinstance(node.id, str) else node.id
+        
+        # Ensure properties is a dictionary
+        properties = getattr(node, 'properties', {}) or {}
+        
         return cls(
             id=node_id,
             name=node.name,
             node_type=node.type,
             description=node.description,
-            properties=getattr(node, 'properties', {}),
+            properties=properties,
             layer_id=UUID(node.layer_id) if node.layer_id and isinstance(node.layer_id, str) else node.layer_id,
             metadata={"type": "GraphNode", "index_fields": ["name"], "created_at": datetime.now().isoformat()}
         )
@@ -163,12 +167,15 @@ class GraphEdge(DataPoint):
         source_id = UUID(edge.source_node_id) if isinstance(edge.source_node_id, str) else edge.source_node_id
         target_id = UUID(edge.target_node_id) if isinstance(edge.target_node_id, str) else edge.target_node_id
         
+        # Ensure properties is a dictionary
+        properties = getattr(edge, 'properties', {}) or {}
+        
         return cls(
             id=edge_id,
             source_node_id=source_id,
             target_node_id=target_id,
             relationship_name=edge.relationship_name,
-            properties=getattr(edge, 'properties', {}),
+            properties=properties,
             layer_id=UUID(edge.layer_id) if edge.layer_id and isinstance(edge.layer_id, str) else edge.layer_id,
             metadata={"type": "GraphEdge", "index_fields": ["relationship_name"], "created_at": datetime.now().isoformat()}
         )
@@ -802,7 +809,7 @@ class LayeredKnowledgeGraphDP(DataPoint):
         Returns:
             JSON string representation of the graph
         """
-        return json.dumps(self.to_dict(), indent=2)
+        return json.dumps(self.to_dict(), indent=2, cls=UUIDEncoder)
     
     @classmethod
     def from_json(cls, json_str: str) -> 'LayeredKnowledgeGraphDP':
@@ -843,3 +850,10 @@ class LayeredKnowledgeGraphDP(DataPoint):
             ValueError: If the layer does not exist or if source/target nodes don't exist
         """
         self.add_edge(edge, layer_id)
+
+class UUIDEncoder(json.JSONEncoder):
+    """JSON encoder that can handle UUID objects."""
+    def default(self, obj):
+        if isinstance(obj, UUID):
+            return str(obj)
+        return super().default(obj)

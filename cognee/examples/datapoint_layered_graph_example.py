@@ -721,34 +721,50 @@ async def analyze_layered_graph(graph: LayeredKnowledgeGraphDP):
                 logger.info(f"    Addresses: {', '.join(addresses)}")
 
 
+class UUIDEncoder(json.JSONEncoder):
+    """JSON encoder that can handle UUID objects."""
+    def default(self, obj):
+        if isinstance(obj, UUID):
+            return str(obj)
+        return super().default(obj)
+
+
 async def save_graph(graph: LayeredKnowledgeGraphDP, filename: str):
     """
-    Save the graph to a JSON file.
+    Save a layered knowledge graph to a JSON file.
     
     Args:
-        graph: The graph to save
+        graph: The layered knowledge graph to save
         filename: The filename to save to
     """
-    serialized = graph.to_serializable_dict()
-    with open(filename, "w") as f:
-        json.dump(serialized, f, indent=2)
-    logger.info(f"Saved graph to {filename}")
+    # Use the to_json method which handles serialization correctly
+    json_str = graph.to_json()
+    
+    # Save to file
+    with open(filename, 'w') as f:
+        f.write(json_str)
+    
+    logger.info(f"Graph saved to {filename}")
 
 
 async def load_graph(filename: str) -> LayeredKnowledgeGraphDP:
     """
-    Load a graph from a JSON file.
+    Load a layered knowledge graph from a JSON file.
     
     Args:
         filename: The filename to load from
         
     Returns:
-        The loaded graph
+        The loaded layered knowledge graph
     """
-    with open(filename, "r") as f:
-        data = json.load(f)
-    graph = LayeredKnowledgeGraphDP.from_serializable_dict(data)
-    logger.info(f"Loaded graph from {filename}")
+    # Load from file
+    with open(filename, 'r') as f:
+        json_str = f.read()
+    
+    # Deserialize the graph
+    graph = LayeredKnowledgeGraphDP.from_json(json_str)
+    
+    logger.info(f"Graph loaded from {filename}")
     return graph
 
 
@@ -767,12 +783,12 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
     
     # Add layer data
     for layer_id in graph.layers:
-        layer = graph._get_layer(layer_id)
+        layer = graph.get_layer(layer_id)
         
         # Get parent layer names
         parent_names = []
         for parent_id in layer.parent_layers:
-            parent = graph._get_layer(parent_id)
+            parent = graph.get_layer(parent_id)
             parent_names.append(parent.name)
         
         layers_data.append({
@@ -787,38 +803,42 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
     node_layer_map = {}
     for layer_id in graph.layers:
         for node in graph.get_layer_nodes(layer_id):
-            node_layer_map[str(node.id)] = {"layer_id": str(layer_id), "layer_name": graph._get_layer(layer_id).name}
+            node_layer_map[str(node.id)] = {"layer_id": str(layer_id), "layer_name": graph.get_layer(layer_id).name}
     
     # Get all nodes from the last layer's cumulative graph
-    last_layer_id = graph.layers[-1]
-    cumulative_graph = graph.get_cumulative_layer_graph(last_layer_id)
-    
-    for node in cumulative_graph.nodes:
-        layer_info = node_layer_map.get(node.id, {"layer_id": "unknown", "layer_name": "Unknown"})
+    layer_ids = list(graph.layers.keys())
+    if layer_ids:
+        last_layer_id = layer_ids[-1]
+        cumulative_graph = graph.get_cumulative_layer_graph(last_layer_id)
         
-        nodes_data.append({
-            "id": node.id,
-            "name": node.name,
-            "type": node.type,
-            "layer": layer_info["layer_name"],
-            "description": node.description,
-            "properties": node.properties if hasattr(node, "properties") else {}
-        })
-    
-    # Add edge data
-    for edge in cumulative_graph.edges:
-        layer_id = edge.layer_id
-        layer_name = "Unknown"
-        if layer_id and layer_id in node_layer_map:
-            layer_name = node_layer_map[layer_id]["layer_name"]
+        for node in cumulative_graph.nodes:
+            layer_info = node_layer_map.get(node.id, {"layer_id": "unknown", "layer_name": "Unknown"})
+            
+            nodes_data.append({
+                "id": node.id,
+                "name": node.name,
+                "type": node.type,
+                "layer": layer_info["layer_name"],
+                "description": node.description,
+                "properties": node.properties if hasattr(node, "properties") else {}
+            })
         
-        edges_data.append({
-            "source": edge.source_node_id,
-            "target": edge.target_node_id,
-            "relationship": edge.relationship_name,
-            "layer": layer_name,
-            "properties": edge.properties if hasattr(edge, "properties") else {}
-        })
+        # Add edge data
+        for edge in cumulative_graph.edges:
+            # Get layer info
+            layer_name = "Unknown"
+            if hasattr(edge, "layer_id") and edge.layer_id:
+                layer_id_str = str(edge.layer_id)
+                if layer_id_str in node_layer_map:
+                    layer_name = node_layer_map[layer_id_str]["layer_name"]
+            
+            edges_data.append({
+                "source": edge.source_node_id,
+                "target": edge.target_node_id,
+                "relationship": edge.relationship_name,
+                "layer": layer_name,
+                "properties": edge.properties if hasattr(edge, "properties") else {}
+            })
     
     # Build the complete visualization data
     viz_data = {
@@ -829,7 +849,7 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
     
     # Save to file
     with open(filename, "w") as f:
-        json.dump(viz_data, f, indent=2)
+        json.dump(viz_data, f, indent=2, cls=UUIDEncoder)
     
     logger.info(f"Exported visualization data to {filename} ({len(nodes_data)} nodes, {len(edges_data)} edges)")
 
@@ -862,11 +882,12 @@ async def main():
     loaded_graph = await load_graph(graph_file)
     logger.info(f"\nSuccessfully loaded graph with {len(loaded_graph.layers)} layers")
     
-    # Demonstrate serialization capabilities from DataPoint
-    node = next(iter(graph._node_cache.values()))
-    logger.info(f"\nDataPoint serialization example (node {node.name}):")
-    logger.info(f"  to_json(): {len(node.to_json())} characters")
-    logger.info(f"  to_pickle(): {len(node.to_pickle())} bytes")
+    # Demonstrate serialization capabilities from DataPoint (if the graph has nodes)
+    if loaded_graph.nodes:
+        node = next(iter(loaded_graph.nodes.values()))
+        logger.info(f"\nDataPoint serialization example (node {node.name}):")
+        logger.info(f"  to_json(): {len(node.to_json())} characters")
+        logger.info(f"  to_pickle(): {len(node.to_pickle())} bytes")
     
     logger.info("\n=== Example Complete ===")
 
