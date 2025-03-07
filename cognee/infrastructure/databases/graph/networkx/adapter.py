@@ -46,15 +46,25 @@ class NetworkXAdapter(GraphDBInterface):
         self,
         node: DataPoint,
     ) -> None:
-        self.graph.add_node(node.id, **node.model_dump())
-
+        # Convert the node to a dictionary and add type field from metadata
+        node_props = node.model_dump()
+        if "metadata" in node_props and isinstance(node_props["metadata"], dict):
+            node_props["type"] = node_props["metadata"].get("type", "Unknown")
+        
+        self.graph.add_node(node.id, **node_props)
         await self.save_graph_to_file(self.filename)
 
     async def add_nodes(
         self,
         nodes: list[DataPoint],
     ) -> None:
-        nodes = [(node.id, node.model_dump()) for node in nodes]
+        # Convert nodes to tuples of (id, props) with type field from metadata
+        nodes = []
+        for node in nodes:
+            node_props = node.model_dump()
+            if "metadata" in node_props and isinstance(node_props["metadata"], dict):
+                node_props["type"] = node_props["metadata"].get("type", "Unknown")
+            nodes.append((node.id, node_props))
 
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
@@ -257,17 +267,36 @@ class NetworkXAdapter(GraphDBInterface):
         if not file_path:
             file_path = self.filename
 
+        # Convert the graph to a dictionary format
         graph_data = nx.readwrite.json_graph.node_link_data(self.graph, edges="links")
 
+        # Convert UUIDs to strings in nodes
+        for node in graph_data["nodes"]:
+            if "id" in node and isinstance(node["id"], UUID):
+                node["id"] = str(node["id"])
+            if "metadata" in node and isinstance(node["metadata"], dict):
+                for key, value in node["metadata"].items():
+                    if isinstance(value, UUID):
+                        node["metadata"][key] = str(value)
+
+        # Convert UUIDs to strings in edges
+        for edge in graph_data["links"]:
+            if "source" in edge and isinstance(edge["source"], UUID):
+                edge["source"] = str(edge["source"])
+            if "target" in edge and isinstance(edge["target"], UUID):
+                edge["target"] = str(edge["target"])
+            if "source_node_id" in edge and isinstance(edge["source_node_id"], UUID):
+                edge["source_node_id"] = str(edge["source_node_id"])
+            if "target_node_id" in edge and isinstance(edge["target_node_id"], UUID):
+                edge["target_node_id"] = str(edge["target_node_id"])
+
+        # Save the graph data to file
         async with aiofiles.open(file_path, "w") as file:
             json_data = json.dumps(graph_data, cls=JSONEncoder)
             await file.write(json_data)
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""
-        if file_path == self.filename:
-            return
-
         if not file_path:
             file_path = self.filename
         try:
@@ -276,14 +305,22 @@ class NetworkXAdapter(GraphDBInterface):
                     graph_data = json.loads(await file.read())
                     for node in graph_data["nodes"]:
                         try:
-                            if not isinstance(node["id"], UUID):
+                            if "id" in node and not isinstance(node["id"], UUID):
                                 try:
                                     node["id"] = UUID(node["id"])
                                 except Exception:
                                     # If conversion fails, keep the original id
                                     pass
+                            if "metadata" in node and isinstance(node["metadata"], dict):
+                                for key, value in node["metadata"].items():
+                                    if isinstance(value, str):
+                                        try:
+                                            node["metadata"][key] = UUID(value)
+                                        except ValueError:
+                                            # If conversion fails, keep the original value
+                                            pass
                         except Exception as e:
-                            logger.error(e)
+                            logger.error(f"Error processing node: {e}")
                             raise e
 
                         if isinstance(node.get("updated_at"), int):
@@ -297,29 +334,39 @@ class NetworkXAdapter(GraphDBInterface):
 
                     for edge in graph_data["links"]:
                         try:
-                            if not isinstance(edge["source"], UUID):
-                                source_id = parse_id(edge["source"])
-                            else:
-                                source_id = edge["source"]
-
-                            if not isinstance(edge["target"], UUID):
-                                target_id = parse_id(edge["target"])
-                            else:
-                                target_id = edge["target"]
-
-                            edge["source"] = source_id
-                            edge["target"] = target_id
-                            edge["source_node_id"] = source_id
-                            edge["target_node_id"] = target_id
+                            if "source" in edge and not isinstance(edge["source"], UUID):
+                                try:
+                                    edge["source"] = UUID(edge["source"])
+                                except ValueError:
+                                    # If conversion fails, keep the original value
+                                    pass
+                            if "target" in edge and not isinstance(edge["target"], UUID):
+                                try:
+                                    edge["target"] = UUID(edge["target"])
+                                except ValueError:
+                                    # If conversion fails, keep the original value
+                                    pass
+                            if "source_node_id" in edge and not isinstance(edge["source_node_id"], UUID):
+                                try:
+                                    edge["source_node_id"] = UUID(edge["source_node_id"])
+                                except ValueError:
+                                    # If conversion fails, keep the original value
+                                    pass
+                            if "target_node_id" in edge and not isinstance(edge["target_node_id"], UUID):
+                                try:
+                                    edge["target_node_id"] = UUID(edge["target_node_id"])
+                                except ValueError:
+                                    # If conversion fails, keep the original value
+                                    pass
                         except Exception as e:
-                            logger.error(e)
+                            logger.error(f"Error processing edge: {e}")
                             raise e
 
-                        if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
+                        if isinstance(edge.get("updated_at"), int):  # Handle timestamp in milliseconds
                             edge["updated_at"] = datetime.fromtimestamp(
                                 edge["updated_at"] / 1000, tz=timezone.utc
                             )
-                        elif isinstance(edge["updated_at"], str):
+                        elif isinstance(edge.get("updated_at"), str):
                             edge["updated_at"] = datetime.strptime(
                                 edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )
@@ -333,9 +380,8 @@ class NetworkXAdapter(GraphDBInterface):
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
                 await self.create_empty_graph(file_path)
 
-        except Exception:
-            logger.error("Failed to load graph from file: %s", file_path)
-
+        except Exception as e:
+            logger.error("Failed to load graph from file: %s - %s", file_path, str(e))
             await self.create_empty_graph(file_path)
 
     async def delete_graph(self, file_path: str = None):
