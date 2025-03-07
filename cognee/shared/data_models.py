@@ -22,6 +22,7 @@ if get_llm_config().llm_provider.lower() == "gemini":
         type: str
         description: str
         label: str
+        layer_id: Optional[str] = None
 
     class Edge(BaseModel):
         """Edge in a knowledge graph."""
@@ -29,6 +30,7 @@ if get_llm_config().llm_provider.lower() == "gemini":
         source_node_id: str
         target_node_id: str
         relationship_name: str
+        layer_id: Optional[str] = None
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
@@ -49,6 +51,7 @@ else:
         properties: Optional[Dict[str, Any]] = Field(
             None, description="A dictionary of properties associated with the node."
         )
+        layer_id: Optional[str] = None
 
     class Edge(BaseModel):
         """Edge in a knowledge graph."""
@@ -56,6 +59,7 @@ else:
         source_node_id: str
         target_node_id: str
         relationship_name: str
+        layer_id: Optional[str] = None
         properties: Optional[Dict[str, Any]] = Field(
             None, description="A dictionary of properties associated with the edge."
         )
@@ -65,6 +69,8 @@ else:
 
         nodes: List[Node] = Field(..., default_factory=list)
         edges: List[Edge] = Field(..., default_factory=list)
+        name: str = "Knowledge Graph"
+        description: str = ""
 
 
 class GraphQLQuery(BaseModel):
@@ -357,3 +363,14 @@ class MonitoringTool(str, Enum):
     LANGFUSE = "langfuse"
     LLMLITE = "llmlite"
     LANGSMITH = "langsmith"
+
+
+class Layer(BaseModel):
+    """Layer in a layered knowledge graph."""
+    
+    id: str
+    name: str
+    description: str
+    layer_type: str = "default"  # Type of layer (e.g., "base", "enrichment", "inference")
+    parent_layers: List[str] = Field(default_factory=list)  # IDs of parent layers this layer builds upon
+    properties: Optional[Dict[str, Any]] = Field(default_factory=dict)
