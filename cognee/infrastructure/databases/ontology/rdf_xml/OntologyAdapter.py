@@ -90,6 +90,8 @@ class OntologyAdapter:
                 logger.info("Node '%s' not found in lookup.", closest_match)
                 return list(nodes), relationships, None
 
+            logger.info("%s match was found for found for '%s' node", node.name, node_name)
+
             queue.append(node)
             visited_nodes.add(node)
             nodes.add(node)
