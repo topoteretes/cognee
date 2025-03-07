@@ -83,16 +83,16 @@ class OntologyAdapter:
             closest_match = self.find_closest_match(name=node_name, category=node_type)
             if not closest_match:
                 logger.info("No close match found for '%s' in category '%s'", node_name, node_type)
-                return list(nodes), relationships
+                return list(nodes), relationships, None
 
             node = self.lookup[node_type].get(closest_match)
             if node is None:
                 logger.info("Node '%s' not found in lookup.", closest_match)
-                return list(nodes), relationships
+                return list(nodes), relationships, None
 
             queue.append(node)
             visited_nodes.add(node)
-            nodes.add(node.name)
+            nodes.add(node)
 
             while queue:
                 current_node = queue.popleft()
@@ -105,7 +105,7 @@ class OntologyAdapter:
                             else:
                                 continue
                         relationships.append((current_node.name, "is_a", parent.name))
-                        nodes.add(parent.name)
+                        nodes.add(parent)
                         if parent not in visited_nodes:
                             visited_nodes.add(parent)
                             queue.append(parent)
@@ -113,7 +113,7 @@ class OntologyAdapter:
                 for prop in self.ontology.object_properties():
                     for target in prop[current_node]:
                         relationships.append((current_node.name, prop.name, target.name))
-                        nodes.add(target.name)
+                        nodes.add(target)
                         if target not in visited_nodes:
                             visited_nodes.add(target)
                             queue.append(target)
@@ -121,12 +121,12 @@ class OntologyAdapter:
                     for source in prop.range:
                         if current_node in prop[source]:
                             relationships.append((source.name, prop.name, current_node.name))
-                            nodes.add(source.name)
+                            nodes.add(source)
                             if source not in visited_nodes:
                                 visited_nodes.add(source)
                                 queue.append(source)
 
-            return list(nodes), relationships
+            return list(nodes), relationships, node
         except Exception as e:
             logger.error("Error in get_subgraph: %s", str(e))
             raise RuntimeError("Failed to retrieve subgraph") from e
