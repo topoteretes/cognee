@@ -40,7 +40,9 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: |
+          poetry install --no-interaction
+          pip install uvicorn
 
       - name: Run cognee server
         env:
