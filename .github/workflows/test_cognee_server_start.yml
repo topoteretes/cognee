@@ -42,7 +42,6 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install --no-interaction
-          pip install uvicorn
 
       - name: Run cognee server
         env:
@@ -56,7 +55,7 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: |
-          uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000 &
+          poetry run uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000 &
           echo $! > server.pid
           sleep 10
 
