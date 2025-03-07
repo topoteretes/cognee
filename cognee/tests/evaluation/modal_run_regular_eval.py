@@ -18,8 +18,8 @@ app = modal.App("cognee-regular-eval")
 @app.function(image=image, max_containers=2, timeout=1800, retries=1)
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
-    print(os.getenv("LLM_API_KEY")[:20])
-    print(os.getenv("OPENAI_API_KEY")[:20])
+    logger.info(f"llm api key: {os.getenv('LLM_API_KEY')[:20]}")
+    logger.info(f"openai api key: {os.getenv('OPENAI_API_KEY')[:20]}")
     if eval_params is None:
         eval_params = EvalConfig().to_dict()
 
