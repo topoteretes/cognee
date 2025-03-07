@@ -33,7 +33,7 @@ Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) 
 More on [use-cases](https://docs.cognee.ai/use_cases).
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="100%" />
 </div>
 
 </div>
@@ -52,6 +52,8 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
 
+## Contributing
+Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
 
 
@@ -83,7 +85,7 @@ To use different LLM providers, for more info check out our <a href="https://doc
 
 ### Simple example
 
-Add LLM_API_KEY to .env using the command bellow. 
+Add LLM_API_KEY to .env using the command bellow.
 ```
 echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
 ```
@@ -147,7 +149,7 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 ## Understand our architecture
 
 <div style="text-align: center">
-  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
+  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="100%" />
 </div>
 
 
@@ -160,10 +162,6 @@ What is AI memory:
 [<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
 
 
-
-## Contributing
-
-Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
 ## Code of Conduct
 
@@ -179,5 +177,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
-
