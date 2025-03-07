@@ -41,9 +41,9 @@ image = (
     .copy_local_file("poetry.lock", "poetry.lock")
     .env(
         {
-            "ENV": "$ENV",
-            "LLM_API_KEY": "$LLM_API_KEY",
-            "OPENAI_API_KEY": "$OPENAI_API_KEY",
+            "ENV": os.getenv("ENV"),
+            "LLM_API_KEY": os.getenv("LLM_API_KEY"),
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
         }
     )
     .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
