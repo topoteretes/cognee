@@ -158,9 +158,7 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 What is AI memory:
 
-
-[<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
-
+[Learn about cognee](https://github.com/user-attachments/assets/8b2a0050-5ec4-424c-b417-8269971503f0)
 
 
 ## Code of Conduct
