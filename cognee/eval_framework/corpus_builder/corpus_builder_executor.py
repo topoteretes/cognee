@@ -28,14 +28,22 @@ class CorpusBuilderExecutor:
         self.questions = None
         self.task_getter = task_getter
 
-    def load_corpus(self, limit: Optional[int] = None) -> Tuple[List[Dict], List[str]]:
-        self.raw_corpus, self.questions = self.adapter.load_corpus(limit=limit)
+    def load_corpus(
+        self, limit: Optional[int] = None, load_golden_context: bool = False
+    ) -> Tuple[List[Dict], List[str]]:
+        self.raw_corpus, self.questions = self.adapter.load_corpus(
+            limit=limit, load_golden_context=load_golden_context
+        )
         return self.raw_corpus, self.questions
 
     async def build_corpus(
-        self, limit: Optional[int] = None, chunk_size=1024, chunker=TextChunker
+        self,
+        limit: Optional[int] = None,
+        chunk_size=1024,
+        chunker=TextChunker,
+        load_golden_context: bool = False,
     ) -> List[str]:
-        self.load_corpus(limit=limit)
+        self.load_corpus(limit=limit, load_golden_context=load_golden_context)
         await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
         return self.questions
 

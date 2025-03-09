@@ -29,13 +29,16 @@ class AnswerGeneratorExecutor:
             retrieval_context = await retriever.get_context(query_text)
             search_results = await retriever.get_completion(query_text, retrieval_context)
 
-            answers.append(
-                {
-                    "question": query_text,
-                    "answer": search_results[0],
-                    "golden_answer": correct_answer,
-                    "retrieval_context": retrieval_context,
-                }
-            )
+            answer = {
+                "question": query_text,
+                "answer": search_results[0],
+                "golden_answer": correct_answer,
+                "retrieval_context": retrieval_context,
+            }
+
+            if "golden_context" in instance:
+                answer["golden_context"] = instance["golden_context"]
+
+            answers.append(answer)
 
         return answers
