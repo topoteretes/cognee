@@ -186,3 +186,6 @@ node_modules/
 
 # Evals
 SWE-bench_testsample/
+
+# ChromaDB Data
+.chromadb_data/
