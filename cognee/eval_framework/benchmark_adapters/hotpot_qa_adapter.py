@@ -2,7 +2,7 @@ import requests
 import os
 import json
 import random
-from typing import Optional, Any, List, Tuple
+from typing import Optional, Any, List, Union, Tuple
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
@@ -37,6 +37,23 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_contexts)
 
+    def _get_raw_corpus(self) -> List[dict[str, Any]]:
+        """Loads the raw corpus data from file or URL and returns it as a list of dictionaries."""
+        filename = self.dataset_info["filename"]
+
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as f:
+                raw_corpus = json.load(f)
+        else:
+            response = requests.get(self.dataset_info["url"])
+            response.raise_for_status()
+            raw_corpus = response.json()
+
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(raw_corpus, f, ensure_ascii=False, indent=4)
+
+        return raw_corpus
+
     def _process_item(
         self,
         item: dict[str, Any],
@@ -60,30 +77,26 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         question_answer_pairs.append(qa_pair)
 
     def load_corpus(
-        self, limit: Optional[int] = None, seed: int = 42, load_golden_context: bool = False
+        self,
+        limit: Optional[int] = None,
+        seed: int = 42,
+        load_golden_context: bool = False,
+        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
     ) -> Tuple[List[str], List[dict[str, Any]]]:
-        """Loads and processes the HotpotQA corpus, optionally with golden context."""
-        filename = self.dataset_info["filename"]
+        """Loads and processes the HotpotQA corpus, optionally with filtering and golden context."""
+        raw_corpus = self._get_raw_corpus()
 
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                corpus_json = json.load(f)
-        else:
-            response = requests.get(self.dataset_info["url"])
-            response.raise_for_status()
-            corpus_json = response.json()
+        if instance_filter is not None:
+            raw_corpus = self._filter_instances(raw_corpus, instance_filter, id_key="_id")
 
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(corpus_json, f, ensure_ascii=False, indent=4)
-
-        if limit is not None and 0 < limit < len(corpus_json):
+        if limit is not None and 0 < limit < len(raw_corpus):
             random.seed(seed)
-            corpus_json = random.sample(corpus_json, limit)
+            raw_corpus = random.sample(raw_corpus, limit)
 
         corpus_list = []
         question_answer_pairs = []
 
-        for item in corpus_json:
+        for item in raw_corpus:
             self._process_item(item, corpus_list, question_answer_pairs, load_golden_context)
 
         return corpus_list, question_answer_pairs
