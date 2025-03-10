@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import List
+from typing import List, Optional
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
     retriever_options,
@@ -32,7 +32,7 @@ async def create_and_insert_answers_table(questions_payload):
 
 
 async def run_question_answering(
-    params: dict, system_prompt="answer_simple_question.txt"
+    params: dict, system_prompt="answer_simple_question.txt", top_k: Optional[int] = None
 ) -> List[dict]:
     if params.get("answering_questions"):
         logging.info("Question answering started...")
@@ -48,7 +48,9 @@ async def run_question_answering(
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
-            retriever=retriever_options[params["qa_engine"]](system_prompt_path=system_prompt),
+            retriever=retriever_options[params["qa_engine"]](
+                system_prompt_path=system_prompt, top_k=top_k
+            ),
         )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
