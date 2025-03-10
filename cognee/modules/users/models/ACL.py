@@ -1,9 +1,8 @@
 from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy.orm import relationship, Mapped
+from sqlalchemy.orm import relationship
 from sqlalchemy import Column, ForeignKey, DateTime, UUID
 from cognee.infrastructure.databases.relational import Base
-from .ACLResources import ACLResources
 
 
 class ACL(Base):
@@ -16,11 +15,8 @@ class ACL(Base):
 
     principal_id = Column(UUID, ForeignKey("principals.id"))
     permission_id = Column(UUID, ForeignKey("permissions.id"))
+    data_id = Column(UUID, ForeignKey("data.id", ondelete="CASCADE"))
 
     principal = relationship("Principal")
     permission = relationship("Permission")
-    resources: Mapped[list["Resource"]] = relationship(
-        "Resource",
-        secondary=ACLResources.__tablename__,
-        back_populates="acls",
-    )
+    data = relationship("Data", back_populates="acls")

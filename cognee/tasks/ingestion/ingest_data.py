@@ -15,7 +15,6 @@ from .save_data_item_to_storage import (
 
 from typing import Union, BinaryIO
 import inspect
-import warnings
 
 
 async def ingest_data(data: Any, dataset_name: str, user: User):

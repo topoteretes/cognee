@@ -1,8 +1,8 @@
 from uuid import UUID
 from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Dataset, DatasetData
-from ...models import ACL, Resource, Permission
+from cognee.modules.data.models import Dataset, DatasetData, Data
+from ...models import ACL, Permission
 
 
 async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -> list[str]:
@@ -12,8 +12,8 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
         async with session.begin():
             document_ids = (
                 await session.scalars(
-                    select(Resource.resource_id)
-                    .join(ACL.resources)
+                    select(Data.id)
+                    .join(ACL.data)
                     .join(ACL.permission)
                     .where(
                         ACL.principal_id == user_id,
