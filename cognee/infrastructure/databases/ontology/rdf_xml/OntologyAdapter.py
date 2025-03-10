@@ -2,7 +2,7 @@ import os
 import difflib
 import logging
 from collections import deque
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
 
 logger = logging.getLogger("OntologyAdapter")
@@ -73,9 +73,9 @@ class OntologyAdapter:
 
     def get_subgraph(
         self, node_name: str, node_type: str = "individuals"
-    ) -> Tuple[List[str], List[Tuple[str, str, str]]]:
-        nodes = set()
-        relationships: List[Tuple[str, str, str]] = []
+    ) -> Tuple[List[Any], List[Tuple[str, str, str]], Optional[Any]]:
+        nodes_set = set()
+        edges: List[Tuple[str, str, str]] = []
         visited_nodes = set()
         queue = deque()
 
@@ -83,18 +83,18 @@ class OntologyAdapter:
             closest_match = self.find_closest_match(name=node_name, category=node_type)
             if not closest_match:
                 logger.info("No close match found for '%s' in category '%s'", node_name, node_type)
-                return list(nodes), relationships, None
+                return list(nodes_set), edges, None
 
             node = self.lookup[node_type].get(closest_match)
             if node is None:
                 logger.info("Node '%s' not found in lookup.", closest_match)
-                return list(nodes), relationships, None
+                return list(nodes_set), edges, None
 
             logger.info("%s match was found for found for '%s' node", node.name, node_name)
 
             queue.append(node)
             visited_nodes.add(node)
-            nodes.add(node)
+            nodes_set.add(node)
 
             while queue:
                 current_node = queue.popleft()
@@ -106,29 +106,29 @@ class OntologyAdapter:
                                 parent = parent.value
                             else:
                                 continue
-                        relationships.append((current_node.name, "is_a", parent.name))
-                        nodes.add(parent)
+                        edges.append((current_node.name, "is_a", parent.name))
+                        nodes_set.add(parent)
                         if parent not in visited_nodes:
                             visited_nodes.add(parent)
                             queue.append(parent)
 
                 for prop in self.ontology.object_properties():
                     for target in prop[current_node]:
-                        relationships.append((current_node.name, prop.name, target.name))
-                        nodes.add(target)
+                        edges.append((current_node.name, prop.name, target.name))
+                        nodes_set.add(target)
                         if target not in visited_nodes:
                             visited_nodes.add(target)
                             queue.append(target)
 
                     for source in prop.range:
                         if current_node in prop[source]:
-                            relationships.append((source.name, prop.name, current_node.name))
-                            nodes.add(source)
+                            edges.append((source.name, prop.name, current_node.name))
+                            nodes_set.add(source)
                             if source not in visited_nodes:
                                 visited_nodes.add(source)
                                 queue.append(source)
 
-            return list(nodes), relationships, node
+            return list(nodes_set), edges, node
         except Exception as e:
             logger.error("Error in get_subgraph: %s", str(e))
             raise RuntimeError("Failed to retrieve subgraph") from e
@@ -139,9 +139,10 @@ if __name__ == "__main__":
     try:
         adapter = OntologyAdapter(ontology_file="basic_ontology.owl")
 
-        nodes, relationships = adapter.get_subgraph("Audi", node_type="individuals")
+        nodes, relationships, start_node = adapter.get_subgraph("Audi", node_type="individuals")
         logger.info("Subgraph nodes: %s", nodes)
         logger.info("Subgraph relationships: %s", relationships)
+        logger.info("Starting node: %s", start_node)
 
     except Exception as e:
         logger.error("Ontology adapter error: %s", e)

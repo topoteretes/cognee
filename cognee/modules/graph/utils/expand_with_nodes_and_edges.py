@@ -15,7 +15,7 @@ from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import Ont
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_adapter: OntologyAdapter,
+    ontology_adapter: OntologyAdapter = OntologyAdapter(),
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
