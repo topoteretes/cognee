@@ -104,10 +104,11 @@ def test_get_subgraph_no_match():
     adapter.ontology = ontology
     adapter._build_lookup()
 
-    nodes, relationships = adapter.get_subgraph("Nonexistent", "individuals")
+    nodes, relationships, start_node = adapter.get_subgraph("Nonexistent", "individuals")
 
     assert nodes == []
     assert relationships == []
+    assert start_node is None
 
 
 def test_get_subgraph_success():
@@ -135,12 +136,12 @@ def test_get_subgraph_success():
     adapter.ontology = ontology
     adapter._build_lookup()
 
-    nodes, relationships = adapter.get_subgraph("Audi", "individuals")
+    nodes, relationships, start_node = adapter.get_subgraph("Audi", "individuals")
 
-    assert "Audi" in nodes
-    assert "Car" in nodes
-    assert "Vehicle" in nodes
-    assert "Thing" in nodes
+    assert audi in nodes
+    assert Car in nodes
+    assert Vehicle in nodes
+    assert Thing in nodes
     assert ("Audi", "is_a", "Car") in relationships
     assert ("Car", "is_a", "Vehicle") in relationships
     assert ("Vehicle", "is_a", "Thing") in relationships
