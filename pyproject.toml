@@ -31,6 +31,7 @@ nest_asyncio = "1.6.0"
 numpy = "1.26.4"
 datasets = "3.1.0"
 falkordb = {version = "1.0.9", optional = true}
+kuzu = {version = "0.8.2", optional = true}
 boto3 = "^1.26.125"
 botocore="^1.35.54"
 gunicorn = "^20.1.0"
@@ -105,6 +106,7 @@ mistral = ["mistral-common"]
 deepeval = ["deepeval"]
 posthog = ["posthog"]
 falkordb = ["falkordb"]
+kuzu = ["kuzu"]
 groq = ["groq"]
 milvus = ["pymilvus"]
 docs = ["unstructured"]

@@ -59,6 +59,14 @@ def create_graph_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif graph_database_provider == "kuzu":
+        if not graph_file_path:
+            raise EnvironmentError("Missing required Kuzu database path.")
+
+        from .kuzu.adapter import KuzuAdapter
+
+        return KuzuAdapter(db_path=graph_file_path)
+
     from .networkx.adapter import NetworkXAdapter
 
     graph_client = NetworkXAdapter(filename=graph_file_path)
