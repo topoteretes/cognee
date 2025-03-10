@@ -23,8 +23,7 @@ class CompletionRetriever(BaseRetriever):
     async def get_context(self, query: str) -> Any:
         """Retrieves relevant document chunks as context."""
         vector_engine = get_vector_engine()
-        limit = self.top_k if self.top_k is not None else 5
-        found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=limit)
+        found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
         if len(found_chunks) == 0:
             raise NoRelevantDataFound
         return found_chunks[0].payload["text"]
