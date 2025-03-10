@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-cognee
+  labels:
+    app: {{ .Release.Name }}-cognee
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-cognee
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-cognee
+    spec:
+      containers:
+        - name: cognee
+          image: {{ .Values.cognee.image }}
+          ports:
+            - containerPort: {{ .Values.cognee.port }}
+          env:
+            - name: HOST
+              value: {{ .Values.cognee.env.HOST }}
+            - name: ENVIRONMENT
+              value: {{ .Values.cognee.env.ENVIRONMENT }}
+            - name: PYTHONPATH
+              value: {{ .Values.cognee.env.PYTHONPATH }}
+          resources:
+            limits:
+              cpu: {{ .Values.cognee.resources.cpu }}
+              memory: {{ .Values.cognee.resources.memory }}
