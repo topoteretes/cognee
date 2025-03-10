@@ -496,14 +496,28 @@ class NetworkXAdapter(GraphDBInterface):
 
                 # Process foreign key relationships for the current table.
                 for fk in details.get("foreign_keys", []):
-                    fk_query = text(
-                        f"SELECT {table_name}.{fk['column']} AS {table_name}_{fk['column']}, "
-                        f"{fk['ref_table']}.{fk['ref_column']} AS {fk['ref_table']}_{fk['ref_column']} "
-                        f"FROM {table_name} "
-                        f"JOIN {fk['ref_table']} ON {table_name}.{fk['column']} = {fk['ref_table']}.{fk['ref_column']};"
-                    )
+                    if fk["ref_table"] == table_name:  # Check if it's a self-referencing FK
+                        alias_1 = f"{table_name}_e1"
+                        alias_2 = f"{table_name}_e2"
+
+                        fk_query = text(
+                            f"SELECT {alias_1}.{fk['column']} AS {alias_1}_{fk['column']}, "
+                            f"{alias_2}.{fk['ref_column']} AS {alias_2}_{fk['ref_column']} "
+                            f"FROM {table_name} AS {alias_1} "
+                            f"JOIN {table_name} AS {alias_2} "
+                            f"ON {alias_1}.{fk['column']} = {alias_2}.{fk['ref_column']};"
+                        )
+                    else:
+                        fk_query = text(
+                            f"SELECT {table_name}.{fk['column']} AS {table_name}_{fk['column']}, "
+                            f"{fk['ref_table']}.{fk['ref_column']} AS {fk['ref_table']}_{fk['ref_column']} "
+                            f"FROM {table_name} "
+                            f"JOIN {fk['ref_table']} "
+                            f"ON {table_name}.{fk['column']} = {fk['ref_table']}.{fk['ref_column']};"
+                        )
+
                     fk_result = await cursor.execute(fk_query)
-                    relations = fk_result.fetchall()
+                    relations = fk_result.fetchall()  # Use `await` for async fetch
 
                     for local_value, ref_value in relations:
                         source_node = None

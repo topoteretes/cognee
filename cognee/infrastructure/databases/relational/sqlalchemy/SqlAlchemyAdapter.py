@@ -229,25 +229,23 @@ class SQLAlchemyAdapter:
 
     async def get_table_names(self) -> List[str]:
         """
-        Return a list of all tables names in database
+        Return a list of all table names in the database, even if they don't have defined SQLAlchemy models.
         """
         table_names = []
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                await connection.run_sync(Base.metadata.reflect)
-                for table in Base.metadata.tables:
-                    table_names.append(str(table))
+                # Use a new MetaData instance to reflect all tables
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect)  # Reflect the entire database
+                table_names = list(metadata.tables.keys())  # Get table names
             else:
                 schema_list = await self.get_schema_list()
-                # Create a MetaData instance to load table information
                 metadata = MetaData()
-                # Drop all tables from all schemas
                 for schema_name in schema_list:
-                    # Load the schema information into the MetaData object
                     await connection.run_sync(metadata.reflect, schema=schema_name)
-                    for table in metadata.sorted_tables:
-                        table_names.append(str(table))
-                    metadata.clear()
+                    table_names.extend(metadata.tables.keys())  # Append table names from schema
+                    metadata.clear()  # Clear metadata for the next schema
+
         return table_names
 
     async def get_data(self, table_name: str, filters: dict = None):
