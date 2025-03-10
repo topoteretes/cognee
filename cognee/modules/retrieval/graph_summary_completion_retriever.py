@@ -12,7 +12,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         summarize_prompt_path: str = "summarize_search_results.txt",
-        top_k: int = 5,
+        top_k: Optional[int] = 5,
     ):
         """Initialize retriever with default prompt paths and search parameters."""
         super().__init__(
