@@ -1,14 +1,21 @@
 from typing import Any, Dict, Iterator
 from uuid import NAMESPACE_OID, uuid5
 
-from cognee.infrastructure.databases.vector import get_vector_engine
-
+from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from .chunk_by_sentence import chunk_by_sentence
+
+
+def get_sentence_size(sentence: str) -> int:
+    embedding_engine = get_embedding_engine()
+    if embedding_engine.tokenizer:
+        return embedding_engine.tokenizer.count_tokens(sentence)
+    else:
+        return len(sentence.split())
 
 
 def chunk_by_paragraph(
     data: str,
-    max_chunk_tokens,
+    max_chunk_size,
     paragraph_length: int = 1024,
     batch_paragraphs: bool = True,
 ) -> Iterator[Dict[str, Any]]:
@@ -23,28 +30,20 @@ def chunk_by_paragraph(
         - Remaining text at the end of the input will be yielded as a final chunk.
     """
     current_chunk = ""
-    current_word_count = 0
     chunk_index = 0
     paragraph_ids = []
     last_cut_type = None
-    current_token_count = 0
+    current_chunk_size = 0
 
-    for paragraph_id, sentence, word_count, end_type in chunk_by_sentence(
+    for paragraph_id, sentence, end_type in chunk_by_sentence(
         data, maximum_length=paragraph_length
     ):
-        # Check if this sentence would exceed length limit
-        embedding_engine = get_vector_engine().embedding_engine
-        token_count = embedding_engine.tokenizer.count_tokens(sentence)
-
-        if current_word_count > 0 and (
-            current_word_count + word_count > paragraph_length
-            or current_token_count + token_count > max_chunk_tokens
-        ):
+        sentence_size = get_sentence_size(sentence)
+        if current_chunk_size > 0 and (current_chunk_size + sentence_size > max_chunk_size):
             # Yield current chunk
             chunk_dict = {
                 "text": current_chunk,
-                "word_count": current_word_count,
-                "token_count": current_token_count,
+                "chunk_size": current_chunk_size,
                 "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
                 "paragraph_ids": paragraph_ids,
                 "chunk_index": chunk_index,
@@ -56,22 +55,19 @@ def chunk_by_paragraph(
             # Start new chunk with current sentence
             paragraph_ids = []
             current_chunk = ""
-            current_word_count = 0
-            current_token_count = 0
+            current_chunk_size = 0
             chunk_index += 1
 
         paragraph_ids.append(paragraph_id)
         current_chunk += sentence
-        current_word_count += word_count
-        current_token_count += token_count
+        current_chunk_size += sentence_size
 
         # Handle end of paragraph
         if end_type in ("paragraph_end", "sentence_cut") and not batch_paragraphs:
             # For non-batch mode, yield each paragraph separately
             chunk_dict = {
                 "text": current_chunk,
-                "word_count": current_word_count,
-                "token_count": current_token_count,
+                "chunk_size": current_chunk_size,
                 "paragraph_ids": paragraph_ids,
                 "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
                 "chunk_index": chunk_index,
@@ -80,8 +76,7 @@ def chunk_by_paragraph(
             yield chunk_dict
             paragraph_ids = []
             current_chunk = ""
-            current_word_count = 0
-            current_token_count = 0
+            current_chunk_size = 0
             chunk_index += 1
 
         last_cut_type = end_type
@@ -90,8 +85,7 @@ def chunk_by_paragraph(
     if current_chunk:
         chunk_dict = {
             "text": current_chunk,
-            "word_count": current_word_count,
-            "token_count": current_token_count,
+            "chunk_size": current_chunk_size,
             "chunk_id": uuid5(NAMESPACE_OID, current_chunk),
             "paragraph_ids": paragraph_ids,
             "chunk_index": chunk_index,

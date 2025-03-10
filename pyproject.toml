@@ -87,6 +87,7 @@ gdown = {version = "^5.2.0", optional = true}
 pyside6 = {version = "^6.8.2.1", optional = true}
 qasync = {version = "^0.27.1", optional = true}
 graphiti-core = {version = "^0.7.0", optional = true}
+modal = "^0.73.90"
 
 
 [tool.poetry.extras]

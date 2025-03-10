@@ -39,7 +39,7 @@ def chunk_by_sentence(
         if word_type in ["paragraph_end", "sentence_end"] or (
             maximum_length and (word_count == maximum_length)
         ):
-            yield (paragraph_id, sentence, word_count, word_type_state)
+            yield (paragraph_id, sentence, word_type_state)
             sentence = ""
             word_count = 0
             paragraph_id = uuid4() if word_type == "paragraph_end" else paragraph_id
@@ -49,6 +49,5 @@ def chunk_by_sentence(
         yield (
             paragraph_id,
             sentence,
-            word_count,
             section_end,
         )
