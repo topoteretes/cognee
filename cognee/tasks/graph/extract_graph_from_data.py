@@ -53,7 +53,7 @@ async def integrate_chunk_graphs(
 async def extract_graph_from_data(
     data_chunks: list[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_adapter: OntologyAdapter,
+    ontology_adapter: OntologyAdapter = OntologyAdapter(),
 ) -> List[DocumentChunk]:
     """Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model."""
     chunk_graphs = await asyncio.gather(
