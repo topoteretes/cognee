@@ -26,7 +26,8 @@ def expand_with_nodes_and_edges(
     relationships = []
     ontology_relationships = []
 
-    mapping = {}
+    name_mapping = {}
+    key_mapping = {}
 
     for data_chunk, graph in zip(data_chunks, chunk_graphs):
         if not graph:
@@ -43,17 +44,19 @@ def expand_with_nodes_and_edges(
 
             type_node_key = f"{type_node_id}_type"
 
-            if type_node_key not in added_nodes_map:
+            if type_node_key not in added_nodes_map and type_node_key not in key_mapping:
                 ontology_entity_type_nodes, ontology_entity_type_edges, start_ent_type_ont = (
                     ontology_adapter.get_subgraph(node_name=type_node_name, node_type="classes")
                 )
 
                 if start_ent_type_ont:
-                    mapping[type_node_name] = start_ent_type_ont.name
+                    name_mapping[type_node_name] = start_ent_type_ont.name
                     ontology_validated_source_type = True
+                    old_key = type_node_key
                     type_node_id = generate_node_id(start_ent_type_ont.name)
                     type_node_key = f"{type_node_id}_type"
                     type_node_name = generate_node_name(start_ent_type_ont.name)
+                    key_mapping[old_key] = type_node_key
 
                 type_node = EntityType(
                     id=type_node_id,
@@ -113,21 +116,25 @@ def expand_with_nodes_and_edges(
                         )
                         existing_edges_map[edge_key] = True
             else:
-                type_node = added_nodes_map.get(type_node_key)
+                type_node = added_nodes_map.get(type_node_key) or added_nodes_map.get(
+                    key_mapping.get(type_node_key)
+                )
 
             entity_node_key = f"{node_id}_entity"
 
-            if entity_node_key not in added_nodes_map:
+            if entity_node_key not in added_nodes_map and entity_node_key not in key_mapping:
                 ontology_entity_nodes, ontology_entity_edges, start_ent_ont = (
                     ontology_adapter.get_subgraph(node_name=node_name, node_type="individuals")
                 )
 
                 if start_ent_ont:
-                    mapping[node_name] = start_ent_ont.name
+                    name_mapping[node_name] = start_ent_ont.name
                     ontology_validated_source_ent = True
+                    old_key = entity_node_key
                     node_id = generate_node_id(start_ent_ont.name)
                     entity_node_key = f"{node_id}_entity"
                     node_name = generate_node_name(start_ent_ont.name)
+                    key_mapping[old_key] = entity_node_key
 
                 entity_node = Entity(
                     id=node_id,
@@ -190,7 +197,9 @@ def expand_with_nodes_and_edges(
                         existing_edges_map[edge_key] = True
 
             else:
-                entity_node = added_nodes_map.get(entity_node_key)
+                entity_node = added_nodes_map.get(entity_node_key) or added_nodes_map.get(
+                    key_mapping.get(entity_node_key)
+                )
 
             if data_chunk.contains is None:
                 data_chunk.contains = []
@@ -198,8 +207,12 @@ def expand_with_nodes_and_edges(
             data_chunk.contains.append(entity_node)
 
         for edge in graph.edges:
-            source_node_id = generate_node_id(mapping.get(edge.source_node_id, edge.source_node_id))
-            target_node_id = generate_node_id(mapping.get(edge.target_node_id, edge.target_node_id))
+            source_node_id = generate_node_id(
+                name_mapping.get(edge.source_node_id, edge.source_node_id)
+            )
+            target_node_id = generate_node_id(
+                name_mapping.get(edge.target_node_id, edge.target_node_id)
+            )
             relationship_name = generate_edge_name(edge.relationship_name)
             edge_key = f"{source_node_id}_{target_node_id}_{relationship_name}"
 
