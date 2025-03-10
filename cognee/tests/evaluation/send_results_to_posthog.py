@@ -14,7 +14,7 @@ setup_logging(logging.INFO)
 
 def initialize_posthog_client():
     posthog = Posthog(
-        api_key=os.getenv("POSTHOG_API_KEY"),
+        api_key=os.getenv("POSTHOG_API_KEY_DEV"),
         host="https://eu.i.posthog.com",
     )
     posthog.debug = True
