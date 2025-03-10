@@ -5,10 +5,11 @@ import logging
 import json
 from dotenv import load_dotenv
 import argparse
+from cognee.shared.utils import setup_logging
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+setup_logging(logging.INFO)
 
 
 def initialize_posthog_client():
@@ -17,6 +18,7 @@ def initialize_posthog_client():
         host="https://eu.i.posthog.com",
     )
     posthog.debug = True
+    logging.info("PostHog client initialized.")
     return posthog
 
 
@@ -25,13 +27,14 @@ def send_event_to_posthog(posthog, results):
         f"mean_{key}": results["aggregate_metrics"][key]["mean"]
         for key in results["aggregate_metrics"].keys()
     }
+    logging.info(properties)
     posthog.capture(
         distinct_id=str(uuid.uuid4()),
         event="cognee_eval_results",
         properties=properties,
     )
 
-    logger.info("Event sent to PostHog successfully.")
+    logging.info("Event sent to PostHog successfully.")
 
 
 def main():
@@ -44,6 +47,9 @@ def main():
     args = parser.parse_args()
     with open(args.filename, "r") as f:
         results = json.load(f)
+    logging.info(
+        f"results loaded, mean correctness {results['aggregate_metrics']['correctness']['mean']}"
+    )
     posthog = initialize_posthog_client()
     send_event_to_posthog(posthog, results)
 
