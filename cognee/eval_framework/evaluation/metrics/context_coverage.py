@@ -3,9 +3,6 @@ from deepeval.test_case import LLMTestCase
 from deepeval.metrics.summarization.schema import ScoreType
 from deepeval.metrics.indicator import metric_progress_indicator
 from deepeval.utils import get_or_create_event_loop
-from deepeval.metrics.summarization.template import SummarizationTemplate
-from deepeval.metrics.summarization.schema import Reason
-from deepeval.metrics.utils import trimAndLoadJson
 
 
 class ContextCoverageMetric(SummarizationMetric):
@@ -48,9 +45,6 @@ class ContextCoverageMetric(SummarizationMetric):
             self.coverage_verdicts = await self._a_generate_coverage_verdicts(test_case)
             self.alignment_verdicts = []
             self.score = self._calculate_score(ScoreType.COVERAGE)
-            self.reason = self._generate_reason()
+            self.reason = await self._a_generate_reason()
             self.success = self.score >= self.threshold
             return self.score
-
-    def is_successful(self) -> bool:
-        return self.success
