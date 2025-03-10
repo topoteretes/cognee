@@ -11,13 +11,17 @@ async def test_answer_generation():
     limit = 1
     corpus_list, qa_pairs = DummyAdapter().load_corpus(limit=limit)
 
-    mock_answer_resolver = AsyncMock()
-    mock_answer_resolver.side_effect = lambda query: ["mock_answer"]
+    mock_retriever = AsyncMock()
+    mock_retriever.get_context = AsyncMock(return_value="Mocked retrieval context")
+    mock_retriever.get_completion = AsyncMock(return_value=["Mocked answer"])
 
     answer_generator = AnswerGeneratorExecutor()
     answers = await answer_generator.question_answering_non_parallel(
-        questions=qa_pairs, answer_resolver=mock_answer_resolver
+        questions=qa_pairs,
+        retriever=mock_retriever,
     )
+
+    mock_retriever.get_context.assert_any_await(qa_pairs[0]["question"])
 
     assert len(answers) == len(qa_pairs)
     assert answers[0]["question"] == qa_pairs[0]["question"], (
@@ -26,6 +30,6 @@ async def test_answer_generation():
     assert answers[0]["golden_answer"] == qa_pairs[0]["answer"], (
         "AnswerGeneratorExecutor is passing the golden answer incorrectly"
     )
-    assert answers[0]["answer"] == "mock_answer", (
+    assert answers[0]["answer"] == "Mocked answer", (
         "AnswerGeneratorExecutor is passing the generated answer incorrectly"
     )
