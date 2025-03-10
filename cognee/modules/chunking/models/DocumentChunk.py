@@ -7,8 +7,7 @@ from cognee.modules.engine.models import Entity
 
 class DocumentChunk(DataPoint):
     text: str
-    word_count: int
-    token_count: int
+    chunk_size: int
     chunk_index: int
     cut_type: str
     is_part_of: Document
