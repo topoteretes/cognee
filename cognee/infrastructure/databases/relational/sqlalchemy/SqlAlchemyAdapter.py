@@ -345,3 +345,40 @@ class SQLAlchemyAdapter:
             raise e
 
         logger.info("Database deleted successfully.")
+
+    async def extract_schema(self):
+        async with self.engine.begin() as cursor:
+            # Fetch all table definitions
+            # cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='table';")
+            tables = await self.get_table_names()
+
+            schema = {}
+            for table_name in tables:
+                schema[table_name] = {"columns": [], "primary_key": None, "foreign_keys": []}
+
+                # Get column details
+                columns_result = await cursor.execute(text(f"PRAGMA table_info('{table_name}');"))
+                columns = columns_result.fetchall()
+                for column in columns:
+                    column_name = column[1]
+                    column_type = column[2]
+                    is_pk = column[5] == 1
+                    schema[table_name]["columns"].append({"name": column_name, "type": column_type})
+                    if is_pk:
+                        schema[table_name]["primary_key"] = column_name
+
+                # Get foreign key details
+                foreign_keys_results = await cursor.execute(
+                    text(f"PRAGMA foreign_key_list('{table_name}');")
+                )
+                foreign_keys = foreign_keys_results.fetchall()
+                for fk in foreign_keys:
+                    schema[table_name]["foreign_keys"].append(
+                        {
+                            "column": fk[3],  # Column in the current table
+                            "ref_table": fk[2],  # Referenced table
+                            "ref_column": fk[4],  # Referenced column
+                        }
+                    )
+
+            return schema

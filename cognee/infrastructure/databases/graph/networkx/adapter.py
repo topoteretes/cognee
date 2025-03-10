@@ -5,12 +5,14 @@ import os
 import json
 import asyncio
 import logging
+from sqlalchemy import text
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -315,11 +317,13 @@ class NetworkXAdapter(GraphDBInterface):
                             logger.error(e)
                             raise e
 
-                        if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
+                        if isinstance(
+                            edge.get("updated_at"), int
+                        ):  # Handle timestamp in milliseconds
                             edge["updated_at"] = datetime.fromtimestamp(
                                 edge["updated_at"] / 1000, tz=timezone.utc
                             )
-                        elif isinstance(edge["updated_at"], str):
+                        elif isinstance(edge.get("updated_at"), str):
                             edge["updated_at"] = datetime.strptime(
                                 edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )
@@ -333,8 +337,9 @@ class NetworkXAdapter(GraphDBInterface):
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
                 await self.create_empty_graph(file_path)
 
-        except Exception:
+        except Exception as exp:
             logger.error("Failed to load graph from file: %s", file_path)
+            raise exp
 
             await self.create_empty_graph(file_path)
 
@@ -457,3 +462,81 @@ class NetworkXAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
+
+    async def migrate_relational_database(self, schema):
+        """
+        Populates the NetworkX graph from a relational schema.
+
+        For each table in the schema:
+          - Fetch all rows and add each as a node. The node id is built as "<table_name>:<primary_key>",
+            where we assume the first column in the row is the primary key.
+          - For every foreign key defined, fetch the relationships and add an edge between the
+            corresponding nodes if they exist.
+        """
+        engine = get_relational_engine()
+
+        async with engine.engine.begin() as cursor:
+            # Iterate over all tables defined in the schema.
+            for table_name, details in schema.items():
+                # Fetch all rows for the current table.
+                rows_result = await cursor.execute(text(f"SELECT * FROM {table_name};"))
+                rows = rows_result.fetchall()
+
+                for row in rows:
+                    # Build a dictionary of properties from the row.
+                    properties = {
+                        col["name"]: row[idx] for idx, col in enumerate(details["columns"])
+                    }
+                    # Use the first column as a primary key to construct a unique node id.
+                    node_id = f"{table_name}:{row[0]}"
+                    # Also store the table name (or label) in the node attributes.
+                    properties["label"] = table_name
+                    # Add the node to the graph.
+                    self.graph.add_node(node_id, **properties)
+
+                # Process foreign key relationships for the current table.
+                for fk in details.get("foreign_keys", []):
+                    fk_query = text(
+                        f"SELECT {table_name}.{fk['column']} AS {table_name}_{fk['column']}, "
+                        f"{fk['ref_table']}.{fk['ref_column']} AS {fk['ref_table']}_{fk['ref_column']} "
+                        f"FROM {table_name} "
+                        f"JOIN {fk['ref_table']} ON {table_name}.{fk['column']} = {fk['ref_table']}.{fk['ref_column']};"
+                    )
+                    fk_result = await cursor.execute(fk_query)
+                    relations = fk_result.fetchall()
+
+                    for local_value, ref_value in relations:
+                        source_node = None
+                        target_node = None
+
+                        # Find the source node in the current table matching the foreign key column.
+                        for node_id, data in self.graph.nodes(data=True):
+                            if (
+                                data.get("label") == table_name
+                                and data.get(fk["column"]) == local_value
+                            ):
+                                source_node = node_id
+                                break
+
+                        # Find the target node in the referenced table.
+                        for node_id, data in self.graph.nodes(data=True):
+                            if (
+                                data.get("label") == fk["ref_table"]
+                                and data.get(fk["ref_column"]) == ref_value
+                            ):
+                                target_node = node_id
+                                break
+
+                        if source_node and target_node:
+                            # Add an edge using the foreign key name as the edge key and relationship type.
+                            self.graph.add_edge(
+                                source_node,
+                                target_node,
+                                key=fk["column"],
+                                relationship_type=fk["column"],
+                            )
+
+        # Optionally save the updated graph to file.
+        await self.save_graph_to_file(self.filename)
+        # await self.visualize_graph
+        print("Data populated into FalkorDB successfully.")
