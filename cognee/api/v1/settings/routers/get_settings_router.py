@@ -27,7 +27,7 @@ class LLMConfigInputDTO(InDTO):
 
 
 class VectorDBConfigInputDTO(InDTO):
-    provider: Union[Literal["lancedb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
+    provider: Union[Literal["lancedb"], Literal["chromadb"], Literal["qdrant"], Literal["weaviate"], Literal["pgvector"]]
     url: str
     api_key: str
 
