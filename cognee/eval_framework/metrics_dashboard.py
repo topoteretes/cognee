@@ -5,7 +5,7 @@ from collections import defaultdict
 
 metrics_fields = {
     "contextual_relevancy": ["question", "retrieval_context"],
-    "context_match": ["question", "retrieval_context", "golden_context"],
+    "context_coverage": ["question", "retrieval_context", "golden_context"],
 }
 default_metrics_fields = ["question", "answer", "golden_answer"]
 

@@ -3,10 +3,12 @@ from deepeval.test_case import LLMTestCase
 from deepeval.metrics.summarization.schema import ScoreType
 from deepeval.metrics.indicator import metric_progress_indicator
 from deepeval.utils import get_or_create_event_loop
-import asyncio
+from deepeval.metrics.summarization.template import SummarizationTemplate
+from deepeval.metrics.summarization.schema import Reason
+from deepeval.metrics.utils import trimAndLoadJson
 
 
-class ContextMatchMetric(SummarizationMetric):
+class ContextCoverageMetric(SummarizationMetric):
     def measure(
         self,
         test_case,
@@ -16,7 +18,7 @@ class ContextMatchMetric(SummarizationMetric):
             input=test_case.context[0],
             actual_output=test_case.retrieval_context[0],
         )
-
+        self.assessment_questions = None
         self.evaluation_cost = 0 if self.using_native_model else None
         with metric_progress_indicator(self, _show_indicator=_show_indicator):
             if self.async_mode:
@@ -26,7 +28,9 @@ class ContextMatchMetric(SummarizationMetric):
                 )
             else:
                 self.coverage_verdicts = self._generate_coverage_verdicts(mapped_test_case)
+                self.alignment_verdicts = []
                 self.score = self._calculate_score(ScoreType.COVERAGE)
+                self.reason = self._generate_reason()
                 self.success = self.score >= self.threshold
                 return self.score
 
@@ -42,7 +46,9 @@ class ContextMatchMetric(SummarizationMetric):
             _show_indicator=_show_indicator,
         ):
             self.coverage_verdicts = await self._a_generate_coverage_verdicts(test_case)
+            self.alignment_verdicts = []
             self.score = self._calculate_score(ScoreType.COVERAGE)
+            self.reason = self._generate_reason()
             self.success = self.score >= self.threshold
             return self.score
 
