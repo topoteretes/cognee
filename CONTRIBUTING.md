@@ -1,6 +1,8 @@
 # 🎉 Welcome to **cognee**! 
 
-We're excited that you're interested in contributing to our project! This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
+We're excited that you're interested in contributing to our project! 
+We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community. 
+This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
 
 ## 🌟 Quick Links
 
@@ -17,6 +19,42 @@ You can contribute to **cognee** in many ways:
 - 🔍 Reviewing pull requests
 - 🛠️ Contributing code or tests
 - 🌐 Helping other users
+
+## 📫 Get in Touch
+
+There are several ways to connect with the **cognee** team and community:
+
+### GitHub Collaboration
+- [Open an issue](https://github.com/topoteretes/cognee/issues) for bug reports, feature requests, or discussions
+- Submit pull requests to contribute code or documentation
+- Join ongoing discussions in existing issues and PRs
+
+### Community Channels
+- Join our [Discord community](https://discord.gg/bcy8xFAtfd) for real-time discussions
+- Participate in community events and discussions
+- Get help from other community members
+
+### Direct Contact
+- Email: vasilije@cognee.ai
+- For business inquiries or sensitive matters, please reach out via email
+- For general questions, prefer public channels like GitHub issues or Discord
+
+We aim to respond to all communications within 2 business days. For faster responses, consider using our Discord channel where the whole community can help!
+
+## Issue Labels
+
+To help you find the most appropriate issues to work on, we use the following labels:
+
+- `good first issue` - Perfect for newcomers to the project
+- `bug` - Something isn't working as expected
+- `documentation` - Improvements or additions to documentation
+- `enhancement` - New features or improvements
+- `help wanted` - Extra attention or assistance needed
+- `question` - Further information is requested
+- `wontfix` - This will not be worked on
+
+Looking for a place to start? Try filtering for [good first issues](https://github.com/topoteretes/cognee/labels/good%20first%20issue)!
+
 
 ## 2. 🛠️ Development Setup
 
