@@ -5,7 +5,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
 WORKDIR /app
 
 # Enable bytecode compilation
-ENV UV_COMPILE_BYTECODE=1
+# ENV UV_COMPILE_BYTECODE=1
 
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
@@ -37,22 +37,18 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
  
 COPY --from=uv /root/.local /root/.local
-COPY --from=uv --chown=1000:1000 /app/.venv /app/.venv
+
 COPY --from=uv /app /app
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
+
 
 # Set environment variables for MCP server
 ENV PYTHONUNBUFFERED=1
