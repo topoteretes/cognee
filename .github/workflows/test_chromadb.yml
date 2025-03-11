@@ -29,7 +29,7 @@ jobs:
           CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER: AUTHORIZATION
           CHROMA_SERVER_AUTH_PROVIDER: chromadb.auth.token.TokenAuthServerProvider
         options: >-
-          --health-cmd "curl -f http://localhost:3002/health || exit 1"
+          --health-cmd "curl -f -H 'Authorization: test-token' http://localhost:3002 || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
