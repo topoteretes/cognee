@@ -279,61 +279,6 @@ class MCPClient:
         """
         return self._make_request("DELETE", f"/api/v1/resources/{resource_id}")
 
-    # User management
-
-    def get_users(self) -> List[Dict[str, Any]]:
-        """Get a list of users."""
-        response = self._make_request("GET", "/api/v1/users")
-        return response.get("users", [])
-
-    def get_user(self, user_id: str) -> Dict[str, Any]:
-        """
-        Get details for a specific user.
-
-        Args:
-            user_id: ID of the user
-
-        Returns:
-            User details
-        """
-        return self._make_request("GET", f"/api/v1/users/{user_id}")
-
-    def create_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create a new user.
-
-        Args:
-            user_data: User information
-
-        Returns:
-            Created user details
-        """
-        return self._make_request("POST", "/api/v1/users", data=user_data)
-
-    def update_user(self, user_id: str, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Update a user.
-
-        Args:
-            user_id: ID of the user to update
-            user_data: User information
-
-        Returns:
-            Updated user details
-        """
-        return self._make_request("PATCH", f"/api/v1/users/{user_id}", data=user_data)
-
-    def delete_user(self, user_id: str) -> Dict[str, Any]:
-        """
-        Delete a user.
-
-        Args:
-            user_id: ID of the user to delete
-
-        Returns:
-            Deletion status
-        """
-        return self._make_request("DELETE", f"/api/v1/users/{user_id}")
 
     # Docker image management
 

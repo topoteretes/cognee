@@ -198,29 +198,6 @@ async def test_monitoring(client: MCPClient):
         return False
 
 
-async def test_user_management(client: MCPClient):
-    """Test user management capabilities."""
-    print_section("TESTING USER MANAGEMENT")
-
-    try:
-        # Get list of users
-        print("Getting list of users...")
-        users = client.get_users()
-        print(f"Users: {json.dumps(users, indent=2)}")
-
-        # We won't create or modify users in a test to avoid potential security issues
-        if users:
-            user_id = users[0].get("id", "")
-            if user_id:
-                print(f"\nGetting details for user {user_id}...")
-                user_details = client.get_user(user_id)
-                print(f"User details: {json.dumps(user_details, indent=2)}")
-
-        return True
-    except Exception as e:
-        print(f"User management test failed: {e}")
-        return False
-
 
 async def test_docker_image_management(client: MCPClient):
     """Test Docker image management capabilities."""
@@ -248,7 +225,6 @@ async def run_all_tests(client: MCPClient):
         test_service_management,
         test_resource_management,
         test_monitoring,
-        test_user_management,
         test_docker_image_management,
     ]
 
@@ -315,8 +291,6 @@ def main():
         asyncio.run(test_resource_management(client))
     elif args.test == "monitoring":
         asyncio.run(test_monitoring(client))
-    elif args.test == "users":
-        asyncio.run(test_user_management(client))
     elif args.test == "images":
         asyncio.run(test_docker_image_management(client))
 

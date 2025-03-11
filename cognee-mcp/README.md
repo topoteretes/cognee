@@ -76,94 +76,78 @@ cognee
 
 ## Testing
 
-### Running Docker Tests
+The Cognee MCP server includes a comprehensive testing framework to ensure its functionality and reliability.
 
-The project includes tests to verify the Docker image and MCP server initialization:
+### Automated Testing
 
-```bash
-./run_docker_tests.sh
-```
-
-This will:
-1. Build the Docker image
-2. Test that the container starts correctly
-3. Verify the MCP initialization flow with the 5-second timeout
-
-> **Note**: Docker testing is the recommended approach as it provides a consistent environment for testing the MCP server.
-
-### Testing MCP Initialization Directly
-
-For debugging purposes, you can test the MCP initialization flow directly without Docker:
+To run the automated tests for the MCP tools, use the provided script:
 
 ```bash
-./test_mcp_init.py
+./run_mcp_tool_tests.sh
 ```
 
-This script:
-1. Starts the MCP server process
-2. Sends an initialization request
-3. Validates the response
-4. Sends an initialized notification
-5. Terminates the server
+This script will:
+1. Build a Docker image for the MCP server
+2. Start a container with the MCP server
+3. Run tests for the Docker build, cognify, search, and codify tools
+4. Clean up the container and image when done
 
-> **Note**: Direct testing may require additional configuration depending on your environment. If you encounter issues, please use the Docker testing approach instead.
+### Manual Testing
 
-### MCP Server Initialization Flow
+For manual testing and debugging, you can use the provided scripts:
 
-The MCP server follows a standardized initialization flow:
+#### Launch MCP Server
 
-1. **Process Launch**: The MCP client launches the server process
-2. **Transport Establishment**: The server sets up its transport layer (stdio)
-3. **Initialization Request**: The client sends an initialize request:
-   ```json
-   {
-     "jsonrpc": "2.0",
-     "id": 1,
-     "method": "initialize",
-     "params": {
-       "protocolVersion": "2024-11-05",
-       "clientInfo": {
-         "name": "client-name",
-         "version": "client-version"
-       },
-       "capabilities": {
-         "resources": {},
-         "tools": {},
-         "prompts": {},
-         "roots": {},
-         "sampling": {}
-       }
-     }
-   }
-   ```
-4. **Server Response**: The server responds with its capabilities:
-   ```json
-   {
-     "jsonrpc": "2.0",
-     "id": 1,
-     "result": {
-       "protocolVersion": "2024-11-05",
-       "serverInfo": {
-         "name": "cognee",
-         "version": "0.1.0"
-       },
-       "capabilities": {
-         "experimental": {},
-         "tools": {
-           "listChanged": false
-         }
-       }
-     }
-   }
-   ```
-5. **Initialization Confirmation**: The client sends an initialized notification:
-   ```json
-   {
-     "jsonrpc": "2.0",
-     "method": "initialized"
-   }
-   ```
-6. **Normal Operation**: The server and client exchange messages according to the protocol
+To launch the MCP server in a Docker container for manual testing:
+
+```bash
+./launch_mcp_server.sh
+```
+
+This script will:
+1. Build a Docker image for the MCP server
+2. Start a container with the MCP server
+3. Provide example commands for testing the server
+
+#### Test MCP Tools Manually
+
+To test specific MCP tools with a running server:
+
+```bash
+python tests/test_mcp_tools_manual.py [options]
+```
+
+Options:
+- `--host HOST`: Host where MCP server is running (default: localhost)
+- `--port PORT`: Port where MCP server is running (default: 8080)
+- `--container CONTAINER`: Container name if using Docker (default: cognee-mcp-dev)
+- `--use-container`: Send requests to Docker container instead of host:port
+- `--tool {cognify,search,codify,all}`: Which tool to test (default: all)
+
+Examples:
+
+```bash
+# Test all tools with a server running on localhost:8080
+python tests/test_mcp_tools_manual.py
+
+# Test only the cognify tool with a server running in a Docker container
+python tests/test_mcp_tools_manual.py --use-container --tool cognify
+
+# Test all tools with a server running on a different host/port
+python tests/test_mcp_tools_manual.py --host 192.168.1.100 --port 9000
+```
+
+## MCP Server Startup Flow
+
+The MCP server follows a specific startup flow:
+
+1. **Process Launch**: The server process is started.
+2. **Environment Setup**: The server sets up its environment, including loading configuration.
+3. **Server Initialization**: The server initializes its components and prepares to receive requests.
+4. **Client Connection**: A client connects to the server.
+5. **Initialization Request**: The client sends an initialization request to the server.
+6. **Server Response**: The server responds with its capabilities and server information.
+7. **Normal Operation**: The server is now ready to process tool requests.
 
 ## Claude Desktop Integration
 
