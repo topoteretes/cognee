@@ -1,21 +1,17 @@
-import cognee
-from typing import List, Dict, Callable, Awaitable
-from cognee.api.v1.search import SearchType
+from typing import List, Dict
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
 
-question_answering_engine_options: Dict[str, Callable[[str, str], Awaitable[List[str]]]] = {
-    "cognee_graph_completion": lambda query, system_prompt_path: cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text=query,
-        system_prompt_path=system_prompt_path,
-    ),
-    "cognee_completion": lambda query, system_prompt_path: cognee.search(
-        query_type=SearchType.COMPLETION, query_text=query, system_prompt_path=system_prompt_path
-    ),
-    "graph_summary_completion": lambda query, system_prompt_path: cognee.search(
-        query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
-        query_text=query,
-        system_prompt_path=system_prompt_path,
-    ),
+from cognee.modules.retrieval.base_retriever import BaseRetriever
+
+
+retriever_options: Dict[str, BaseRetriever] = {
+    "cognee_graph_completion": GraphCompletionRetriever,
+    "cognee_completion": CompletionRetriever,
+    "graph_summary_completion": GraphSummaryCompletionRetriever,
 }
 
 
@@ -23,21 +19,26 @@ class AnswerGeneratorExecutor:
     async def question_answering_non_parallel(
         self,
         questions: List[Dict[str, str]],
-        answer_resolver: Callable[[str], Awaitable[List[str]]],
+        retriever: BaseRetriever,
     ) -> List[Dict[str, str]]:
         answers = []
         for instance in questions:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            search_results = await answer_resolver(query_text)
+            retrieval_context = await retriever.get_context(query_text)
+            search_results = await retriever.get_completion(query_text, retrieval_context)
 
-            answers.append(
-                {
-                    "question": query_text,
-                    "answer": search_results[0],
-                    "golden_answer": correct_answer,
-                }
-            )
+            answer = {
+                "question": query_text,
+                "answer": search_results[0],
+                "golden_answer": correct_answer,
+                "retrieval_context": retrieval_context,
+            }
+
+            if "golden_context" in instance:
+                answer["golden_context"] = instance["golden_context"]
+
+            answers.append(answer)
 
         return answers
