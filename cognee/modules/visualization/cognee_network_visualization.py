@@ -20,7 +20,6 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         "EntityType": "#6510f4",
         "DocumentChunk": "#801212",
         "TextSummary": "#1077f4",
-        "Ontology": "#10a997",
         "default": "#D3D3D3",
     }
 
