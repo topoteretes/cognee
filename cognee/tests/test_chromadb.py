@@ -68,13 +68,6 @@ async def test_getting_of_documents(dataset_name_1):
 
 async def main():
     print(cognee.config)
-    cognee.config.set_vector_db_config(
-        {
-            "vector_db_url": "http://chromadb:8000",
-            "vector_db_key": "test-token",
-            "vector_db_provider": "chromadb",
-        }
-    )
 
     data_directory_path = str(
         pathlib.Path(
