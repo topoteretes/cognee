@@ -20,9 +20,9 @@ logger = logging.getLogger("ChromaDBAdapter")
 
 class IndexSchema(DataPoint):
     text: str
-    
+
     metadata: dict = {"index_fields": ["text"]}
-    
+
     def model_dump(self):
         data = super().model_dump()
         return process_data_for_chroma(data)
@@ -52,7 +52,7 @@ def restore_data_from_chroma(data):
     restored_data = {}
     dict_keys = []
     list_keys = []
-    
+
     # First, identify all special keys
     for key in data.keys():
         if key.endswith("__dict"):
@@ -61,7 +61,7 @@ def restore_data_from_chroma(data):
             list_keys.append(key)
         else:
             restored_data[key] = data[key]
-    
+
     # Process dictionary fields
     for key in dict_keys:
         original_key = key[:-7]  # Remove '__dict' suffix
@@ -70,7 +70,7 @@ def restore_data_from_chroma(data):
         except Exception as e:
             logger.debug(f"Error restoring dictionary from JSON: {e}")
             restored_data[key] = data[key]
-    
+
     # Process list fields
     for key in list_keys:
         original_key = key[:-7]  # Remove '__list' suffix
@@ -79,7 +79,7 @@ def restore_data_from_chroma(data):
         except Exception as e:
             logger.debug(f"Error restoring list from JSON: {e}")
             restored_data[key] = data[key]
-    
+
     return restored_data
 
 
@@ -89,7 +89,9 @@ class ChromaDBAdapter(VectorDBInterface):
     api_key: str
     connection: AsyncHttpClient = None
 
-    def __init__(self, url: Optional[str], api_key: Optional[str], embedding_engine: EmbeddingEngine):
+    def __init__(
+        self, url: Optional[str], api_key: Optional[str], embedding_engine: EmbeddingEngine
+    ):
         self.embedding_engine = embedding_engine
         self.url = url
         self.api_key = api_key
@@ -97,8 +99,7 @@ class ChromaDBAdapter(VectorDBInterface):
     async def get_connection(self) -> AsyncHttpClient:
         if self.connection is None:
             settings = Settings(
-                chroma_client_auth_provider="token",
-                chroma_client_auth_credentials=self.api_key
+                chroma_client_auth_provider="token", chroma_client_auth_credentials=self.api_key
             )
             self.connection = await AsyncHttpClient(host=self.url, settings=settings)
 
@@ -115,35 +116,29 @@ class ChromaDBAdapter(VectorDBInterface):
 
     async def create_collection(self, collection_name: str, payload_schema=None):
         client = await self.get_connection()
-        
+
         if not await self.has_collection(collection_name):
-            await client.create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"}
-            )
+            await client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         client = await self.get_connection()
-        
+
         if not await self.has_collection(collection_name):
             await self.create_collection(collection_name)
-        
+
         collection = await client.get_collection(collection_name)
-        
+
         texts = [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         embeddings = await self.embed_data(texts)
         ids = [str(data_point.id) for data_point in data_points]
-        
+
         metadatas = []
         for data_point in data_points:
             metadata = data_point.model_dump()
             metadatas.append(process_data_for_chroma(metadata))
-        
+
         await collection.upsert(
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=texts
+            ids=ids, embeddings=embeddings, metadatas=metadatas, documents=texts
         )
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
@@ -170,7 +165,7 @@ class ChromaDBAdapter(VectorDBInterface):
         client = await self.get_connection()
         collection = await client.get_collection(collection_name)
         results = await collection.get(ids=data_point_ids, include=["metadatas"])
-        
+
         return [
             ScoredResult(
                 id=parse_id(id),
@@ -193,25 +188,25 @@ class ChromaDBAdapter(VectorDBInterface):
         client = await self.get_connection()
         try:
             collection = await client.get_collection(collection_name)
-            
+
             results = await collection.query(
-                query_embeddings=[query_vector],
-                include=["metadatas", "distances"],
-                n_results=100
+                query_embeddings=[query_vector], include=["metadatas", "distances"], n_results=100
             )
-            
+
             result_values = []
-            for i, (id, metadata, distance) in enumerate(zip(
-                results["ids"][0], results["metadatas"][0], results["distances"][0]
-            )):
-                result_values.append({
-                    "id": parse_id(id),
-                    "payload": restore_data_from_chroma(metadata),
-                    "_distance": distance
-                })
-            
+            for i, (id, metadata, distance) in enumerate(
+                zip(results["ids"][0], results["metadatas"][0], results["distances"][0])
+            ):
+                result_values.append(
+                    {
+                        "id": parse_id(id),
+                        "payload": restore_data_from_chroma(metadata),
+                        "_distance": distance,
+                    }
+                )
+
             normalized_values = normalize_distances(result_values)
-            
+
             scored_results = []
             for i, result in enumerate(result_values):
                 scored_results.append(
@@ -221,7 +216,7 @@ class ChromaDBAdapter(VectorDBInterface):
                         score=normalized_values[i],
                     )
                 )
-            
+
             return scored_results
         except Exception as e:
             logger.error(f"Error in get_distance_from_collection_elements: {str(e)}")
@@ -246,40 +241,42 @@ class ChromaDBAdapter(VectorDBInterface):
         try:
             client = await self.get_connection()
             collection = await client.get_collection(collection_name)
-            
+
             results = await collection.query(
                 query_embeddings=[query_vector],
-                include=["metadatas", "distances", "embeddings"] if with_vector else ["metadatas", "distances"],
-                n_results=limit
+                include=["metadatas", "distances", "embeddings"]
+                if with_vector
+                else ["metadatas", "distances"],
+                n_results=limit,
             )
-            
+
             vector_list = []
-            for i, (id, metadata, distance) in enumerate(zip(
-                results["ids"][0], results["metadatas"][0], results["distances"][0]
-            )):
+            for i, (id, metadata, distance) in enumerate(
+                zip(results["ids"][0], results["metadatas"][0], results["distances"][0])
+            ):
                 item = {
                     "id": parse_id(id),
                     "payload": restore_data_from_chroma(metadata),
-                    "_distance": distance
+                    "_distance": distance,
                 }
-                
+
                 if with_vector and "embeddings" in results:
                     item["vector"] = results["embeddings"][0][i]
-                    
+
                 vector_list.append(item)
-            
+
             # Normalize vector distance
             normalized_values = normalize_distances(vector_list)
             for i in range(len(normalized_values)):
                 vector_list[i]["score"] = normalized_values[i]
-            
+
             # Create and return ScoredResult objects
             return [
                 ScoredResult(
                     id=row["id"],
                     payload=row["payload"],
                     score=row["score"],
-                    vector=row.get("vector") if with_vector else None
+                    vector=row.get("vector") if with_vector else None,
                 )
                 for row in vector_list
             ]
@@ -288,42 +285,48 @@ class ChromaDBAdapter(VectorDBInterface):
             return []
 
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: int = 5, with_vectors: bool = False
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: int = 5,
+        with_vectors: bool = False,
     ):
         """Perform multiple searches in a single request for efficiency."""
         query_vectors = await self.embed_data(query_texts)
-        
+
         client = await self.get_connection()
         collection = await client.get_collection(collection_name)
-        
+
         results = await collection.query(
             query_embeddings=query_vectors,
-            include=["metadatas", "distances", "embeddings"] if with_vectors else ["metadatas", "distances"],
-            n_results=limit
+            include=["metadatas", "distances", "embeddings"]
+            if with_vectors
+            else ["metadatas", "distances"],
+            n_results=limit,
         )
-        
+
         all_results = []
         for i in range(len(query_texts)):
             query_results = []
-            
-            for j, (id, metadata, distance) in enumerate(zip(
-                results["ids"][i], results["metadatas"][i], results["distances"][i]
-            )):
+
+            for j, (id, metadata, distance) in enumerate(
+                zip(results["ids"][i], results["metadatas"][i], results["distances"][i])
+            ):
                 similarity = 1.0 - min(distance, 2.0) / 2.0
-                
+
                 result = ScoredResult(
                     id=parse_id(id),
                     payload=metadata,
                     score=similarity,
                 )
-                
+
                 if with_vectors and "embeddings" in results:
                     result.vector = results["embeddings"][i][j]
-                
+
                 query_results.append(result)
-            
+
             all_results.append(query_results)
-        
+
         return all_results
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
@@ -340,7 +343,7 @@ class ChromaDBAdapter(VectorDBInterface):
         for collection_name in collections:
             await client.delete_collection(collection_name)
         return True
-            
+
     async def get_table_names(self):
         """Get a list of all collection names in the database."""
         client = await self.get_connection()

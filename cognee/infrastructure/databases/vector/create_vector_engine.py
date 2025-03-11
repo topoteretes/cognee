@@ -81,7 +81,7 @@ def create_vector_engine(
             database_port=vector_db_port,
             embedding_engine=embedding_engine,
         )
-        
+
     elif vector_db_provider == "chromadb":
         try:
             import chromadb
@@ -89,7 +89,7 @@ def create_vector_engine(
             raise ImportError(
                 "ChromaDB is not installed. Please install it with 'pip install chromadb'"
             )
-            
+
         from .chromadb.ChromaDBAdapter import ChromaDBAdapter
 
         return ChromaDBAdapter(
