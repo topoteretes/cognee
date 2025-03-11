@@ -7,14 +7,15 @@ from fastapi_users.authentication import (
     BearerTransport,
     JWTStrategy,
 )
-from datetime import datetime, timedelta
+
 from typing import Optional
 
+from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_user
 
 
 class CustomJWTStrategy(JWTStrategy):
-    async def write_token(self, user: str, lifetime_seconds: Optional[int] = None) -> str:
+    async def write_token(self, user: User, lifetime_seconds: Optional[int] = None) -> str:
         # JoinLoad tenant and role information to user object
         user = await get_user(user.id)
 

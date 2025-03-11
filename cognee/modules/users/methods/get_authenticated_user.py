@@ -8,7 +8,7 @@ import jwt
 fastapi_users = get_fastapi_users()
 
 
-async def get_authenticated_user(authorization: str = Header(...)):
+async def get_authenticated_user(authorization: str = Header(...)) -> SimpleNamespace:
     """Extract and validate JWT from Authorization header."""
     try:
         scheme, token = authorization.split()
@@ -20,10 +20,10 @@ async def get_authenticated_user(authorization: str = Header(...)):
         )
 
         # SimpleNamespace lets us access dictionary elements like attributes
-        ret_val = SimpleNamespace(
+        auth_data = SimpleNamespace(
             id=payload["user_id"], tenant_id=payload["tenant_id"], roles=payload["roles"]
         )
-        return ret_val
+        return auth_data
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")

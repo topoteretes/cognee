@@ -3,7 +3,7 @@ from sqlalchemy import Column, ForeignKey, DateTime, UUID
 from cognee.infrastructure.databases.relational import Base
 
 
-class TenantDefaultPermission(Base):
+class TenantDefaultPermissions(Base):
     __tablename__ = "tenant_default_permissions"
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
