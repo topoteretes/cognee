@@ -21,12 +21,14 @@ jobs:
         shell: bash
     services:
       chromadb:
-        image: chromadb/chromadb:latest
+        image: chromadb/chroma:0.6.3
         options: >-
           --health-cmd "curl -f http://localhost:3002/health || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+        volumes:
+          - chroma-data:/chroma/chroma
         ports:
           - 3002:3002
 
