@@ -3,6 +3,14 @@ from unittest.mock import patch
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 
+
+def mock_get_embedding_engine():
+    class MockEngine:
+        tokenizer = None
+
+    return MockEngine()
+
+
 GROUND_TRUTH = [
     {"word_count": 57, "len_text": 353, "cut_type": "sentence_end"},
     {"word_count": 58, "len_text": 358, "cut_type": "sentence_end"},
@@ -24,7 +32,11 @@ TEST_TEXT = """
 "The feature ships, Sarah. That's final.\""""
 
 
-def test_AudioDocument():
+@patch(
+    "cognee.tasks.chunks.chunk_by_sentence.get_embedding_engine",
+    side_effect=mock_get_embedding_engine,
+)
+def test_AudioDocument(mock_engine):
     document = AudioDocument(
         id=uuid.uuid4(),
         name="audio-dummy-test",
@@ -35,10 +47,10 @@ def test_AudioDocument():
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
         for ground_truth, paragraph_data in zip(
             GROUND_TRUTH,
-            document.read(chunk_size=64, chunker_cls=TextChunker, max_chunk_tokens=512),
+            document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):
-            assert ground_truth["word_count"] == paragraph_data.word_count, (
-                f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
+            assert ground_truth["word_count"] == paragraph_data.chunk_size, (
+                f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
             )
             assert ground_truth["len_text"] == len(paragraph_data.text), (
                 f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'

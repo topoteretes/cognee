@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from cognee.tasks.chunks import chunk_by_paragraph
 
 
