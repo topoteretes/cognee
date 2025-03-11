@@ -27,7 +27,6 @@ def send_event_to_posthog(posthog, results):
         f"mean_{key}": results["aggregate_metrics"][key]["mean"]
         for key in results["aggregate_metrics"].keys()
     }
-    logging.info(properties)
     posthog.capture(
         distinct_id=str(uuid.uuid4()),
         event="cognee_eval_results",

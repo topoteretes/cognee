@@ -15,11 +15,10 @@ logger = logging.getLogger(__name__)
 app = modal.App("cognee-regular-eval")
 
 
-@app.function(image=image, max_containers=2, timeout=1800, retries=1)
+@app.function(image=image, max_containers=2, timeout=1800, retries=3)
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
-    logger.info(f"llm api key length: {len(os.getenv('LLM_API_KEY'))}")
-    logger.info(f"openai api key length: {len(os.getenv('OPENAI_API_KEY'))}")
+
     if eval_params is None:
         eval_params = EvalConfig().to_dict()
 
@@ -44,8 +43,8 @@ async def modal_run_eval(eval_params=None):
 async def main():
     config = EvalConfig(
         task_getter_type="Default",
-        benchmark="Dummy",
-        number_of_samples_in_corpus=1,
+        benchmark="HotPotQA",
+        number_of_samples_in_corpus=50,
         building_corpus_from_scratch=True,
         answering_questions=True,
         qa_engine="cognee_graph_completion",
