@@ -24,15 +24,16 @@ jobs:
         image: chromadb/chroma:0.6.3
         env:
           IS_PERSISTENT: TRUE
+          CHROMA_SERVER_AUTH_PROVIDER: chromadb.auth.token.TokenAuthServerProvider
           CHROMA_SERVER_AUTH_CREDENTIALS: test-token
           CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: chromadb.auth.token.TokenConfigServerAuthCredentialsProvider
           CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER: AUTHORIZATION
-          CHROMA_SERVER_AUTH_PROVIDER: chromadb.auth.token.TokenAuthServerProvider
         options: >-
-          --health-cmd "curl -f -H 'Authorization: test-token' http://localhost:3002 || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "cat < /dev/null > /dev/tcp/localhost/8000"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 3
+          --volume $(pwd)/.chromadb_data/:/chroma/chroma/
         ports:
           - 3002:8000
 
