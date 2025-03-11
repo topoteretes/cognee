@@ -5,6 +5,12 @@ from collections import deque
 from typing import List, Tuple, Dict, Optional, Any
 from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
 
+from cognee.modules.ontology.exceptions.exceptions import (
+    OntologyInitializationError,
+    FindClosestMatchError,
+    GetSubgraphError,
+)
+
 logger = logging.getLogger("OntologyAdapter")
 
 
@@ -29,7 +35,7 @@ class OntologyResolver:
             self._build_lookup()
         except Exception as e:
             logger.error("Failed to load ontology: %s", str(e))
-            raise RuntimeError("Ontology initialization failed") from e
+            raise OntologyInitializationError() from e
 
     def _build_lookup(self):
         try:
@@ -69,7 +75,7 @@ class OntologyResolver:
             return best_match[0] if best_match else None
         except Exception as e:
             logger.error("Error in find_closest_match: %s", str(e))
-            raise e
+            raise FindClosestMatchError() from e
 
     def get_subgraph(
         self, node_name: str, node_type: str = "individuals"
@@ -131,18 +137,4 @@ class OntologyResolver:
             return list(nodes_set), edges, node
         except Exception as e:
             logger.error("Error in get_subgraph: %s", str(e))
-            raise RuntimeError("Failed to retrieve subgraph") from e
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    try:
-        adapter = OntologyResolver(ontology_file="basic_ontology.owl")
-
-        nodes, relationships, start_node = adapter.get_subgraph("Audi", node_type="individuals")
-        logger.info("Subgraph nodes: %s", nodes)
-        logger.info("Subgraph relationships: %s", relationships)
-        logger.info("Starting node: %s", start_node)
-
-    except Exception as e:
-        logger.error("Ontology resolver error: %s", e)
+            raise GetSubgraphError() from e
