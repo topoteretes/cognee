@@ -25,7 +25,7 @@ jobs:
         volumes:
           - chroma-data:/chroma/chroma
         ports:
-          - 3002:3002
+          - 3002:8000
 
     steps:
       - name: Check out
