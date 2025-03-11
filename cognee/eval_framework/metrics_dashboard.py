@@ -3,6 +3,12 @@ import plotly.graph_objects as go
 from typing import Dict, List, Tuple
 from collections import defaultdict
 
+metrics_fields = {
+    "contextual_relevancy": ["question", "retrieval_context"],
+    "context_coverage": ["question", "retrieval_context", "golden_context"],
+}
+default_metrics_fields = ["question", "answer", "golden_answer"]
+
 
 def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]:
     """Create distribution histogram plots for each metric."""
@@ -59,38 +65,30 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
         for metric, values in entry["metrics"].items():
             if metric not in metric_details:
                 metric_details[metric] = []
+            current_metrics_fields = metrics_fields.get(metric, default_metrics_fields)
             metric_details[metric].append(
-                {
-                    "question": entry["question"],
-                    "answer": entry["answer"],
-                    "golden_answer": entry["golden_answer"],
+                {key: entry[key] for key in current_metrics_fields}
+                | {
                     "reason": values.get("reason", ""),
                     "score": values["score"],
                 }
             )
 
     for metric, details in metric_details.items():
+        formatted_column_names = [key.replace("_", " ").title() for key in details[0].keys()]
         details_html.append(f"<h3>{metric} Details</h3>")
-        details_html.append("""
+        details_html.append(f"""
             <table class="metric-table">
                 <tr>
-                    <th>Question</th>
-                    <th>Answer</th>
-                    <th>Golden Answer</th>
-                    <th>Reason</th>
-                    <th>Score</th>
+                    {"".join(f"<th>{col}</th>" for col in formatted_column_names)}
                 </tr>
         """)
         for item in details:
-            details_html.append(
-                f"<tr>"
-                f"<td>{item['question']}</td>"
-                f"<td>{item['answer']}</td>"
-                f"<td>{item['golden_answer']}</td>"
-                f"<td>{item['reason']}</td>"
-                f"<td>{item['score']}</td>"
-                f"</tr>"
-            )
+            details_html.append(f"""
+                <tr>
+                    {"".join(f"<td>{value}</td>" for value in item.values())}
+                </tr>
+            """)
         details_html.append("</table>")
     return details_html
 
