@@ -6,6 +6,9 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from unittest.mock import patch
 from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
 
 GROUND_TRUTH = {
@@ -24,9 +27,8 @@ GROUND_TRUTH = {
     "input_file,chunk_size",
     [("code.txt", 256), ("Natural_language_processing.txt", 128)],
 )
-@patch(
-    "cognee.tasks.chunks.chunk_by_sentence.get_embedding_engine",
-    side_effect=mock_get_embedding_engine,
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
 def test_TextDocument(mock_engine, input_file, chunk_size):
     test_file_path = os.path.join(

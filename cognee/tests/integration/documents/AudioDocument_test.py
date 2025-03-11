@@ -2,6 +2,9 @@ import uuid
 from unittest.mock import patch
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
 
 def mock_get_embedding_engine():
@@ -32,9 +35,8 @@ TEST_TEXT = """
 "The feature ships, Sarah. That's final.\""""
 
 
-@patch(
-    "cognee.tasks.chunks.chunk_by_sentence.get_embedding_engine",
-    side_effect=mock_get_embedding_engine,
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
 def test_AudioDocument(mock_engine):
     document = AudioDocument(

@@ -4,11 +4,13 @@ from unittest.mock import patch
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.UnstructuredDocument import UnstructuredDocument
 from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
 
-@patch(
-    "cognee.tasks.chunks.chunk_by_sentence.get_embedding_engine",
-    side_effect=mock_get_embedding_engine,
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
 def test_UnstructuredDocument(mock_engine):
     # Define file paths of test data

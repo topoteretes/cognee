@@ -1,5 +1,8 @@
 from unittest.mock import patch
 from cognee.tasks.chunks import chunk_by_paragraph
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
 
 def mock_get_embedding_engine():
@@ -56,9 +59,8 @@ Third paragraph is cut and is missing the dot at the end""",
 }
 
 
-@patch(
-    "cognee.tasks.chunks.chunk_by_sentence.get_embedding_engine",
-    side_effect=mock_get_embedding_engine,
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
 def run_chunking_test(test_text, expected_chunks, mock_engine):
     chunks = []

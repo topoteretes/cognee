@@ -4,6 +4,9 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
 from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
 from unittest.mock import patch
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
 
 GROUND_TRUTH = [
@@ -12,9 +15,8 @@ GROUND_TRUTH = [
 ]
 
 
-@patch(
-    "cognee.tasks.chunks.chunk_by_sentence.get_embedding_engine",
-    side_effect=mock_get_embedding_engine,
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
 def test_PdfDocument(mock_engine):
     test_file_path = os.path.join(
