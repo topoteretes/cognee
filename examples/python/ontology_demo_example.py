@@ -1,6 +1,7 @@
 import cognee
 import asyncio
 import logging
+import os
 
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
@@ -55,7 +56,12 @@ async def main():
     await cognee.add(text_list)
 
     # Step 3: Create knowledge graph
-    pipeline_run = await cognee.cognify(ontology_file_path="basic_ontology.owl")
+
+    ontology_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
+    )
+
+    pipeline_run = await cognee.cognify(ontology_file_path=ontology_path)
     print("Knowledge with ontology created.")
 
     # Step 4: Calculate descriptive metrics
