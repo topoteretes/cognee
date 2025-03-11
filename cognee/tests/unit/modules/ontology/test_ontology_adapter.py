@@ -1,6 +1,6 @@
 import pytest
 from owlready2 import get_ontology, Thing
-from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyResolver
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 
 
 def test_ontology_adapter_initialization_success():
