@@ -56,20 +56,16 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
         return data
 
-    def _process_item(
+    def _get_corpus_entries(self, item: dict[str, Any]) -> List[str]:
+        """Extracts corpus entries from the paragraphs of an item."""
+        return [paragraph["paragraph_text"] for paragraph in item.get("paragraphs", [])]
+
+    def _get_question_answer_pair(
         self,
         item: dict[str, Any],
-        corpus_list: List[str],
-        question_answer_pairs: List[dict[str, Any]],
         load_golden_context: bool = False,
-    ) -> None:
-        """Processes a single item and adds it to the corpus and QA pairs."""
-        # Add paragraphs to corpus
-        paragraphs = item.get("paragraphs", [])
-        for paragraph in paragraphs:
-            corpus_list.append(paragraph["paragraph_text"])
-
-        # Create QA pair
+    ) -> dict[str, Any]:
+        """Extracts a question-answer pair from an item."""
         qa_pair = {
             "id": item.get("id", ""),
             "question": item.get("question", ""),
@@ -81,7 +77,7 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         if load_golden_context:
             qa_pair["golden_context"] = self._get_golden_context(item)
 
-        question_answer_pairs.append(qa_pair)
+        return qa_pair
 
     def load_corpus(
         self,
@@ -105,7 +101,8 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         question_answer_pairs = []
 
         for item in raw_corpus:
-            self._process_item(item, corpus_list, question_answer_pairs, load_golden_context)
+            corpus_list.extend(self._get_corpus_entries(item))
+            question_answer_pairs.append(self._get_question_answer_pair(item, load_golden_context))
 
         return corpus_list, question_answer_pairs
 
