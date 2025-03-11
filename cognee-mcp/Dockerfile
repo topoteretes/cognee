@@ -20,15 +20,16 @@ RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev
 
-RUN apt-get install -y \
-    gcc \
-    libpq-dev
-
 COPY . /app
 
 RUN uv sync --reinstall
 
 # Place executables in the environment at the front of the path
-ENV PATH="/app/:/app/.venv/bin:$PATH"
+ENV PATH="/app:/app/.venv/bin:$PATH"
+
+# Set environment variables for MCP server
+ENV PYTHONUNBUFFERED=1
+ENV MCP_LOG_LEVEL=DEBUG
+ENV PYTHONPATH=/app
 
 ENTRYPOINT ["cognee"]
