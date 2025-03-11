@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.32"
+version = "0.1.34"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic", "Boris Arzentar"]
 readme = "README.md"
@@ -18,8 +18,8 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.10.0,<3.13"
-openai = "1.59.4"
+python = ">=3.10,<=3.13"
+openai = "^1.59.4"
 pydantic = "2.10.5"
 python-dotenv = "1.0.1"
 fastapi = "0.115.7"
@@ -47,11 +47,11 @@ graphistry = "^0.33.5"
 tenacity = "^9.0.0"
 weaviate-client = {version = "4.9.6", optional = true}
 scikit-learn = "^1.5.0"
-pypdf = "^4.1.0"
+pypdf = ">=4.1.0,<6.0.0"
 neo4j = {version = "^5.20.0", optional = true}
 jinja2 = "^3.1.3"
 matplotlib = "^3.8.3"
-tiktoken = "0.9.0"
+tiktoken = "<=0.9.0"
 langchain_text_splitters = {version = "0.3.2", optional = true}
 langsmith = {version = "0.2.3", optional = true}
 langdetect = "1.0.9"
@@ -79,7 +79,7 @@ bokeh="^3.6.2"
 nltk = "3.9.1"
 google-generativeai = {version = "^0.8.4", optional = true}
 mistral-common = {version = "^1.5.2", optional = true}
-fastembed = {version = "^0.4.2", optional = true}
+fastembed = {version = "^0.6.0", optional = true, markers = "python_version < '3.13'"}
 tree-sitter = {version = "^0.24.0", optional = true}
 tree-sitter-python = {version = "^0.23.6", optional = true}
 plotly = {version = "^6.0.0", optional = true}
