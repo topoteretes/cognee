@@ -8,7 +8,7 @@ from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
 logger = logging.getLogger("OntologyAdapter")
 
 
-class OntologyAdapter:
+class OntologyResolver:
     def __init__(
         self,
         ontology_file: Optional[str] = None,
@@ -137,7 +137,7 @@ class OntologyAdapter:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     try:
-        adapter = OntologyAdapter(ontology_file="basic_ontology.owl")
+        adapter = OntologyResolver(ontology_file="basic_ontology.owl")
 
         nodes, relationships, start_node = adapter.get_subgraph("Audi", node_type="individuals")
         logger.info("Subgraph nodes: %s", nodes)
@@ -145,4 +145,4 @@ if __name__ == "__main__":
         logger.info("Starting node: %s", start_node)
 
     except Exception as e:
-        logger.error("Ontology adapter error: %s", e)
+        logger.error("Ontology resolver error: %s", e)

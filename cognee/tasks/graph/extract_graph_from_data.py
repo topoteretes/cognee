@@ -4,7 +4,7 @@ from typing import Type, List
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyAdapter
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
 from cognee.modules.graph.utils import (
@@ -19,7 +19,7 @@ async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
-    ontology_adapter: OntologyAdapter,
+    ontology_adapter: OntologyResolver,
 ) -> List[DocumentChunk]:
     """Updates DocumentChunk objects, integrates data points and edges into databases."""
     graph_engine = await get_graph_engine()
@@ -53,7 +53,7 @@ async def integrate_chunk_graphs(
 async def extract_graph_from_data(
     data_chunks: list[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_adapter: OntologyAdapter = OntologyAdapter(),
+    ontology_adapter: OntologyResolver = OntologyResolver(),
 ) -> List[DocumentChunk]:
     """Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model."""
     chunk_graphs = await asyncio.gather(

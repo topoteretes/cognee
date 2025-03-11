@@ -5,7 +5,7 @@ from typing import Union, Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_max_chunk_tokens
-from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyAdapter
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -126,7 +126,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     try:
         cognee_config = get_cognify_config()
-        ontology_adapter = OntologyAdapter(ontology_file=ontology_file_path)
+        ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
         default_tasks = [
             Task(classify_documents),
             Task(check_permissions_on_documents, user=user, permissions=["write"]),

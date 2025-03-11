@@ -9,13 +9,13 @@ from cognee.modules.engine.utils import (
 )
 from owlready2 import Thing, ThingClass
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyAdapter
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 
 
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_adapter: OntologyAdapter = OntologyAdapter(),
+    ontology_resolver: OntologyResolver = OntologyResolver(),
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
@@ -46,7 +46,7 @@ def expand_with_nodes_and_edges(
 
             if type_node_key not in added_nodes_map and type_node_key not in key_mapping:
                 ontology_entity_type_nodes, ontology_entity_type_edges, start_ent_type_ont = (
-                    ontology_adapter.get_subgraph(node_name=type_node_name, node_type="classes")
+                    ontology_resolver.get_subgraph(node_name=type_node_name, node_type="classes")
                 )
 
                 if start_ent_type_ont:
@@ -124,7 +124,7 @@ def expand_with_nodes_and_edges(
 
             if entity_node_key not in added_nodes_map and entity_node_key not in key_mapping:
                 ontology_entity_nodes, ontology_entity_edges, start_ent_ont = (
-                    ontology_adapter.get_subgraph(node_name=node_name, node_type="individuals")
+                    ontology_resolver.get_subgraph(node_name=node_name, node_type="individuals")
                 )
 
                 if start_ent_ont:

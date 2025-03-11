@@ -1,13 +1,13 @@
 import pytest
 from owlready2 import get_ontology, Thing
-from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyAdapter
+from cognee.infrastructure.databases.ontology.rdf_xml.OntologyAdapter import OntologyResolver
 
 
 def test_ontology_adapter_initialization_success():
     """Test successful initialization of OntologyAdapter."""
     ontology = get_ontology("http://example.org/test_ontology")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -17,7 +17,7 @@ def test_ontology_adapter_initialization_success():
 
 def test_ontology_adapter_initialization_file_not_found():
     """Test OntologyAdapter initialization with nonexistent file."""
-    adapter = OntologyAdapter(ontology_file="nonexistent.owl")
+    adapter = OntologyResolver(ontology_file="nonexistent.owl")
     assert adapter.ontology.base_iri == "http://example.org/empty_ontology#"
 
 
@@ -32,7 +32,7 @@ def test_build_lookup():
 
         Car("Audi")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -52,7 +52,7 @@ def test_find_closest_match_exact():
 
         Car("Audi")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -74,7 +74,7 @@ def test_find_closest_match_fuzzy():
         Car("Audi")
         Car("BMW")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -87,7 +87,7 @@ def test_find_closest_match_no_match():
     """Test no match found in lookup."""
     ontology = get_ontology("http://example.org/test_ontology")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -100,7 +100,7 @@ def test_get_subgraph_no_match():
     """Test get_subgraph with no matching node."""
     ontology = get_ontology("http://example.org/test_ontology")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -132,7 +132,7 @@ def test_get_subgraph_success():
 
         vw.owns = [audi, porsche]
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
@@ -151,7 +151,7 @@ def test_refresh_lookup():
     """Test refreshing lookup rebuilds the dictionary."""
     ontology = get_ontology("http://example.org/test_ontology")
 
-    adapter = OntologyAdapter()
+    adapter = OntologyResolver()
     adapter.ontology = ontology
     adapter._build_lookup()
 
