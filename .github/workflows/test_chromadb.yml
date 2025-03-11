@@ -21,20 +21,14 @@ jobs:
         shell: bash
     services:
       chromadb:
-        image: chromadb/chroma:0.6.3
-        env:
-          IS_PERSISTENT: TRUE
-          CHROMA_SERVER_AUTH_PROVIDER: chromadb.auth.token.TokenAuthServerProvider
-          CHROMA_SERVER_AUTH_CREDENTIALS: test-token
-          CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: chromadb.auth.token.TokenConfigServerAuthCredentialsProvider
-          CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER: AUTHORIZATION
+        image: chromadb/chromadb:latest
         options: >-
-          --health-cmd "cat < /dev/null > /dev/tcp/localhost/8000"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 3
+          --health-cmd "curl -f http://localhost:3002/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
         ports:
-          - 3002:8000
+          - 3002:3002
 
     steps:
       - name: Check out
