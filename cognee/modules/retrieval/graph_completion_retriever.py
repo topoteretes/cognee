@@ -15,12 +15,12 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        top_k: int = 5,
+        top_k: Optional[int] = 5,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
-        self.top_k = top_k
+        self.top_k = top_k if top_k is not None else 5
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """Converts retrieved graph edges into a human-readable string format."""
