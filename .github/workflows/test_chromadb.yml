@@ -33,7 +33,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-          --volume $(pwd)/.chromadb_data/:/chroma/chroma/
         ports:
           - 3002:8000
 
