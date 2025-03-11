@@ -1,22 +1,12 @@
 from typing import Any, Dict, Iterator
 from uuid import NAMESPACE_OID, uuid5
 
-from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from .chunk_by_sentence import chunk_by_sentence
-
-
-def get_sentence_size(sentence: str) -> int:
-    embedding_engine = get_embedding_engine()
-    if embedding_engine.tokenizer:
-        return embedding_engine.tokenizer.count_tokens(sentence)
-    else:
-        return len(sentence.split())
 
 
 def chunk_by_paragraph(
     data: str,
     max_chunk_size,
-    paragraph_length: int = 1024,
     batch_paragraphs: bool = True,
 ) -> Iterator[Dict[str, Any]]:
     """
@@ -35,10 +25,9 @@ def chunk_by_paragraph(
     last_cut_type = None
     current_chunk_size = 0
 
-    for paragraph_id, sentence, end_type in chunk_by_sentence(
-        data, maximum_length=paragraph_length
+    for paragraph_id, sentence, sentence_size, end_type in chunk_by_sentence(
+        data, maximum_size=max_chunk_size
     ):
-        sentence_size = get_sentence_size(sentence)
         if current_chunk_size > 0 and (current_chunk_size + sentence_size > max_chunk_size):
             # Yield current chunk
             chunk_dict = {
