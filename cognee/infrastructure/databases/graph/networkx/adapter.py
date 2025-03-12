@@ -495,7 +495,6 @@ class NetworkXAdapter(GraphDBInterface):
                         # Use value of the primary key column
                         node_id = f"{table_name}:{properties[details['primary_key']]}"
 
-                    # node_id = f"{table_name}:{row[0]}"
                     # Also store the table name (or label) in the node attributes.
                     properties["label"] = table_name
                     properties["type"] = "TableRow"
