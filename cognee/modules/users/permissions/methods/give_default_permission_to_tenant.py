@@ -14,13 +14,13 @@ from cognee.modules.users.models import (
     TenantDefaultPermissions,
 )
 
-async def give_default_permission_to_tenant(
-        tenant_id: UUID, permission_name: str
-):
+
+async def give_default_permission_to_tenant(tenant_id: UUID, permission_name: str):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-
-        tenant = (await session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalars().first()
+        tenant = (
+            (await session.execute(select(Tenant).where(Tenant.id == tenant_id))).scalars().first()
+        )
 
         if not tenant:
             raise TenantNotFoundError
@@ -35,7 +35,11 @@ async def give_default_permission_to_tenant(
             create_permission_statement = insert(Permission).values(name=permission_name)
             await session.execute(create_permission_statement)
             permission_entity = (
-                (await session.execute(select(Permission).where(Permission.name == permission_name)))
+                (
+                    await session.execute(
+                        select(Permission).where(Permission.name == permission_name)
+                    )
+                )
                 .scalars()
                 .first()
             )

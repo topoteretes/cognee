@@ -8,9 +8,10 @@ from cognee.modules.users.models import (
     Role,
 )
 
+
 async def create_role(
-        role_name: str,
-        tenant_id: UUID,
+    role_name: str,
+    tenant_id: UUID,
 ):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:

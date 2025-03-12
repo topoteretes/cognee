@@ -16,6 +16,7 @@ from cognee.modules.users.models import (
     UserRole,
 )
 
+
 async def add_user_to_role(user_id: UUID, role_id: UUID):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:

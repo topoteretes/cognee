@@ -14,9 +14,8 @@ from cognee.modules.users.models import (
     RoleDefaultPermissions,
 )
 
-async def give_default_permission_to_role(
-        role_id: UUID, permission_name: str
-):
+
+async def give_default_permission_to_role(role_id: UUID, permission_name: str):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
@@ -35,7 +34,11 @@ async def give_default_permission_to_role(
             stmt = insert(Permission).values(name=permission_name)
             await session.execute(stmt)
             permission_entity = (
-                (await session.execute(select(Permission).where(Permission.name == permission_name)))
+                (
+                    await session.execute(
+                        select(Permission).where(Permission.name == permission_name)
+                    )
+                )
                 .scalars()
                 .first()
             )
