@@ -49,6 +49,7 @@ async def run_corpus_builder(params: dict, chunk_size=1024, chunker=TextChunker)
         questions = await corpus_builder.build_corpus(
             limit=params.get("number_of_samples_in_corpus"),
             chunker=chunker,
+            chunk_size=chunk_size,
             load_golden_context=params.get("evaluating_contexts"),
         )
         with open(params["questions_path"], "w", encoding="utf-8") as f:
