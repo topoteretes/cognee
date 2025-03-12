@@ -5,7 +5,7 @@ from cognee.modules.chunking.Chunker import Chunker
 class TextDocument(Document):
     type: str = "text"
 
-    def read(self, chunk_size: int, chunker_cls: Chunker, max_chunk_tokens: int):
+    def read(self, chunker_cls: Chunker, max_chunk_size: int):
         def get_text():
             with open(self.raw_data_location, mode="r", encoding="utf-8") as file:
                 while True:
@@ -16,8 +16,6 @@ class TextDocument(Document):
 
                     yield text
 
-        chunker = chunker_cls(
-            self, chunk_size=chunk_size, get_text=get_text, max_chunk_tokens=max_chunk_tokens
-        )
+        chunker = chunker_cls(self, max_chunk_size=max_chunk_size, get_text=get_text)
 
         yield from chunker.read()

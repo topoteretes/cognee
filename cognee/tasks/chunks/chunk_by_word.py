@@ -2,7 +2,7 @@ import re
 from typing import Iterator, Tuple
 
 
-SENTENCE_ENDINGS = r"[.;!?…]"
+SENTENCE_ENDINGS = r"[.;!?…。！？]"
 PARAGRAPH_ENDINGS = r"[\n\r]"
 
 
