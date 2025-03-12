@@ -118,6 +118,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
+    chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
 ) -> list[Task]:
     if user is None:
@@ -131,7 +132,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(
                 extract_chunks_from_documents,
-                max_chunk_size=get_max_chunk_tokens(),
+                max_chunk_size=chunk_size or get_max_chunk_tokens(),
                 chunker=chunker,
             ),  # Extract text chunks based on the document type.
             Task(
