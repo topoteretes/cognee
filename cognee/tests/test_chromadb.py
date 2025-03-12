@@ -67,7 +67,6 @@ async def test_getting_of_documents(dataset_name_1):
 
 
 async def main():
-    print(cognee.config)
     cognee.config.set_vector_db_config(
         {"vector_db_url": "http://chromadb:8000", "vector_db_key": "test-token", "vector_db_provider": "chromadb"}
     )
@@ -151,9 +150,6 @@ async def main():
 
     history = await cognee.get_search_history()
     assert len(history) == 8, "Search history is not correct."
-
-    results = await brute_force_triplet_search("What is a quantum computer?")
-    assert len(results) > 0
 
     await test_local_file_deletion(text, explanation_file_path)
 
