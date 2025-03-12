@@ -101,8 +101,5 @@ networks:
 
 volumes:
   chromadb_data:
-
-
 # UNCOMMENT IF USING POSTGRES
-# volumes:
-#   postgres_data:
+#  postgres_data:
