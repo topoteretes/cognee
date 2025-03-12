@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Any, Union, Tuple
 import os
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class BaseBenchmarkAdapter(ABC):
@@ -11,22 +14,9 @@ class BaseBenchmarkAdapter(ABC):
         instance_filter: Union[str, List[str], List[int]],
         id_key: str = "id",
     ) -> List[dict[str, Any]]:
-        """
-        Filter instances by IDs or indices, or load filter from a JSON file.
-
-        Args:
-            instances: List of instances to filter
-            instance_filter: Filter criteria (IDs, indices, or path to JSON file)
-            id_key: The key used for ID in the instances (defaults to "id")
-
-        Returns:
-            Filtered list of instances
-
-        Raises:
-            FileNotFoundError: If filter file not found
-            ValueError: If filter format is invalid
-        """
+        """Filter instances by IDs or indices, or load filter from a JSON file."""
         if isinstance(instance_filter, str):
+            logger.info(f"Loading instance filter from file: {instance_filter}")
             if not os.path.isfile(instance_filter):
                 raise FileNotFoundError(f"Filter file not found: {instance_filter}")
 
@@ -37,10 +27,18 @@ class BaseBenchmarkAdapter(ABC):
                     raise ValueError(f"Invalid JSON in filter file: {e}")
 
         if all(isinstance(fid, str) for fid in instance_filter):
-            return [inst for inst in instances if inst.get(id_key) in instance_filter]
+            logger.info(f"Filtering by {len(instance_filter)} string IDs using key '{id_key}'")
+            filtered = [inst for inst in instances if inst.get(id_key) in instance_filter]
+            if not filtered:
+                logger.warning(f"No instances found with the provided IDs using key '{id_key}'")
+            return filtered
 
         if all(isinstance(fid, int) for fid in instance_filter):
-            return [instances[i] for i in instance_filter if 0 <= i < len(instances)]
+            logger.info(f"Filtering by {len(instance_filter)} integer indices")
+            filtered = [instances[i] for i in instance_filter if 0 <= i < len(instances)]
+            if not filtered:
+                logger.warning("No instances found at the provided indices")
+            return filtered
 
         raise ValueError(
             "instance_filter must be a list of string ids, integer indices, or a JSON file path."
