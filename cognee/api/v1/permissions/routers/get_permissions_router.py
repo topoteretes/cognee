@@ -1,10 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-
-from cognee.modules.users import get_async_session
 
 
 def get_permissions_router() -> APIRouter:
@@ -12,7 +9,7 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/roles/{role_id}/permissions")
     async def give_default_permission_to_role(
-        role_id: UUID, permission_name: str, db: Session = Depends(get_async_session)
+        role_id: UUID, permission_name: str
     ):
         from cognee.modules.users.permissions.methods import give_default_permission_to_role as set_default_permission_to_role
         await set_default_permission_to_role(role_id, permission_name)
