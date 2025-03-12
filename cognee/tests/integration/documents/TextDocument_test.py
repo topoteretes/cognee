@@ -4,6 +4,12 @@ import uuid
 import pytest
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
+from unittest.mock import patch
+from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
+
 
 GROUND_TRUTH = {
     "code.txt": [
@@ -21,7 +27,10 @@ GROUND_TRUTH = {
     "input_file,chunk_size",
     [("code.txt", 256), ("Natural_language_processing.txt", 128)],
 )
-def test_TextDocument(input_file, chunk_size):
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+)
+def test_TextDocument(mock_engine, input_file, chunk_size):
     test_file_path = os.path.join(
         os.sep,
         *(os.path.dirname(__file__).split(os.sep)[:-2]),
@@ -38,10 +47,10 @@ def test_TextDocument(input_file, chunk_size):
 
     for ground_truth, paragraph_data in zip(
         GROUND_TRUTH[input_file],
-        document.read(chunk_size=chunk_size, chunker_cls=TextChunker, max_chunk_tokens=1024),
+        document.read(chunker_cls=TextChunker, max_chunk_size=chunk_size),
     ):
-        assert ground_truth["word_count"] == paragraph_data.word_count, (
-            f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
+        assert ground_truth["word_count"] == paragraph_data.chunk_size, (
+            f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
         )
         assert ground_truth["len_text"] == len(paragraph_data.text), (
             f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
