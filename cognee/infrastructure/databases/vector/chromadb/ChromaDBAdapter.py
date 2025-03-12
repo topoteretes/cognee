@@ -64,7 +64,7 @@ def restore_data_from_chroma(data):
     
     # Process dictionary fields
     for key in dict_keys:
-        original_key = key[:-7]  # Remove '__dict' suffix
+        original_key = key[:-6]  # Remove '__dict' suffix
         try:
             restored_data[original_key] = json.loads(data[key])
         except Exception as e:
@@ -73,7 +73,7 @@ def restore_data_from_chroma(data):
     
     # Process list fields
     for key in list_keys:
-        original_key = key[:-7]  # Remove '__list' suffix
+        original_key = key[:-6]  # Remove '__list' suffix
         try:
             restored_data[original_key] = json.loads(data[key])
         except Exception as e:
