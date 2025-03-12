@@ -45,17 +45,19 @@ def expand_with_nodes_and_edges(
             type_node_key = f"{type_node_id}_type"
 
             if type_node_key not in added_nodes_map and type_node_key not in key_mapping:
-                ontology_entity_type_nodes, ontology_entity_type_edges, start_ent_type_ont = (
-                    ontology_resolver.get_subgraph(node_name=type_node_name, node_type="classes")
-                )
+                (
+                    ontology_entity_type_nodes,
+                    ontology_entity_type_edges,
+                    ontology_closest_class_node,
+                ) = ontology_resolver.get_subgraph(node_name=type_node_name, node_type="classes")
 
-                if start_ent_type_ont:
-                    name_mapping[type_node_name] = start_ent_type_ont.name
+                if ontology_closest_class_node:
+                    name_mapping[type_node_name] = ontology_closest_class_node.name
                     ontology_validated_source_type = True
                     old_key = type_node_key
-                    type_node_id = generate_node_id(start_ent_type_ont.name)
+                    type_node_id = generate_node_id(ontology_closest_class_node.name)
                     type_node_key = f"{type_node_id}_type"
-                    type_node_name = generate_node_name(start_ent_type_ont.name)
+                    type_node_name = generate_node_name(ontology_closest_class_node.name)
                     key_mapping[old_key] = type_node_key
 
                 type_node = EntityType(
@@ -67,11 +69,11 @@ def expand_with_nodes_and_edges(
                 )
                 added_nodes_map[type_node_key] = type_node
 
-                for ont_to_store in ontology_entity_type_nodes:
-                    ont_node_id = generate_node_id(ont_to_store.name)
-                    ont_node_name = generate_node_name(ont_to_store.name)
+                for ontology_node_to_store in ontology_entity_type_nodes:
+                    ont_node_id = generate_node_id(ontology_node_to_store.name)
+                    ont_node_name = generate_node_name(ontology_node_to_store.name)
 
-                    if isinstance(ont_to_store, ThingClass):
+                    if isinstance(ontology_node_to_store, ThingClass):
                         ont_node_key = f"{ont_node_id}_type"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -83,7 +85,7 @@ def expand_with_nodes_and_edges(
                                 ontology_valid=True,
                             )
 
-                    elif isinstance(ont_to_store, Thing):
+                    elif isinstance(ontology_node_to_store, Thing):
                         ont_node_key = f"{ont_node_id}_entity"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -146,11 +148,11 @@ def expand_with_nodes_and_edges(
 
                 added_nodes_map[entity_node_key] = entity_node
 
-                for ont_to_store in ontology_entity_nodes:
-                    ont_node_id = generate_node_id(ont_to_store.name)
-                    ont_node_name = generate_node_name(ont_to_store.name)
+                for ontology_node_to_store in ontology_entity_nodes:
+                    ont_node_id = generate_node_id(ontology_node_to_store.name)
+                    ont_node_name = generate_node_name(ontology_node_to_store.name)
 
-                    if isinstance(ont_to_store, ThingClass):
+                    if isinstance(ontology_node_to_store, ThingClass):
                         ont_node_key = f"{ont_node_id}_type"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -162,7 +164,7 @@ def expand_with_nodes_and_edges(
                                 ontology_valid=True,
                             )
 
-                    elif isinstance(ont_to_store, Thing):
+                    elif isinstance(ontology_node_to_store, Thing):
                         ont_node_key = f"{ont_node_id}_entity"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map

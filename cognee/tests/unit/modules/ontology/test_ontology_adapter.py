@@ -9,7 +9,7 @@ def test_ontology_adapter_initialization_success():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     assert adapter.ontology is not None
     assert isinstance(adapter.lookup, dict)
@@ -34,7 +34,7 @@ def test_build_lookup():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     assert isinstance(adapter.lookup, dict)
     assert "car" in adapter.lookup["classes"]
@@ -54,7 +54,7 @@ def test_find_closest_match_exact():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     result = adapter.find_closest_match("Audi", "individuals")
 
@@ -76,7 +76,7 @@ def test_find_closest_match_fuzzy():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     result = adapter.find_closest_match("Audii", "individuals")
 
@@ -89,7 +89,7 @@ def test_find_closest_match_no_match():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     result = adapter.find_closest_match("Nonexistent", "individuals")
 
@@ -102,7 +102,7 @@ def test_get_subgraph_no_match():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     nodes, relationships, start_node = adapter.get_subgraph("Nonexistent", "individuals")
 
@@ -134,7 +134,7 @@ def test_get_subgraph_success():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     nodes, relationships, start_node = adapter.get_subgraph("Audi", "individuals")
 
@@ -153,7 +153,7 @@ def test_refresh_lookup():
 
     adapter = OntologyResolver()
     adapter.ontology = ontology
-    adapter._build_lookup()
+    adapter.build_lookup()
 
     original_lookup = adapter.lookup.copy()
     adapter.refresh_lookup()

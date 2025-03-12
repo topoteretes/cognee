@@ -5,7 +5,7 @@ from collections import deque
 from typing import List, Tuple, Dict, Optional, Any
 from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
 
-from cognee.modules.ontology.exceptions.exceptions import (
+from cognee.modules.ontology.exceptions import (
     OntologyInitializationError,
     FindClosestMatchError,
     GetSubgraphError,
@@ -32,12 +32,12 @@ class OntologyResolver:
                     fallback_url,
                 )
                 self.ontology = get_ontology(fallback_url)
-            self._build_lookup()
+            self.build_lookup()
         except Exception as e:
             logger.error("Failed to load ontology: %s", str(e))
             raise OntologyInitializationError() from e
 
-    def _build_lookup(self):
+    def build_lookup(self):
         try:
             self.lookup: Dict[str, Dict[str, Thing]] = {
                 "classes": {
@@ -59,7 +59,7 @@ class OntologyResolver:
             raise RuntimeError("Lookup build failed") from e
 
     def refresh_lookup(self):
-        self._build_lookup()
+        self.build_lookup()
         logger.info("Ontology lookup refreshed.")
 
     def find_closest_match(self, name: str, category: str) -> Optional[str]:
