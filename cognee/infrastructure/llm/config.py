@@ -41,6 +41,7 @@ class LLMConfig(BaseSettings):
         # 1. Check LLM environment variables
         #
         llm_env_vars = {
+            "LLM_PROVIDER": is_env_set("LLM_PROVIDER"),
             "LLM_MODEL": is_env_set("LLM_MODEL"),
             "LLM_ENDPOINT": is_env_set("LLM_ENDPOINT"),
             "LLM_API_KEY": is_env_set("LLM_API_KEY"),
@@ -49,7 +50,7 @@ class LLMConfig(BaseSettings):
             missing_llm = [key for key, is_set in llm_env_vars.items() if not is_set]
             raise ValueError(
                 "You have set some but not all of the required environment variables "
-                f"for LLM usage (LLM_MODEL, LLM_ENDPOINT, LLM_API_KEY). Missing: {missing_llm}"
+                f"for LLM usage (LLM_PROVIDER, LLM_MODEL, LLM_ENDPOINT, LLM_API_KEY). Missing: {missing_llm}"
             )
 
         #
