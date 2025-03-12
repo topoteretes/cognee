@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from cognee.tasks.chunks import chunk_by_word
-from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS
+from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS, INPUT_TEXTS_LONGWORDS
 
 
 @pytest.mark.parametrize(
@@ -11,7 +11,7 @@ from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS
         INPUT_TEXTS["english_text"],
         INPUT_TEXTS["english_lists"],
         INPUT_TEXTS["python_code"],
-        INPUT_TEXTS["chinese_text"],
+        INPUT_TEXTS_LONGWORDS["chinese_text"],
     ],
 )
 def test_chunk_by_word_isomorphism(input_text):
@@ -28,7 +28,7 @@ def test_chunk_by_word_isomorphism(input_text):
         INPUT_TEXTS["english_text"],
         INPUT_TEXTS["english_lists"],
         INPUT_TEXTS["python_code"],
-        INPUT_TEXTS["chinese_text"],
+        INPUT_TEXTS_LONGWORDS["chinese_text"],
     ],
 )
 def test_chunk_by_word_splits(input_text):
