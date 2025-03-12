@@ -1,0 +1,46 @@
+services:
+  cognee:
+    image : cognee-backend:latest
+    container_name: cognee-backend
+    networks:
+      - cognee-network
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - /app/cognee-frontend/ # Ignore frontend code
+    environment:
+      - HOST=0.0.0.0
+      - ENVIRONMENT=local
+      - PYTHONPATH=.
+    ports:
+      - 8000:8000
+      # - 5678:5678 # Debugging
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8GB
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: postgres
+    environment:
+      POSTGRES_USER: cognee
+      POSTGRES_PASSWORD: cognee
+      POSTGRES_DB: cognee_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    networks:
+      - cognee-network
+
+networks:
+  cognee-network:
+    name: cognee-network
+
+volumes:
+  postgres_data:
+
