@@ -45,7 +45,7 @@ async def test_search(
     doc_id1 = uuid.uuid4()
     doc_id2 = uuid.uuid4()
     doc_id3 = uuid.uuid4()  # This one will be filtered out
-    mock_get_document_ids.return_value = [str(doc_id1), str(doc_id2)]
+    mock_get_document_ids.return_value = [doc_id1, doc_id2]
 
     # Mock search results
     search_results = [
