@@ -2,6 +2,11 @@ import uuid
 from unittest.mock import patch
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
+from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
+import sys
+
+chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
+
 
 GROUND_TRUTH = [
     {"word_count": 51, "len_text": 298, "cut_type": "sentence_end"},
@@ -13,7 +18,10 @@ TEST_TEXT = """A dramatic confrontation unfolds as a red fox and river otter eng
 The commotion has attracted an audience: a murder of crows has gathered in the low branches, their harsh calls adding to the chaos as they hop excitedly from limb to limb. One particularly bold crow dive-bombs the wrestling pair, causing both animals to momentarily freeze mid-tussle, creating a perfect snapshot of suspended action—the fox's fur dripping wet, the otter's body coiled like a spring, and the crow's wings spread wide against the golden morning light."""
 
 
-def test_ImageDocument():
+@patch.object(
+    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+)
+def test_ImageDocument(mock_engine):
     document = ImageDocument(
         id=uuid.uuid4(),
         name="image-dummy-test",
@@ -24,10 +32,10 @@ def test_ImageDocument():
     with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
         for ground_truth, paragraph_data in zip(
             GROUND_TRUTH,
-            document.read(chunk_size=64, chunker_cls=TextChunker, max_chunk_tokens=512),
+            document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):
-            assert ground_truth["word_count"] == paragraph_data.word_count, (
-                f'{ground_truth["word_count"] = } != {paragraph_data.word_count = }'
+            assert ground_truth["word_count"] == paragraph_data.chunk_size, (
+                f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
             )
             assert ground_truth["len_text"] == len(paragraph_data.text), (
                 f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
