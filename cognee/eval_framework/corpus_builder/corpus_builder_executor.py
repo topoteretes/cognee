@@ -55,5 +55,5 @@ class CorpusBuilderExecutor:
 
         await cognee.add(self.raw_corpus)
 
-        tasks = await self.task_getter(chunk_size=chunk_size, chunker=TextChunker)
+        tasks = await self.task_getter(chunker=TextChunker)
         await cognee.cognify(tasks=tasks)

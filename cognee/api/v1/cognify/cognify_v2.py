@@ -113,7 +113,7 @@ def generate_dataset_name(dataset_name: str) -> str:
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
-    user: User = None, graph_model: BaseModel = KnowledgeGraph, chunk_size=1024, chunker=TextChunker
+    user: User = None, graph_model: BaseModel = KnowledgeGraph, chunker=TextChunker
 ) -> list[Task]:
     if user is None:
         user = await get_default_user()
@@ -125,9 +125,8 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             Task(check_permissions_on_documents, user=user, permissions=["write"]),
             Task(
                 extract_chunks_from_documents,
-                max_chunk_tokens=get_max_chunk_tokens(),
+                max_chunk_size=get_max_chunk_tokens(),
                 chunker=chunker,
-                chunk_size=chunk_size,
             ),  # Extract text chunks based on the document type.
             Task(
                 extract_graph_from_data, graph_model=graph_model, task_config={"batch_size": 10}
