@@ -194,10 +194,12 @@ class ChromaDBAdapter(VectorDBInterface):
         try:
             collection = await client.get_collection(collection_name)
             
+            collection_count = await collection.count()
+            
             results = await collection.query(
                 query_embeddings=[query_vector],
                 include=["metadatas", "distances"],
-                n_results=100
+                n_results=collection_count
             )
             
             result_values = []
