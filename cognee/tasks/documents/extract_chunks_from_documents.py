@@ -26,8 +26,7 @@ async def update_document_token_count(document_id: UUID, token_count: int) -> No
 
 async def extract_chunks_from_documents(
     documents: list[Document],
-    max_chunk_tokens: int,
-    chunk_size: int = 1024,
+    max_chunk_size: int,
     chunker: Chunker = TextChunker,
 ) -> AsyncGenerator:
     """
@@ -39,10 +38,9 @@ async def extract_chunks_from_documents(
     """
     for document in documents:
         document_token_count = 0
-        for document_chunk in document.read(
-            chunk_size=chunk_size, chunker_cls=chunker, max_chunk_tokens=max_chunk_tokens
-        ):
-            document_token_count += document_chunk.token_count
+        for document_chunk in document.read(max_chunk_size=max_chunk_size, chunker_cls=chunker):
+            document_token_count += document_chunk.chunk_size
             yield document_chunk
 
         await update_document_token_count(document.id, document_token_count)
+        # todo rita
