@@ -477,6 +477,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         async with engine.engine.begin() as cursor:
             # Iterate over all tables defined in the schema.
+            # Migrate all rows from tables to graph
             for table_name, details in schema.items():
                 # Fetch all rows for the current table.
                 rows_result = await cursor.execute(text(f"SELECT * FROM {table_name};"))
@@ -494,27 +495,27 @@ class NetworkXAdapter(GraphDBInterface):
                     # Add the node to the graph.
                     self.graph.add_node(node_id, **properties)
 
+                    # Add table node if it doesn't exist
+                    self.graph.add_node(table_name)
+                    # Create edge between table and table element
+                    await self.add_edge(node_id, table_name, "is_part_of")
+
+            # Iterate over all tables defined in the schema.
+            # Map relationships between rows (which are now nodes in the graph) as edges in graph
+            for table_name, details in schema.items():
                 # Process foreign key relationships for the current table.
                 for fk in details.get("foreign_keys", []):
-                    if fk["ref_table"] == table_name:  # Check if it's a self-referencing FK
-                        alias_1 = f"{table_name}_e1"
-                        alias_2 = f"{table_name}_e2"
+                    # Aliases are needed in the case a table is referencing itself
+                    alias_1 = f"{table_name}_e1"
+                    alias_2 = f"{fk['ref_table']}_e2"
 
-                        fk_query = text(
-                            f"SELECT {alias_1}.{fk['column']} AS {alias_1}_{fk['column']}, "
-                            f"{alias_2}.{fk['ref_column']} AS {alias_2}_{fk['ref_column']} "
-                            f"FROM {table_name} AS {alias_1} "
-                            f"JOIN {table_name} AS {alias_2} "
-                            f"ON {alias_1}.{fk['column']} = {alias_2}.{fk['ref_column']};"
-                        )
-                    else:
-                        fk_query = text(
-                            f"SELECT {table_name}.{fk['column']} AS {table_name}_{fk['column']}, "
-                            f"{fk['ref_table']}.{fk['ref_column']} AS {fk['ref_table']}_{fk['ref_column']} "
-                            f"FROM {table_name} "
-                            f"JOIN {fk['ref_table']} "
-                            f"ON {table_name}.{fk['column']} = {fk['ref_table']}.{fk['ref_column']};"
-                        )
+                    fk_query = text(
+                        f"SELECT {alias_1}.{fk['column']} AS {alias_1}_{fk['column']}, "
+                        f"{alias_2}.{fk['ref_column']} AS {alias_2}_{fk['ref_column']} "
+                        f"FROM {table_name} AS {alias_1} "
+                        f"JOIN {fk['ref_table']} AS {alias_2} "
+                        f"ON {alias_1}.{fk['column']} = {alias_2}.{fk['ref_column']};"
+                    )
 
                     fk_result = await cursor.execute(fk_query)
                     relations = fk_result.fetchall()  # Use `await` for async fetch
@@ -550,7 +551,6 @@ class NetworkXAdapter(GraphDBInterface):
                                 relationship_type=fk["column"],
                             )
 
-        # Optionally save the updated graph to file.
+        # Save the updated graph to file.
         await self.save_graph_to_file(self.filename)
-        # await self.visualize_graph
-        print("Data populated into FalkorDB successfully.")
+        print("Data populated into NetworkX successfully.")
