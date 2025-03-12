@@ -10,34 +10,29 @@ class ChunksRetriever(BaseRetriever):
     async def get_context(self, query: str) -> Any:
         """Retrieves document chunks context based on the query."""
         results = await self.search_vector_db(
-            query,
-            collection_name="chunks",
-            limit=5,
-            filter_condition=None
+            query, collection_name="chunks", limit=5, filter_condition=None
         )
-        
+
         # Transform the results to have a content key
         transformed_results = []
         for result in results:
             payload = result.get("payload", {})
-            transformed_result = {
-                "score": result.get("score", 0)
-            }
-            
+            transformed_result = {"score": result.get("score", 0)}
+
             # Only add content if text exists in the payload
             if "text" in payload:
                 transformed_result["content"] = payload["text"]
-                
+
             # Only add document_id if it exists in the payload
             if "document_id" in payload:
                 transformed_result["document_id"] = payload["document_id"]
-                
+
             # Only add metadata if it exists in the payload
             if "metadata" in payload:
                 transformed_result["metadata"] = payload["metadata"]
-                
+
             transformed_results.append(transformed_result)
-            
+
         return transformed_results
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
