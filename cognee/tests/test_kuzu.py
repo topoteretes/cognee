@@ -24,9 +24,6 @@ async def main():
         ).resolve()
     )
 
-    for path in [data_directory_path, cognee_directory_path]:
-        if os.path.exists(path):
-            shutil.rmtree(path)
 
     try:
         # Set Kuzu as the graph database provider

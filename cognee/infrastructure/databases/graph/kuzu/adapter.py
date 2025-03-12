@@ -16,15 +16,9 @@ from kuzu.database import Database
 from kuzu import Connection
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.storage.utils import JSONEncoder
 
 logger = logging.getLogger(__name__)
-
-
-class UUIDEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, UUID):
-            return str(obj)
-        return super().default(obj)
 
 
 class KuzuAdapter(GraphDBInterface):
@@ -34,7 +28,7 @@ class KuzuAdapter(GraphDBInterface):
         """Initialize Kuzu database connection and schema."""
         self.db_path = db_path  # Path for the database directory
         self.db: Optional[Database] = None
-        self.conn: Optional[Connection] = None
+        self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
         self._initialize_connection()
 
@@ -44,9 +38,9 @@ class KuzuAdapter(GraphDBInterface):
             os.makedirs(self.db_path, exist_ok=True)
             self.db = Database(self.db_path)
             self.db.init_database()
-            self.conn = Connection(self.db)
+            self.connection = Connection(self.db)
             # Create node table with essential fields and timestamp
-            self.conn.execute("""
+            self.connection.execute("""
                 CREATE NODE TABLE IF NOT EXISTS Node(
                     id STRING PRIMARY KEY,
                     text STRING,
@@ -58,7 +52,7 @@ class KuzuAdapter(GraphDBInterface):
                 )
             """)
             # Create relationship table with timestamp
-            self.conn.execute("""
+            self.connection.execute("""
                 CREATE REL TABLE IF NOT EXISTS EDGE(
                     FROM Node TO Node,
                     relationship_name STRING,
@@ -78,19 +72,19 @@ class KuzuAdapter(GraphDBInterface):
 
         def blocking_query():
             try:
-                if not self.conn:
+                if not self.connection:
                     logger.debug("Reconnecting to Kuzu database...")
                     self._initialize_connection()
-                result = self.conn.execute(query, params if params else {})
+                result = self.connection.execute(query, params if params else {})
                 rows = []
                 while result.has_next():
                     row = result.get_next()
-                    processed_row = []
+                    processed_rows = []
                     for val in row:
                         if hasattr(val, "as_py"):
                             val = val.as_py()
-                        processed_row.append(val)
-                    rows.append(tuple(processed_row))
+                        processed_rows.append(val)
+                    rows.append(tuple(processed_rows))
                 return rows
             except Exception as e:
                 logger.error(f"Query execution failed: {e}")
@@ -105,11 +99,10 @@ class KuzuAdapter(GraphDBInterface):
         Kuzu doesn't have session management like Neo4j, so this provides API compatibility.
         """
         try:
-            yield self.conn
+            yield self.connection
         finally:
             pass
 
-    # Helper method for parsing nodes
 
     def _parse_node(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert a raw node result (with JSON properties) into a dictionary."""
@@ -146,7 +139,7 @@ class KuzuAdapter(GraphDBInterface):
             "relationship_name": relationship_name,
             "created_at": now,
             "updated_at": now,
-            "properties": json.dumps(properties, cls=UUIDEncoder),
+            "properties": json.dumps(properties, cls=JSONEncoder),
         }
         return query, params
 
@@ -175,16 +168,10 @@ class KuzuAdapter(GraphDBInterface):
             for key in core_properties:
                 properties.pop(key, None)
 
-            core_properties["properties"] = json.dumps(properties, cls=UUIDEncoder)
+            core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
 
             # Check if node exists
-            match_query = """
-            MATCH (n:Node)
-            WHERE n.id = $id
-            RETURN COUNT(n)
-            """
-            result = await self.query(match_query, {"id": core_properties["id"]})
-            exists = result[0][0] > 0 if result else False
+            exists = await self.has_node(core_properties["id"])
 
             if not exists:
                 # Add timestamps for new node
@@ -213,9 +200,73 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
-        """Add multiple nodes to the graph."""
-        for node in nodes:
-            await self.add_node(node)
+        """Add multiple nodes to the graph in a batch operation."""
+        if not nodes:
+            return
+
+        try:
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            
+            # Prepare all nodes data first
+            node_params = []
+            for node in nodes:
+                properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
+                
+                # Extract core fields
+                core_properties = {
+                    "id": str(properties.get("id", "")),
+                    "text": str(properties.get("text", "")),
+                    "type": str(properties.get("type", "")),
+                    "dataset": str(properties.get("dataset", "")),
+                }
+                
+                # Remove core fields from other properties
+                for key in core_properties:
+                    properties.pop(key, None)
+                
+                node_params.append({
+                    **core_properties,
+                    "properties": json.dumps(properties, cls=JSONEncoder),
+                    "created_at": now,
+                    "updated_at": now
+                })
+
+            if node_params:
+                # First check which nodes don't exist yet
+                check_query = """
+                UNWIND $nodes AS node
+                MATCH (n:Node)
+                WHERE n.id = node.id
+                RETURN n.id
+                """
+                existing_nodes = await self.query(check_query, {"nodes": node_params})
+                existing_ids = {str(row[0]) for row in existing_nodes}
+                
+                # Filter out existing nodes
+                new_nodes = [node for node in node_params if node["id"] not in existing_ids]
+                
+                if new_nodes:
+                    # Batch create new nodes
+                    create_query = """
+                    UNWIND $nodes AS node
+                    CREATE (n:Node {
+                        id: node.id,
+                        text: node.text,
+                        type: node.type,
+                        dataset: node.dataset,
+                        properties: node.properties,
+                        created_at: timestamp(node.created_at),
+                        updated_at: timestamp(node.updated_at)
+                    })
+                    """
+                    await self.query(create_query, {"nodes": new_nodes})
+                    logger.debug(f"Added {len(new_nodes)} new nodes in batch")
+                else:
+                    logger.debug("No new nodes to add - all nodes already exist")
+                    
+        except Exception as e:
+            logger.error(f"Failed to add nodes in batch: {e}")
+            raise
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a node and its relationships."""
@@ -243,7 +294,6 @@ class KuzuAdapter(GraphDBInterface):
         try:
             result = await self.query(query_str, {"id": node_id})
             if result and result[0]:
-                # Use helper to parse JSON properties
                 node_data = self._parse_node(result[0][0])
                 return node_data
             return None
@@ -288,12 +338,45 @@ class KuzuAdapter(GraphDBInterface):
         return result[0][0] if result else False
 
     async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
-        """Check if multiple edges exist."""
-        result_edges = []
-        for from_node, to_node, edge_label in edges:
-            if await self.has_edge(from_node, to_node, edge_label):
-                result_edges.append((from_node, to_node, edge_label))
-        return result_edges
+        """Check if multiple edges exist in a batch operation."""
+        if not edges:
+            return []
+
+        try:
+            # Transform edges into format needed for batch query
+            edge_params = [
+                {
+                    "from_id": from_node,
+                    "to_id": to_node,
+                    "relationship_name": edge_label
+                }
+                for from_node, to_node, edge_label in edges
+            ]
+
+            # Batch check query
+            query = """
+            UNWIND $edges AS edge
+            MATCH (from:Node)-[r:EDGE]->(to:Node)
+            WHERE from.id = edge.from_id 
+            AND to.id = edge.to_id 
+            AND r.relationship_name = edge.relationship_name
+            RETURN from.id, to.id, r.relationship_name
+            """
+            
+            results = await self.query(query, {"edges": edge_params})
+            
+            # Convert results back to tuples and ensure string types
+            existing_edges = [
+                (str(row[0]), str(row[1]), str(row[2])) 
+                for row in results
+            ]
+            
+            logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
+            return existing_edges
+            
+        except Exception as e:
+            logger.error(f"Failed to check edges in batch: {e}")
+            return []
 
     async def add_edge(
         self,
@@ -313,12 +396,44 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
-        """Add multiple edges at once."""
-        for from_node, to_node, relationship_name, properties in edges:
-            query, params = self._edge_query_and_params(
-                from_node, to_node, relationship_name, properties
-            )
-            await self.query(query, params)
+        """Add multiple edges in a batch operation."""
+        if not edges:
+            return
+
+        try:
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            
+            # Transform edges into the format needed for batch insertion
+            edge_params = [
+                {
+                    "from_id": from_node,
+                    "to_id": to_node,
+                    "relationship_name": relationship_name,
+                    "properties": json.dumps(properties, cls=JSONEncoder),
+                    "created_at": now,
+                    "updated_at": now
+                }
+                for from_node, to_node, relationship_name, properties in edges
+            ]
+
+            # Batch create query
+            query = """
+            UNWIND $edges AS edge
+            MATCH (from:Node), (to:Node)
+            WHERE from.id = edge.from_id AND to.id = edge.to_id
+            CREATE (from)-[r:EDGE {
+                relationship_name: edge.relationship_name,
+                created_at: timestamp(edge.created_at),
+                updated_at: timestamp(edge.updated_at),
+                properties: edge.properties
+            }]->(to)
+            """
+            
+            await self.query(query, {"edges": edge_params})
+            
+        except Exception as e:
+            logger.error(f"Failed to add edges in batch: {e}")
+            raise
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         """Get all edges connected to a node."""
@@ -356,16 +471,6 @@ class KuzuAdapter(GraphDBInterface):
                                 f"Failed to parse properties JSON for edge connected to {node_id}"
                             )
                     edges.append((row[0], row[1], row[2]))
-            if not edges:
-                # Return a self-referential edge if none found
-                edges.append(
-                    (
-                        {"id": node_id, "text": "", "type": "", "dataset": ""},
-                        "SELF",
-                        {"id": node_id, "text": "", "type": "", "dataset": ""},
-                    )
-                )
-            return edges
         except Exception as e:
             logger.error(f"Failed to get edges for node {node_id}: {e}")
             return [
@@ -385,50 +490,62 @@ class KuzuAdapter(GraphDBInterface):
         WHERE n.id = $id
         RETURN DISTINCT properties(m)
         """
-        result = await self.query(query_str, {"id": node_id})
-        return [row[0] for row in result]
+        try:
+            result = await self.query(query_str, {"id": node_id})
+            return [row[0] for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get neighbours for node {node_id}: {e}")
+            return []
 
     async def get_predecessors(
         self, node_id: Union[str, UUID], edge_label: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get all predecessor nodes."""
-        if edge_label:
-            query_str = """
-            MATCH (n)<-[r:EDGE]-(m)
-            WHERE n.id = $id AND r.relationship_name = $edge_label
-            RETURN properties(m)
-            """
-            params = {"id": str(node_id), "edge_label": edge_label}
-        else:
-            query_str = """
-            MATCH (n)<-[r:EDGE]-(m)
-            WHERE n.id = $id
-            RETURN properties(m)
-            """
-            params = {"id": str(node_id)}
-        result = await self.query(query_str, params)
-        return [row[0] for row in result]
+        try:
+            if edge_label:
+                query_str = """
+                MATCH (n)<-[r:EDGE]-(m)
+                WHERE n.id = $id AND r.relationship_name = $edge_label
+                RETURN properties(m)
+                """
+                params = {"id": str(node_id), "edge_label": edge_label}
+            else:
+                query_str = """
+                MATCH (n)<-[r:EDGE]-(m)
+                WHERE n.id = $id
+                RETURN properties(m)
+                """
+                params = {"id": str(node_id)}
+            result = await self.query(query_str, params)
+            return [row[0] for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get predecessors for node {node_id}: {e}")
+            return []
 
     async def get_successors(
         self, node_id: Union[str, UUID], edge_label: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get all successor nodes."""
-        if edge_label:
-            query_str = """
-            MATCH (n)-[r:EDGE]->(m)
-            WHERE n.id = $id AND r.relationship_name = $edge_label
-            RETURN properties(m)
-            """
-            params = {"id": str(node_id), "edge_label": edge_label}
-        else:
-            query_str = """
-            MATCH (n)-[r:EDGE]->(m)
-            WHERE n.id = $id
-            RETURN properties(m)
-            """
-            params = {"id": str(node_id)}
-        result = await self.query(query_str, params)
-        return [row[0] for row in result]
+        try:
+            if edge_label:
+                query_str = """
+                MATCH (n)-[r:EDGE]->(m)
+                WHERE n.id = $id AND r.relationship_name = $edge_label
+                RETURN properties(m)
+                """
+                params = {"id": str(node_id), "edge_label": edge_label}
+            else:
+                query_str = """
+                MATCH (n)-[r:EDGE]->(m)
+                WHERE n.id = $id
+                RETURN properties(m)
+                """
+                params = {"id": str(node_id)}
+            result = await self.query(query_str, params)
+            return [row[0] for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get successors for node {node_id}: {e}")
+            return []
 
     async def get_connections(
         self, node_id: str
@@ -461,35 +578,22 @@ class KuzuAdapter(GraphDBInterface):
             edges = []
             for row in results:
                 if row and len(row) == 3:
-                    processed_row = []
-                    for item in row:
-                        if isinstance(item, dict) and "properties" in item and item["properties"]:
-                            try:
-                                props = json.loads(item["properties"])
-                                item.update(props)
-                                del item["properties"]
-                            except json.JSONDecodeError:
-                                logger.warning("Failed to parse JSON properties")
-                        processed_row.append(item)
-                    edges.append(tuple(processed_row))
-            if not edges:
-                edges.append(
-                    (
-                        {"id": node_id, "text": "", "type": "", "dataset": ""},
-                        {"relationship_name": "SELF"},
-                        {"id": node_id, "text": "", "type": "", "dataset": ""},
-                    )
-                )
-            return edges
+                    processed_rows = []
+                    for i, item in enumerate(row):
+                        if isinstance(item, dict):
+                            if "properties" in item and item["properties"]:
+                                try:
+                                    props = json.loads(item["properties"])
+                                    item.update(props)
+                                    del item["properties"]
+                                except json.JSONDecodeError:
+                                    logger.warning(f"Failed to parse JSON properties for node/edge {i}")
+                        processed_rows.append(item)
+                    edges.append(tuple(processed_rows))
+            return edges if edges else []  # Always return a list, even if empty
         except Exception as e:
             logger.error(f"Failed to get connections for node {node_id}: {e}")
-            return [
-                (
-                    {"id": node_id, "text": "", "type": "", "dataset": ""},
-                    {"relationship_name": "SELF"},
-                    {"id": node_id, "text": "", "type": "", "dataset": ""},
-                )
-            ]
+            return []  # Return empty list on error
 
     async def remove_connection_to_predecessors_of(
         self, node_ids: List[str], edge_label: str
@@ -663,9 +767,9 @@ class KuzuAdapter(GraphDBInterface):
         """Delete all data from the graph while preserving the database structure."""
         try:
             # Delete relationships from the fixed table EDGE
-            self.conn.execute("MATCH ()-[r:EDGE]->() DELETE r")
+            await self.query("MATCH ()-[r:EDGE]->() DELETE r")
             # Then delete nodes
-            self.conn.execute("MATCH (n:Node) DELETE n")
+            await self.query("MATCH (n:Node) DELETE n")
             logger.info("Cleared all data from graph while preserving structure")
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
@@ -674,8 +778,8 @@ class KuzuAdapter(GraphDBInterface):
     async def clear_database(self) -> None:
         """Clear all data from the database by deleting the database files and reinitializing."""
         try:
-            if self.conn:
-                self.conn = None
+            if self.connection:
+                self.connection = None
             if self.db:
                 self.db.close()
                 self.db = None
@@ -685,13 +789,13 @@ class KuzuAdapter(GraphDBInterface):
             # Reinitialize the database
             self._initialize_connection()
             # Verify the database is empty
-            result = self.conn.execute("MATCH (n:Node) RETURN COUNT(n)")
+            result = self.connection.execute("MATCH (n:Node) RETURN COUNT(n)")
             count = result.get_next()[0] if result.has_next() else 0
             if count > 0:
                 logger.warning(
                     f"Database still contains {count} nodes after clearing, forcing deletion"
                 )
-                self.conn.execute("MATCH (n:Node) DETACH DELETE n")
+                self.connection.execute("MATCH (n:Node) DETACH DELETE n")
             logger.info("Database cleared successfully")
         except Exception as e:
             logger.error(f"Error during database clearing: {e}")
