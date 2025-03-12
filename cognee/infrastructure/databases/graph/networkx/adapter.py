@@ -46,15 +46,25 @@ class NetworkXAdapter(GraphDBInterface):
         self,
         node: DataPoint,
     ) -> None:
-        self.graph.add_node(node.id, **node.model_dump())
-
+        # Convert the node to a dictionary and add type field from metadata
+        node_props = node.model_dump()
+        if "metadata" in node_props and isinstance(node_props["metadata"], dict):
+            node_props["type"] = node_props["metadata"].get("type", "Unknown")
+        
+        self.graph.add_node(node.id, **node_props)
         await self.save_graph_to_file(self.filename)
 
     async def add_nodes(
         self,
         nodes: list[DataPoint],
     ) -> None:
-        nodes = [(node.id, node.model_dump()) for node in nodes]
+        # Convert nodes to tuples of (id, props) with type field from metadata
+        nodes = []
+        for node in nodes:
+            node_props = node.model_dump()
+            if "metadata" in node_props and isinstance(node_props["metadata"], dict):
+                node_props["type"] = node_props["metadata"].get("type", "Unknown")
+            nodes.append((node.id, node_props))
 
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
@@ -81,12 +91,17 @@ class NetworkXAdapter(GraphDBInterface):
         relationship_name: str,
         edge_properties: Dict[str, Any] = {},
     ) -> None:
-        edge_properties["updated_at"] = datetime.now(timezone.utc)
+        """Add an edge to the graph with the given properties."""
+        # Create a copy of edge properties to avoid modifying the input
+        props = edge_properties.copy() if edge_properties else {}
+        props["updated_at"] = datetime.now(timezone.utc)
+        
+        # Add the edge with the relationship name as the key
         self.graph.add_edge(
             from_node,
             to_node,
             key=relationship_name,
-            **(edge_properties if edge_properties else {}),
+            **props
         )
         await self.save_graph_to_file(self.filename)
 
@@ -94,6 +109,7 @@ class NetworkXAdapter(GraphDBInterface):
         self,
         edges: tuple[str, str, str, dict],
     ) -> None:
+        """Add multiple edges to the graph."""
         edges = [
             (
                 edge[0],
@@ -253,89 +269,42 @@ class NetworkXAdapter(GraphDBInterface):
         await self.save_graph_to_file(file_path)
 
     async def save_graph_to_file(self, file_path: str = None) -> None:
-        """Asynchronously save the graph to a file in JSON format."""
+        """Asynchronously save the graph to a pickle file."""
         if not file_path:
             file_path = self.filename
 
-        graph_data = nx.readwrite.json_graph.node_link_data(self.graph, edges="links")
+        try:
+            import pickle
+            
+            # Save the graph data to file
+            with open(file_path, "wb") as file:
+                pickle.dump(self.graph, file)
+                logger.debug("Graph data saved successfully")
 
-        async with aiofiles.open(file_path, "w") as file:
-            json_data = json.dumps(graph_data, cls=JSONEncoder)
-            await file.write(json_data)
+        except Exception as e:
+            logger.error(f"Error saving graph to file: {file_path} - {str(e)}")
+            raise
 
     async def load_graph_from_file(self, file_path: str = None):
-        """Asynchronously load the graph from a file in JSON format."""
-        if file_path == self.filename:
-            return
-
+        """Asynchronously load the graph from a pickle file."""
         if not file_path:
             file_path = self.filename
         try:
             if os.path.exists(file_path):
-                async with aiofiles.open(file_path, "r") as file:
-                    graph_data = json.loads(await file.read())
-                    for node in graph_data["nodes"]:
-                        try:
-                            if not isinstance(node["id"], UUID):
-                                try:
-                                    node["id"] = UUID(node["id"])
-                                except Exception:
-                                    # If conversion fails, keep the original id
-                                    pass
-                        except Exception as e:
-                            logger.error(e)
-                            raise e
-
-                        if isinstance(node.get("updated_at"), int):
-                            node["updated_at"] = datetime.fromtimestamp(
-                                node["updated_at"] / 1000, tz=timezone.utc
-                            )
-                        elif isinstance(node.get("updated_at"), str):
-                            node["updated_at"] = datetime.strptime(
-                                node["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
-                            )
-
-                    for edge in graph_data["links"]:
-                        try:
-                            if not isinstance(edge["source"], UUID):
-                                source_id = parse_id(edge["source"])
-                            else:
-                                source_id = edge["source"]
-
-                            if not isinstance(edge["target"], UUID):
-                                target_id = parse_id(edge["target"])
-                            else:
-                                target_id = edge["target"]
-
-                            edge["source"] = source_id
-                            edge["target"] = target_id
-                            edge["source_node_id"] = source_id
-                            edge["target_node_id"] = target_id
-                        except Exception as e:
-                            logger.error(e)
-                            raise e
-
-                        if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
-                            edge["updated_at"] = datetime.fromtimestamp(
-                                edge["updated_at"] / 1000, tz=timezone.utc
-                            )
-                        elif isinstance(edge["updated_at"], str):
-                            edge["updated_at"] = datetime.strptime(
-                                edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
-                            )
-
-                    self.graph = nx.readwrite.json_graph.node_link_graph(graph_data, edges="links")
-
-                    for node_id, node_data in self.graph.nodes(data=True):
-                        node_data["id"] = node_id
+                import pickle
+                logger.debug(f"Loading graph from file: {file_path}")
+                
+                with open(file_path, "rb") as file:
+                    self.graph = pickle.load(file)
+                    logger.debug(f"Graph loaded successfully: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
             else:
                 # Log that the file does not exist and an empty graph is initialized
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
                 await self.create_empty_graph(file_path)
 
-        except Exception:
-            logger.error("Failed to load graph from file: %s", file_path)
-
+        except Exception as e:
+            logger.error("Failed to load graph from file: %s - %s", file_path, str(e))
+            # Create an empty graph to recover from errors
             await self.create_empty_graph(file_path)
 
     async def delete_graph(self, file_path: str = None):
