@@ -157,7 +157,7 @@ def expand_with_nodes_and_edges(
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
                         ):
-                            added_ontology_nodes_map[ont_node_key] = Entity(
+                            added_ontology_nodes_map[ont_node_key] = EntityType(
                                 id=ont_node_id,
                                 name=ont_node_name,
                                 description=ont_node_name,
