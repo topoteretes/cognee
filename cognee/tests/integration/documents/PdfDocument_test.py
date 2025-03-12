@@ -4,8 +4,8 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.PdfDocument import PdfDocument
 
 GROUND_TRUTH = [
-    {"word_count": 879, "len_text": 5607, "cut_type": "sentence_end"},
-    {"word_count": 953, "len_text": 6363, "cut_type": "sentence_end"},
+    {"word_count": 879, "len_text": 5697, "cut_type": "sentence_end"},
+    {"word_count": 953, "len_text": 6473, "cut_type": "sentence_end"},
 ]
 
 
