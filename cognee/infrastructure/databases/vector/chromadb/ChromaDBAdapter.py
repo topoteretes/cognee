@@ -306,21 +306,34 @@ class ChromaDBAdapter(VectorDBInterface):
         
         all_results = []
         for i in range(len(query_texts)):
-            query_results = []
+            vector_list = []
             
             for j, (id, metadata, distance) in enumerate(zip(
                 results["ids"][i], results["metadatas"][i], results["distances"][i]
             )):
-                similarity = 1.0 - min(distance, 2.0) / 2.0
+                item = {
+                    "id": parse_id(id),
+                    "payload": restore_data_from_chroma(metadata),
+                    "_distance": distance
+                }
                 
+                if with_vectors and "embeddings" in results:
+                    item["vector"] = results["embeddings"][i][j]
+                    
+                vector_list.append(item)
+            
+            normalized_values = normalize_distances(vector_list)
+            
+            query_results = []
+            for j, item in enumerate(vector_list):
                 result = ScoredResult(
-                    id=parse_id(id),
-                    payload=metadata,
-                    score=similarity,
+                    id=item["id"],
+                    payload=item["payload"],
+                    score=normalized_values[j],
                 )
                 
                 if with_vectors and "embeddings" in results:
-                    result.vector = results["embeddings"][i][j]
+                    result.vector = item.get("vector")
                 
                 query_results.append(result)
             
