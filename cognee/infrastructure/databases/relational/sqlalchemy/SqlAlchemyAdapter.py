@@ -5,7 +5,7 @@ from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
-from sqlalchemy import text, select, MetaData, Table, delete
+from sqlalchemy import text, select, MetaData, Table, delete, inspect
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -345,38 +345,92 @@ class SQLAlchemyAdapter:
         logger.info("Database deleted successfully.")
 
     async def extract_schema(self):
-        async with self.engine.begin() as cursor:
-            # Fetch all table definitions
-            # cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='table';")
+        async with self.engine.begin() as connection:
             tables = await self.get_table_names()
 
             schema = {}
-            for table_name in tables:
-                schema[table_name] = {"columns": [], "primary_key": None, "foreign_keys": []}
 
-                # Get column details
-                columns_result = await cursor.execute(text(f"PRAGMA table_info('{table_name}');"))
-                columns = columns_result.fetchall()
-                for column in columns:
-                    column_name = column[1]
-                    column_type = column[2]
-                    is_pk = column[5] == 1
-                    schema[table_name]["columns"].append({"name": column_name, "type": column_type})
-                    if is_pk:
-                        schema[table_name]["primary_key"] = column_name
+            if self.engine.dialect.name == "sqlite":
+                for table_name in tables:
+                    schema[table_name] = {"columns": [], "primary_key": None, "foreign_keys": []}
 
-                # Get foreign key details
-                foreign_keys_results = await cursor.execute(
-                    text(f"PRAGMA foreign_key_list('{table_name}');")
-                )
-                foreign_keys = foreign_keys_results.fetchall()
-                for fk in foreign_keys:
-                    schema[table_name]["foreign_keys"].append(
-                        {
-                            "column": fk[3],  # Column in the current table
-                            "ref_table": fk[2],  # Referenced table
-                            "ref_column": fk[4],  # Referenced column
-                        }
+                    # Get column details
+                    columns_result = await connection.execute(
+                        text(f"PRAGMA table_info('{table_name}');")
                     )
+                    columns = columns_result.fetchall()
+                    for column in columns:
+                        column_name = column[1]
+                        column_type = column[2]
+                        is_pk = column[5] == 1
+                        schema[table_name]["columns"].append(
+                            {"name": column_name, "type": column_type}
+                        )
+                        if is_pk:
+                            schema[table_name]["primary_key"] = column_name
+
+                    # Get foreign key details
+                    foreign_keys_results = await connection.execute(
+                        text(f"PRAGMA foreign_key_list('{table_name}');")
+                    )
+                    foreign_keys = foreign_keys_results.fetchall()
+                    for fk in foreign_keys:
+                        schema[table_name]["foreign_keys"].append(
+                            {
+                                "column": fk[3],  # Column in the current table
+                                "ref_table": fk[2],  # Referenced table
+                                "ref_column": fk[4],  # Referenced column
+                            }
+                        )
+            else:
+                schema_list = await self.get_schema_list()
+                for schema_name in schema_list:
+                    # Get tables for the current schema via the inspector.
+                    tables = await connection.run_sync(
+                        lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema_name)
+                    )
+                    for table_name in tables:
+                        # Optionally, qualify the table name with the schema if not in the default schema.
+                        key = (
+                            table_name if schema_name == "public" else f"{schema_name}.{table_name}"
+                        )
+                        schema[key] = {"columns": [], "primary_key": None, "foreign_keys": []}
+
+                        # Helper function to get table details using the inspector.
+                        def get_details(sync_conn, table, schema_name):
+                            insp = inspect(sync_conn)
+                            cols = insp.get_columns(table, schema=schema_name)
+                            pk = insp.get_pk_constraint(table, schema=schema_name)
+                            fks = insp.get_foreign_keys(table, schema=schema_name)
+                            return cols, pk, fks
+
+                        cols, pk, fks = await connection.run_sync(
+                            get_details, table_name, schema_name
+                        )
+
+                        for column in cols:
+                            # Convert the type to string
+                            schema[key]["columns"].append(
+                                {"name": column["name"], "type": str(column["type"])}
+                            )
+                        pk_columns = pk.get("constrained_columns", [])
+                        if pk_columns:
+                            schema[key]["primary_key"] = pk_columns[0]
+                        for fk in fks:
+                            for col, ref_col in zip(
+                                fk.get("constrained_columns", []), fk.get("referred_columns", [])
+                            ):
+                                if col and ref_col:
+                                    schema[key]["foreign_keys"].append(
+                                        {
+                                            "column": col,
+                                            "ref_table": fk.get("referred_table"),
+                                            "ref_column": ref_col,
+                                        }
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"Missing value in foreign key information. \nColumn value: {col}\nReference column value: {ref_col}\n"
+                                    )
 
             return schema

@@ -337,9 +337,8 @@ class NetworkXAdapter(GraphDBInterface):
                 logger.warning("File %s not found. Initializing an empty graph.", file_path)
                 await self.create_empty_graph(file_path)
 
-        except Exception as exp:
+        except Exception:
             logger.error("Failed to load graph from file: %s", file_path)
-            raise exp
 
             await self.create_empty_graph(file_path)
 

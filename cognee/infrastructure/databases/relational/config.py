@@ -34,7 +34,7 @@ def get_relational_config():
 
 
 class MigrationConfig(BaseSettings):
-    migration_db_path: str = None
+    migration_db_path: Union[str, None] = None
     migration_db_name: str = None
     migration_db_host: Union[str, None] = None
     migration_db_port: Union[str, None] = None

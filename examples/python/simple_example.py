@@ -18,8 +18,8 @@ from cognee.shared.utils import setup_logging
 async def main():
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
-    # await cognee.prune.prune_data()
-    # await cognee.prune.prune_system(metadata=True)
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
     print("Data reset complete.\n")
 
     # cognee knowledge graph will be created based on this text
