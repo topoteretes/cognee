@@ -50,8 +50,8 @@ async def run_corpus_builder(
         )
         questions = await corpus_builder.build_corpus(
             limit=params.get("number_of_samples_in_corpus"),
-            chunk_size=chunk_size,
             chunker=chunker,
+            chunk_size=chunk_size,
             load_golden_context=params.get("evaluating_contexts"),
             instance_filter=instance_filter,
         )
