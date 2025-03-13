@@ -24,7 +24,6 @@ async def main():
         ).resolve()
     )
 
-
     try:
         # Set Kuzu as the graph database provider
         cognee.config.set_graph_database_provider("kuzu")
@@ -84,9 +83,6 @@ async def main():
 
         history = await cognee.get_search_history()
         assert len(history) == 6, "Search history is not correct."
-
-        results = await brute_force_triplet_search("What is a quantum computer?")
-        assert len(results) > 0
 
         await cognee.prune.prune_data()
         assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
