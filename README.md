@@ -47,6 +47,7 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
 - Reduce hallucinations, developer effort, and cost.
 - Load data to graph and vector databases using only Pydantic
 - Manipulate your data while ingesting from 30+ data sources
+- Add RDF/XML based ontologies to the graph to ground your knowledge base
 
 ## Get Started
 
@@ -113,7 +114,7 @@ async def main():
     # Add the text, and make it available for cognify
     await cognee.add(text)
 
-    # Use LLMs and cognee to create knowledge graph
+    # Use LLMs and cognee to create knowledge graph (Optionally add rdf/xml ontology file as cognify parameter ontology_file_path=YOUR_ONTOLOGY_PATH)
     await cognee.cognify()
     print("Cognify process complete.\n")
 
