@@ -344,7 +344,7 @@ class ChromaDBAdapter(VectorDBInterface):
             await client.delete_collection(collection_name)
         return True
 
-    async def get_table_names(self):
+    async def get_collection_names(self):
         """Get a list of all collection names in the database."""
         client = await self.get_connection()
         return await client.list_collections()

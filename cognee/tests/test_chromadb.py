@@ -67,8 +67,6 @@ async def test_getting_of_documents(dataset_name_1):
 
 
 async def main():
-    print(cognee.config)
-
     cognee.config.set_vector_db_config(
         {
             "vector_db_url": "http://localhost:3002",
