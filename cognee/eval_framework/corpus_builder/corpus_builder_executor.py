@@ -2,7 +2,6 @@ import cognee
 import logging
 from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
-from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.Task import Task
