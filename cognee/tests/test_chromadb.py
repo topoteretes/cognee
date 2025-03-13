@@ -5,7 +5,6 @@ import cognee
 
 from cognee.modules.data.models import Data
 from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.users.methods import get_default_user
 
 logging.basicConfig(level=logging.DEBUG)
@@ -159,7 +158,7 @@ async def main():
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    tables_in_database = await vector_engine.get_table_names()
+    tables_in_database = await vector_engine.get_collection_names()
     assert len(tables_in_database) == 0, "ChromaDB database is not empty"
 
 
