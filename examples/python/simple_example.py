@@ -3,7 +3,10 @@ import cognee
 import logging
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.relational import (
+    get_relational_engine,
+    get_migration_relational_engine,
+)
 from cognee.shared.utils import setup_logging
 
 # Prerequisites:
@@ -15,8 +18,8 @@ from cognee.shared.utils import setup_logging
 async def main():
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    # await cognee.prune.prune_data()
+    # await cognee.prune.prune_system(metadata=True)
     print("Data reset complete.\n")
 
     # cognee knowledge graph will be created based on this text
@@ -28,7 +31,7 @@ async def main():
     print("Adding text to cognee:")
     print(text.strip())
     # Add the text, and make it available for cognify
-    await cognee.add([text])
+    # await cognee.add([text])
     print("Text added successfully.\n")
 
     print("Running cognify to create knowledge graph...\n")
@@ -60,7 +63,7 @@ async def main():
     # for result_text in search_results:
     #     print(result_text)
 
-    engine = get_relational_engine()
+    engine = get_migration_relational_engine()
     schema = await engine.extract_schema()
     graph = await get_graph_engine()
     await graph.migrate_relational_database(schema=schema)

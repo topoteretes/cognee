@@ -12,7 +12,7 @@ import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.relational import get_migration_relational_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -472,7 +472,7 @@ class NetworkXAdapter(GraphDBInterface):
           - For every foreign key defined, fetch the relationships and add an edge between the
             corresponding nodes if they exist.
         """
-        engine = get_relational_engine()
+        engine = get_migration_relational_engine()
 
         async with engine.engine.begin() as cursor:
             # Iterate over all tables defined in the schema.
