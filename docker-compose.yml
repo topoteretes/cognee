@@ -60,6 +60,25 @@ services:
       - 3001:3000
     networks:
       - cognee-network
+
+  chromadb:
+    image: chromadb/chroma:0.6.3
+    container_name: chromadb
+    profiles:
+      - chromadb
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_SERVER_AUTH_CREDENTIALS=${VECTOR_DB_KEY}
+      - CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider
+      - CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=AUTHORIZATION
+      - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider
+    volumes:
+      - .chromadb_data/:/chroma/chroma/
+    networks:
+      - cognee-network
+    ports:
+      - "3002:8000"
+
   # UNCOMMENT IF USING POSTGRES
   # postgres:
   #   image: pgvector/pgvector:pg17
@@ -75,12 +94,12 @@ services:
   #   networks:
   #     - cognee-network
   # UNCOMMENT THE VOLUES SECTION BELOW AS WELL TO USE POSTGRES
+
 networks:
   cognee-network:
     name: cognee-network
 
-# UNCOMMENT IF USING POSTGRES         
-# volumes:                           
-#   postgres_data:                  
-
-
+volumes:
+  chromadb_data:
+# UNCOMMENT IF USING POSTGRES
+#   postgres_data:
