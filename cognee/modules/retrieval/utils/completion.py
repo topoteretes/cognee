@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 
