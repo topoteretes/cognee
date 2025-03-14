@@ -13,7 +13,7 @@ load_dotenv()
 
 setup_logging(logging.INFO)
 
-SEGMENT_WRITE_KEY = os.getenv("SEGMENT_WRITE_KEY")
+SEGMENT_WRITE_KEY = os.getenv("SEGMENT_WRITE_KEY_EVAL")
 analytics.write_key = SEGMENT_WRITE_KEY
 
 
