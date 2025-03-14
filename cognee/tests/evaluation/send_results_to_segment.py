@@ -6,34 +6,35 @@ import json
 from dotenv import load_dotenv
 import argparse
 from cognee.shared.utils import setup_logging
+import analytics
+import datetime
 
 load_dotenv()
 
 setup_logging(logging.INFO)
 
-
-def initialize_posthog_client():
-    posthog = Posthog(
-        api_key=os.getenv("POSTHOG_API_KEY_DEV"),
-        host="https://eu.i.posthog.com",
-    )
-    posthog.debug = True
-    logging.info("PostHog client initialized.")
-    return posthog
+SEGMENT_WRITE_KEY = os.getenv("SEGMENT_WRITE_KEY")
+analytics.write_key = SEGMENT_WRITE_KEY
 
 
-def send_event_to_posthog(posthog, results):
+def send_event_to_segment(results):
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
+
     properties = {
         f"mean_{key}": results["aggregate_metrics"][key]["mean"]
         for key in results["aggregate_metrics"].keys()
     }
-    posthog.capture(
-        distinct_id=str(uuid.uuid4()),
+    properties["created_at"] = created_at
+
+    # Send event to Segment
+    analytics.track(
+        user_id="evalresults_ingest_bot",  # Unique identifier for the event
         event="cognee_eval_results",
         properties=properties,
     )
 
-    logging.info("Event sent to PostHog successfully.")
+    # Ensure all events are sent
+    analytics.flush()
 
 
 def main():
@@ -49,8 +50,7 @@ def main():
     logging.info(
         f"results loaded, mean correctness {results['aggregate_metrics']['correctness']['mean']}"
     )
-    posthog = initialize_posthog_client()
-    send_event_to_posthog(posthog, results)
+    send_event_to_segment(results)
 
 
 if __name__ == "__main__":
