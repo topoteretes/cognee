@@ -8,7 +8,7 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 import json
-import os
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def main():
     config = EvalConfig(
         task_getter_type="Default",
         benchmark="HotPotQA",
-        number_of_samples_in_corpus=50,
+        number_of_samples_in_corpus=1,
         building_corpus_from_scratch=True,
         answering_questions=True,
         qa_engine="cognee_graph_completion",

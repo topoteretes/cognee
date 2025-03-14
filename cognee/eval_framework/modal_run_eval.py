@@ -10,6 +10,8 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
     run_question_answering,
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
+from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,8 @@ app = modal.App("modal-run-eval")
 
 image = (
     modal.Image.from_dockerfile(path="Dockerfile_modal", force_build=False)
-    .copy_local_file("pyproject.toml", "pyproject.toml")
-    .copy_local_file("poetry.lock", "poetry.lock")
+    .add_local_file("pyproject.toml", "/root/cognee/pyproject.toml", copy=True)
+    .add_local_file("poetry.lock", "/root/cognee/poetry.lock", copy=True)
     .env(
         {
             "ENV": os.getenv("ENV"),
@@ -46,12 +48,13 @@ image = (
             "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
         }
     )
-    .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
+    .poetry_install_from_file(poetry_pyproject_toml="/root/cognee/pyproject.toml")
     .pip_install("protobuf", "h2", "deepeval", "gdown", "plotly", "unstructured")
+    .add_local_python_source("cognee")
 )
 
 
-@app.function(image=image, concurrency_limit=2, timeout=1800, retries=1)
+@app.function(image=image, max_containers=2, timeout=1800, retries=1)
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
     if eval_params is None:
