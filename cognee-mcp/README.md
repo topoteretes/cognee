@@ -82,5 +82,5 @@ http://localhost:5173?timeout=120000
 To apply new changes while developing cognee you need to do:
 
 1. `poetry lock` in cognee folder
-2. `uv sync --dev --all-extras --reinstall `
+2. `uv sync --dev --all-extras --reinstall`
 3. `mcp dev src/server.py`
