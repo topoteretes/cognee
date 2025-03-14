@@ -1,5 +1,6 @@
 import json
 from uuid import UUID
+from decimal import Decimal
 from datetime import datetime
 from pydantic_core import PydanticUndefined
 from pydantic import create_model
@@ -14,6 +15,8 @@ class JSONEncoder(json.JSONEncoder):
         elif isinstance(obj, UUID):
             # if the obj is uuid, we simply return the value of uuid
             return str(obj)
+        elif isinstance(obj, Decimal):
+            return float(obj)
         return json.JSONEncoder.default(self, obj)
 
 

@@ -31,3 +31,31 @@ class RelationalConfig(BaseSettings):
 @lru_cache
 def get_relational_config():
     return RelationalConfig()
+
+
+class MigrationConfig(BaseSettings):
+    migration_db_path: Union[str, None] = None
+    migration_db_name: str = None
+    migration_db_host: Union[str, None] = None
+    migration_db_port: Union[str, None] = None
+    migration_db_username: Union[str, None] = None
+    migration_db_password: Union[str, None] = None
+    migration_db_provider: str = None
+
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    def to_dict(self) -> dict:
+        return {
+            "migration_db_path": self.migration_db_path,
+            "migration_db_name": self.migration_db_name,
+            "migration_db_host": self.migration_db_host,
+            "migration_db_port": self.migration_db_port,
+            "migration_db_username": self.migration_db_username,
+            "migration_db_password": self.migration_db_password,
+            "migration_db_provider": self.migration_db_provider,
+        }
+
+
+@lru_cache
+def get_migration_config():
+    return MigrationConfig()
