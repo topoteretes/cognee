@@ -10,7 +10,5 @@ class Document(DataPoint):
     mime_type: str
     metadata: dict = {"index_fields": ["name"]}
 
-    def read(
-        self, chunk_size: int, chunker_cls: Chunker, max_chunk_tokens: Optional[int] = None
-    ) -> str:
+    def read(self, chunker_cls: Chunker, max_chunk_size: int) -> str:
         pass

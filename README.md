@@ -8,11 +8,11 @@
   cognee - memory layer for AI apps and Agents
 
   <p align="center">
+  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  .
   <a href="https://cognee.ai">Learn more</a>
   ·
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
-  ·
-  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
   </p>
 
 
@@ -89,7 +89,7 @@ Add LLM_API_KEY to .env using the command bellow.
 ```
 echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
 ```
-You can see available env variables in the repository `.env.template` file.
+You can see available env variables in the repository `.env.template` file. If you don't specify it otherwise, like in this example, SQLite (relational database), LanceDB (vector database) and NetworkX (graph store) will be used as default components.
 
 This script will run the default pipeline:
 

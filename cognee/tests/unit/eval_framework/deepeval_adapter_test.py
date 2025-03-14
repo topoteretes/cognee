@@ -5,7 +5,12 @@ import sys
 
 with patch.dict(
     sys.modules,
-    {"deepeval": MagicMock(), "deepeval.metrics": MagicMock(), "deepeval.test_case": MagicMock()},
+    {
+        "deepeval": MagicMock(),
+        "deepeval.metrics": MagicMock(),
+        "deepeval.test_case": MagicMock(),
+        "cognee.eval_framework.evaluation.metrics.context_coverage": MagicMock(),
+    },
 ):
     from cognee.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
 
