@@ -23,11 +23,11 @@ async def migrate_relational_database_cypher(graph_db, schema):
     """
     engine = get_migration_relational_engine()
 
-    async with engine.engine.begin() as cursor:
+    async with engine.engine.begin() as connection:
         # Migrate rows as nodes and connect them to their table node.
         for table_name, details in schema.items():
             # Fetch all rows for the current table.
-            rows_result = await cursor.execute(text(f"SELECT * FROM {table_name};"))
+            rows_result = await connection.execute(text(f"SELECT * FROM {table_name};"))
             rows = rows_result.fetchall()
 
             for row in rows:
@@ -60,12 +60,19 @@ async def migrate_relational_database_cypher(graph_db, schema):
                         node_id=node_id,
                         properties=properties,
                     )
+
+                    # Add extra properties
+                    properties["label"] = table_name
+                    properties["type"] = "Table"
+
                     # Ensure the table node exists.
                     await session.run(
                         """
                         MERGE (t:Table {id: $table_name})
+                        SET t += $properties
                         """,
                         table_name=table_name,
+                        properties=properties,
                     )
                     # Create the relationship from the row node to its table
                     # and set relationship properties for later extraction.
@@ -100,7 +107,7 @@ async def migrate_relational_database_cypher(graph_db, schema):
                     f"JOIN {fk['ref_table']} AS {alias_2} "
                     f"ON {alias_1}.{fk['column']} = {alias_2}.{fk['ref_column']};"
                 )
-                fk_result = await cursor.execute(fk_query)
+                fk_result = await connection.execute(fk_query)
                 relations = fk_result.fetchall()
 
                 for source_id, ref_value in relations:
