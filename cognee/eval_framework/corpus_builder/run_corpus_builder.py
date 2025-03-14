@@ -2,8 +2,6 @@ import logging
 import json
 from typing import List
 
-from unstructured.chunking.dispatch import chunk
-
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.modules.data.models.questions_base import QuestionsBase
