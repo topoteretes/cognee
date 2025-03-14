@@ -44,7 +44,7 @@ async def main():
     config = EvalConfig(
         task_getter_type="Default",
         benchmark="HotPotQA",
-        number_of_samples_in_corpus=1,
+        number_of_samples_in_corpus=50,
         building_corpus_from_scratch=True,
         answering_questions=True,
         qa_engine="cognee_graph_completion",
