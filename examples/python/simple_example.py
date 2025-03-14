@@ -2,11 +2,6 @@ import asyncio
 import cognee
 import logging
 from cognee.api.v1.search import SearchType
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.relational import (
-    get_relational_engine,
-    get_migration_relational_engine,
-)
 from cognee.shared.utils import setup_logging
 
 # Prerequisites:
@@ -31,7 +26,7 @@ async def main():
     print("Adding text to cognee:")
     print(text.strip())
     # Add the text, and make it available for cognify
-    # await cognee.add([text])
+    await cognee.add(text)
     print("Text added successfully.\n")
 
     print("Running cognify to create knowledge graph...\n")
@@ -50,26 +45,19 @@ async def main():
     print("6. Summarizing text: Creating concise summaries of the content for quick insights.\n")
 
     # Use LLMs and cognee to create knowledge graph
-    # await cognee.cognify()
+    await cognee.cognify()
     print("Cognify process complete.\n")
 
     query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
-    # search_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text=query_text)
+    search_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text=query_text)
 
     print("Search results:")
     # Display results
-    # for result_text in search_results:
-    #     print(result_text)
+    for result_text in search_results:
+        print(result_text)
 
-    engine = get_migration_relational_engine()
-    schema = await engine.extract_schema()
-    graph = await get_graph_engine()
-    await graph.migrate_relational_database(schema=schema)
-    from cognee.api.v1.visualize.visualize import visualize_graph
-
-    await visualize_graph("/Users/igorilic/Desktop/cognee/test.html")
     # Example output:
     # ({'id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'natural language processing', 'description': 'An interdisciplinary subfield of computer science and information retrieval.'}, {'relationship_name': 'is_a_subfield_of', 'source_node_id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'target_node_id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 15, 473137, tzinfo=datetime.timezone.utc)}, {'id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'computer science', 'description': 'The study of computation and information processing.'})
     # (...)
