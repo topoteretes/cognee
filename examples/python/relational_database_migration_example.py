@@ -1,8 +1,9 @@
 import asyncio
-import cognee
+import os
 import logging
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
 )
@@ -17,13 +18,24 @@ from cognee.shared.utils import setup_logging
 
 async def main():
     engine = get_migration_relational_engine()
+
+    print("Extracting schema of database to migrate.")
     schema = await engine.extract_schema()
+    print(f"Migrated database schema:\n{schema}")
+
     graph = await get_graph_engine()
+    print("Migrating relational database to graph database based on schema.")
     await graph.migrate_relational_database(schema=schema)
-    from cognee.api.v1.visualize.visualize import visualize_graph
+    print("Relational database migration complete.")
+
+    # Define location where to store html visualization of graph of the migrated database
+    home_dir = os.path.expanduser("~")
+    destination_file_path = os.path.join(home_dir, "graph_visualization.html")
 
     # test.html is a file with visualized data migration
-    await visualize_graph("/Users/igorilic/Desktop/cognee/test.html")
+    print("Adding html visualization of graph database after migration.")
+    await visualize_graph(destination_file_path)
+    print(f"Visualization can be found at: {destination_file_path}")
 
 
 if __name__ == "__main__":
