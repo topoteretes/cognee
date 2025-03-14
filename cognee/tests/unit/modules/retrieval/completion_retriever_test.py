@@ -13,12 +13,20 @@ class TestCompletionRetriever:
     @pytest.mark.asyncio
     @patch("cognee.modules.retrieval.utils.completion.get_llm_client")
     @patch("cognee.modules.retrieval.utils.completion.render_prompt")
-    async def test_get_completion(self, mock_render_prompt, mock_get_llm_client, mock_retriever):
+    @patch("cognee.modules.retrieval.completion_retriever.get_vector_engine")
+    async def test_get_completion(
+        self, mock_get_vector_engine, mock_render_prompt, mock_get_llm_client, mock_retriever
+    ):
         # Setup
         query = "test query"
 
         # Mock render_prompt
         mock_render_prompt.return_value = "Rendered prompt with context"
+
+        mock_search_results = [MagicMock()]
+        mock_vector_engine = AsyncMock()
+        mock_vector_engine.search.return_value = mock_search_results
+        mock_get_vector_engine.return_value = mock_vector_engine
 
         # Mock LLM client
         mock_llm_client = MagicMock()
@@ -43,11 +51,17 @@ class TestCompletionRetriever:
 
     @pytest.mark.asyncio
     @patch("cognee.modules.retrieval.completion_retriever.generate_completion")
+    @patch("cognee.modules.retrieval.completion_retriever.get_vector_engine")
     async def test_get_completion_with_custom_prompt(
-        self, mock_generate_completion, mock_retriever
+        self, mock_get_vector_engine, mock_generate_completion, mock_retriever
     ):
         # Setup
         query = "test query with custom prompt"
+
+        mock_search_results = [MagicMock()]
+        mock_vector_engine = AsyncMock()
+        mock_vector_engine.search.return_value = mock_search_results
+        mock_get_vector_engine.return_value = mock_vector_engine
 
         mock_retriever.user_prompt_path = "custom_user_prompt.txt"
         mock_retriever.system_prompt_path = "custom_system_prompt.txt"
