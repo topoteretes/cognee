@@ -8,6 +8,9 @@ from cognee.exceptions import InvalidValueError
 from cognee.modules.search.methods.search import search, specific_search
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.models import User
+import sys
+
+search_module = sys.modules.get("cognee.modules.search.methods.search")
 
 
 @pytest.fixture
@@ -18,11 +21,11 @@ def mock_user():
 
 
 @pytest.mark.asyncio
-@patch("cognee.modules.search.methods.search.log_query")
-@patch("cognee.modules.search.methods.search.log_result")
-@patch("cognee.modules.search.methods.search.get_document_ids_for_user")
-@patch("cognee.modules.search.methods.search.specific_search")
-@patch("cognee.modules.search.methods.search.parse_id")
+@patch.object(search_module, "log_query")
+@patch.object(search_module, "log_result")
+@patch.object(search_module, "get_document_ids_for_user")
+@patch.object(search_module, "specific_search")
+@patch.object(search_module, "parse_id")
 async def test_search(
     mock_parse_id,
     mock_specific_search,
@@ -87,8 +90,8 @@ async def test_search(
 
 
 @pytest.mark.asyncio
-@patch("cognee.modules.search.methods.search.SummariesRetriever")
-@patch("cognee.modules.search.methods.search.send_telemetry")
+@patch.object(search_module, "SummariesRetriever")
+@patch.object(search_module, "send_telemetry")
 async def test_specific_search_summaries(mock_send_telemetry, mock_summaries_retriever, mock_user):
     # Setup
     query = "test query"
@@ -112,8 +115,8 @@ async def test_specific_search_summaries(mock_send_telemetry, mock_summaries_ret
 
 
 @pytest.mark.asyncio
-@patch("cognee.modules.search.methods.search.InsightsRetriever")
-@patch("cognee.modules.search.methods.search.send_telemetry")
+@patch.object(search_module, "InsightsRetriever")
+@patch.object(search_module, "send_telemetry")
 async def test_specific_search_insights(mock_send_telemetry, mock_insights_retriever, mock_user):
     # Setup
     query = "test query"
@@ -137,8 +140,8 @@ async def test_specific_search_insights(mock_send_telemetry, mock_insights_retri
 
 
 @pytest.mark.asyncio
-@patch("cognee.modules.search.methods.search.ChunksRetriever")
-@patch("cognee.modules.search.methods.search.send_telemetry")
+@patch.object(search_module, "ChunksRetriever")
+@patch.object(search_module, "send_telemetry")
 async def test_specific_search_chunks(mock_send_telemetry, mock_chunks_retriever, mock_user):
     # Setup
     query = "test query"
