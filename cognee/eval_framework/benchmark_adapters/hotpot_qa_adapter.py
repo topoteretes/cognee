@@ -2,7 +2,7 @@ import requests
 import os
 import json
 import random
-from typing import Optional, Any, List, Tuple
+from typing import Optional, Any, List, Union, Tuple
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
@@ -37,17 +37,33 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_contexts)
 
-    def _process_item(
+    def _get_raw_corpus(self) -> List[dict[str, Any]]:
+        """Loads the raw corpus data from file or URL and returns it as a list of dictionaries."""
+        filename = self.dataset_info["filename"]
+
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as f:
+                raw_corpus = json.load(f)
+        else:
+            response = requests.get(self.dataset_info["url"])
+            response.raise_for_status()
+            raw_corpus = response.json()
+
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(raw_corpus, f, ensure_ascii=False, indent=4)
+
+        return raw_corpus
+
+    def _get_corpus_entries(self, item: dict[str, Any]) -> List[str]:
+        """Extracts corpus entries from the context of an item."""
+        return [" ".join(sentences) for title, sentences in item["context"]]
+
+    def _get_question_answer_pair(
         self,
         item: dict[str, Any],
-        corpus_list: List[str],
-        question_answer_pairs: List[dict[str, Any]],
         load_golden_context: bool = False,
-    ) -> None:
-        """Processes a single item and adds it to the corpus and QA pairs."""
-        for title, sentences in item["context"]:
-            corpus_list.append(" ".join(sentences))
-
+    ) -> dict[str, Any]:
+        """Extracts a question-answer pair from an item."""
         qa_pair = {
             "question": item["question"],
             "answer": item["answer"].lower(),
@@ -57,33 +73,30 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         if load_golden_context:
             qa_pair["golden_context"] = self._get_golden_context(item)
 
-        question_answer_pairs.append(qa_pair)
+        return qa_pair
 
     def load_corpus(
-        self, limit: Optional[int] = None, seed: int = 42, load_golden_context: bool = False
+        self,
+        limit: Optional[int] = None,
+        seed: int = 42,
+        load_golden_context: bool = False,
+        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
     ) -> Tuple[List[str], List[dict[str, Any]]]:
-        """Loads and processes the HotpotQA corpus, optionally with golden context."""
-        filename = self.dataset_info["filename"]
+        """Loads and processes the HotpotQA corpus, optionally with filtering and golden context."""
+        raw_corpus = self._get_raw_corpus()
 
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                corpus_json = json.load(f)
-        else:
-            response = requests.get(self.dataset_info["url"])
-            response.raise_for_status()
-            corpus_json = response.json()
+        if instance_filter is not None:
+            raw_corpus = self._filter_instances(raw_corpus, instance_filter, id_key="_id")
 
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(corpus_json, f, ensure_ascii=False, indent=4)
-
-        if limit is not None and 0 < limit < len(corpus_json):
+        if limit is not None and 0 < limit < len(raw_corpus):
             random.seed(seed)
-            corpus_json = random.sample(corpus_json, limit)
+            raw_corpus = random.sample(raw_corpus, limit)
 
         corpus_list = []
         question_answer_pairs = []
 
-        for item in corpus_json:
-            self._process_item(item, corpus_list, question_answer_pairs, load_golden_context)
+        for item in raw_corpus:
+            corpus_list.extend(self._get_corpus_entries(item))
+            question_answer_pairs.append(self._get_question_answer_pair(item, load_golden_context))
 
         return corpus_list, question_answer_pairs

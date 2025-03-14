@@ -5,6 +5,10 @@ from cognee.modules.pipelines.tasks.Task import Task
 from cognee.eval_framework.corpus_builder.task_getters.get_cascade_graph_tasks import (
     get_cascade_graph_tasks,
 )
+from cognee.eval_framework.corpus_builder.task_getters.get_default_tasks_by_indices import (
+    get_no_summary_tasks,
+    get_just_chunks_tasks,
+)
 
 
 class TaskGetters(Enum):
@@ -12,6 +16,8 @@ class TaskGetters(Enum):
 
     DEFAULT = ("Default", get_default_tasks)
     CASCADE_GRAPH = ("CascadeGraph", get_cascade_graph_tasks)
+    NO_SUMMARIES = ("NoSummaries", get_no_summary_tasks)
+    JUST_CHUNKS = ("JustChunks", get_just_chunks_tasks)
 
     def __new__(cls, getter_name: str, getter_func: Callable[..., Awaitable[List[Task]]]):
         obj = object.__new__(cls)
