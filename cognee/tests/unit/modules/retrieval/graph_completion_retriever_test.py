@@ -5,6 +5,7 @@ import pytest
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.graph.exceptions import EntityNotFoundError
+from cognee.tasks.completion.exceptions import NoRelevantDataFound
 
 
 class TestGraphCompletionRetriever:
@@ -13,70 +14,112 @@ class TestGraphCompletionRetriever:
         return GraphCompletionRetriever(system_prompt_path="test_prompt.txt")
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.utils.completion.get_llm_client")
-    @patch("cognee.modules.retrieval.utils.completion.render_prompt")
-    @patch("cognee.modules.retrieval.utils.brute_force_triplet_search.get_graph_engine")
-    async def test_get_completion(
-        self,
-        mock_get_graph_engine,
-        mock_render_prompt,
-        mock_get_llm_client,
-        mock_retriever,
-    ):
-        # Setup
-        query = "test query"
-
-        # Mock graph engine
-        mock_graph_engine = MagicMock()
-        mock_graph_engine.get_graph_data = AsyncMock()
-        nodes = [
-            {"id": "node1", "label": "Node 1", "properties": {"name": "Node 1"}},
-            {"id": "node2", "label": "Node 2", "properties": {"name": "Node 2"}},
+    @patch("cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search")
+    async def test_get_triplets_success(self, mock_brute_force_triplet_search, mock_retriever):
+        mock_brute_force_triplet_search.return_value = [
+            AsyncMock(
+                node1=AsyncMock(attributes={"text": "Node A"}),
+                attributes={"relationship_type": "connects"},
+                node2=AsyncMock(attributes={"text": "Node B"}),
+            )
         ]
-        nodes_data = [(node["id"], node) for node in nodes]
-        edges = [{"source": "node1", "target": "node2", "label": "RELATES_TO"}]
-        edges_data = [(edge["source"], edge["target"], edge["label"], edge) for edge in edges]
-        mock_graph_engine.get_graph_data.return_value = (nodes_data, edges_data)
-        mock_get_graph_engine.return_value = mock_graph_engine
 
-        # Mock render_prompt
-        mock_render_prompt.return_value = "Rendered prompt with context and graph"
+        result = await mock_retriever.get_triplets("test query")
 
-        # Mock LLM client
-        mock_llm_client = MagicMock()
-        mock_llm_client.acreate_structured_output = AsyncMock()
-        mock_llm_client.acreate_structured_output.return_value = (
-            "Generated graph completion response"
-        )
-        mock_get_llm_client.return_value = mock_llm_client
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert result[0].attributes["relationship_type"] == "connects"
+        mock_brute_force_triplet_search.assert_called_once()
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
+    @pytest.mark.asyncio
+    @patch("cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search")
+    async def test_get_triplets_no_results(self, mock_brute_force_triplet_search, mock_retriever):
+        mock_brute_force_triplet_search.return_value = []
 
-        # Verify
-        assert len(results) == 1
-        assert results[0] == "Generated graph completion response"
+        with pytest.raises(NoRelevantDataFound):
+            await mock_retriever.get_triplets("test query")
 
-        assert mock_graph_engine.get_graph_data.call_count == 1
+    @pytest.mark.asyncio
+    async def test_resolve_edges_to_text(self, mock_retriever):
+        triplets = [
+            AsyncMock(
+                node1=AsyncMock(attributes={"text": "Node A"}),
+                attributes={"relationship_type": "connects"},
+                node2=AsyncMock(attributes={"text": "Node B"}),
+            ),
+            AsyncMock(
+                node1=AsyncMock(attributes={"text": "Node X"}),
+                attributes={"relationship_type": "links"},
+                node2=AsyncMock(attributes={"text": "Node Y"}),
+            ),
+        ]
 
-        # Verify prompt was rendered
-        mock_render_prompt.assert_called_once()
+        result = await mock_retriever.resolve_edges_to_text(triplets)
 
-        # Verify LLM client was called
-        mock_llm_client.acreate_structured_output.assert_called_once_with(
-            text_input="Rendered prompt with context and graph",
-            system_prompt=None,
-            response_model=str,
-        )
+        expected_output = "Node A -- connects -- Node B\n---\nNode X -- links -- Node Y"
+        assert result == expected_output
+
+    @pytest.mark.asyncio
+    @patch(
+        "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.get_triplets",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.resolve_edges_to_text",
+        new_callable=AsyncMock,
+    )
+    async def test_get_context(self, mock_resolve_edges_to_text, mock_get_triplets, mock_retriever):
+        """Test get_context calls get_triplets and resolve_edges_to_text."""
+        mock_get_triplets.return_value = ["mock_triplet"]
+        mock_resolve_edges_to_text.return_value = "Mock Context"
+
+        result = await mock_retriever.get_context("test query")
+
+        assert result == "Mock Context"
+        mock_get_triplets.assert_called_once_with("test query")
+        mock_resolve_edges_to_text.assert_called_once_with(["mock_triplet"])
+
+    @pytest.mark.asyncio
+    @patch(
+        "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.get_context"
+    )
+    @patch("cognee.modules.retrieval.graph_completion_retriever.generate_completion")
+    async def test_get_completion_without_context(
+        self, mock_generate_completion, mock_get_context, mock_retriever
+    ):
+        """Test get_completion when no context is provided (calls get_context)."""
+        mock_get_context.return_value = "Mock Context"
+        mock_generate_completion.return_value = "Generated Completion"
+
+        result = await mock_retriever.get_completion("test query")
+
+        assert result == ["Generated Completion"]
+        mock_get_context.assert_called_once_with("test query")
+        mock_generate_completion.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch(
+        "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.get_context"
+    )
+    @patch("cognee.modules.retrieval.graph_completion_retriever.generate_completion")
+    async def test_get_completion_with_context(
+        self, mock_generate_completion, mock_get_context, mock_retriever
+    ):
+        """Test get_completion when context is provided (does not call get_context)."""
+        mock_generate_completion.return_value = "Generated Completion"
+
+        result = await mock_retriever.get_completion("test query", context="Provided Context")
+
+        assert result == ["Generated Completion"]
+        mock_get_context.assert_not_called()
+        mock_generate_completion.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("cognee.modules.retrieval.utils.completion.get_llm_client")
-    @patch("cognee.modules.retrieval.utils.completion.render_prompt")
     @patch("cognee.modules.retrieval.utils.brute_force_triplet_search.get_graph_engine")
     async def test_get_completion_with_empty_graph(
         self,
         mock_get_graph_engine,
-        mock_render_prompt,
         mock_get_llm_client,
         mock_retriever,
     ):
@@ -88,9 +131,6 @@ class TestGraphCompletionRetriever:
         mock_graph_engine.get_graph_data = AsyncMock()
         mock_graph_engine.get_graph_data.return_value = ([], [])
         mock_get_graph_engine.return_value = mock_graph_engine
-
-        # Mock render_prompt
-        mock_render_prompt.return_value = "Rendered prompt with context but no graph"
 
         # Mock LLM client
         mock_llm_client = MagicMock()
@@ -106,6 +146,3 @@ class TestGraphCompletionRetriever:
 
         # Verify graph engine was called
         mock_graph_engine.get_graph_data.assert_called_once()
-
-        # Verify prompt was not rendered
-        mock_render_prompt.assert_not_called()
