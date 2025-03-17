@@ -117,8 +117,10 @@ class TestGraphCompletionRetriever:
     @pytest.mark.asyncio
     @patch("cognee.modules.retrieval.utils.completion.get_llm_client")
     @patch("cognee.modules.retrieval.utils.brute_force_triplet_search.get_graph_engine")
+    @patch("cognee.modules.retrieval.utils.brute_force_triplet_search.get_vector_engine")
     async def test_get_completion_with_empty_graph(
         self,
+        mock_get_vector_engine,
         mock_get_graph_engine,
         mock_get_llm_client,
         mock_retriever,
