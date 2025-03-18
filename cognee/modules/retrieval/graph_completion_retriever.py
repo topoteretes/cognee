@@ -7,6 +7,7 @@ from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subcla
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.tasks.completion.exceptions import NoRelevantDataFound
 
 
@@ -44,7 +45,7 @@ class GraphCompletionRetriever(BaseRetriever):
         """Converts retrieved graph edges into a human-readable string format."""
         nodes_dict = self._get_nodes_dict(retrieved_edges)
         node_section = "\n".join(
-            f"Node: {info['name']}\n  Node Content: {info['content']}"
+            f"Node: {info['name']}\n__node_content_start__\n{info['content']}\n__node_content_end__\n"
             for info in nodes_dict.values()
         )
         connection_section = "\n".join(
@@ -93,7 +94,7 @@ class GraphCompletionRetriever(BaseRetriever):
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
         """Concatenates the top N frequent words in text."""
         if stop_words is None:
-            stop_words = set()
+            stop_words = DEFAULT_STOP_WORDS
 
         words = [word.lower().strip(string.punctuation) for word in text.split()]
 
@@ -104,8 +105,8 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return separator.join(top_words)
 
-    def _get_title(self, text: str, first_n_words: int = 3, top_n_words: int = 3) -> str:
+    def _get_title(self, text: str, first_n_words: int = 7, top_n_words: int = 3) -> str:
         """Creates a title, by combining first words with most frequent words from the text."""
         first_n_words = text.split()[:first_n_words]
         top_n_words = self._top_n_words(text, top_n=top_n_words)
-        return f"{', '.join(first_n_words)}... [{top_n_words}]"
+        return f"{' '.join(first_n_words)}... [{top_n_words}]"
