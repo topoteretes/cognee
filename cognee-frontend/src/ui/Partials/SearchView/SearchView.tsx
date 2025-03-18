@@ -36,6 +36,9 @@ export default function SearchView() {
   }, {
     value: 'CHUNKS',
     label: 'Query document chunks',
+  }, {
+    value: 'CYPHER_QUERY',
+    label: 'Cypher prompting',
   }];
   const [searchType, setSearchType] = useState(searchOptions[0]);
 
