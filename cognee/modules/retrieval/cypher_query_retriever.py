@@ -5,6 +5,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,10 +57,9 @@ class CypherQueryRetriever(BaseRetriever):
     {previous_attempt_context}
                 """,
                 system_prompt=system_prompt,
-                response_model=str
+                response_model=str,
             )
             try:
-
                 context = await graph_engine.query(cypher_query)
                 if context:
                     return context
@@ -69,11 +69,9 @@ class CypherQueryRetriever(BaseRetriever):
             except Exception as e:
                 previous_attempt_context += f"Query: {cypher_query} -> Executed with error: {e}\n"
         return None
-    
+
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         if context is None:
             context = await self.get_context(query)
 
         return context
-        
-
