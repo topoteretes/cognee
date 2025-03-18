@@ -1,4 +1,6 @@
 from typing import Any, Optional
+from collections import Counter
+import string
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
@@ -22,16 +24,33 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 5
 
+    def _get_nodes_dict(self, retrieved_edges: list) -> dict:
+        """Creates a dictionary of nodes with their names and content."""
+        nodes_dict = {}
+        for edge in retrieved_edges:
+            for node in (edge.node1, edge.node2):
+                if node.id not in nodes_dict:
+                    if "text" in node.attributes:
+                        name = self._get_title(node.attributes["text"])
+                        content = node.attributes["text"]
+                    else:
+                        name = node.attributes.get("name", "Unnamed Node")
+                        content = name
+                    nodes_dict[node.id] = {"node": node, "name": name, "content": content}
+        return nodes_dict
+
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """Converts retrieved graph edges into a human-readable string format."""
-        edge_strings = []
-        for edge in retrieved_edges:
-            node1_string = edge.node1.attributes.get("text") or edge.node1.attributes.get("name")
-            node2_string = edge.node2.attributes.get("text") or edge.node2.attributes.get("name")
-            edge_string = edge.attributes["relationship_type"]
-            edge_str = f"{node1_string} -- {edge_string} -- {node2_string}"
-            edge_strings.append(edge_str)
-        return "\n---\n".join(edge_strings)
+        nodes_dict = self._get_nodes_dict(retrieved_edges)
+        node_section = "\n".join(
+            f"Node: {info['name']}\n  Node Content: {info['content']}"
+            for info in nodes_dict.values()
+        )
+        connection_section = "\n".join(
+            f"{nodes_dict[edge.node1.id]['name']} --[{edge.attributes['relationship_type']}]--> {nodes_dict[edge.node2.id]['name']}"
+            for edge in retrieved_edges
+        )
+        return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
 
     async def get_triplets(self, query: str) -> list:
         """Retrieves relevant graph triplets."""
@@ -69,3 +88,23 @@ class GraphCompletionRetriever(BaseRetriever):
             system_prompt_path=self.system_prompt_path,
         )
         return [completion]
+
+    def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
+        """Concatenates the top N frequent words in text."""
+        if stop_words is None:
+            stop_words = set()
+
+        words = [word.lower().strip(string.punctuation) for word in text.split()]
+
+        if stop_words:
+            words = [word for word in words if word and word not in stop_words]
+
+        top_words = [word for word, freq in Counter(words).most_common(top_n)]
+
+        return separator.join(top_words)
+
+    def _get_title(self, text: str, first_n_words: int = 3, top_n_words: int = 3) -> str:
+        """Creates a title, by combining first words with most frequent words from the text."""
+        first_n_words = text.split()[:first_n_words]
+        top_n_words = self._top_n_words(text, top_n=top_n_words)
+        return f"{', '.join(first_n_words)}... [{top_n_words}]"
