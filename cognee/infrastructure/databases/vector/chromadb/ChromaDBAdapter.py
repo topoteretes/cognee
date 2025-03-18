@@ -222,8 +222,7 @@ class ChromaDBAdapter(VectorDBInterface):
                 )
 
             return scored_results
-        except Exception as e:
-            logger.error(f"Error in get_distance_from_collection_elements: {str(e)}")
+        except Exception:
             return []
 
     async def search(
