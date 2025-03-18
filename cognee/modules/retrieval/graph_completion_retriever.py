@@ -30,9 +30,10 @@ class GraphCompletionRetriever(BaseRetriever):
         for edge in retrieved_edges:
             for node in (edge.node1, edge.node2):
                 if node.id not in nodes_dict:
-                    if "text" in node.attributes:
-                        name = self._get_title(node.attributes["text"])
-                        content = node.attributes["text"]
+                    text = node.attributes.get("text")
+                    if text:
+                        name = self._get_title(text)
+                        content = text
                     else:
                         name = node.attributes.get("name", "Unnamed Node")
                         content = name
