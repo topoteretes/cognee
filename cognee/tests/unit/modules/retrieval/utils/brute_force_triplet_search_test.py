@@ -5,6 +5,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     brute_force_search,
     brute_force_triplet_search,
 )
+from unittest.mock import AsyncMock
 
 
 @pytest.mark.asyncio
@@ -13,9 +14,12 @@ async def test_brute_force_search_collection_not_found():
     query = "test query"
     collections = ["nonexistent_collection"]
     top_k = 5
+    mock_memory_fragment = AsyncMock()
 
     with pytest.raises(Exception) as exc_info:
-        await brute_force_search(query, user, top_k, collections=collections)
+        await brute_force_search(
+            query, user, top_k, collections=collections, memory_fragment=mock_memory_fragment
+        )
 
     assert isinstance(exc_info.value.__cause__, CollectionDistancesNotFoundError)
 
@@ -26,8 +30,11 @@ async def test_brute_force_triplet_search_collection_not_found():
     query = "test query"
     collections = ["nonexistent_collection"]
     top_k = 5
+    mock_memory_fragment = AsyncMock()
 
     with pytest.raises(Exception) as exc_info:
-        await brute_force_triplet_search(query, user, top_k, collections=collections)
+        await brute_force_triplet_search(
+            query, user, top_k, collections=collections, memory_fragment=mock_memory_fragment
+        )
 
     assert isinstance(exc_info.value.__cause__, CollectionDistancesNotFoundError)
