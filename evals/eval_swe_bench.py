@@ -82,8 +82,10 @@ async def generate_patch_with_cognee(instance):
     return answer_prediction
 
 
-async def generate_patch_without_cognee(instance, llm_client):
+async def generate_patch_without_cognee(instance):
     instructions = read_query_prompt("patch_gen_instructions.txt")
+
+    llm_client = get_llm_client()
 
     answer_prediction = await llm_client.acreate_structured_output(
         text_input=instance["text"],
@@ -128,7 +130,7 @@ async def main():
 
     if args.cognee_off:
         dataset_name = "princeton-nlp/SWE-bench_Lite_bm25_13K"
-        dataset = load_swebench_dataset(dataset_name, split="test")
+        dataset = load_swebench_dataset(dataset_name, split="test")[:2]
         predictions_path = "preds_nocognee.json"
         if not Path(predictions_path).exists():
             preds = await get_preds(dataset, with_cognee=False)
