@@ -1,7 +1,7 @@
 # Configuration for the 'cognee' application service
 cognee:
   # Image name (using the local image we’ll build in Minikube)
-  image: "hajdul1988/cognee-backend:latest"
+  image: "cognee/cognee:main"
   port: 8000
   env:
     HOST: "0.0.0.0"
