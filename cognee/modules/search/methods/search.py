@@ -66,7 +66,7 @@ async def specific_search(
             system_prompt_path=system_prompt_path
         ).get_completion,
         SearchType.CODE: CodeRetriever().get_completion,
-        SearchType.CYPHER_SEARCH: CypherSearchRetriever().get_completion,
+        SearchType.CYPHER: CypherSearchRetriever().get_completion,
     }
 
     search_task = search_tasks.get(query_type)
