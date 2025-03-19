@@ -15,19 +15,16 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 
 sudo docker run hello-world
 
-sudo apt install -y unzip
-
 sudo apt-get install -y python3-virtualenv
 
 sudo add-apt-repository -y ppa:deadsnakes/ppa
 
 sudo apt update -y
 
-sudo apt install -y python3.11
+sudo apt install -y python3.12
 
-virtualenv venv --python=python3.11
+virtualenv venv --python=python3.12
 
 source venv/bin/activate
 pip install poetry
 poetry install
-pip install swebench transformers sentencepiece datasets tiktoken protobuf
