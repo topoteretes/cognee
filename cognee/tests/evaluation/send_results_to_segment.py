@@ -1,12 +1,10 @@
-from posthog import Posthog
 import os
-import uuid
 import logging
 import json
 from dotenv import load_dotenv
 import argparse
 from cognee.shared.utils import setup_logging
-import analytics
+import segment.analytics as analytics
 import datetime
 
 load_dotenv()
