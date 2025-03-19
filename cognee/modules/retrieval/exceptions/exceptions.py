@@ -17,6 +17,6 @@ class CypherSearchError(CogneeApiError):
         self,
         message: str = "An error occurred during the execution of the Cypher query.",
         name: str = "CypherSearchError",
-        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)

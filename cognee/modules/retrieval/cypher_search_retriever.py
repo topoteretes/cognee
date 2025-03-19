@@ -32,8 +32,6 @@ class CypherSearchRetriever(BaseRetriever):
                 )
 
             result = await graph_engine.query(query)
-        except SearchTypeNotSupported:
-            raise
         except Exception as e:
             logger.error("Failed to execture cypher search retrieval: %s", str(e))
             raise CypherSearchError() from e
