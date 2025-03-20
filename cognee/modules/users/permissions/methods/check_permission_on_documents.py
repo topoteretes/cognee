@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 async def check_permission_on_documents(user: User, permission_type: str, document_ids: list[UUID]):
-    user_roles_ids = [role.id for role in user.roles]
+    # TODO: Enable user role permissions again. Temporarily disabled during rework.
+    # user_roles_ids = [role.id for role in user.roles]
+    user_roles_ids = []
 
     db_engine = get_relational_engine()
 

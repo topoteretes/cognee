@@ -1,8 +1,7 @@
 from types import SimpleNamespace
-
 from sqlalchemy.orm import selectinload
 from sqlalchemy.future import select
-from cognee.modules.users.models import User, Tenant
+from cognee.modules.users.models import User
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.methods.create_default_user import create_default_user
 

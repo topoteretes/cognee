@@ -16,7 +16,10 @@ async def create_dataset(dataset_name: str, owner_id: UUID, session: AsyncSessio
     ).first()
 
     if dataset is None:
-        dataset = Dataset(id=uuid5(NAMESPACE_OID, dataset_name), name=dataset_name, data=[])
+        # Dataset id should be generated based on dataset_name and owner_id so multiple users can use the same dataset_name
+        dataset = Dataset(
+            id=uuid5(NAMESPACE_OID, f"{dataset_name}{str(owner_id)}"), name=dataset_name, data=[]
+        )
         dataset.owner_id = owner_id
 
         session.add(dataset)
