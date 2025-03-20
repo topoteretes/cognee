@@ -24,16 +24,18 @@ image = (
     .add_local_file("poetry.lock", remote_path="/root/poetry.lock", copy=True)
     .env(local_env_vars)
     .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
-    .pip_install("protobuf", "h2")
+    .pip_install("protobuf", "h2", "neo4j")
     .add_local_python_source("cognee")
 )
 
 
-@app.function(image=image, max_containers=5)
+@app.function(image=image, max_containers=10, retries=3)
 async def entry(name: str, text: str):
     setup_logging(logging.INFO)
     logger.info(f"file_name: {name}")
+    setup_logging(logging.ERROR)
     await cognee.add(text)
+    await cognee.cognify()
 
 
 def batch_files(file_list, batch_size):
@@ -44,7 +46,7 @@ def batch_files(file_list, batch_size):
 @app.local_entrypoint()
 async def main():
     directory_name = "cognee_parallel_deployment/modal_input/"
-    batch_size = 10
+    batch_size = 20
 
     files = [
         os.path.join(directory_name, f)
