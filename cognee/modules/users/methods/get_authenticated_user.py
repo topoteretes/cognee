@@ -24,7 +24,9 @@ async def get_authenticated_user(authorization: str = Header(...)) -> SimpleName
         if payload["tenant_id"]:
             # SimpleNamespace lets us access dictionary elements like attributes
             auth_data = SimpleNamespace(
-                id=UUID(payload["user_id"]), tenant_id=UUID(payload["tenant_id"]), roles=payload["roles"]
+                id=UUID(payload["user_id"]),
+                tenant_id=UUID(payload["tenant_id"]),
+                roles=payload["roles"],
             )
         else:
             auth_data = SimpleNamespace(
