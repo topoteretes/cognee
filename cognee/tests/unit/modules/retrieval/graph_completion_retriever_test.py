@@ -40,23 +40,45 @@ class TestGraphCompletionRetriever:
 
     @pytest.mark.asyncio
     async def test_resolve_edges_to_text(self, mock_retriever):
+        # Mock edges with some shared nodes to test deduplication
+        node_a = AsyncMock(id="node_a_id", attributes={"text": "Node A text content"})
+        node_b = AsyncMock(id="node_b_id", attributes={"text": "Node B text content"})
+        node_x = AsyncMock(id="node_x_id", attributes={"text": "Node X text content"})
+
         triplets = [
             AsyncMock(
-                node1=AsyncMock(attributes={"text": "Node A"}),
+                node1=node_a,
                 attributes={"relationship_type": "connects"},
-                node2=AsyncMock(attributes={"text": "Node B"}),
+                node2=node_b,
             ),
             AsyncMock(
-                node1=AsyncMock(attributes={"text": "Node X"}),
+                node1=node_a,  # Same node as in first triplet (tests deduplication)
                 attributes={"relationship_type": "links"},
-                node2=AsyncMock(attributes={"text": "Node Y"}),
+                node2=node_x,
             ),
         ]
 
-        result = await mock_retriever.resolve_edges_to_text(triplets)
+        # Mock _get_title to return predictable titles
+        with patch.object(
+            mock_retriever, "_get_title", side_effect=lambda text: f"Title for {text[:10]}..."
+        ):
+            result = await mock_retriever.resolve_edges_to_text(triplets)
 
-        expected_output = "Node A -- connects -- Node B\n---\nNode X -- links -- Node Y"
-        assert result == expected_output
+            # Check that result contains both nodes and connections sections
+            assert "Nodes:" in result
+            assert "Connections:" in result
+
+            # Check that node A appears only once (deduplication)
+            assert result.count("Title for Node A te") == 1
+
+            # Check that all nodes are included
+            assert "Title for Node A te" in result
+            assert "Title for Node B te" in result
+            assert "Title for Node X te" in result
+
+            # Check that connections are formatted correctly
+            assert "--[connects]-->" in result
+            assert "--[links]-->" in result
 
     @pytest.mark.asyncio
     @patch(
@@ -147,3 +169,94 @@ class TestGraphCompletionRetriever:
 
         # Verify graph engine was called
         mock_graph_engine.get_graph_data.assert_called_once()
+
+    def test_top_n_words(self, mock_retriever):
+        """Test extraction of top frequent words from text."""
+        text = "The quick brown fox jumps over the lazy dog. The fox is quick."
+
+        # Test default behavior
+        result = mock_retriever._top_n_words(text)
+        assert len(result.split(", ")) <= 3  # Default top_n is 3
+        assert "fox" in result
+        assert "quick" in result
+
+        # Test with custom top_n
+        result = mock_retriever._top_n_words(text, top_n=2)
+        assert len(result.split(", ")) <= 2
+
+        # Test with custom separator
+        result = mock_retriever._top_n_words(text, separator=" | ")
+        assert " | " in result
+
+        # Test with custom stop words
+        result = mock_retriever._top_n_words(text, stop_words={"fox", "quick"})
+        assert "fox" not in result
+        assert "quick" not in result
+
+    def test_get_title(self, mock_retriever):
+        """Test title generation from text."""
+        text = "This is a long paragraph about various topics that should generate a title. The main topics are AI, programming and data science."
+
+        # Test default behavior
+        title = mock_retriever._get_title(text)
+        assert "..." in title
+        assert "[" in title and "]" in title
+
+        # Test with custom first_n_words
+        title = mock_retriever._get_title(text, first_n_words=3)
+        first_part = title.split("...")[0].strip()
+        assert len(first_part.split()) == 3
+
+        # Test with custom top_n_words
+        title = mock_retriever._get_title(text, top_n_words=2)
+        top_part = title.split("[")[1].split("]")[0]
+        assert len(top_part.split(", ")) <= 2
+
+    def test_get_nodes(self, mock_retriever):
+        """Test node processing and deduplication."""
+        # Create mock nodes with different attribute types
+        node_with_text = AsyncMock(id="text_node", attributes={"text": "This is a text node"})
+        node_with_name = AsyncMock(id="name_node", attributes={"name": "Named Node"})
+        node_without_attrs = AsyncMock(id="empty_node", attributes={})
+
+        # Create mock edges using these nodes
+        edges = [
+            AsyncMock(
+                node1=node_with_text, node2=node_with_name, attributes={"relationship_type": "rel1"}
+            ),
+            AsyncMock(
+                node1=node_with_text,
+                node2=node_without_attrs,
+                attributes={"relationship_type": "rel2"},
+            ),
+            AsyncMock(
+                node1=node_with_name,
+                node2=node_without_attrs,
+                attributes={"relationship_type": "rel3"},
+            ),
+        ]
+
+        # Mock _get_title to return a predictable value
+        with patch.object(mock_retriever, "_get_title", return_value="Generated Title"):
+            nodes = mock_retriever._get_nodes(edges)
+
+            # Check node count (should be 3 unique nodes)
+            assert len(nodes) == 3
+
+            # Check that each node has expected fields
+            for node_id, info in nodes.items():
+                assert "node" in info
+                assert "name" in info
+                assert "content" in info
+
+            # Check specific node processing
+            text_node_info = nodes[node_with_text.id]
+            assert text_node_info["name"] == "Generated Title"
+            assert text_node_info["content"] == "This is a text node"
+
+            name_node_info = nodes[node_with_name.id]
+            assert name_node_info["name"] == "Named Node"
+            assert name_node_info["content"] == "Named Node"
+
+            empty_node_info = nodes[node_without_attrs.id]
+            assert empty_node_info["name"] == "Unnamed Node"
