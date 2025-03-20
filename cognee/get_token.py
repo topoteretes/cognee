@@ -5,10 +5,10 @@ import datetime
 SECRET_KEY = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
 
 
-def create_jwt(user_id: str, tenant: str, roles: list[str]):
+def create_jwt(user_id: str, tenant_id: str, roles: list[str]):
     payload = {
         "user_id": user_id,
-        "tenant_id": tenant,
+        "tenant_id": tenant_id,
         "roles": roles,
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1),  # 1 hour expiry
     }
