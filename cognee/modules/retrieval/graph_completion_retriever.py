@@ -25,12 +25,12 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 5
 
-    def _get_nodes_dict(self, retrieved_edges: list) -> dict:
+    def _get_nodes(self, retrieved_edges: list) -> dict:
         """Creates a dictionary of nodes with their names and content."""
-        nodes_dict = {}
+        nodes = {}
         for edge in retrieved_edges:
             for node in (edge.node1, edge.node2):
-                if node.id not in nodes_dict:
+                if node.id not in nodes:
                     text = node.attributes.get("text")
                     if text:
                         name = self._get_title(text)
@@ -38,18 +38,18 @@ class GraphCompletionRetriever(BaseRetriever):
                     else:
                         name = node.attributes.get("name", "Unnamed Node")
                         content = name
-                    nodes_dict[node.id] = {"node": node, "name": name, "content": content}
-        return nodes_dict
+                    nodes[node.id] = {"node": node, "name": name, "content": content}
+        return nodes
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """Converts retrieved graph edges into a human-readable string format."""
-        nodes_dict = self._get_nodes_dict(retrieved_edges)
+        nodes = self._get_nodes(retrieved_edges)
         node_section = "\n".join(
             f"Node: {info['name']}\n__node_content_start__\n{info['content']}\n__node_content_end__\n"
-            for info in nodes_dict.values()
+            for info in nodes.values()
         )
         connection_section = "\n".join(
-            f"{nodes_dict[edge.node1.id]['name']} --[{edge.attributes['relationship_type']}]--> {nodes_dict[edge.node2.id]['name']}"
+            f"{nodes[edge.node1.id]['name']} --[{edge.attributes['relationship_type']}]--> {nodes[edge.node2.id]['name']}"
             for edge in retrieved_edges
         )
         return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
