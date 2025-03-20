@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from collections import Counter
 
 from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode

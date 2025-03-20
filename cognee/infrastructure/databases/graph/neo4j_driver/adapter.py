@@ -2,6 +2,8 @@
 
 import json
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import asyncio
 from textwrap import dedent
 from typing import Optional, Any, List, Dict
@@ -22,7 +24,7 @@ from .neo4j_metrics_utils import (
     count_self_loops,
 )
 
-logger = logging.getLogger("Neo4jAdapter")
+logger = structlog.get_logger("Neo4jAdapter")
 
 
 class Neo4jAdapter(GraphDBInterface):

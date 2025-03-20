@@ -1,11 +1,13 @@
 import modal
 import os
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import asyncio
 import cognee
 import signal
 
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 from cognee.modules.search.types import SearchType
 
 app = modal.App("cognee-runner")
@@ -23,6 +25,7 @@ image = (
 @app.function(image=image, concurrency_limit=10)
 async def entry(text: str, query: str):
     setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(text)

@@ -1,6 +1,8 @@
 """Adapter for Kuzu graph database."""
 
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import json
 import os
 import shutil
@@ -19,7 +21,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 import aiofiles
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class KuzuAdapter(GraphDBInterface):

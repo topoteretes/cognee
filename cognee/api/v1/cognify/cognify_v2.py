@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import Union, Optional
 
 from pydantic import BaseModel
@@ -28,7 +30,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 
-logger = logging.getLogger("cognify.v2")
+logger = structlog.get_logger("cognify.v2")
 
 update_status_lock = asyncio.Lock()
 

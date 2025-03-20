@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from collections import Counter
 
 from cognee.infrastructure.databases.vector import get_vector_engine

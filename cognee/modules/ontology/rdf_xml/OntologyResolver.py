@@ -1,6 +1,8 @@
 import os
 import difflib
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any
 from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
@@ -11,7 +13,7 @@ from cognee.modules.ontology.exceptions import (
     GetSubgraphError,
 )
 
-logger = logging.getLogger("OntologyAdapter")
+logger = structlog.get_logger("OntologyAdapter")
 
 
 class OntologyResolver:

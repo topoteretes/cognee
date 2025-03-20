@@ -1,9 +1,11 @@
 import cognee
 import asyncio
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 
 from cognee.api.v1.search import SearchType
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 from cognee.modules.retrieval.EntityCompletionRetriever import EntityCompletionRetriever
 from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
     TripletSearchContextProvider,
@@ -144,6 +146,7 @@ async def main(enable_steps):
 
 if __name__ == "__main__":
     setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
 
     rebuild_kg = True
     retrieve = True

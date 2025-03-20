@@ -1,5 +1,7 @@
 from os import path
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from cognee.root_dir import get_absolute_path
 
 

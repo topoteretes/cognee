@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import json
 from typing import List
 

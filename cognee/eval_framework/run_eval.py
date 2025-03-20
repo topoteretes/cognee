@@ -1,6 +1,8 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import asyncio
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 from cognee.eval_framework.eval_config import EvalConfig
 
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder

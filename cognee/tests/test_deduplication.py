@@ -1,6 +1,8 @@
 import hashlib
 import os
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import pathlib
 
 import cognee

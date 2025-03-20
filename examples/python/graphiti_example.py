@@ -2,8 +2,10 @@ import asyncio
 
 import cognee
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from cognee.modules.pipelines import Task, run_tasks
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 from cognee.tasks.temporal_awareness import build_graph_with_temporal_awareness
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -72,6 +74,7 @@ async def main():
 
 if __name__ == "__main__":
     setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

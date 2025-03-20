@@ -4,6 +4,8 @@ import json
 import asyncio
 import datetime
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 from cognee.eval_framework.answer_generation.run_question_answering_module import (
@@ -11,7 +13,7 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def read_and_combine_metrics(eval_params: dict) -> dict:

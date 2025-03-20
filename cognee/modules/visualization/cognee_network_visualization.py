@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import networkx as nx
 import json
 import os
@@ -6,7 +8,7 @@ import os
 from cognee.infrastructure.files.storage import LocalStorage
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 async def cognee_network_visualization(graph_data, destination_file_path: str = None):

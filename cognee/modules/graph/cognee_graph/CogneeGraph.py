@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import List, Dict, Union
 
 from cognee.exceptions import InvalidValueError
@@ -8,7 +10,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 import heapq
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class CogneeGraph(CogneeAbstractGraph):

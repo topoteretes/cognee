@@ -1,11 +1,13 @@
 import cognee
 import asyncio
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import os
 
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 
 text_1 = """
 1. Audi

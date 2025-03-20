@@ -1,6 +1,8 @@
 import inspect
 import json
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from uuid import UUID, uuid4
 
 from typing import Any
@@ -17,7 +19,7 @@ from uuid import uuid5, NAMESPACE_OID
 
 from ..tasks.Task import Task
 
-logger = logging.getLogger("run_tasks(tasks: [Task], data)")
+logger = structlog.get_logger("run_tasks(tasks: [Task], data)")
 
 
 async def run_tasks_base(tasks: list[Task], data=None, user: User = None):

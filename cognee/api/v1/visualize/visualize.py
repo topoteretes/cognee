@@ -3,10 +3,12 @@ from cognee.modules.visualization.cognee_network_visualization import (
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 
 
 import asyncio
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 
 
 async def visualize_graph(destination_file_path: str = None):
@@ -27,6 +29,7 @@ async def visualize_graph(destination_file_path: str = None):
 
 if __name__ == "__main__":
     setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

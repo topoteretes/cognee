@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import Dict, List, Optional, Any
 import os
 import json
@@ -15,7 +17,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..vector_db_interface import VectorDBInterface
 from ..utils import normalize_distances
 
-logger = logging.getLogger("ChromaDBAdapter")
+logger = structlog.get_logger("ChromaDBAdapter")
 
 
 class IndexSchema(DataPoint):

@@ -2,10 +2,12 @@ import os
 import asyncio
 import pathlib
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 
 import cognee
 from cognee.api.v1.search import SearchType
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -48,6 +50,7 @@ async def main():
 
 if __name__ == "__main__":
     setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
