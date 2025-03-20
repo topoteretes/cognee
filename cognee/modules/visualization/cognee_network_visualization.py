@@ -21,6 +21,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         "DocumentChunk": "#801212",
         "TextSummary": "#1077f4",
         "default": "#D3D3D3",
+        "OntologyNode": "#2ecc71"
     }
 
     for node_id, node_info in nodes_data:
