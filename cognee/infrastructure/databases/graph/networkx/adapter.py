@@ -5,12 +5,16 @@ import os
 import json
 import asyncio
 import logging
+from sqlalchemy import text
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.migrate_relational_database import (
+    migrate_relational_database_networkx,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -315,11 +319,13 @@ class NetworkXAdapter(GraphDBInterface):
                             logger.error(e)
                             raise e
 
-                        if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
+                        if isinstance(
+                            edge.get("updated_at"), int
+                        ):  # Handle timestamp in milliseconds
                             edge["updated_at"] = datetime.fromtimestamp(
                                 edge["updated_at"] / 1000, tz=timezone.utc
                             )
-                        elif isinstance(edge["updated_at"], str):
+                        elif isinstance(edge.get("updated_at"), str):
                             edge["updated_at"] = datetime.strptime(
                                 edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )
@@ -457,3 +463,6 @@ class NetworkXAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
+
+    async def migrate_relational_database(self, schema):
+        await migrate_relational_database_networkx(self, schema)
