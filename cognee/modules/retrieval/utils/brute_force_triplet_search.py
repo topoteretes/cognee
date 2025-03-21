@@ -8,6 +8,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
+from cognee.modules.retrieval.exceptions import CollectionDistancesNotFoundError
 
 
 def format_triplets(edges):
@@ -146,6 +147,9 @@ async def brute_force_search(
                 for collection in collections
             ]
         )
+
+        if all(not item for item in results):
+            raise CollectionDistancesNotFoundError()
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
