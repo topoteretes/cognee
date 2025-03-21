@@ -2,7 +2,6 @@ import logging
 import structlog
 from cognee.shared.logging_utils import setup_logging
 import asyncio
-from cognee.shared.logging_utils import setup_logging
 from cognee.eval_framework.eval_config import EvalConfig
 
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
@@ -14,6 +13,7 @@ from cognee.eval_framework.metrics_dashboard import create_dashboard
 
 # Configure logging
 setup_logging(logging.INFO)
+logger = structlog.get_logger(__name__)
 
 # Define parameters and file paths.
 eval_params = EvalConfig().to_dict()

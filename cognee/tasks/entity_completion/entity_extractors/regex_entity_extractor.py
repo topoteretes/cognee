@@ -8,6 +8,7 @@ from cognee.modules.engine.models import Entity
 from cognee.root_dir import get_absolute_path
 from cognee.tasks.entity_completion.entity_extractors.regex_entity_config import RegexEntityConfig
 
+setup_logging(logging.INFO)
 logger = structlog.get_logger("regex_entity_extractor")
 
 

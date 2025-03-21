@@ -15,6 +15,10 @@ from cognee.modules.data.models.metrics_data import Metrics
 from cognee.modules.data.models.metrics_base import MetricsBase
 
 
+setup_logging(logger.INFO)
+logger = structlog.get_logger()
+
+
 async def create_and_insert_metrics_table(questions_payload):
     relational_config = get_relational_config()
     relational_engine = get_relational_engine()
@@ -34,7 +38,7 @@ async def create_and_insert_metrics_table(questions_payload):
 
 async def execute_evaluation(params: dict) -> None:
     """Execute the evaluation step and save results."""
-    logging.info("Evaluation started...")
+    logger.info("Evaluation started...")
     try:
         with open(params["answers_path"], "r", encoding="utf-8") as f:
             answers = json.load(f)
@@ -43,7 +47,7 @@ async def execute_evaluation(params: dict) -> None:
     except json.JSONDecodeError as e:
         raise ValueError(f"Error decoding JSON from {params['answers_path']}: {e}")
 
-    logging.info(f"Loaded {len(answers)} answers from {params['answers_path']}")
+    logger.info(f"Loaded {len(answers)} answers from {params['answers_path']}")
     evaluator = EvaluationExecutor(
         evaluator_engine=params["evaluation_engine"],
         evaluate_contexts=params["evaluating_contexts"],
@@ -55,7 +59,7 @@ async def execute_evaluation(params: dict) -> None:
         json.dump(metrics, f, ensure_ascii=False, indent=4)
 
     await create_and_insert_metrics_table(metrics)
-    logging.info("Evaluation completed")
+    logger.info("Evaluation completed")
     return metrics
 
 
@@ -65,16 +69,16 @@ async def run_evaluation(params: dict) -> List[dict]:
     if params.get("evaluating_answers"):
         metrics = await execute_evaluation(params)
     else:
-        logging.info("Skipping evaluation as evaluating_answers is False")
+        logger.info("Skipping evaluation as evaluating_answers is False")
 
     # Step 2: Calculate metrics if requested
     if params.get("calculate_metrics"):
-        logging.info("Calculating metrics statistics...")
+        logger.info("Calculating metrics statistics...")
         calculate_metrics_statistics(
             json_data=params["metrics_path"], aggregate_output_path=params["aggregate_metrics_path"]
         )
-        logging.info("Metrics calculation completed")
+        logger.info("Metrics calculation completed")
         return metrics
     else:
-        logging.info("Skipping metrics calculation as calculate_metrics is False")
+        logger.info("Skipping metrics calculation as calculate_metrics is False")
         return []

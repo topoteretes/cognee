@@ -13,6 +13,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.search.methods import search
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
+setup_logging(logger.ERROR)
 logger = structlog.get_logger(__name__)
 
 
@@ -57,13 +58,11 @@ async def code_description_to_code_part(
         vector_engine = get_vector_engine()
         graph_engine = await get_graph_engine()
     except Exception as init_error:
-        logging.error("Failed to initialize engines: %s", init_error, exc_info=True)
+        logger.error("Failed to initialize engines: %s", init_error, exc_info=True)
         raise RuntimeError("System initialization error. Please try again later.") from init_error
 
     send_telemetry("code_description_to_code_part_search EXECUTION STARTED", user.id)
-    logging.info(
-        "Search initiated by user %s with query: '%s' and top_k: %d", user.id, query, top_k
-    )
+    logger.info("Search initiated by user %s with query: '%s' and top_k: %d", user.id, query, top_k)
 
     context_from_documents = ""
 
@@ -91,7 +90,7 @@ async def code_description_to_code_part(
             "CodeSummary_text", query_text=query, limit=top_k
         )
         if not code_summaries:
-            logging.warning("No results found for query: '%s' by user: %s", query, user.id)
+            logger.warning("No results found for query: '%s' by user: %s", query, user.id)
             return []
 
         memory_fragment = CogneeGraph()
@@ -114,7 +113,7 @@ async def code_description_to_code_part(
             node_to_search_from = memory_fragment.get_node(node_id)
 
             if not node_to_search_from:
-                logging.debug("Node %s not found in memory fragment graph", node_id)
+                logger.debug("Node %s not found in memory fragment graph", node_id)
                 continue
 
             for code_file in node_to_search_from.get_skeleton_neighbours():
@@ -129,7 +128,7 @@ async def code_description_to_code_part(
                         if code_file_edge.get_attribute("relationship_name") == "contains":
                             code_pieces_to_return.add(code_file_edge.get_destination_node())
 
-        logging.info(
+        logger.info(
             "Search completed for user: %s, query: '%s'. Found %d code pieces.",
             user.id,
             query,
@@ -139,7 +138,7 @@ async def code_description_to_code_part(
         return code_pieces_to_return, context_from_documents
 
     except Exception as exec_error:
-        logging.error(
+        logger.error(
             "Error during code description to code part search for user: %s, query: '%s'. Error: %s",
             user.id,
             query,

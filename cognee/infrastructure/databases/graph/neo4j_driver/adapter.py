@@ -24,6 +24,7 @@ from .neo4j_metrics_utils import (
     count_self_loops,
 )
 
+setup_logging(logging.ERROR)
 logger = structlog.get_logger("Neo4jAdapter")
 
 

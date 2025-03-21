@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import setup_logging
 
 from cognee.exceptions import InvalidValueError
 
+setup_logging(logging.ERROR)
 logger = structlog.get_logger(__name__)
 
 

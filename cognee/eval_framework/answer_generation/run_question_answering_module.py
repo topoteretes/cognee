@@ -16,6 +16,10 @@ from cognee.modules.data.models.answers_base import AnswersBase
 from cognee.modules.data.models.answers_data import Answers
 
 
+setup_logging(logging.INFO)
+logger = structlog.get_logger(__name__)
+
+
 async def create_and_insert_answers_table(questions_payload):
     relational_config = get_relational_config()
     relational_engine = get_relational_engine()

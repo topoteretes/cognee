@@ -9,6 +9,7 @@ from typing import Dict, List, Pattern, Any
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.root_dir import get_absolute_path
 
+setup_logging(logging.INFO)
 logger = structlog.get_logger("regex_entity_config")
 
 

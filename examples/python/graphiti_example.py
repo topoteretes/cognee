@@ -5,7 +5,6 @@ import logging
 import structlog
 from cognee.shared.logging_utils import setup_logging
 from cognee.modules.pipelines import Task, run_tasks
-from cognee.shared.logging_utils import setup_logging
 from cognee.tasks.temporal_awareness import build_graph_with_temporal_awareness
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,

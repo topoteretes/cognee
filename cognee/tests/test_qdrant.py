@@ -7,7 +7,8 @@ import cognee
 from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 
-logging.basicConfig(level=logging.DEBUG)
+setup_logging(logging.DEBUG)
+logger = structlog.get_logger()
 
 
 async def main():

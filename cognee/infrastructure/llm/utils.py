@@ -6,6 +6,7 @@ import litellm
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
+setup_logging(logging.INFO)
 logger = structlog.get_logger(__name__)
 
 

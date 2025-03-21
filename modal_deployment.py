@@ -7,7 +7,7 @@ import asyncio
 import cognee
 import signal
 
-from cognee.shared.logging_utils import setup_logging
+
 from cognee.modules.search.types import SearchType
 
 app = modal.App("cognee-runner")
@@ -88,10 +88,10 @@ async def main():
 
     results = await asyncio.gather(*tasks)
 
-    print("\nFinal Results:")
+    logger.info("Final Results:")
 
     for result in results:
-        print(result)
-        print("----")
+        logger.info(result)
+        logger.info("----")
 
     os.kill(os.getpid(), signal.SIGTERM)

@@ -5,7 +5,6 @@ import structlog
 from cognee.shared.logging_utils import setup_logging
 
 from cognee.api.v1.search import SearchType
-from cognee.shared.logging_utils import setup_logging
 from cognee.modules.retrieval.EntityCompletionRetriever import EntityCompletionRetriever
 from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
     TripletSearchContextProvider,

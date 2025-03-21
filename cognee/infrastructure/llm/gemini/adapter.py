@@ -12,6 +12,7 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.base_config import get_base_config
 
+setup_logging(logging.DEBUG)
 logger = structlog.get_logger(__name__)
 
 monitoring = get_base_config().monitoring_tool

@@ -19,6 +19,7 @@ from uuid import uuid5, NAMESPACE_OID
 
 from ..tasks.Task import Task
 
+setup_logging(logging.INFO)
 logger = structlog.get_logger("run_tasks(tasks: [Task], data)")
 
 

@@ -5,7 +5,6 @@ import structlog
 from cognee.shared.logging_utils import setup_logging
 
 from cognee.api.v1.search import SearchType
-from cognee.shared.logging_utils import setup_logging
 
 job_1 = """
 CV 1: Relevant

@@ -5,7 +5,6 @@ import structlog
 from cognee.shared.logging_utils import setup_logging
 
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
-from cognee.shared.logging_utils import setup_logging
 
 
 async def main(repo_path, include_docs):

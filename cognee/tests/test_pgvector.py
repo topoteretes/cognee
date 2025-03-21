@@ -10,7 +10,8 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.users.methods import get_default_user
 
-logging.basicConfig(level=logging.DEBUG)
+setup_logging(logging.DEBUG)
+logger = structlog.get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location):

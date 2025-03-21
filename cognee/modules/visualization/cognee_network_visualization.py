@@ -8,6 +8,7 @@ import os
 from cognee.infrastructure.files.storage import LocalStorage
 
 
+setup_logging(logging.INFO)
 logger = structlog.get_logger(__name__)
 
 

@@ -8,7 +8,8 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.utils import render_graph
 from cognee.low_level import DataPoint
 
-logging.basicConfig(level=logging.DEBUG)
+setup_logging(logging.DEBUG)
+logger = structlog.get_logger()
 
 
 async def main():

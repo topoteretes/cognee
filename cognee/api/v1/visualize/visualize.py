@@ -8,7 +8,6 @@ from cognee.shared.logging_utils import setup_logging
 
 
 import asyncio
-from cognee.shared.logging_utils import setup_logging
 
 
 async def visualize_graph(destination_file_path: str = None):

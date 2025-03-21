@@ -13,6 +13,7 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 
+setup_logging(logging.INFO)
 logger = structlog.get_logger(__name__)
 
 
