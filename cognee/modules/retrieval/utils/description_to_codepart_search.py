@@ -13,7 +13,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.search.methods import search
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
-setup_logging(logger.ERROR)
+setup_logging(logging.ERROR)
 logger = structlog.get_logger(__name__)
 
 

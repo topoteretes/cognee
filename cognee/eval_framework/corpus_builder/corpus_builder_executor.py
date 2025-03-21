@@ -9,6 +9,10 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.Task import Task
 
 
+setup_logging(logging.ERROR)
+logger = structlog.get_logger()
+
+
 class CorpusBuilderExecutor:
     def __init__(
         self,
@@ -54,9 +58,6 @@ class CorpusBuilderExecutor:
         return self.questions
 
     async def run_cognee(self, chunk_size=1024, chunker=TextChunker) -> None:
-        setup_logging(logging.ERROR)
-        logger = structlog.get_logger()
-
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 

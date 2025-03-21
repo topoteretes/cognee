@@ -25,7 +25,6 @@ image = (
 @app.function(image=image, concurrency_limit=10)
 async def entry(text: str, query: str):
     setup_logging(logging.ERROR)
-    logger = structlog.get_logger()
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(text)
@@ -41,6 +40,8 @@ async def entry(text: str, query: str):
 
 @app.local_entrypoint()
 async def main():
+    setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
     text_queries = [
         {
             "text": "NASA's Artemis program aims to return humans to the Moon by 2026, focusing on sustainable exploration and preparing for future Mars missions.",

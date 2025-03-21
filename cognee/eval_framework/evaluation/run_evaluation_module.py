@@ -15,7 +15,7 @@ from cognee.modules.data.models.metrics_data import Metrics
 from cognee.modules.data.models.metrics_base import MetricsBase
 
 
-setup_logging(logger.INFO)
+setup_logging(logging.INFO)
 logger = structlog.get_logger()
 
 
