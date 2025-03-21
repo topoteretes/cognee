@@ -31,6 +31,9 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
     """
     engine = get_migration_relational_engine()
     nodes = []
+    # Create a mapping of node_id to node objects for referencing in edge creation
+    node_mapping = {}
+
     async with engine.engine.begin() as cursor:
         # First, create table type nodes for all tables
         for table_name, details in schema.items():
@@ -40,6 +43,7 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
             )
             nodes.append(table_node)
             await kuzu_adapter.add_node(table_node)
+            node_mapping[table_name] = table_node
 
             # Fetch all rows for the current table
             rows_result = await cursor.execute(text(f"SELECT * FROM {table_name};"))
@@ -76,6 +80,9 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
                 # Add the row node to the graph
                 await kuzu_adapter.add_node(row_node)
 
+                # Store the node object in our mapping
+                node_mapping[node_id] = row_node
+
                 # Create edge between row node and table node
                 await kuzu_adapter.add_edge(
                     from_node=row_node.id,
@@ -111,17 +118,19 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
 
                 for source_id, ref_value in relations:
                     # Construct node ids
-                    source_node = f"{table_name}:{source_id}"
-                    target_node = f"{fk['ref_table']}:{ref_value}"
+                    source_node_id = f"{table_name}:{source_id}"
+                    target_node_id = f"{fk['ref_table']}:{ref_value}"
 
-                    # Check if both nodes exist before creating edge
-                    if await kuzu_adapter.has_node(source_node) and await kuzu_adapter.has_node(
-                        target_node
-                    ):
-                        # Add edge representing the foreign key relationship
+                    # Check if both nodes exist in our mapping before creating edge
+                    if source_node_id in node_mapping and target_node_id in node_mapping:
+                        # Get the source and target node objects from our mapping
+                        source_node = node_mapping[source_node_id]
+                        target_node = node_mapping[target_node_id]
+
+                        # Add edge representing the foreign key relationship using the node objects
                         await kuzu_adapter.add_edge(
-                            from_node=source_node,
-                            to_node=target_node,
+                            from_node=source_node.id,
+                            to_node=target_node.id,
                             relationship_name=fk["column"],
                             edge_properties={"relationship_type": fk["column"]},
                         )
