@@ -1,5 +1,6 @@
 import logging
 from decimal import Decimal
+from uuid import uuid5, NAMESPACE_OID
 from sqlalchemy import text
 from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
     get_migration_relational_engine,
@@ -39,7 +40,10 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
         for table_name, details in schema.items():
             # Create a TableType node for each table
             table_node = TableType(
-                name=table_name, text=table_name, description=f"Table: {table_name}"
+                id=uuid5(NAMESPACE_OID, name=table_name),
+                name=table_name,
+                text=table_name,
+                description=f"Table: {table_name}",
             )
             nodes.append(table_node)
             await kuzu_adapter.add_node(table_node)
@@ -69,7 +73,10 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
                 node_id = f"{table_name}:{primary_key_value}"
 
                 # Create a TableRow node
+                # Node id must uniquely map to the id used in the relational database
+                # To catch the foreign key relationships properly
                 row_node = TableRow(
+                    id=uuid5(NAMESPACE_OID, name=node_id),
                     name=node_id,
                     text=node_id,
                     properties=str(row_properties),
@@ -135,9 +142,9 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
                             edge_properties={"relationship_type": fk["column"]},
                         )
 
-    await index_data_points(nodes)
+    # await index_data_points(nodes)
     # This step has to happen after adding nodes and edges because we query the graph.
-    await index_graph_edges()
+    # await index_graph_edges()
 
     logger.info("Data successfully migrated from relational database to Kuzu graph database")
     return await kuzu_adapter.get_graph_data()
