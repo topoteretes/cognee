@@ -37,15 +37,18 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
  
 COPY --from=uv /root/.local /root/.local
+
 COPY --from=uv /app /app
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
+
 
 # Set environment variables for MCP server
 ENV PYTHONUNBUFFERED=1
@@ -55,3 +58,4 @@ ENV PYTHONPATH=/app
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command
 ENTRYPOINT ["cognee"]
+
