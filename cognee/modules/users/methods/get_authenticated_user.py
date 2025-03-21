@@ -5,6 +5,8 @@ from fastapi import HTTPException, Header
 import os
 import jwt
 
+from uuid import UUID
+
 fastapi_users = get_fastapi_users()
 
 
@@ -19,10 +21,18 @@ async def get_authenticated_user(authorization: str = Header(...)) -> SimpleName
             token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
         )
 
-        # SimpleNamespace lets us access dictionary elements like attributes
-        auth_data = SimpleNamespace(
-            id=payload["user_id"], tenant_id=payload["tenant_id"], roles=payload["roles"]
-        )
+        if payload["tenant_id"]:
+            # SimpleNamespace lets us access dictionary elements like attributes
+            auth_data = SimpleNamespace(
+                id=UUID(payload["user_id"]),
+                tenant_id=UUID(payload["tenant_id"]),
+                roles=payload["roles"],
+            )
+        else:
+            auth_data = SimpleNamespace(
+                id=UUID(payload["user_id"]), tenant_id=None, roles=payload["roles"]
+            )
+
         return auth_data
 
     except jwt.ExpiredSignatureError:

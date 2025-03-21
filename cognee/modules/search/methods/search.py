@@ -12,6 +12,7 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
 from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
@@ -65,6 +66,7 @@ async def specific_search(
             system_prompt_path=system_prompt_path
         ).get_completion,
         SearchType.CODE: CodeRetriever().get_completion,
+        SearchType.CYPHER: CypherSearchRetriever().get_completion,
     }
 
     search_task = search_tasks.get(query_type)
