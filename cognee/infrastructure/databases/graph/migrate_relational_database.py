@@ -5,6 +5,9 @@ from cognee.infrastructure.databases.relational.get_migration_relational_engine 
     get_migration_relational_engine,
 )
 
+from cognee.tasks.storage.index_data_points import index_data_points
+from cognee.tasks.storage.index_graph_edges import index_graph_edges
+
 from uuid import uuid4
 
 from cognee.modules.engine.models import TableRow, TableType
@@ -27,12 +30,15 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
     application's data model.
     """
     engine = get_migration_relational_engine()
-
+    nodes = []
     async with engine.engine.begin() as cursor:
         # First, create table type nodes for all tables
         for table_name, details in schema.items():
             # Create a TableType node for each table
-            table_node = TableType(name=table_name, description=f"Table: {table_name}")
+            table_node = TableType(
+                name=table_name, text=table_name, description=f"Table: {table_name}"
+            )
+            nodes.append(table_node)
             await kuzu_adapter.add_node(table_node)
 
             # Fetch all rows for the current table
@@ -61,17 +67,19 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
                 # Create a TableRow node
                 row_node = TableRow(
                     name=node_id,
-                    properties=row_properties,
+                    text=node_id,
+                    properties=str(row_properties),
                     description=f"Row in {table_name} with {primary_key_col}={primary_key_value}",
                 )
+                nodes.append(row_node)
 
                 # Add the row node to the graph
                 await kuzu_adapter.add_node(row_node)
 
                 # Create edge between row node and table node
                 await kuzu_adapter.add_edge(
-                    from_node=node_id,
-                    to_node=table_name,
+                    from_node=row_node.id,
+                    to_node=table_node.id,
                     relationship_name="is_part_of",
                 )
 
@@ -117,6 +125,10 @@ async def migrate_relational_database_kuzu(kuzu_adapter, schema):
                             relationship_name=fk["column"],
                             edge_properties={"relationship_type": fk["column"]},
                         )
+
+    await index_data_points(nodes)
+    # This step has to happen after adding nodes and edges because we query the graph.
+    await index_graph_edges()
 
     logger.info("Data successfully migrated from relational database to Kuzu graph database")
     return await kuzu_adapter.get_graph_data()

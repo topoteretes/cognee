@@ -1,4 +1,5 @@
 import asyncio
+import cognee
 import os
 import logging
 
@@ -18,6 +19,9 @@ from cognee.shared.utils import setup_logging
 
 async def main():
     engine = get_migration_relational_engine()
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
     print("Extracting schema of database to migrate.")
     schema = await engine.extract_schema()
