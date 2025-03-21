@@ -59,3 +59,7 @@ class GraphDBInterface(Protocol):
     async def get_graph_metrics(self, include_optional):
         """ "https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
         raise NotImplementedError
+
+    @abstractmethod
+    async def migrate_relational_database(self, schema):
+        raise NotImplementedError

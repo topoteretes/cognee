@@ -12,7 +12,9 @@ import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.databases.relational import get_migration_relational_engine
+from cognee.infrastructure.databases.graph.migrate_relational_database import (
+    migrate_relational_database_networkx,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -463,88 +465,4 @@ class NetworkXAdapter(GraphDBInterface):
         return mandatory_metrics | optional_metrics
 
     async def migrate_relational_database(self, schema):
-        """
-        Populates the NetworkX graph from a relational schema.
-
-        For each table in the schema:
-          - Fetch all rows and add each as a node. The node id is built as "<table_name>:<primary_key>"
-          - For every foreign key defined, fetch the relationships and add an edge between the
-            corresponding nodes if they exist.
-        """
-        engine = get_migration_relational_engine()
-
-        async with engine.engine.begin() as cursor:
-            # Iterate over all tables defined in the schema.
-            # Migrate all rows from tables to graph
-            for table_name, details in schema.items():
-                # Fetch all rows for the current table.
-                rows_result = await cursor.execute(text(f"SELECT * FROM {table_name};"))
-                rows = rows_result.fetchall()
-
-                for row in rows:
-                    # Build a dictionary of properties from the row.
-                    properties = {
-                        col["name"]: row[idx] for idx, col in enumerate(details["columns"])
-                    }
-
-                    if not details["primary_key"]:
-                        # Assume the value of the first column in details['columns'] is the primary key.
-                        node_id = f"{table_name}:{properties[details['columns'][0]['name']]}"
-                    else:
-                        # Use value of the primary key column
-                        node_id = f"{table_name}:{properties[details['primary_key']]}"
-
-                    # Also store the table name (or label) in the node attributes.
-                    properties["label"] = table_name
-                    properties["type"] = "TableRow"
-                    # Add the node to the graph.
-                    self.graph.add_node(node_id, **properties)
-
-                    # Add table node if it doesn't exist
-                    self.graph.add_node(table_name, type="Table")
-                    # Create edge between table and table element
-                    await self.add_edge(node_id, table_name, "is_part_of")
-
-            # Iterate over all tables defined in the schema.
-            # Map relationships between rows (which are now nodes in the graph) as edges in graph
-            # NOTE: First all rows must be migrated to graph as nodes
-            for table_name, details in schema.items():
-                # Process foreign key relationships for the current table.
-                for fk in details.get("foreign_keys", []):
-                    # Aliases are needed in the case a table is referencing itself
-                    alias_1 = f"{table_name}_e1"
-                    alias_2 = f"{fk['ref_table']}_e2"
-
-                    if not details["primary_key"]:
-                        # Assume the first column in details['columns'] is the primary key.
-                        primary_key_col = details["columns"][0]["name"]
-                    else:
-                        primary_key_col = details["primary_key"]
-
-                    fk_query = text(
-                        f"SELECT {alias_1}.{primary_key_col} AS source_id, "
-                        f"{alias_2}.{fk['ref_column']} AS ref_value "
-                        f"FROM {table_name} AS {alias_1} "
-                        f"JOIN {fk['ref_table']} AS {alias_2} "
-                        f"ON {alias_1}.{fk['column']} = {alias_2}.{fk['ref_column']};"
-                    )
-
-                    fk_result = await cursor.execute(fk_query)
-                    relations = fk_result.fetchall()
-
-                    for source_id, ref_value in relations:
-                        # Construct node ids using the primary key value for the source.
-                        source_node = f"{table_name}:{source_id}"
-                        target_node = f"{fk['ref_table']}:{ref_value}"
-
-                        if source_node in self.graph and target_node in self.graph:
-                            self.graph.add_edge(
-                                source_node,
-                                target_node,
-                                key=fk["column"],
-                                relationship_type=fk["column"],
-                            )
-
-        # Save the updated graph to file.
-        await self.save_graph_to_file(self.filename)
-        print("Data populated into NetworkX successfully.")
+        await migrate_relational_database_networkx(self, schema)
