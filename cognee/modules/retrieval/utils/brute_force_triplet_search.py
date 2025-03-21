@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import List, Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine

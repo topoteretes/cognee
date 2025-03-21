@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import List, Optional
 from fastembed import TextEmbedding
 import litellm
@@ -8,7 +10,7 @@ from cognee.infrastructure.databases.exceptions.EmbeddingException import Embedd
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 litellm.set_verbose = False
-logger = logging.getLogger("FastembedEmbeddingEngine")
+logger = structlog.get_logger("FastembedEmbeddingEngine")
 
 
 class FastembedEmbeddingEngine(EmbeddingEngine):

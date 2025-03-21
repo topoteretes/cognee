@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import json
 from typing import List
 
@@ -12,6 +14,10 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
 )
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
+
+
+setup_logging(logging.ERROR)
+logger = structlog.get_logger(__name__)
 
 
 async def create_and_insert_questions_table(questions_payload):
@@ -35,7 +41,7 @@ async def run_corpus_builder(
     params: dict, chunk_size=1024, chunker=TextChunker, instance_filter=None
 ) -> List[dict]:
     if params.get("building_corpus_from_scratch"):
-        logging.info("Corpus Builder started...")
+        logger.info("Corpus Builder started...")
 
         try:
             task_getter = TaskGetters(params.get("task_getter_type", "Default")).getter_func
@@ -58,6 +64,6 @@ async def run_corpus_builder(
 
         await create_and_insert_questions_table(questions_payload=questions)
 
-        logging.info("Corpus Builder End...")
+        logger.info("Corpus Builder End...")
 
         return questions

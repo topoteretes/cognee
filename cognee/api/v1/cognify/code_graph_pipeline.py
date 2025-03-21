@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.api.v1.search.search_v2 import search
@@ -29,7 +31,7 @@ if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 
 
-logger = logging.getLogger("code_graph_pipeline")
+logger = structlog.get_logger("code_graph_pipeline")
 update_status_lock = asyncio.Lock()
 
 

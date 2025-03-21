@@ -14,6 +14,7 @@ import http.server
 import socketserver
 from threading import Thread
 import logging
+import structlog
 import sys
 
 from cognee.base_config import get_base_config
@@ -23,6 +24,7 @@ from uuid import uuid4
 import pathlib
 import nltk
 from cognee.shared.exceptions import IngestionError
+from .logging_utils import setup_logging
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -349,23 +351,6 @@ def graph_to_tuple(graph):
     nodes = list(graph.nodes(data=True))  # Get nodes with attributes
     edges = list(graph.edges(data=True))  # Get edges with attributes
     return (nodes, edges)
-
-
-def setup_logging(log_level=logging.INFO):
-    """Sets up the logging configuration."""
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s\n")
-
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    stream_handler.setLevel(log_level)
-
-    root_logger = logging.getLogger()
-
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-
-    root_logger.addHandler(stream_handler)
-    root_logger.setLevel(log_level)
 
 
 def start_visualization_server(

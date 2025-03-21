@@ -1,11 +1,13 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph
 from cognee.modules.chunking.Chunker import Chunker
 from .models.DocumentChunk import DocumentChunk
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class TextChunker(Chunker):

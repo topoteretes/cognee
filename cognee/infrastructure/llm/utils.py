@@ -1,10 +1,13 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import litellm
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
-logger = logging.getLogger(__name__)
+setup_logging(logging.INFO)
+logger = structlog.get_logger(__name__)
 
 
 def get_max_chunk_tokens():

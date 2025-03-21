@@ -5,6 +5,8 @@ import os
 import json
 import asyncio
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
@@ -16,7 +18,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class NetworkXAdapter(GraphDBInterface):

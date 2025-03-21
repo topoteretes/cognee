@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from typing import List
 
 from pydantic import BaseModel
@@ -9,7 +11,8 @@ from cognee.modules.engine.models.EntityType import EntityType
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
-logger = logging.getLogger("llm_entity_extractor")
+setup_logging(logging.INFO)
+logger = structlog.get_logger("llm_entity_extractor")
 
 
 class EntityList(BaseModel):

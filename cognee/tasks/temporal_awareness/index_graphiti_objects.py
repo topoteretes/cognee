@@ -1,10 +1,16 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 from collections import Counter
 
 from cognee.tasks.temporal_awareness.graphiti_model import GraphitiNode
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.models.EdgeType import EdgeType
+
+
+setup_logging(logging.ERROR)
+logger = structlog.get_logger(__name__)
 
 
 async def index_and_transform_graphiti_nodes_and_edges():
@@ -15,7 +21,7 @@ async def index_and_transform_graphiti_nodes_and_edges():
         vector_engine = get_vector_engine()
         graph_engine = await get_graph_engine()
     except Exception as e:
-        logging.error("Failed to initialize engines: %s", e)
+        logger.error("Failed to initialize engines: %s", e)
         raise RuntimeError("Initialization error") from e
 
     await graph_engine.query("""MATCH (n) SET n.id = n.uuid RETURN n""")

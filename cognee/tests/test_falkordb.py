@@ -1,11 +1,14 @@
 import os
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import pathlib
 import cognee
 from cognee.modules.search.types import SearchType
 # from cognee.shared.utils import render_graph
 
-logging.basicConfig(level=logging.DEBUG)
+setup_logging(logging.DEBUG)
+logger = structlog.get_logger()
 
 
 async def main():

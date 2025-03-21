@@ -1,11 +1,13 @@
 import modal
 import os
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import asyncio
 import cognee
 import signal
 
-from cognee.shared.utils import setup_logging
+
 from cognee.modules.search.types import SearchType
 
 app = modal.App("cognee-runner")
@@ -38,6 +40,8 @@ async def entry(text: str, query: str):
 
 @app.local_entrypoint()
 async def main():
+    setup_logging(logging.ERROR)
+    logger = structlog.get_logger()
     text_queries = [
         {
             "text": "NASA's Artemis program aims to return humans to the Moon by 2026, focusing on sustainable exploration and preparing for future Mars missions.",
@@ -85,10 +89,10 @@ async def main():
 
     results = await asyncio.gather(*tasks)
 
-    print("\nFinal Results:")
+    logger.info("Final Results:")
 
     for result in results:
-        print(result)
-        print("----")
+        logger.info(result)
+        logger.info("----")
 
     os.kill(os.getpid(), signal.SIGTERM)

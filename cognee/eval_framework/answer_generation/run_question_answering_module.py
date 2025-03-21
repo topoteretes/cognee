@@ -1,4 +1,6 @@
 import logging
+import structlog
+from cognee.shared.logging_utils import setup_logging
 import json
 from typing import List, Optional
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
@@ -12,6 +14,10 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
 )
 from cognee.modules.data.models.answers_base import AnswersBase
 from cognee.modules.data.models.answers_data import Answers
+
+
+setup_logging(logging.INFO)
+logger = structlog.get_logger(__name__)
 
 
 async def create_and_insert_answers_table(questions_payload):
