@@ -2,6 +2,7 @@ import sys
 import logging
 import structlog
 
+
 def setup_logging(log_level=logging.INFO):
     """Sets up the logging configuration with structlog integration."""
 
@@ -14,11 +15,11 @@ def setup_logging(log_level=logging.INFO):
                 exc_type, exc_value, tb = event_dict["exc_info"]
             else:
                 exc_type, exc_value, tb = sys.exc_info()
-            
+
             event_dict["exception_type"] = exc_type.__name__
             event_dict["exception_message"] = str(exc_value)
             event_dict["traceback"] = True
-        
+
         return event_dict
 
     # Configure structlog
