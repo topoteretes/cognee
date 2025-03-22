@@ -9,8 +9,10 @@ import asyncio
 import json
 import logging
 import os
-from uuid import uuid4, UUID
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any, Tuple, Set
+from uuid import UUID, uuid4
 
 from cognee.modules.graph.datapoint_layered_graph import (
     GraphNode,
@@ -18,6 +20,7 @@ from cognee.modules.graph.datapoint_layered_graph import (
     GraphLayer,
     LayeredKnowledgeGraphDP
 )
+from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.data_models import Node, Edge, KnowledgeGraph
 
 # Configure logging
@@ -721,14 +724,6 @@ async def analyze_layered_graph(graph: LayeredKnowledgeGraphDP):
                 logger.info(f"    Addresses: {', '.join(addresses)}")
 
 
-class UUIDEncoder(json.JSONEncoder):
-    """JSON encoder that can handle UUID objects."""
-    def default(self, obj):
-        if isinstance(obj, UUID):
-            return str(obj)
-        return super().default(obj)
-
-
 async def save_graph(graph: LayeredKnowledgeGraphDP, filename: str):
     """
     Save a layered knowledge graph to a JSON file.
@@ -776,10 +771,15 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
         graph: The graph to export
         filename: The filename to save to
     """
-    # For each layer, get its graph and collect data
-    layers_data = []
-    nodes_data = []
-    edges_data = []
+    # Generate visualization-friendly data
+    viz_data = {
+        "graph_id": str(graph.id),
+        "name": graph.name,
+        "description": graph.description,
+        "layers": [],
+        "nodes": [],
+        "edges": []
+    }
     
     # Add layer data
     for layer_id in graph.layers:
@@ -791,7 +791,7 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
             parent = graph.get_layer(parent_id)
             parent_names.append(parent.name)
         
-        layers_data.append({
+        viz_data["layers"].append({
             "id": str(layer.id),
             "name": layer.name,
             "description": layer.description,
@@ -814,7 +814,7 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
         for node in cumulative_graph.nodes:
             layer_info = node_layer_map.get(node.id, {"layer_id": "unknown", "layer_name": "Unknown"})
             
-            nodes_data.append({
+            viz_data["nodes"].append({
                 "id": node.id,
                 "name": node.name,
                 "type": node.type,
@@ -832,7 +832,7 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
                 if layer_id_str in node_layer_map:
                     layer_name = node_layer_map[layer_id_str]["layer_name"]
             
-            edges_data.append({
+            viz_data["edges"].append({
                 "source": edge.source_node_id,
                 "target": edge.target_node_id,
                 "relationship": edge.relationship_name,
@@ -840,18 +840,11 @@ async def export_visualization_data(graph: LayeredKnowledgeGraphDP, filename: st
                 "properties": edge.properties if hasattr(edge, "properties") else {}
             })
     
-    # Build the complete visualization data
-    viz_data = {
-        "layers": layers_data,
-        "nodes": nodes_data,
-        "edges": edges_data
-    }
-    
     # Save to file
-    with open(filename, "w") as f:
-        json.dump(viz_data, f, indent=2, cls=UUIDEncoder)
+    with open(filename, 'w') as f:
+        json.dump(viz_data, f, indent=2, cls=JSONEncoder)
     
-    logger.info(f"Exported visualization data to {filename} ({len(nodes_data)} nodes, {len(edges_data)} edges)")
+    logger.info(f"Exported visualization data to {filename} ({len(viz_data['nodes'])} nodes, {len(viz_data['edges'])} edges)")
 
 
 async def main():

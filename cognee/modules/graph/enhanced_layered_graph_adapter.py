@@ -27,8 +27,9 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.datapoint_layered_graph import (
-    GraphNode, GraphEdge, GraphLayer, LayeredKnowledgeGraphDP, UUIDEncoder
+    GraphNode, GraphEdge, GraphLayer, LayeredKnowledgeGraphDP
 )
+from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.data_models import Node, Edge, KnowledgeGraph, Layer
 
 logger = logging.getLogger(__name__)

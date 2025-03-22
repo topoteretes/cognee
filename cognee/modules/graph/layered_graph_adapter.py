@@ -15,8 +15,9 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.datapoint_layered_graph import (
-    GraphNode, GraphEdge, GraphLayer, LayeredKnowledgeGraphDP, UUIDEncoder
+    GraphNode, GraphEdge, GraphLayer, LayeredKnowledgeGraphDP
 )
+from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.data_models import Node, Edge, KnowledgeGraph
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class LayeredGraphDBAdapter:
             "name": graph.name,
             "description": graph.description,
             "type": "LayeredKnowledgeGraph",
-            "metadata": json.dumps(graph.metadata, cls=UUIDEncoder)
+            "metadata": json.dumps(graph.metadata, cls=JSONEncoder)
         }
         
         await self._graph_db.add_node(str(graph.id), graph_node_properties)
@@ -78,10 +79,10 @@ class LayeredGraphDBAdapter:
                 "name": layer.name,
                 "description": layer.description,
                 "layer_type": layer.layer_type,
-                "parent_layers": json.dumps([str(parent_id) for parent_id in layer.parent_layers], cls=UUIDEncoder),
-                "properties": json.dumps(layer.properties, cls=UUIDEncoder),
+                "parent_layers": json.dumps([str(parent_id) for parent_id in layer.parent_layers], cls=JSONEncoder),
+                "properties": json.dumps(layer.properties, cls=JSONEncoder),
                 "type": "GraphLayer",
-                "metadata": json.dumps(layer.metadata, cls=UUIDEncoder)
+                "metadata": json.dumps(layer.metadata, cls=JSONEncoder)
             }
             
             # Create task to add the layer node
@@ -115,10 +116,10 @@ class LayeredGraphDBAdapter:
                 "name": node.name,
                 "node_type": node.node_type,
                 "description": node.description,
-                "properties": json.dumps(node.properties, cls=UUIDEncoder),
+                "properties": json.dumps(node.properties, cls=JSONEncoder),
                 "layer_id": str(node.layer_id) if node.layer_id else None,
                 "type": "GraphNode",
-                "metadata": json.dumps(node.metadata, cls=UUIDEncoder)
+                "metadata": json.dumps(node.metadata, cls=JSONEncoder)
             }
             
             # Create task to add the node
@@ -144,10 +145,10 @@ class LayeredGraphDBAdapter:
                 "source_node_id": str(edge.source_node_id),
                 "target_node_id": str(edge.target_node_id),
                 "relationship_name": edge.relationship_name,
-                "properties": json.dumps(edge.properties, cls=UUIDEncoder),
+                "properties": json.dumps(edge.properties, cls=JSONEncoder),
                 "layer_id": str(edge.layer_id) if edge.layer_id else None,
                 "type": "GraphEdge",
-                "metadata": json.dumps(edge.metadata, cls=UUIDEncoder)
+                "metadata": json.dumps(edge.metadata, cls=JSONEncoder)
             }
             
             # Create task to add the edge node (represent edge as a node for querying)
@@ -318,10 +319,10 @@ class LayeredGraphDBAdapter:
             "name": layer.name,
             "description": layer.description,
             "layer_type": layer.layer_type,
-            "parent_layers": json.dumps([str(parent_id) for parent_id in layer.parent_layers], cls=UUIDEncoder),
-            "properties": json.dumps(layer.properties, cls=UUIDEncoder),
+            "parent_layers": json.dumps([str(parent_id) for parent_id in layer.parent_layers], cls=JSONEncoder),
+            "properties": json.dumps(layer.properties, cls=JSONEncoder),
             "type": "GraphLayer",
-            "metadata": json.dumps(layer.metadata, cls=UUIDEncoder)
+            "metadata": json.dumps(layer.metadata, cls=JSONEncoder)
         }
         
         # Add the layer node
