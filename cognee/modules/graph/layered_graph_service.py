@@ -9,12 +9,12 @@ from typing import Dict, List, Optional, Set, Any, Union, Tuple
 
 
 from cognee.shared.data_models import (
-    LayeredKnowledgeGraph,
     KnowledgeGraph,
     Layer,
     Node,
     Edge
 )
+from cognee.modules.graph.simplified_layered_graph import LayeredKnowledgeGraph
 from cognee.modules.graph.layered_graph_builder import LayeredGraphBuilder
 
 logger = logging.getLogger(__name__)
@@ -54,16 +54,19 @@ class LayeredGraphService:
         # Create a copy of the layered graph to avoid modifying the original
         builder = LayeredGraphBuilder(name=layered_graph.name, description=layered_graph.description)
         
+        # Get all layers (async)
+        all_layers = await layered_graph.get_layers()
+        
         # Copy existing layers
-        for layer in layered_graph.layers:
-            if layer.id not in layer_ids:  # Skip layers that will be merged
-                parent_layers = [p for p in layer.parent_layers if p not in layer_ids]
+        for layer in all_layers:
+            if str(layer.id) not in layer_ids:  # Skip layers that will be merged
+                parent_layers = [str(p) for p in layer.parent_layers if str(p) not in layer_ids]
                 builder.create_layer(
                     name=layer.name,
                     description=layer.description,
                     layer_type=layer.layer_type,
                     parent_layers=parent_layers,
-                    layer_id=layer.id,
+                    layer_id=str(layer.id),
                     properties=layer.properties
                 )
         
@@ -80,7 +83,8 @@ class LayeredGraphService:
         
         # Merge nodes and edges from specified layers
         for layer_id in layer_ids:
-            layer_graph = layered_graph.get_layer_graph(layer_id)
+            # Get layer graph (async)
+            layer_graph = await layered_graph.get_layer_graph(layer_id)
             
             # Process nodes
             for node in layer_graph.nodes:
@@ -132,8 +136,9 @@ class LayeredGraphService:
         Returns:
             Dictionary containing differences between the layers
         """
-        base_graph = layered_graph.get_layer_graph(base_layer_id)
-        comparison_graph = layered_graph.get_layer_graph(comparison_layer_id)
+        # Get both layer graphs (async)
+        base_graph = await layered_graph.get_layer_graph(base_layer_id)
+        comparison_graph = await layered_graph.get_layer_graph(comparison_layer_id)
         
         # Get node IDs and edge keys for easy comparison
         base_node_ids = {node.id for node in base_graph.nodes}
@@ -220,7 +225,9 @@ class LayeredGraphService:
         """
         # If no layer IDs specified, use all layers
         if layer_ids is None:
-            layer_ids = [layer.id for layer in layered_graph.layers]
+            # Get all layers (async)
+            all_layers = await layered_graph.get_layers()
+            layer_ids = [str(layer.id) for layer in all_layers]
             
         # Initialize lists for nodes and edges
         nodes = []
@@ -230,9 +237,9 @@ class LayeredGraphService:
         for layer_id in layer_ids:
             # Get graph for this layer (cumulative or not)
             if include_cumulative:
-                layer_graph = layered_graph.get_cumulative_layer_graph(layer_id)
+                layer_graph = await layered_graph.get_cumulative_layer_graph(layer_id)
             else:
-                layer_graph = layered_graph.get_layer_graph(layer_id)
+                layer_graph = await layered_graph.get_layer_graph(layer_id)
             
             # Apply node filter if provided
             if node_filter is not None:
@@ -299,18 +306,22 @@ class LayeredGraphService:
         all_dependencies = {}  # layer_id -> set of all ancestor layer IDs
         layer_depth = {}  # layer_id -> depth in dependency hierarchy
         
+        # Get layers (async)
+        layers = await layered_graph.get_layers()
+        
         # Create lookup for layers by ID
-        layers_by_id = {layer.id: layer for layer in layered_graph.layers}
+        layers_by_id = {str(layer.id): layer for layer in layers}
         
         # Build direct dependencies and reverse dependencies
-        for layer in layered_graph.layers:
-            dependencies[layer.id] = set(layer.parent_layers)
+        for layer in layers:
+            layer_id = str(layer.id)
+            dependencies[layer_id] = set(str(p) for p in layer.parent_layers)
             
             # Initialize reverse dependencies sets
-            for parent_id in layer.parent_layers:
+            for parent_id in dependencies[layer_id]:
                 if parent_id not in reverse_dependencies:
                     reverse_dependencies[parent_id] = set()
-                reverse_dependencies[parent_id].add(layer.id)
+                reverse_dependencies[parent_id].add(layer_id)
         
         # Initialize reverse dependencies for layers with no children
         for layer_id in dependencies:
@@ -506,11 +517,16 @@ class LayeredGraphService:
         # Get dependency analysis
         analysis = await LayeredGraphService.analyze_layer_dependencies(layered_graph)
         
+        # Get layers (async)
+        layers = await layered_graph.get_layers()
+        
         # Calculate metrics for each layer
-        for layer in layered_graph.layers:
-            layer_id = layer.id
-            layer_graph = layered_graph.get_layer_graph(layer_id)
-            cumulative_graph = layered_graph.get_cumulative_layer_graph(layer_id)
+        for layer in layers:
+            layer_id = str(layer.id)
+            
+            # Get layer graph and cumulative graph (async)
+            layer_graph = await layered_graph.get_layer_graph(layer_id)
+            cumulative_graph = await layered_graph.get_cumulative_layer_graph(layer_id)
             
             # Count node types in this layer
             node_types = {}

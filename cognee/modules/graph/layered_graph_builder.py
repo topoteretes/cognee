@@ -5,17 +5,22 @@ This module provides utilities for building and managing layered knowledge graph
 """
 
 import uuid
+import asyncio
+import os
 from typing import Dict, List, Optional, Any, Union
 
 from cognee.shared.data_models import (
-    LayeredKnowledgeGraph,
     KnowledgeGraph,
     Layer,
     Node,
     Edge
 )
+from cognee.modules.graph.simplified_layered_graph import LayeredKnowledgeGraph
+from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
+import networkx as nx
 
-
+import logging
+logger = logging.getLogger(__name__)
 
 
 class LayeredGraphBuilder:
@@ -40,13 +45,47 @@ class LayeredGraphBuilder:
         
         # Initialize layered graph
         self.layered_graph = LayeredKnowledgeGraph(
-            base_graph=self.base_graph,
-            layers=[],
+            id=uuid.uuid4(),
             name=name,
             description=description
         )
         
-        # Keep track of layers
+        # Set up an adapter for the layered graph
+        db_directory = os.path.join(os.getcwd(), ".cognee_system", "databases")
+        os.makedirs(db_directory, exist_ok=True)
+        db_file = os.path.join(db_directory, "temp_layered_graph.pkl")
+        
+        # Create a NetworkXAdapter with an initialized graph
+        nx_adapter = NetworkXAdapter(filename=db_file)
+        if not hasattr(nx_adapter, 'graph') or nx_adapter.graph is None:
+            nx_adapter.graph = nx.MultiDiGraph()
+            
+        # Create a wrapper adapter that provides the expected _graph_db attribute
+        class AdapterWrapper:
+            def __init__(self, adapter):
+                self._graph_db = adapter
+                self._graph_db_initialized = True
+        
+        # Set the adapter on the layered graph
+        self.adapter = AdapterWrapper(nx_adapter)
+        self.layered_graph.set_adapter(self.adapter)
+        
+        # Initialize the graph in the database
+        try:
+            # If we're in an async context, await the initialization
+            import inspect
+            if inspect.iscoroutinefunction(inspect.currentframe().f_back.f_code):
+                asyncio.create_task(self.layered_graph.initialize())
+            else:
+                # For synchronous context, use nest_asyncio
+                import nest_asyncio
+                nest_asyncio.apply()
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(self.layered_graph.initialize())
+        except Exception as e:
+            logger.warning(f"Error initializing layered graph: {e}")
+        
+        # Keep track of layers for builder's internal state
         self.layers: Dict[str, Layer] = {}
         
         # Keep track of node IDs by layer
@@ -74,28 +113,28 @@ class LayeredGraphBuilder:
             parent_layers: List of parent layer IDs
             layer_id: Specific ID for the layer (generated if not provided)
             properties: Additional layer properties
-            
+        
         Returns:
             ID of the created layer
         """
         # Generate ID if not provided
         if layer_id is None:
             layer_id = str(uuid.uuid4())
-            
+        
         # Initialize empty parents list if not provided
         if parent_layers is None:
             parent_layers = []
-            
+        
         # Initialize empty properties dict if not provided
         if properties is None:
             properties = {}
-            
+        
         # Verify parent layers exist
         for parent_id in parent_layers:
             if parent_id not in self.layers:
                 raise ValueError(f"Parent layer with ID {parent_id} does not exist")
         
-        # Create layer
+        # Create layer for local tracking
         layer = Layer(
             id=layer_id,
             name=name,
@@ -105,13 +144,39 @@ class LayeredGraphBuilder:
             properties=properties
         )
         
-        # Add layer to layered graph
-        self.layered_graph.add_layer(layer)
+        # Convert parent_layers strings to UUIDs for the new API
+        parent_layer_uuids = [uuid.UUID(p) for p in parent_layers] if parent_layers else None
         
-        # Keep track of layer
-        self.layers[layer_id] = layer
-        self.layer_nodes[layer_id] = []
-        self.layer_edges[layer_id] = []
+        # Use the new add_layer API that accepts individual parameters
+        try:
+            # Import nest_asyncio for handling async in sync context
+            import nest_asyncio
+            nest_asyncio.apply()
+            loop = asyncio.get_event_loop()
+            
+            # Call add_layer and wait for the result
+            layer_obj = loop.run_until_complete(
+                self.layered_graph.add_layer(
+                    name=name,
+                    description=description,
+                    layer_type=layer_type,
+                    parent_layers=parent_layer_uuids
+                )
+            )
+            
+            # Store the layer in local tracking dictionaries
+            self.layers[layer_id] = layer
+            
+            # Initialize empty layer node and edge lists
+            self.layer_nodes[layer_id] = []
+            self.layer_edges[layer_id] = []
+            
+        except Exception as e:
+            logger.error(f"Error adding layer: {e}")
+            # Fall back to local tracking only
+            self.layers[layer_id] = layer
+            self.layer_nodes[layer_id] = []
+            self.layer_edges[layer_id] = []
         
         return layer_id
     
@@ -152,8 +217,34 @@ class LayeredGraphBuilder:
             properties=properties
         )
         
-        # Add node to layer
-        self.layered_graph.add_node_to_layer(node, layer_id)
+        # Add node to layer using the async add_node method
+        try:
+            node_properties = {}
+            if properties:
+                node_properties = properties
+            if description:
+                node_properties["description"] = description
+                
+            # Create a Pydantic-compatible properties dictionary
+            # Import nest_asyncio for handling async in sync context
+            import nest_asyncio
+            nest_asyncio.apply()
+            loop = asyncio.get_event_loop()
+            
+            # Call add_node and wait for the result
+            graph_node = loop.run_until_complete(
+                self.layered_graph.add_node(
+                    name=name,
+                    node_type=node_type,
+                    properties=node_properties,
+                    metadata={"id": node_id},
+                    layer_id=uuid.UUID(layer_id)
+                )
+            )
+        except Exception as e:
+            logger.error(f"Error adding node to layer: {e}")
+            # Fall back to local tracking only
+            pass
         
         # Keep track of node
         self.layer_nodes[layer_id].append(node_id)
@@ -194,8 +285,27 @@ class LayeredGraphBuilder:
             properties=properties
         )
         
-        # Add edge to layer
-        self.layered_graph.add_edge_to_layer(edge, layer_id)
+        # Add edge to layer using the async add_edge method
+        try:
+            # Import nest_asyncio for handling async in sync context
+            import nest_asyncio
+            nest_asyncio.apply()
+            loop = asyncio.get_event_loop()
+            
+            # Call add_edge and wait for the result
+            graph_edge = loop.run_until_complete(
+                self.layered_graph.add_edge(
+                    source_id=uuid.UUID(source_node_id),
+                    target_id=uuid.UUID(target_node_id),
+                    edge_type=relationship_name,
+                    properties=properties or {},
+                    layer_id=uuid.UUID(layer_id)
+                )
+            )
+        except Exception as e:
+            logger.error(f"Error adding edge to layer: {e}")
+            # Fall back to local tracking only
+            pass
         
         # Keep track of edge
         self.layer_edges[layer_id].append((source_node_id, target_node_id, relationship_name))
@@ -226,6 +336,11 @@ class LayeredGraphBuilder:
         # Map to track original to new node IDs
         id_mapping = {}
         
+        # Import nest_asyncio for handling async in sync context
+        import nest_asyncio
+        nest_asyncio.apply()
+        loop = asyncio.get_event_loop()
+        
         # Add nodes
         for node in subgraph.nodes:
             new_id = f"{id_prefix}{node.id}" if id_prefix else node.id
@@ -240,8 +355,26 @@ class LayeredGraphBuilder:
                 properties=node.properties
             )
             
-            # Add to layered graph
-            self.layered_graph.add_node_to_layer(new_node, layer_id)
+            # Add to layered graph using async method
+            try:
+                node_properties = node.properties or {}
+                if node.description:
+                    node_properties["description"] = node.description
+                
+                # Call add_node and wait for the result
+                graph_node = loop.run_until_complete(
+                    self.layered_graph.add_node(
+                        name=node.name,
+                        node_type=node.type,
+                        properties=node_properties,
+                        metadata={"id": new_id},
+                        layer_id=uuid.UUID(layer_id)
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Error adding node to layer: {e}")
+                # Fall back to local tracking only
+                pass
             
             # Keep track of mapping and node
             id_mapping[node.id] = new_id
@@ -262,8 +395,22 @@ class LayeredGraphBuilder:
                 properties=edge.properties
             )
             
-            # Add to layered graph
-            self.layered_graph.add_edge_to_layer(new_edge, layer_id)
+            # Add to layered graph using async method
+            try:
+                # Call add_edge and wait for the result
+                graph_edge = loop.run_until_complete(
+                    self.layered_graph.add_edge(
+                        source_id=uuid.UUID(new_source_id),
+                        target_id=uuid.UUID(new_target_id),
+                        edge_type=edge.relationship_name,
+                        properties=edge.properties or {},
+                        layer_id=uuid.UUID(layer_id)
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Error adding edge to layer: {e}")
+                # Fall back to local tracking only
+                pass
             
             # Keep track of edge
             self.layer_edges[layer_id].append((new_source_id, new_target_id, edge.relationship_name))
