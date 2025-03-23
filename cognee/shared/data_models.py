@@ -368,10 +368,12 @@ class MonitoringTool(str, Enum):
 
 class Layer(BaseModel):
     """Layer in a layered knowledge graph."""
-    
+
     id: str
     name: str
     description: str
     layer_type: str = "default"  # Type of layer (e.g., "base", "enrichment", "inference")
-    parent_layers: List[str] = Field(default_factory=list)  # IDs of parent layers this layer builds upon
+    parent_layers: List[str] = Field(
+        default_factory=list
+    )  # IDs of parent layers this layer builds upon
     properties: Optional[Dict[str, Any]] = Field(default_factory=dict)

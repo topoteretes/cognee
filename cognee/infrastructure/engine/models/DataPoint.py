@@ -67,7 +67,7 @@ class DataPoint(BaseModel):
     # JSON Serialization
     def to_json(self) -> str:
         """Serialize the instance to a JSON string."""
-        return self.json()
+        return self.model_dump_json()
 
     @classmethod
     def from_json(self, json_str: str):
