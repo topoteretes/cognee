@@ -1,0 +1,22 @@
+# Configuration for the 'cognee' application service
+cognee:
+  # Image name (using the local image we’ll build in Minikube)
+  image: "cognee/cognee:main"
+  port: 8000
+  env:
+    HOST: "0.0.0.0"
+    ENVIRONMENT: "local"
+    PYTHONPATH: "."
+  resources:
+    cpu: "4.0"
+    memory: "8Gi"
+
+# Configuration for the 'postgres' database service
+postgres:
+  image: "pgvector/pgvector:pg17"
+  port: 5432
+  env:
+    POSTGRES_USER: "cognee"
+    POSTGRES_PASSWORD: "cognee"
+    POSTGRES_DB: "cognee_db"
+  storage: "8Gi"

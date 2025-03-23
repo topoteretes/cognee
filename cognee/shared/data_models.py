@@ -299,6 +299,7 @@ class GraphDBType(Enum):
     NETWORKX = auto()
     NEO4J = auto()
     FALKORDB = auto()
+    KUZU = auto()
 
 
 # Models for representing different entities

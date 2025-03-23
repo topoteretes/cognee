@@ -2,7 +2,6 @@ import cognee
 import logging
 from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
-from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.Task import Task
@@ -28,14 +27,28 @@ class CorpusBuilderExecutor:
         self.questions = None
         self.task_getter = task_getter
 
-    def load_corpus(self, limit: Optional[int] = None) -> Tuple[List[Dict], List[str]]:
-        self.raw_corpus, self.questions = self.adapter.load_corpus(limit=limit)
+    def load_corpus(
+        self,
+        limit: Optional[int] = None,
+        load_golden_context: bool = False,
+        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+    ) -> Tuple[List[Dict], List[str]]:
+        self.raw_corpus, self.questions = self.adapter.load_corpus(
+            limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
+        )
         return self.raw_corpus, self.questions
 
     async def build_corpus(
-        self, limit: Optional[int] = None, chunk_size=1024, chunker=TextChunker
+        self,
+        limit: Optional[int] = None,
+        chunk_size=1024,
+        chunker=TextChunker,
+        load_golden_context: bool = False,
+        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
     ) -> List[str]:
-        self.load_corpus(limit=limit)
+        self.load_corpus(
+            limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
+        )
         await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
         return self.questions
 
@@ -47,5 +60,5 @@ class CorpusBuilderExecutor:
 
         await cognee.add(self.raw_corpus)
 
-        tasks = await self.task_getter(chunk_size=chunk_size, chunker=TextChunker)
+        tasks = await self.task_getter(chunk_size=chunk_size, chunker=chunker)
         await cognee.cognify(tasks=tasks)

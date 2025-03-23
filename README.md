@@ -8,11 +8,11 @@
   cognee - memory layer for AI apps and Agents
 
   <p align="center">
+  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  .
   <a href="https://cognee.ai">Learn more</a>
   ·
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
-  ·
-  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
   </p>
 
 
@@ -33,7 +33,7 @@ Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) 
 More on [use-cases](https://docs.cognee.ai/use_cases).
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="100%" />
 </div>
 
 </div>
@@ -52,6 +52,8 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
 
+## Contributing
+Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
 
 
@@ -83,11 +85,11 @@ To use different LLM providers, for more info check out our <a href="https://doc
 
 ### Simple example
 
-Add LLM_API_KEY to .env using the command bellow. 
+Add LLM_API_KEY to .env using the command bellow.
 ```
 echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
 ```
-You can see available env variables in the repository `.env.template` file.
+You can see available env variables in the repository `.env.template` file. If you don't specify it otherwise, like in this example, SQLite (relational database), LanceDB (vector database) and NetworkX (graph store) will be used as default components.
 
 This script will run the default pipeline:
 
@@ -147,7 +149,7 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 ## Understand our architecture
 
 <div style="text-align: center">
-  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="80%" />
+  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="100%" />
 </div>
 
 
@@ -156,14 +158,8 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 What is AI memory:
 
+[Learn about cognee](https://github.com/user-attachments/assets/8b2a0050-5ec4-424c-b417-8269971503f0)
 
-[<img src="https://img.youtube.com/vi/fI4hDzguN5k/maxresdefault.jpg" width="100%">](https://www.youtube.com/watch?v=fI4hDzguN5k "Learn about cognee: 55")
-
-
-
-## Contributing
-
-Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
 ## Code of Conduct
 
@@ -179,5 +175,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
-
-
