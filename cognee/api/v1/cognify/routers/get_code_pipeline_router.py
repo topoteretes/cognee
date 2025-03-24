@@ -33,6 +33,7 @@ def get_code_pipeline_router() -> APIRouter:
     async def code_pipeline_index(payload: CodePipelineIndexPayloadDTO):
         """This endpoint is responsible for running the indexation on code repo."""
         from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
+
         try:
             async for result in run_code_graph_pipeline(payload.repo_path, payload.include_docs):
                 logger.info(result)
