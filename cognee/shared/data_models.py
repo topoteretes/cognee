@@ -2,8 +2,10 @@
 
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Union
+from uuid import UUID, uuid4, uuid5, NAMESPACE_OID
 
 from pydantic import BaseModel, Field
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.config import get_llm_config
 
 if get_llm_config().llm_provider.lower() == "gemini":
@@ -358,3 +360,19 @@ class MonitoringTool(str, Enum):
     LANGFUSE = "langfuse"
     LLMLITE = "llmlite"
     LANGSMITH = "langsmith"
+
+
+class RelationshipType(str, Enum):
+    # ... existing relationship types ...
+    
+    # Add GitHub developer analysis relationship types
+    OWNS = "OWNS"
+    CONTRIBUTED_TO = "CONTRIBUTED_TO"
+    COLLABORATED_WITH = "COLLABORATED_WITH"
+    AUTHORED = "AUTHORED"
+    BELONGS_TO = "BELONGS_TO"
+    INTERACTED_WITH = "INTERACTED_WITH"
+    DESCRIBES = "DESCRIBES"
+    ACTIVITY_OF = "ACTIVITY_OF"
+    TRAJECTORY_OF = "TRAJECTORY_OF"
+    USES_TECHNOLOGY = "USES_TECHNOLOGY"

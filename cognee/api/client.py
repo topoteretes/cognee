@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
-from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router
+from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router, get_github_pipeline_router
 from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
 from fastapi import Request
@@ -171,6 +171,10 @@ app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["vi
 
 app.include_router(
     get_code_pipeline_router(), prefix="/api/v1/code-pipeline", tags=["code-pipeline"]
+)
+
+app.include_router(
+    get_github_pipeline_router(), prefix="/api/v1/github-pipeline", tags=["github-pipeline"]
 )
 
 

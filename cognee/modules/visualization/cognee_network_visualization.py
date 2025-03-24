@@ -2,6 +2,7 @@ import logging
 import networkx as nx
 import json
 import os
+from typing import Dict, List, Optional, Union, Any
 
 from cognee.infrastructure.files.storage import LocalStorage
 
@@ -9,49 +10,159 @@ from cognee.infrastructure.files.storage import LocalStorage
 logger = logging.getLogger(__name__)
 
 
-async def cognee_network_visualization(graph_data, destination_file_path: str = None):
-    nodes_data, edges_data = graph_data
+def get_display_name(node_info: Dict[str, Any]) -> str:
+    """Generate a human-readable display name for the node based on its type and attributes."""
+    # Use name if present
+    if node_info.get("name") and node_info.get("name") != node_info.get("id"):
+        return node_info.get("name")
+    
+    # Try to get a display name from 'type' and other attributes
+    node_type = node_info.get("type")
+    
+    if node_type == "Developer" and node_info.get("username"):
+        return f"{node_info.get('username')}"
+    
+    elif node_type == "Repository" and node_info.get("owner") and node_info.get("name"):
+        return f"{node_info.get('owner')}/{node_info.get('name')}"
+    
+    elif node_type == "DeveloperPersonality" and node_info.get("username"):
+        traits = node_info.get("primary_traits", "")
+        return f"{node_info.get('username')}'s Personality: {traits}"
+    
+    elif node_type == "Collaboration" and node_info.get("developer1_username") and node_info.get("developer2_username"):
+        return f"Collaboration: {node_info.get('developer1_username')} & {node_info.get('developer2_username')}"
+    
+    elif node_type == "PullRequest" and node_info.get("number"):
+        title = node_info.get("title", "")[:25]
+        if len(node_info.get("title", "")) > 25:
+            title += "..."
+        return f"PR #{node_info.get('number')}: {title}"
+    
+    elif node_type == "PRComment" and node_info.get("author_username"):
+        return f"Comment by {node_info.get('author_username')}"
+    
+    elif node_type == "Contribution" and node_info.get("developer_username") and node_info.get("repository_name"):
+        count = node_info.get("contributions_count", "")
+        return f"{node_info.get('developer_username')} → {node_info.get('repository_name')} ({count})"
+    
+    elif node_type == "ReadmeDocument" and node_info.get("repository_name"):
+        return f"README: {node_info.get('repository_name')}"
+    
+    elif node_type == "DeveloperInteraction" and node_info.get("developer1_username") and node_info.get("developer2_username"):
+        return f"Interaction: {node_info.get('developer1_username')} → {node_info.get('developer2_username')}"
+    
+    elif node_type == "SentimentAnalysis" and node_info.get("content"):
+        # Get first 20 characters of content
+        content_preview = node_info.get("content", "")[:20]
+        if len(node_info.get("content", "")) > 20:
+            content_preview += "..."
+        return f"Sentiment: {content_preview}"
+    
+    elif node_type == "DeveloperSummary" and node_info.get("summary"):
+        # Try to find related developer from the ID
+        if "developer_id" in node_info:
+            dev_id = node_info.get("developer_id")
+            if "username" in node_info:
+                return f"Summary: {node_info.get('username')}"
+        return f"Developer Summary"
+    
+    elif node_type:
+        # Use type as a fallback with the truncated ID
+        node_id = node_info.get("id", "")
+        if len(node_id) > 8:
+            node_id = node_id[-8:]
+        return f"{node_type}: {node_id}"
+    
+    # Final fallback
+    return str(node_info.get("id"))
 
+
+async def cognee_network_visualization(
+    graph_data: Dict[str, List[Dict]],
+    output_file: str,
+    as_string: bool = False,
+    color_map: Optional[Dict[str, str]] = None,
+) -> Union[str, None]:
+    # Prepare nodes and edges
+    nodes = graph_data.get("nodes", [])
+    edges = graph_data.get("edges", [])
+
+    # Create a directed graph
     G = nx.DiGraph()
 
-    nodes_list = []
-    color_map = {
+    # Define color map for different node types
+    default_color_map = {
+        "Developer": "#2ca02c",  # Green
+        "Repository": "#d62728",  # Red
+        "PullRequest": "#9467bd",  # Purple
+        "PRComment": "#8c564b",  # Brown
+        "Contribution": "#e377c2",  # Pink
+        "DeveloperPersonality": "#17becf",  # Cyan
+        "TemporalActivity": "#bcbd22",  # Olive
+        "DeveloperTrajectory": "#ff7f0e",  # Orange
+        "CodeQuality": "#1f77b4",  # Blue
+        "Collaboration": "#ff7f0e",  # Orange
+        "DeveloperSummary": "#98df8a",  # Light green
+        "ReadmeDocument": "#ffbb78",  # Light orange
+        "DeveloperInteraction": "#aec7e8",  # Light blue
+        "SentimentAnalysis": "#c5b0d5",  # Light purple
+        "default": "#7f7f7f",  # Gray
         "Entity": "#f47710",
         "EntityType": "#6510f4",
         "DocumentChunk": "#801212",
         "TextSummary": "#1077f4",
-        "default": "#D3D3D3",
     }
 
-    for node_id, node_info in nodes_data:
-        node_info = node_info.copy()
-        node_info["id"] = str(node_id)
-        node_info["color"] = color_map.get(node_info.get("type", "default"), "#D3D3D3")
-        node_info["name"] = node_info.get("name", str(node_id))
+    # Use provided color map or default
+    color_map = color_map or default_color_map
 
-        try:
-            del node_info[
-                "updated_at"
-            ]  #:TODO: We should decide what properties to show on the nodes and edges, we dont necessarily need all.
-        except KeyError:
-            pass
+    # Add nodes to the graph
+    for node in nodes:
+        # Ensure node has a type attribute if it exists in the data
+        node_type = node.get("type", "DataPoint")
+        
+        # Preserve all node attributes but ensure core properties are set
+        G.add_node(
+            node["id"],
+            **{k: v for k, v in node.items()},
+            color=color_map.get(node_type, color_map["default"]),
+            name=get_display_name(node),
+            type=node_type,  # Explicitly store the type to ensure it's preserved
+        )
 
-        try:
-            del node_info["created_at"]
-        except KeyError:
-            pass
+    # Add edges to the graph
+    for edge in edges:
+        # Add all edge attributes
+        G.add_edge(
+            edge["source"],
+            edge["target"],
+            **{k: v for k, v in edge.items() if k not in ["source", "target"]},
+        )
 
-        nodes_list.append(node_info)
-        G.add_node(node_id, **node_info)
+    # Convert NetworkX graph to D3.js format
+    d3_data = {"nodes": [], "links": []}
 
-    edge_labels = {}
-    links_list = []
-    for source, target, relation, edge_info in edges_data:
-        source = str(source)
-        target = str(target)
-        G.add_edge(source, target)
-        edge_labels[(source, target)] = relation
-        links_list.append({"source": source, "target": target, "relation": relation})
+    # Prepare nodes for D3
+    for node_id, node_data in G.nodes(data=True):
+        d3_node = {"id": node_id, "color": node_data.get("color", color_map["default"])}
+        
+        # Include name if available
+        if "name" in node_data:
+            d3_node["name"] = node_data["name"]
+        
+        # Copy all other attributes from the original node
+        for key, value in node_data.items():
+            if key not in ["id", "color", "name"]:
+                d3_node[key] = value
+                
+        d3_data["nodes"].append(d3_node)
+
+    # Prepare links for D3
+    for source, target, edge_data in G.edges(data=True):
+        link = {"source": source, "target": target}
+        if "relation" in edge_data:
+            link["relation"] = edge_data["relation"]
+        d3_data["links"].append(link)
 
     html_template = """
     <!DOCTYPE html>
@@ -60,17 +171,134 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         <meta charset="utf-8">
         <script src="https://d3js.org/d3.v5.min.js"></script>
         <style>
-            body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(90deg, #101010, #1a1a2e); color: white; font-family: 'Inter', sans-serif; }
+            body, html { 
+                margin: 0; 
+                padding: 0; 
+                width: 100%; 
+                height: 100%; 
+                overflow: hidden; 
+                background: linear-gradient(90deg, #101010, #1a1a2e); 
+                color: white; 
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; 
+            }
 
-            svg { width: 100vw; height: 100vh; display: block; }
-            .links line { stroke: rgba(255, 255, 255, 0.4); stroke-width: 2px; }
-            .nodes circle { stroke: white; stroke-width: 0.5px; filter: drop-shadow(0 0 5px rgba(255,255,255,0.3)); }
-            .node-label { font-size: 5px; font-weight: bold; fill: white; text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
-            .edge-label { font-size: 3px; fill: rgba(255, 255, 255, 0.7); text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
+            svg { 
+                width: 100vw; 
+                height: 100vh; 
+                display: block; 
+            }
+            
+            .links line { 
+                stroke: rgba(255, 255, 255, 0.3); 
+                stroke-width: 1.5px; 
+                transition: stroke 0.3s ease, stroke-width 0.3s ease;
+            }
+            
+            .links line:hover {
+                stroke: rgba(255, 255, 255, 0.8);
+                stroke-width: 2.5px;
+                cursor: pointer;
+            }
+            
+            .nodes circle { 
+                stroke: white; 
+                stroke-width: 0.5px; 
+                filter: drop-shadow(0 0 8px rgba(255,255,255,0.3));
+                transition: all 0.3s ease;
+            }
+            
+            .nodes circle:hover {
+                filter: drop-shadow(0 0 12px rgba(255,255,255,0.5));
+                cursor: pointer;
+            }
+            
+            .node-label { 
+                font-size: 6px; 
+                font-weight: bold; 
+                fill: white; 
+                text-anchor: middle; 
+                dominant-baseline: middle; 
+                pointer-events: none;
+                text-shadow: 0px 0px 3px rgba(0,0,0,0.8);
+            }
+            
+            .edge-label { 
+                font-size: 4px; 
+                fill: rgba(255, 255, 255, 0.8); 
+                text-anchor: middle; 
+                dominant-baseline: middle; 
+                pointer-events: none;
+                text-shadow: 1px 1px 1px rgba(0,0,0,0.7);
+            }
+            
+            .legend {
+                position: fixed;
+                bottom: 10px;
+                left: 10px;
+                background: rgba(0, 0, 0, 0.7);
+                border-radius: 5px;
+                padding: 10px;
+                max-width: 200px;
+                z-index: 1000;
+                font-size: 12px;
+            }
+            
+            .legend-item {
+                display: flex;
+                align-items: center;
+                margin-bottom: 5px;
+            }
+            
+            .legend-color {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                margin-right: 5px;
+            }
+            
+            .controls {
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: rgba(0, 0, 0, 0.7);
+                border-radius: 5px;
+                padding: 10px;
+                z-index: 1000;
+            }
+            
+            button {
+                background: #333;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                margin: 0 5px;
+                border-radius: 3px;
+                cursor: pointer;
+            }
+            
+            button:hover {
+                background: #555;
+            }
         </style>
     </head>
     <body>
         <svg></svg>
+        
+        <!-- Controls -->
+        <div class="controls">
+            <button id="zoom-in">Zoom In</button>
+            <button id="zoom-out">Zoom Out</button>
+            <button id="reset-view">Reset View</button>
+        </div>
+        
+        <!-- Legend for node types -->
+        <div class="legend">
+            <h3 style="margin-top: 0; margin-bottom: 10px;">Node Types</h3>
+            <div id="legend-items">
+                <!-- Will be populated by JavaScript -->
+            </div>
+        </div>
+        
         <script>
             var nodes = {nodes};
             var links = {links};
@@ -80,10 +308,63 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 height = window.innerHeight;
 
             var container = svg.append("g");
+            
+            // Create color mapping for legend
+            var nodeTypes = {
+                "Developer": "#2ca02c",
+                "Repository": "#d62728",
+                "PullRequest": "#9467bd",
+                "PRComment": "#8c564b",
+                "Contribution": "#e377c2",
+                "DeveloperPersonality": "#17becf",
+                "Collaboration": "#ff7f0e",
+                "DeveloperSummary": "#98df8a"
+            };
+            
+            // Create legend
+            var legendDiv = d3.select("#legend-items");
+            
+            // Add only node types that are present in our data
+            var presentNodeTypes = {};
+            nodes.forEach(d => {
+                if (d.type) {
+                    presentNodeTypes[d.type] = d.color;
+                }
+            });
+            
+            // Create legend items
+            Object.entries(presentNodeTypes).forEach(([type, color]) => {
+                legendDiv.append("div")
+                    .attr("class", "legend-item")
+                    .html(`<div class="legend-color" style="background-color: ${color}"></div> ${type}`);
+            });
+            
+            // Create zoom behavior
+            var zoom = d3.zoom()
+                .scaleExtent([0.1, 8])
+                .on("zoom", function() {
+                    container.attr("transform", d3.event.transform);
+                });
+                
+            svg.call(zoom);
+            
+            // Controls
+            d3.select("#zoom-in").on("click", function() {
+                svg.transition().call(zoom.scaleBy, 1.5);
+            });
+            
+            d3.select("#zoom-out").on("click", function() {
+                svg.transition().call(zoom.scaleBy, 0.75);
+            });
+            
+            d3.select("#reset-view").on("click", function() {
+                svg.transition().call(zoom.transform, d3.zoomIdentity);
+                simulation.alpha(1).restart();
+            });
 
             var simulation = d3.forceSimulation(nodes)
                 .force("link", d3.forceLink(links).id(d => d.id).strength(0.1))
-                .force("charge", d3.forceManyBody().strength(-275))
+                .force("charge", d3.forceManyBody().strength(-300))
                 .force("center", d3.forceCenter(width / 2, height / 2))
                 .force("x", d3.forceX().strength(0.1).x(width / 2))
                 .force("y", d3.forceY().strength(0.1).y(height / 2));
@@ -110,20 +391,51 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 .enter().append("g");
 
             var node = nodeGroup.append("circle")
-                .attr("r", 13)
+                .attr("r", d => getNodeSize(d))
                 .attr("fill", d => d.color)
+                .attr("stroke", "white")
+                .attr("stroke-width", 1.5)
+                .attr("stroke-opacity", 0.7)
                 .call(d3.drag()
                     .on("start", dragstarted)
                     .on("drag", dragged)
-                    .on("end", dragended));
+                    .on("end", dragended))
+                .on("mouseover", function(d) {
+                    d3.select(this)
+                        .attr("stroke", "#fff")
+                        .attr("stroke-width", 3);
+                })
+                .on("mouseout", function(d) {
+                    d3.select(this)
+                        .attr("stroke", "white")
+                        .attr("stroke-width", 1.5);
+                });
 
             nodeGroup.append("text")
                 .attr("class", "node-label")
-                .attr("dy", 4)
+                .attr("dy", d => getNodeSize(d) + 5)
                 .attr("text-anchor", "middle")
                 .text(d => d.name);
 
-            node.append("title").text(d => JSON.stringify(d));
+            node.append("title").text(d => {
+                let details = "";
+                for (const [key, value] of Object.entries(d)) {
+                    if (key !== "id" && key !== "x" && key !== "y" && key !== "vx" && key !== "vy" && key !== "fx" && key !== "fy") {
+                        details += `${key}: ${value}\n`;
+                    }
+                }
+                return details;
+            });
+
+            function getNodeSize(d) {
+                // Assign different sizes based on node type
+                if (d.type === "Developer") return 15;
+                if (d.type === "Repository") return 14;
+                if (d.type === "DeveloperPersonality") return 12;
+                if (d.type === "PullRequest") return 10;
+                if (d.type === "Collaboration") return 12;
+                return 8; // Default size for other nodes
+            }
 
             simulation.on("tick", function() {
                 link.attr("x1", d => d.source.x)
@@ -141,8 +453,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 nodeGroup.select("text")
                     .attr("x", d => d.x)
                     .attr("y", d => d.y)
-                    .attr("dy", 4)
-                    .attr("text-anchor", "middle");
+                    .attr("dy", d => getNodeSize(d) + 5);
             });
 
             svg.call(d3.zoom().on("zoom", function() {
@@ -182,18 +493,18 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     </html>
     """
 
-    html_content = html_template.replace("{nodes}", json.dumps(nodes_list))
-    html_content = html_content.replace("{links}", json.dumps(links_list))
+    html_content = html_template.replace("{nodes}", json.dumps(d3_data["nodes"]))
+    html_content = html_content.replace("{links}", json.dumps(d3_data["links"]))
 
-    if not destination_file_path:
+    if not output_file:
         home_dir = os.path.expanduser("~")
-        destination_file_path = os.path.join(home_dir, "graph_visualization.html")
+        output_file = os.path.join(home_dir, "graph_visualization.html")
 
-    LocalStorage.ensure_directory_exists(os.path.dirname(destination_file_path))
+    LocalStorage.ensure_directory_exists(os.path.dirname(output_file))
 
-    with open(destination_file_path, "w") as f:
+    with open(output_file, "w") as f:
         f.write(html_content)
 
-    logger.info(f"Graph visualization saved as {destination_file_path}")
+    logger.info(f"Graph visualization saved as {output_file}")
 
     return html_content
