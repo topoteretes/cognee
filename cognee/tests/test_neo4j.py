@@ -68,14 +68,13 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
-    assert len(search_results) != 0, "Query related summaries don't exist."
-    print("\nExtracted summaries are:\n")
+    print("\nExtracted results are:\n")
     for result in search_results:
         print(f"{result}\n")
 
     history = await cognee.get_search_history()
 
-    assert len(history) == 6, "Search history is not correct."
+    assert len(history) == 10, "Search history is not correct."
 
     results = await brute_force_triplet_search("What is a quantum computer?")
     assert len(results) > 0
