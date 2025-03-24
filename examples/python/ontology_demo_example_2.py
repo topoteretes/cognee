@@ -68,13 +68,13 @@ def print_comparison_table(questions, answers_with, answers_without, col_width=4
 
 
 async def main():
-    setup_logging(logging.INFO)
+    setup_logging(logging.ERROR)
 
     questions = [
         "What are common risk factors for Type 2 Diabetes?",
         "What preventive measures reduce the risk of Hypertension?",
         "What symptoms indicate possible Cardiovascular Disease?",
-        "How does Moderate Coffee Consumption affect health risks?",
+        "I have blurred vision and a headache. What diease do I have?",
         "What diseases are associated with Obesity?",
     ]
 
