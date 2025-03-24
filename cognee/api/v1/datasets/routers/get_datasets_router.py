@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from fastapi import APIRouter
 from datetime import datetime
 from uuid import UUID
@@ -16,7 +14,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunStatus
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 class ErrorResponseDTO(BaseModel):

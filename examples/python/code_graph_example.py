@@ -1,8 +1,6 @@
 import argparse
 import asyncio
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 
@@ -34,8 +32,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    setup_logging(logging.ERROR)
-    logger = structlog.get_logger()
+    logger = get_logger(level=ERROR)
 
     args = parse_args()
 

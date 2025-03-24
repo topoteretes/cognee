@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import json
 from typing import List
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
@@ -15,8 +13,7 @@ from cognee.modules.data.models.metrics_data import Metrics
 from cognee.modules.data.models.metrics_base import MetricsBase
 
 
-setup_logging(logging.INFO)
-logger = structlog.get_logger()
+logger = get_logger()
 
 
 async def create_and_insert_metrics_table(questions_payload):

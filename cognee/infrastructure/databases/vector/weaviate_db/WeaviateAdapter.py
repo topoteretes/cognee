@@ -1,7 +1,5 @@
 import asyncio
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 
 from cognee.exceptions import InvalidValueError
@@ -12,7 +10,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
-logger = structlog.get_logger("WeaviateAdapter")
+logger = get_logger("WeaviateAdapter")
 
 
 class IndexSchema(DataPoint):

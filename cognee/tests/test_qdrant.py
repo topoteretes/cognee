@@ -1,14 +1,11 @@
 import os
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import pathlib
 import cognee
 from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 
-setup_logging(logging.DEBUG)
-logger = structlog.get_logger()
+logger = get_logger()
 
 
 async def main():

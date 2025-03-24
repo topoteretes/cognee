@@ -7,9 +7,7 @@ from tree_sitter import Language, Node, Parser, Tree
 
 import aiofiles
 
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 
 from cognee.low_level import DataPoint
 from cognee.shared.CodeGraphEntities import (
@@ -19,7 +17,7 @@ from cognee.shared.CodeGraphEntities import (
     ClassDefinition,
 )
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 PY_LANGUAGE = Language(tspython.language())
 source_code_parser = Parser(PY_LANGUAGE)

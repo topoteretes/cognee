@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import asyncio
 from cognee.eval_framework.eval_config import EvalConfig
 
@@ -11,9 +9,8 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 from cognee.eval_framework.metrics_dashboard import create_dashboard
 
-# Configure logging
-setup_logging(logging.INFO)
-logger = structlog.get_logger(__name__)
+# Configure logging(logging.INFO)
+logger = get_logger()
 
 # Define parameters and file paths.
 eval_params = EvalConfig().to_dict()
@@ -35,7 +32,7 @@ async def main():
     await run_evaluation(eval_params)
 
     if eval_params.get("dashboard"):
-        logging.info("Generating dashboard...")
+        logger.info("Generating dashboard...")
         create_dashboard(
             metrics_path=eval_params["metrics_path"],
             aggregate_metrics_path=eval_params["aggregate_metrics_path"],

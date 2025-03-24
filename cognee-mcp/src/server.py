@@ -2,9 +2,7 @@ import asyncio
 import json
 import os
 import cognee
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -19,7 +17,7 @@ from cognee.modules.storage.utils import JSONEncoder
 
 mcp = Server("cognee")
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 @mcp.list_tools()

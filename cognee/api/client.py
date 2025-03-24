@@ -2,9 +2,7 @@
 
 import os
 import uvicorn
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import sentry_sdk
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response
@@ -30,12 +28,7 @@ from cognee.api.v1.users.routers import (
 )
 from contextlib import asynccontextmanager
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format="%(asctime)s [%(levelname)s] %(message)s",  # Set the log message format
-)
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 if os.getenv("ENV", "prod") == "prod":
     sentry_sdk.init(

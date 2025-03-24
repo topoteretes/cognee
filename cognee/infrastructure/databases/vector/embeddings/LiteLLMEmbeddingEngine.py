@@ -1,7 +1,5 @@
 import asyncio
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger
 import math
 from typing import List, Optional
 import litellm
@@ -14,7 +12,7 @@ from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 litellm.set_verbose = False
-logger = structlog.get_logger("LiteLLMEmbeddingEngine")
+logger = get_logger("LiteLLMEmbeddingEngine")
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):

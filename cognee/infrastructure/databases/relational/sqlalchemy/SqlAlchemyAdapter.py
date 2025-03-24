@@ -1,8 +1,6 @@
 import os
 from os import path
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
@@ -18,7 +16,7 @@ from cognee.modules.data.models.Data import Data
 from ..ModelBase import Base
 
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 class SQLAlchemyAdapter:

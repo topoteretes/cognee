@@ -1,8 +1,6 @@
 import asyncio
 import httpx
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 import os
 
@@ -10,7 +8,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import Em
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 
-logger = structlog.get_logger("OllamaEmbeddingEngine")
+logger = get_logger("OllamaEmbeddingEngine")
 
 
 class OllamaEmbeddingEngine(EmbeddingEngine):

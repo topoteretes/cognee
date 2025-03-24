@@ -2,9 +2,37 @@ import sys
 import logging
 import structlog
 
+# Export common log levels
+DEBUG = logging.DEBUG
+INFO = logging.INFO
+WARNING = logging.WARNING
+ERROR = logging.ERROR
+CRITICAL = logging.CRITICAL
 
-def setup_logging(log_level=logging.INFO):
-    """Sets up the logging configuration with structlog integration."""
+
+def get_logger(name=None, level=INFO):
+    """Get a configured structlog logger.
+
+    Args:
+        name: Logger name (default: None, uses __name__)
+        level: Logging level (default: INFO)
+
+    Returns:
+        A configured structlog logger instance
+    """
+    return setup_logging(level, name)
+
+
+def setup_logging(log_level=INFO, name=None):
+    """Sets up the logging configuration with structlog integration.
+
+    Args:
+        log_level: The logging level to use (default: INFO)
+        name: Optional logger name (default: None, uses __name__)
+
+    Returns:
+        A configured structlog logger instance
+    """
 
     def exception_handler(logger, method_name, event_dict):
         """Custom processor to handle uncaught exceptions."""
@@ -60,17 +88,43 @@ def setup_logging(log_level=logging.INFO):
 
     # Create formatter for standard library logging
     formatter = structlog.stdlib.ProcessorFormatter(
-        processor=structlog.dev.ConsoleRenderer(colors=True),
+        processor=structlog.dev.ConsoleRenderer(
+            colors=True,
+            force_colors=True,
+            level_styles={
+                "critical": structlog.dev.RED,
+                "exception": structlog.dev.RED,
+                "error": structlog.dev.RED,
+                "warn": structlog.dev.YELLOW,
+                "warning": structlog.dev.YELLOW,
+                "info": structlog.dev.GREEN,
+                "debug": structlog.dev.BLUE,
+            },
+        ),
     )
 
-    # Setup handler
-    stream_handler = logging.StreamHandler(sys.stdout)
+    # Setup handler with newlines
+    class NewlineStreamHandler(logging.StreamHandler):
+        def emit(self, record):
+            try:
+                msg = self.format(record)
+                stream = self.stream
+                stream.write("\n" + msg + self.terminator)
+                self.flush()
+            except Exception:
+                self.handleError(record)
+
+    # Use our custom handler
+    stream_handler = NewlineStreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
     stream_handler.setLevel(log_level)
 
     # Configure root logger
-    root_logger = structlog.get_logger()
+    root_logger = logging.getLogger()
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(log_level)
+
+    # Return a configured logger
+    return structlog.get_logger(name if name else __name__)

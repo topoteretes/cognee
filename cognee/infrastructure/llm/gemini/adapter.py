@@ -1,8 +1,6 @@
 from typing import Type, Optional
 from pydantic import BaseModel
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import litellm
 import asyncio
 from litellm import acompletion, JSONSchemaValidationError
@@ -12,8 +10,7 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.base_config import get_base_config
 
-setup_logging(logging.DEBUG)
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 monitoring = get_base_config().monitoring_tool
 if monitoring == MonitoringTool.LANGFUSE:

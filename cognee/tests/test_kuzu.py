@@ -1,7 +1,5 @@
 import os
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import pathlib
 import cognee
 import shutil
@@ -10,8 +8,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_forc
 from cognee.infrastructure.engine import DataPoint
 from uuid import uuid4
 
-setup_logging(logging.DEBUG)
-logger = structlog.get_logger()
+logger = get_logger()
 
 
 async def main():

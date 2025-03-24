@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -11,7 +9,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ...models.User import User
 from ...models.ACL import ACL
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 async def check_permission_on_documents(user: User, permission_type: str, document_ids: list[UUID]):

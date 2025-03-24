@@ -1,7 +1,5 @@
 import asyncio
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 
 from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -13,8 +11,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.search.methods import search
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
-setup_logging(logging.ERROR)
-logger = structlog.get_logger(__name__)
+logger = get_logger(level=ERROR)
 
 
 async def code_description_to_code_part_search(

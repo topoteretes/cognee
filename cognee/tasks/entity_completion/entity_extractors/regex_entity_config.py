@@ -1,7 +1,5 @@
 import json
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger
 import os
 import re
 from typing import Dict, List, Pattern, Any
@@ -9,8 +7,7 @@ from typing import Dict, List, Pattern, Any
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.root_dir import get_absolute_path
 
-setup_logging(logging.INFO)
-logger = structlog.get_logger("regex_entity_config")
+logger = get_logger("regex_entity_config")
 
 
 class RegexEntityConfig:

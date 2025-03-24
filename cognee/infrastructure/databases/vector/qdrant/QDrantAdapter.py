@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger
 from typing import Dict, List, Optional
 
 from cognee.infrastructure.engine.utils import parse_id
@@ -13,7 +11,7 @@ from cognee.infrastructure.engine import DataPoint
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..vector_db_interface import VectorDBInterface
 
-logger = structlog.get_logger("QDrantAdapter")
+logger = get_logger("QDrantAdapter")
 
 
 class IndexSchema(DataPoint):

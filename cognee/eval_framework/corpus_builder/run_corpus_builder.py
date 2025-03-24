@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 import json
 from typing import List
 
@@ -15,9 +13,7 @@ from cognee.infrastructure.databases.relational.get_relational_engine import (
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 
-
-setup_logging(logging.ERROR)
-logger = structlog.get_logger(__name__)
+logger = get_logger(level=ERROR)
 
 
 async def create_and_insert_questions_table(questions_payload):

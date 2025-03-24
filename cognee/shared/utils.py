@@ -13,8 +13,6 @@ import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
-import logging
-import structlog
 import sys
 
 from cognee.base_config import get_base_config
@@ -24,7 +22,6 @@ from uuid import uuid4
 import pathlib
 import nltk
 from cognee.shared.exceptions import IngestionError
-from .logging_utils import setup_logging
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -232,9 +229,6 @@ async def render_graph(
 # def sanitize_df(df):
 #     """Replace NaNs and infinities in a DataFrame with None, making it JSON compliant."""
 #     return df.replace([np.inf, -np.inf, np.nan], None)
-
-
-logging.basicConfig(level=logging.INFO)
 
 
 async def convert_to_serializable_graph(G):

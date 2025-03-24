@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import json
 from typing import List, Optional
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
@@ -16,8 +14,7 @@ from cognee.modules.data.models.answers_base import AnswersBase
 from cognee.modules.data.models.answers_data import Answers
 
 
-setup_logging(logging.INFO)
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 async def create_and_insert_answers_table(questions_payload):
@@ -41,7 +38,7 @@ async def run_question_answering(
     params: dict, system_prompt="answer_simple_question.txt", top_k: Optional[int] = None
 ) -> List[dict]:
     if params.get("answering_questions"):
-        logging.info("Question answering started...")
+        logger.info("Question answering started...")
         try:
             with open(params["questions_path"], "r", encoding="utf-8") as f:
                 questions = json.load(f)
@@ -50,7 +47,7 @@ async def run_question_answering(
         except json.JSONDecodeError as e:
             raise ValueError(f"Error decoding JSON from {params['questions_path']}: {e}")
 
-        logging.info(f"Loaded {len(questions)} questions from {params['questions_path']}")
+        logger.info(f"Loaded {len(questions)} questions from {params['questions_path']}")
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,
@@ -62,11 +59,11 @@ async def run_question_answering(
             json.dump(answers, f, ensure_ascii=False, indent=4)
 
         await create_and_insert_answers_table(answers)
-        logging.info("Question answering End...")
+        logger.info("Question answering End...")
 
         return answers
     else:
-        logging.info(
+        logger.info(
             "The question answering module was not executed as answering_questions is not enabled"
         )
         return []

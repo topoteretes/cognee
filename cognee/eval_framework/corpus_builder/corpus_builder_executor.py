@@ -1,16 +1,12 @@
 import cognee
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.Task import Task
 
-
-setup_logging(logging.ERROR)
-logger = structlog.get_logger()
+logger = get_logger(level=ERROR)
 
 
 class CorpusBuilderExecutor:

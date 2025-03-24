@@ -1,7 +1,5 @@
 import json
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
@@ -10,7 +8,7 @@ from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.storage.utils import JSONEncoder
 
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 class CodePipelineIndexPayloadDTO(InDTO):

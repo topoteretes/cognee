@@ -1,8 +1,6 @@
 import asyncio
 import cognee
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.api.v1.search import SearchType
 
 # Prerequisites:
@@ -69,8 +67,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    setup_logging(logging.ERROR)
-    logger = structlog.get_logger()
+    logger = get_logger(level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

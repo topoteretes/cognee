@@ -2,11 +2,9 @@ import os
 
 from tqdm import tqdm
 
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 _NODE_TYPE_MAP = {
     "funcdef": "func_def",

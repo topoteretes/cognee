@@ -1,12 +1,10 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
-logger = structlog.get_logger("index_data_points")
+logger = get_logger("index_data_points")
 
 
 async def index_data_points(data_points: list[DataPoint]):

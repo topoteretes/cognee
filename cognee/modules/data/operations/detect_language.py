@@ -1,9 +1,6 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 
-setup_logging(logging.ERROR)
-logger = structlog.get_logger(__name__)
+logger = get_logger(level=ERROR)
 
 
 async def detect_language(text: str):

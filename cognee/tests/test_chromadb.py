@@ -1,7 +1,5 @@
 import os
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import pathlib
 import cognee
 
@@ -9,8 +7,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 
-setup_logging(logging.DEBUG)
-logger = structlog.get_logger()
+logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location):

@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from typing import AsyncGenerator, Generator
 from uuid import NAMESPACE_OID, uuid5
 
@@ -9,7 +7,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, SourceCodeChunk
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 def _get_naive_subchunk_token_counts(

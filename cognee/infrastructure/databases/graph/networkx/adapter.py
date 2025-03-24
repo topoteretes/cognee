@@ -4,9 +4,7 @@ from datetime import datetime, timezone
 import os
 import json
 import asyncio
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
@@ -18,7 +16,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
 import numpy as np
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 class NetworkXAdapter(GraphDBInterface):

@@ -4,14 +4,12 @@ from fastapi import APIRouter
 from typing import List
 import aiohttp
 import subprocess
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 import os
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 def get_visualize_router() -> APIRouter:

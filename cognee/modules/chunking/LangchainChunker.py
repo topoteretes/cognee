@@ -1,6 +1,4 @@
-import logging
-import structlog
-from cognee.shared.logging_utils import setup_logging
+from cognee.shared.logging_utils import get_logger, INFO
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.modules.chunking.Chunker import Chunker
@@ -8,7 +6,7 @@ from .models.DocumentChunk import DocumentChunk
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from cognee.infrastructure.databases.vector import get_vector_engine
 
-logger = structlog.get_logger(__name__)
+logger = get_logger()
 
 
 class LangchainChunker(Chunker):
