@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 async def check_permission_on_documents(user: User, permission_type: str, document_ids: list[UUID]):
-    user_group_ids = [group.id for group in user.groups]
+    # TODO: Enable user role permissions again. Temporarily disabled during rework.
+    # user_roles_ids = [role.id for role in user.roles]
+    user_roles_ids = []
 
     db_engine = get_relational_engine()
 
@@ -21,13 +23,13 @@ async def check_permission_on_documents(user: User, permission_type: str, docume
         result = await session.execute(
             select(ACL)
             .join(ACL.permission)
-            .options(joinedload(ACL.resources))
-            .where(ACL.principal_id.in_([user.id, *user_group_ids]))
+            .options(joinedload(ACL.data))
+            .where(ACL.principal_id.in_([user.id, *user_roles_ids]))
             .where(ACL.permission.has(name=permission_type))
         )
         acls = result.unique().scalars().all()
-        resource_ids = [resource.resource_id for acl in acls for resource in acl.resources]
-        has_permissions = all(document_id in resource_ids for document_id in document_ids)
+        data_ids = [acl.data.id for acl in acls]
+        has_permissions = all(document_id in data_ids for document_id in document_ids)
 
         if not has_permissions:
             raise PermissionDeniedError(

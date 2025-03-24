@@ -1,7 +1,7 @@
 import os
 import json
 import random
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Union, Tuple
 import zipfile
 
 import gdown
@@ -38,41 +38,8 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_context)
 
-    def _process_item(
-        self,
-        item: dict[str, Any],
-        corpus_list: List[str],
-        question_answer_pairs: List[dict[str, Any]],
-        load_golden_context: bool = False,
-    ) -> None:
-        """Processes a single item and adds it to the corpus and QA pairs."""
-        # Add paragraphs to corpus
-        paragraphs = item.get("paragraphs", [])
-        for paragraph in paragraphs:
-            corpus_list.append(paragraph["paragraph_text"])
-
-        # Create QA pair
-        qa_pair = {
-            "id": item.get("id", ""),
-            "question": item.get("question", ""),
-            "answer": item.get("answer", "").lower()
-            if isinstance(item.get("answer"), str)
-            else item.get("answer"),
-        }
-
-        if load_golden_context:
-            qa_pair["golden_context"] = self._get_golden_context(item)
-
-        question_answer_pairs.append(qa_pair)
-
-    def load_corpus(
-        self,
-        limit: Optional[int] = None,
-        seed: int = 42,
-        load_golden_context: bool = False,
-        auto_download: bool = True,
-    ) -> tuple[list[str], list[dict[str, Any]]]:
-        """Loads and processes the Musique QA dataset."""
+    def _get_raw_corpus(self, auto_download: bool = True) -> List[dict[str, Any]]:
+        """Loads the raw corpus data from file or downloads it if needed."""
         target_filename = self.dataset_info["filename"]
 
         if not os.path.exists(target_filename):
@@ -87,15 +54,55 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         with open(target_filename, "r", encoding="utf-8") as f:
             data = [json.loads(line) for line in f]
 
-        if limit is not None and 0 < limit < len(data):
+        return data
+
+    def _get_corpus_entries(self, item: dict[str, Any]) -> List[str]:
+        """Extracts corpus entries from the paragraphs of an item."""
+        return [paragraph["paragraph_text"] for paragraph in item.get("paragraphs", [])]
+
+    def _get_question_answer_pair(
+        self,
+        item: dict[str, Any],
+        load_golden_context: bool = False,
+    ) -> dict[str, Any]:
+        """Extracts a question-answer pair from an item."""
+        qa_pair = {
+            "id": item.get("id", ""),
+            "question": item.get("question", ""),
+            "answer": item.get("answer", "").lower()
+            if isinstance(item.get("answer"), str)
+            else item.get("answer"),
+        }
+
+        if load_golden_context:
+            qa_pair["golden_context"] = self._get_golden_context(item)
+
+        return qa_pair
+
+    def load_corpus(
+        self,
+        limit: Optional[int] = None,
+        seed: int = 42,
+        load_golden_context: bool = False,
+        auto_download: bool = True,
+        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+    ) -> Tuple[List[str], List[dict[str, Any]]]:
+        """Loads and processes the Musique QA dataset with optional filtering."""
+        raw_corpus = self._get_raw_corpus(auto_download)
+
+        if instance_filter is not None:
+            raw_corpus = self._filter_instances(raw_corpus, instance_filter, id_key="id")
+
+        if limit is not None and 0 < limit < len(raw_corpus):
             random.seed(seed)
-            data = random.sample(data, limit)
+            raw_corpus = random.sample(raw_corpus, limit)
 
         corpus_list = []
         question_answer_pairs = []
 
-        for item in data:
-            self._process_item(item, corpus_list, question_answer_pairs, load_golden_context)
+        for item in raw_corpus:
+            corpus_list.extend(self._get_corpus_entries(item))
+            question_answer_pairs.append(self._get_question_answer_pair(item, load_golden_context))
 
         return corpus_list, question_answer_pairs
 

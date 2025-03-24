@@ -11,7 +11,9 @@ async def get_user(user_id: UUID):
     async with db_engine.get_async_session() as session:
         user = (
             await session.execute(
-                select(User).options(joinedload(User.groups)).where(User.id == user_id)
+                select(User)
+                .options(joinedload(User.roles), joinedload(User.tenant))
+                .where(User.id == user_id)
             )
         ).scalar()
 
