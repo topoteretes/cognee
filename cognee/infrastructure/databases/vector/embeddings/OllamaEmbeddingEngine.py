@@ -50,7 +50,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if self.mock:
             return [[0.0] * self.dimensions for _ in text]
 
-        embeddings = asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
+        embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
     async def _get_embedding(self, prompt: str) -> List[float]:
