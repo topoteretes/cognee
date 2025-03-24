@@ -85,12 +85,6 @@ To use different LLM providers, for more info check out our <a href="https://doc
 
 ### Simple example
 
-Add LLM_API_KEY to .env using the command bellow.
-```
-echo "LLM_API_KEY=YOUR_OPENAI_API_KEY" > .env
-```
-You can see available env variables in the repository `.env.template` file. If you don't specify it otherwise, like in this example, SQLite (relational database), LanceDB (vector database) and NetworkX (graph store) will be used as default components.
-
 This script will run the default pipeline:
 
 ```python
