@@ -8,6 +8,9 @@ from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 
 
+logger = get_logger()
+
+
 async def visualize_graph(destination_file_path: str = None):
     graph_engine = await get_graph_engine()
     graph_data = await graph_engine.get_graph_data()
