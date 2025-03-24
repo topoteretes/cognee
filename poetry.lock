@@ -410,7 +410,7 @@ description = "Timeout context manager for asyncio programs"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "python_version == \"3.10\""
+markers = "python_version < \"3.11\""
 files = [
     {file = "async-timeout-4.0.3.tar.gz", hash = "sha256:4640d96be84d82d02ed59ea2b7105a0f7b33abe8703703cd0ab0bf87c427522f"},
     {file = "async_timeout-4.0.3-py3-none-any.whl", hash = "sha256:7405140ff1230c310e51dc27b3145b9092d659ce68ff733fb0cefe3ee42be028"},
@@ -423,7 +423,7 @@ description = "Timeout context manager for asyncio programs"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version == \"3.11\" and python_full_version < \"3.11.3\" and extra == \"falkordb\""
+markers = "extra == \"falkordb\" and python_full_version < \"3.11.3\" and python_version == \"3.11\""
 files = [
     {file = "async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c"},
     {file = "async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3"},
@@ -567,7 +567,7 @@ description = "Backport of CPython tarfile module"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\") and extra == \"deepeval\""
+markers = "extra == \"deepeval\" and python_version <= \"3.11\""
 files = [
     {file = "backports.tarfile-1.2.0-py3-none-any.whl", hash = "sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34"},
     {file = "backports_tarfile-1.2.0.tar.gz", hash = "sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991"},
@@ -603,7 +603,7 @@ description = "Modern password hashing for your software and your servers"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"chromadb\" or extra == \"api\""
+markers = "extra == \"api\" or extra == \"chromadb\""
 files = [
     {file = "bcrypt-4.3.0-cp313-cp313t-macosx_10_12_universal2.whl", hash = "sha256:f01e060f14b6b57bbb72fc5b4a83ac21c443c9a2ee708e04a10e9192f90a6281"},
     {file = "bcrypt-4.3.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c5eeac541cefd0bb887a371ef73c62c3cd78535e4887b310626036a7c0a817bb"},
@@ -921,7 +921,7 @@ files = [
     {file = "cffi-1.17.1-cp39-cp39-win_amd64.whl", hash = "sha256:d016c76bdd850f3c626af19b0542c9677ba156e4ee4fccfdd7848803533ef662"},
     {file = "cffi-1.17.1.tar.gz", hash = "sha256:1c39c6016c32bc48dd54561950ebd6836e1670f2ae46128f67cf49e789c52824"},
 ]
-markers = {main = "(sys_platform == \"linux\" or python_version >= \"3.13\" or extra == \"weaviate\" or extra == \"api\" or extra == \"docs\") and (platform_python_implementation != \"PyPy\" or extra == \"api\" or python_version >= \"3.13\") and (python_version >= \"3.13\" or extra == \"deepeval\" or extra == \"weaviate\" or extra == \"api\" or extra == \"docs\")"}
+markers = {main = "(extra == \"deepeval\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\") and (sys_platform == \"linux\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\") and (platform_python_implementation != \"PyPy\" or extra == \"api\" or python_version >= \"3.13\")"}
 
 [package.dependencies]
 pycparser = "*"
@@ -1174,7 +1174,7 @@ description = "Colored terminal output for Python's logging module"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "coloredlogs-15.0.1-py2.py3-none-any.whl", hash = "sha256:612ee75c546f53e92e70049c9dbfcc18c935a2b9a53b66085ce9ef6a6e5c0934"},
     {file = "coloredlogs-15.0.1.tar.gz", hash = "sha256:7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0"},
@@ -1361,7 +1361,7 @@ description = "cryptography is a package which provides cryptographic recipes an
 optional = false
 python-versions = "!=3.9.0,!=3.9.1,>=3.7"
 groups = ["main"]
-markers = "sys_platform == \"linux\" and (extra == \"deepeval\" or extra == \"weaviate\" or extra == \"api\" or extra == \"docs\") or (extra == \"weaviate\" or extra == \"api\" or extra == \"docs\") and (extra == \"deepeval\" or extra == \"weaviate\" or extra == \"api\" or extra == \"docs\")"
+markers = "extra == \"deepeval\" and sys_platform == \"linux\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\""
 files = [
     {file = "cryptography-44.0.2-cp37-abi3-macosx_10_9_universal2.whl", hash = "sha256:efcfe97d1b3c79e486554efddeb8f6f53a4cdd4cf6086642784fa31fc384e1d7"},
     {file = "cryptography-44.0.2-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:29ecec49f3ba3f3849362854b7253a9f59799e3763b0c9d0826259a88efa02f1"},
@@ -1974,7 +1974,7 @@ description = "Backport of PEP 654 (exception groups)"
 optional = false
 python-versions = ">=3.7"
 groups = ["main", "dev"]
-markers = "python_version == \"3.10\""
+markers = "python_version < \"3.11\""
 files = [
     {file = "exceptiongroup-1.2.2-py3-none-any.whl", hash = "sha256:3111b9d131c238bec2f8f516e123e14ba243563fb135d3fe885990585aa7795b"},
     {file = "exceptiongroup-1.2.2.tar.gz", hash = "sha256:47c2edf7c6738fafb49fd34290706d1a1a2f4d1c6df275526b62cbb4aa5393cc"},
@@ -2102,7 +2102,7 @@ description = "Fast, light, accurate library built for retrieval embedding gener
 optional = true
 python-versions = ">=3.9.0"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\") and extra == \"codegraph\""
+markers = "python_version < \"3.13\" and extra == \"codegraph\""
 files = [
     {file = "fastembed-0.6.0-py3-none-any.whl", hash = "sha256:a08385e9388adea0529a586004f2d588c9787880a510e4e5d167127a11e75328"},
     {file = "fastembed-0.6.0.tar.gz", hash = "sha256:5c9ead25f23449535b07243bbe1f370b820dcc77ec2931e61674e3fe7ff24733"},
@@ -2174,7 +2174,7 @@ description = "The FlatBuffers serialization format for Python"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "flatbuffers-25.2.10-py2.py3-none-any.whl", hash = "sha256:ebba5f4d5ea615af3f7fd70fc310636fbb2bbd1f566ac0a23d98dd412de50051"},
     {file = "flatbuffers-25.2.10.tar.gz", hash = "sha256:97e451377a41262f8d9bd4295cc836133415cc03d8cb966410a4af92eb00d26e"},
@@ -2607,7 +2607,7 @@ description = "Lightweight in-process concurrent programming"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "(platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\") and (python_version == \"3.10\" or extra == \"api\" or extra == \"llama-index\" or extra == \"deepeval\") and (python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\")"
+markers = "(platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\") and (extra == \"api\" or extra == \"llama-index\" or extra == \"deepeval\") and python_version < \"3.13\""
 files = [
     {file = "greenlet-3.1.1-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:0bbae94a29c9e5c7e4a2b7f0aae5c17e8e90acbfd3bf6270eeba60c39fce3563"},
     {file = "greenlet-3.1.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0fde093fb93f35ca72a556cf72c92ea3ebfda3d79fc35bb19fbe685853869a83"},
@@ -3156,7 +3156,7 @@ description = "Human friendly output for text interfaces using Python"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477"},
     {file = "humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc"},
@@ -3357,7 +3357,7 @@ description = "IPython: Productive Interactive Computing"
 optional = true
 python-versions = ">=3.10"
 groups = ["dev"]
-markers = "python_version == \"3.10\""
+markers = "python_version < \"3.11\""
 files = [
     {file = "ipython-8.34.0-py3-none-any.whl", hash = "sha256:0419883fa46e0baa182c5d50ebb8d6b49df1889fdb70750ad6d8cfe678eda6e3"},
     {file = "ipython-8.34.0.tar.gz", hash = "sha256:c31d658e754673ecc6514583e7dda8069e47136eb62458816b7d1e6625948b5a"},
@@ -4795,7 +4795,7 @@ description = "Python logging made (stupidly) simple"
 optional = true
 python-versions = "<4.0,>=3.5"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\") and extra == \"codegraph\""
+markers = "python_version < \"3.13\" and extra == \"codegraph\""
 files = [
     {file = "loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c"},
     {file = "loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6"},
@@ -5475,7 +5475,7 @@ description = "Python extension for MurmurHash (MurmurHash3), a set of fast and 
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "(extra == \"codegraph\" or extra == \"chromadb\") and python_version < \"3.13\" or extra == \"chromadb\""
 files = [
     {file = "mmh3-5.1.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:eaf4ac5c6ee18ca9232238364d7f2a213278ae5ca97897cafaa123fcc7bb8bec"},
     {file = "mmh3-5.1.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:48f9aa8ccb9ad1d577a16104834ac44ff640d8de8c0caed09a2300df7ce8460a"},
@@ -5575,7 +5575,7 @@ description = "An implementation of time.monotonic() for Python 2 & < 3.3"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"posthog\" or extra == \"chromadb\""
+markers = "extra == \"chromadb\" or extra == \"posthog\""
 files = [
     {file = "monotonic-1.6-py2.py3-none-any.whl", hash = "sha256:68687e19a14f11f26d140dd5c86f3dba4bf5df58003000ed467e0e2a69bca96c"},
     {file = "monotonic-1.6.tar.gz", hash = "sha256:3a55207bcfed53ddd5c5bae174524062935efed17792e9de2ad0205ce9ad63f7"},
@@ -5601,7 +5601,7 @@ description = "Python library for arbitrary-precision floating-point arithmetic"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"},
     {file = "mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"},
@@ -6164,7 +6164,7 @@ description = "ONNX Runtime is a runtime accelerator for Machine Learning models
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "onnxruntime-1.21.0-cp310-cp310-macosx_13_0_universal2.whl", hash = "sha256:95513c9302bc8dd013d84148dcf3168e782a80cdbf1654eddc948a23147ccd3d"},
     {file = "onnxruntime-1.21.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:635d4ab13ae0f150dd4c6ff8206fd58f1c6600636ecc796f6f0c42e4c918585b"},
@@ -6648,8 +6648,8 @@ files = [
 [package.dependencies]
 numpy = [
     {version = ">=1.22.4", markers = "python_version < \"3.11\""},
-    {version = ">=1.23.2", markers = "python_version == \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
+    {version = ">=1.23.2", markers = "python_version == \"3.11\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -6745,7 +6745,7 @@ description = "Python datetimes made easy"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\""
+markers = "python_version < \"3.13\""
 files = [
     {file = "pendulum-3.0.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:2cf9e53ef11668e07f73190c805dbdf07a1939c3298b78d5a9203a86775d1bfd"},
     {file = "pendulum-3.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:fb551b9b5e6059377889d2d878d940fd0bbb80ae4810543db18e6f77b02c5ef6"},
@@ -7069,7 +7069,7 @@ description = "Integrate PostHog into any python application."
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"posthog\" or extra == \"chromadb\""
+markers = "extra == \"chromadb\" or extra == \"posthog\""
 files = [
     {file = "posthog-3.21.0-py2.py3-none-any.whl", hash = "sha256:1e07626bb5219369dd36826881fa61711713e8175d3557db4657e64ecb351467"},
     {file = "posthog-3.21.0.tar.gz", hash = "sha256:62e339789f6f018b6a892357f5703d1f1e63c97aee75061b3dc97c5e5c6a5304"},
@@ -7253,7 +7253,7 @@ description = ""
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"qdrant\" or extra == \"weaviate\" or extra == \"chromadb\" or extra == \"deepeval\" or extra == \"milvus\") and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"qdrant\" or extra == \"weaviate\" or extra == \"deepeval\" or extra == \"milvus\")"
+markers = "python_version == \"3.10\" and extra == \"codegraph\" or (extra == \"chromadb\" or extra == \"qdrant\" or extra == \"weaviate\" or extra == \"deepeval\" or extra == \"milvus\") and python_version < \"3.11\" or (python_version == \"3.12\" or extra == \"qdrant\" or extra == \"weaviate\" or extra == \"chromadb\" or extra == \"deepeval\" or extra == \"milvus\") and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"qdrant\" or extra == \"weaviate\" or extra == \"deepeval\" or extra == \"milvus\") and python_version >= \"3.12\" or python_version == \"3.11\" and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"qdrant\" or extra == \"weaviate\" or extra == \"deepeval\" or extra == \"milvus\")"
 files = [
     {file = "protobuf-5.29.4-cp310-abi3-win32.whl", hash = "sha256:13eb236f8eb9ec34e63fc8b1d6efd2777d062fa6aaa68268fb67cf77f6839ad7"},
     {file = "protobuf-5.29.4-cp310-abi3-win_amd64.whl", hash = "sha256:bcefcdf3976233f8a502d265eb65ea740c989bacc6c30a58290ed0e519eb4b8d"},
@@ -7369,7 +7369,7 @@ description = "Fast and parallel snowball stemmer"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\") and extra == \"codegraph\""
+markers = "python_version < \"3.13\" and extra == \"codegraph\""
 files = [
     {file = "py_rust_stemmers-0.1.5-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:bfbd9034ae00419ff2154e33b8f5b4c4d99d1f9271f31ed059e5c7e9fa005844"},
     {file = "py_rust_stemmers-0.1.5-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c7162ae66df2bb0fc39b350c24a049f5f5151c03c046092ba095c2141ec223a2"},
@@ -7533,7 +7533,7 @@ files = [
     {file = "pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc"},
     {file = "pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6"},
 ]
-markers = {main = "(platform_python_implementation != \"PyPy\" or extra == \"api\" or python_version >= \"3.13\") and (sys_platform == \"linux\" or extra == \"weaviate\" or extra == \"api\" or extra == \"docs\" or python_version >= \"3.13\") and (python_version >= \"3.13\" or extra == \"deepeval\" or extra == \"weaviate\" or extra == \"api\" or extra == \"docs\")"}
+markers = {main = "(extra == \"deepeval\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\") and (platform_python_implementation != \"PyPy\" or extra == \"api\" or python_version >= \"3.13\") and (sys_platform == \"linux\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\")"}
 
 [[package]]
 name = "pydantic"
@@ -7773,8 +7773,8 @@ astroid = ">=3.3.8,<=3.4.0.dev0"
 colorama = {version = ">=0.4.5", markers = "sys_platform == \"win32\""}
 dill = [
     {version = ">=0.2", markers = "python_version < \"3.11\""},
-    {version = ">=0.3.6", markers = "python_version >= \"3.11\""},
     {version = ">=0.3.7", markers = "python_version >= \"3.12\""},
+    {version = ">=0.3.6", markers = "python_version == \"3.11\""},
 ]
 isort = ">=4.2.5,<5.13 || >5.13,<7"
 mccabe = ">=0.6,<0.8"
@@ -7915,7 +7915,7 @@ description = "A python implementation of GNU readline."
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "sys_platform == \"win32\" and (extra == \"codegraph\" or extra == \"chromadb\") and (python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\")"
+markers = "sys_platform == \"win32\" and (python_version == \"3.10\" or extra == \"chromadb\" or extra == \"codegraph\") and (extra == \"chromadb\" or python_version == \"3.12\" or python_version == \"3.10\" or python_version == \"3.11\") and (extra == \"codegraph\" or extra == \"chromadb\")"
 files = [
     {file = "pyreadline3-3.5.4-py3-none-any.whl", hash = "sha256:eaf8e6cc3c49bcccf145fc6067ba8643d1df34d604a1ec0eccbf7a18e6d3fae6"},
     {file = "pyreadline3-3.5.4.tar.gz", hash = "sha256:8d57d53039a1c75adba8e50dd3d992b28143480816187ea5efbd5c78e6c885b7"},
@@ -8476,7 +8476,7 @@ description = "Client library for the Qdrant vector search engine"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\") and extra == \"qdrant\""
+markers = "python_version < \"3.13\" and extra == \"qdrant\""
 files = [
     {file = "qdrant_client-1.13.3-py3-none-any.whl", hash = "sha256:f52cacbb936e547d3fceb1aaed3e3c56be0ebfd48e8ea495ea3dbc89c671d1d2"},
     {file = "qdrant_client-1.13.3.tar.gz", hash = "sha256:61ca09e07c6d7ac0dfbdeb13dca4fe5f3e08fa430cb0d74d66ef5d023a70adfc"},
@@ -9790,7 +9790,7 @@ description = "Computer algebra system (CAS) in Python"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "sympy-1.13.3-py3-none-any.whl", hash = "sha256:54612cf55a62755ee71824ce692986f23c88ffa77207b30c1368eda4a7060f73"},
     {file = "sympy-1.13.3.tar.gz", hash = "sha256:b27fd2c6530e0ab39e275fc9b683895367e51d5da91baa8d3d64db2565fec4d9"},
@@ -9975,7 +9975,7 @@ description = "A lil' TOML parser"
 optional = false
 python-versions = ">=3.8"
 groups = ["main", "dev"]
-markers = "python_version == \"3.10\""
+markers = "python_version < \"3.11\""
 files = [
     {file = "tomli-2.2.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:678e4fa69e4575eb77d103de3df8a895e1591b48e740211bd1067378c69e8249"},
     {file = "tomli-2.2.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:023aa114dd824ade0100497eb2318602af309e5a55595f76b626d6d9f3b7b0a6"},
@@ -11031,7 +11031,7 @@ description = "A small Python utility to set file creation time on Windows"
 optional = true
 python-versions = ">=3.5"
 groups = ["main"]
-markers = "extra == \"codegraph\" and sys_platform == \"win32\" and (python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\")"
+markers = "extra == \"codegraph\" and sys_platform == \"win32\" and python_version < \"3.13\""
 files = [
     {file = "win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390"},
     {file = "win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0"},
@@ -11308,4 +11308,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "5461d9f11d99217d0dc336124cca5a6c8a08cc8bc83f71dd95f3fdc3bba37045"
+content-hash = "bc5152caab0286ac54dceb3341773d566cadbc11a8d57c06048f7e91943235f9"

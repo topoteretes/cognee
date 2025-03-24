@@ -1,8 +1,10 @@
 import asyncio
-import requests
+import aiohttp
 import logging
 from typing import List, Optional
 import os
+
+import aiohttp.http_exceptions
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
@@ -67,14 +69,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
-                response = requests.post(self.endpoint, json=payload, headers=headers, timeout=60.0)
-                response.raise_for_status()
-                data = response.json()
-
-                future = asyncio.Future()
-                future.set_result(data["embedding"])
-                return future
-            except requests.exceptions.HTTPError as e:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        self.endpoint, json=payload, headers=headers, timeout=60.0
+                    ) as response:
+                        data = response.json()
+                        return data["embedding"]
+            except aiohttp.http_exceptions.HttpBadRequest as e:
                 logger.error(f"HTTP error on attempt {retries + 1}: {e}")
                 retries += 1
                 await asyncio.sleep(min(2**retries, 60))
