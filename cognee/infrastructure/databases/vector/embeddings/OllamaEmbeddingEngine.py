@@ -70,7 +70,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 response = requests.post(self.endpoint, json=payload, headers=headers, timeout=60.0)
                 response.raise_for_status()
                 data = response.json()
-                return data["embedding"]
+
+                future = asyncio.Future()
+                future.set_result(data["embedding"])
+                return future
             except requests.exceptions.HTTPError as e:
                 logger.error(f"HTTP error on attempt {retries + 1}: {e}")
                 retries += 1
