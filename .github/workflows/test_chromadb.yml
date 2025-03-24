@@ -44,7 +44,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install --extra chromadb --no-interaction
 
       - name: Run chromadb test
         env:

@@ -44,7 +44,10 @@ def get_add_router() -> APIRouter:
 
                         return await cognee_add(file_data)
 
-                    return JSONResponse(status_code=400, content={"error": f"Invalid content sent to cognee: {data}"})
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": f"Invalid content sent to cognee: {data}"},
+                    )
             else:
                 await cognee_add(
                     data,
