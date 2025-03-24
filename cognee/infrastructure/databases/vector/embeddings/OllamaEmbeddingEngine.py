@@ -70,10 +70,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         while retries < self.MAX_RETRIES:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(
+                    async with session.post(
                         self.endpoint, json=payload, headers=headers, timeout=60.0
                     ) as response:
-                        data = response.json()
+                        data = await response.json()
                         return data["embedding"]
             except aiohttp.http_exceptions.HttpBadRequest as e:
                 logger.error(f"HTTP error on attempt {retries + 1}: {e}")
