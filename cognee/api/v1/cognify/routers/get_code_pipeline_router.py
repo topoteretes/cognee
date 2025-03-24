@@ -22,6 +22,12 @@ class CodePipelineRetrievePayloadDTO(InDTO):
 
 
 def get_code_pipeline_router() -> APIRouter:
+    try:
+        import run_code_graph_pipeline
+    except ModuleNotFoundError:
+        logger.error("tree-sitter module not found. Skipping codegraph API routes.")
+        return None
+
     router = APIRouter()
 
     @router.post("/index", response_model=None)
