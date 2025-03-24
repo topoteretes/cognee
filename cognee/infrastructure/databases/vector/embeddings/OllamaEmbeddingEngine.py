@@ -1,5 +1,5 @@
 import asyncio
-import httpx
+import requests
 import logging
 from typing import List, Optional
 import os
@@ -48,14 +48,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if self.mock:
             return [[0.0] * self.dimensions for _ in text]
 
-        embeddings = []
-        async with httpx.AsyncClient() as client:
-            for prompt in text:
-                embedding = await self._get_embedding(client, prompt)
-                embeddings.append(embedding)
+        embeddings = asyncio.gather(**[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
-    async def _get_embedding(self, client: httpx.AsyncClient, prompt: str) -> List[float]:
+    async def _get_embedding(self, prompt: str) -> List[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
@@ -71,13 +67,11 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
-                response = await client.post(
-                    self.endpoint, json=payload, headers=headers, timeout=60.0
-                )
+                response = requests.post(self.endpoint, json=payload, headers=headers, timeout=60.0)
                 response.raise_for_status()
                 data = response.json()
                 return data["embedding"]
-            except httpx.HTTPStatusError as e:
+            except requests.exceptions.HTTPError as e:
                 logger.error(f"HTTP error on attempt {retries + 1}: {e}")
                 retries += 1
                 await asyncio.sleep(min(2**retries, 60))

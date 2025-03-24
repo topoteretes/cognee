@@ -2,7 +2,6 @@ from typing import Type, Optional
 from pydantic import BaseModel
 import logging
 import litellm
-import asyncio
 from litellm import acompletion, JSONSchemaValidationError
 from cognee.shared.data_models import MonitoringTool
 from cognee.exceptions import InvalidValueError
@@ -13,6 +12,7 @@ from cognee.base_config import get_base_config
 logger = logging.getLogger(__name__)
 
 monitoring = get_base_config().monitoring_tool
+
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 
