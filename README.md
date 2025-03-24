@@ -96,52 +96,30 @@ This script will run the default pipeline:
 ```python
 import cognee
 import asyncio
-from cognee.modules.search.types import SearchType
+
 
 async def main():
-    # Create a clean slate for cognee -- reset data and system state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    # cognee knowledge graph will be created based on this text
-    text = """
-    Natural language processing (NLP) is an interdisciplinary
-    subfield of computer science and information retrieval.
-    """
+    # Add text to cognee
+    await cognee.add("Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.")
 
-    print("Adding text to cognee:")
-    print(text.strip())
-    # Add the text, and make it available for cognify
-    await cognee.add(text)
-
-    # Use LLMs and cognee to create knowledge graph
+    # Generate the knowledge graph
     await cognee.cognify()
-    print("Cognify process complete.\n")
 
+    # Query the knowledge graph
+    results = await cognee.search("Tell me about NLP")
 
-    query_text = "Tell me about NLP"
-    print(f"Searching cognee for insights with query: '{query_text}'")
-    # Query cognee for insights on the added text
-    search_results = await cognee.search(
-        query_text=query_text, query_type=SearchType.INSIGHTS
-    )
+    # Display the results
+    for result in results:
+        print(result)
 
-    print("Search results:")
-    # Display results
-    for result_text in search_results:
-        print(result_text)
-
-    # Example output:
-       # ({'id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'natural language processing', 'description': 'An interdisciplinary subfield of computer science and information retrieval.'}, {'relationship_name': 'is_a_subfield_of', 'source_node_id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'target_node_id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 15, 473137, tzinfo=datetime.timezone.utc)}, {'id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'computer science', 'description': 'The study of computation and information processing.'})
-       # (...)
-        #
-        # It represents nodes and relationships in the knowledge graph:
-        # - The first element is the source node (e.g., 'natural language processing').
-        # - The second element is the relationship between nodes (e.g., 'is_a_subfield_of').
-        # - The third element is the target node (e.g., 'computer science').
 
 if __name__ == '__main__':
     asyncio.run(main())
 
+```
+Example output:
+```
+       # ({'id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'natural language processing', 'description': 'An interdisciplinary subfield of computer science and information retrieval.'}, {'relationship_name': 'is_a_subfield_of', 'source_node_id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'target_node_id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 15, 473137, tzinfo=datetime.timezone.utc)}, {'id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'computer science', 'description': 'The study of computation and information processing.'})
 ```
 For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
 
