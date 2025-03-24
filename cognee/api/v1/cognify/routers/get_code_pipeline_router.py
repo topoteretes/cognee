@@ -1,5 +1,5 @@
 import json
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO

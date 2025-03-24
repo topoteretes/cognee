@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import asyncio
 from cognee.eval_framework.eval_config import EvalConfig
 

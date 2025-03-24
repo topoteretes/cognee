@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload

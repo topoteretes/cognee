@@ -9,6 +9,9 @@ WARNING = logging.WARNING
 ERROR = logging.ERROR
 CRITICAL = logging.CRITICAL
 
+# Track if logging has been configured
+_is_configured = False
+
 
 def get_logger(name=None, level=INFO):
     """Get a configured structlog logger.
@@ -20,7 +23,12 @@ def get_logger(name=None, level=INFO):
     Returns:
         A configured structlog logger instance
     """
-    return setup_logging(level, name)
+    global _is_configured
+    if not _is_configured:
+        setup_logging(level)
+        _is_configured = True
+
+    return structlog.get_logger(name if name else __name__)
 
 
 def setup_logging(log_level=INFO, name=None):

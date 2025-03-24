@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from typing import AsyncGenerator, Generator
 from uuid import NAMESPACE_OID, uuid5
 

@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import litellm
 
 from cognee.infrastructure.databases.vector import get_vector_engine

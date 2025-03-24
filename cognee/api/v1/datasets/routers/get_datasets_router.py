@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from fastapi import APIRouter
 from datetime import datetime
 from uuid import UUID

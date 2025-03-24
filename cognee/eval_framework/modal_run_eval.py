@@ -3,7 +3,7 @@ import os
 import json
 import asyncio
 import datetime
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 from cognee.eval_framework.answer_generation.run_question_answering_module import (

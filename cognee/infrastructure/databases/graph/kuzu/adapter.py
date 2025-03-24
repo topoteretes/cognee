@@ -1,6 +1,6 @@
 """Adapter for Kuzu graph database."""
 
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import json
 import os
 import shutil

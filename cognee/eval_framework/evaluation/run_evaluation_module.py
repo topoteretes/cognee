@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import json
 from typing import List
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor

@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from typing import List
 import aiohttp
 import subprocess
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import os
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user

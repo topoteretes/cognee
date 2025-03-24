@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import json
 from typing import List, Optional
 from cognee.eval_framework.answer_generation.answer_generation_executor import (

@@ -2,7 +2,7 @@
 
 import os
 import uvicorn
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import sentry_sdk
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response

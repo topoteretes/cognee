@@ -7,7 +7,7 @@ from tree_sitter import Language, Node, Parser, Tree
 
 import aiofiles
 
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 
 from cognee.low_level import DataPoint
 from cognee.shared.CodeGraphEntities import (

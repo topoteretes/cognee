@@ -1,6 +1,6 @@
 import os
 from os import path
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List

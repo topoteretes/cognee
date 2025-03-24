@@ -5,7 +5,7 @@ from uuid import NAMESPACE_OID, uuid5
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart
 from cognee.tasks.repo_processor.extract_code_parts import extract_code_parts
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

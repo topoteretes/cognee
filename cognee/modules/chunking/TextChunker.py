@@ -1,4 +1,4 @@
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph

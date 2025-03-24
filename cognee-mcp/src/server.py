@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import cognee
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 

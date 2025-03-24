@@ -2,7 +2,7 @@ import os
 
 from tqdm import tqdm
 
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

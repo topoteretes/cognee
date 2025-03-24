@@ -1,5 +1,5 @@
 import os
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
 

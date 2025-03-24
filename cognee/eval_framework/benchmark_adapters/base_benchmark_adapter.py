@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Any, Union, Tuple
 import os
 import json
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

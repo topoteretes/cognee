@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import os
 
 from cognee.api.v1.search import SearchType

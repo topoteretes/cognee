@@ -1,6 +1,6 @@
 from typing import Type, Optional
 from pydantic import BaseModel
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 import litellm
 import asyncio
 from litellm import acompletion, JSONSchemaValidationError

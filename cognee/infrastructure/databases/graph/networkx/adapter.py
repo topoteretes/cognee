@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 import json
 import asyncio
-from cognee.shared.logging_utils import get_logger, INFO
+from cognee.shared.logging_utils import get_logger
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
