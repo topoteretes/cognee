@@ -18,7 +18,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.infrastructure.databases.graph.migrate_relational_database import (
-    migrate_relational_database_kuzu,
+    migrate_relational_database,
 )
 
 logger = logging.getLogger(__name__)
@@ -927,4 +927,4 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def migrate_relational_database(self, schema):
-        await migrate_relational_database_kuzu(self, schema=schema)
+        await migrate_relational_database(self, schema=schema)

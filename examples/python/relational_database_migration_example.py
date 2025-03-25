@@ -9,6 +9,15 @@ from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
 )
 from cognee.shared.utils import setup_logging
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import get_default_user
+
+from cognee.infrastructure.databases.relational import (
+    create_db_and_tables as create_relational_db_and_tables,
+)
+from cognee.infrastructure.databases.vector.pgvector import (
+    create_db_and_tables as create_pgvector_db_and_tables,
+)
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -22,6 +31,11 @@ async def main():
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
+
+    # Needed to create principals table
+    # Create tables for databases
+    await create_relational_db_and_tables()
+    await create_pgvector_db_and_tables()
 
     print("Extracting schema of database to migrate.")
     schema = await engine.extract_schema()
@@ -40,6 +54,11 @@ async def main():
     print("Adding html visualization of graph database after migration.")
     await visualize_graph(destination_file_path)
     print(f"Visualization can be found at: {destination_file_path}")
+
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="What kind of data do you contain?"
+    )
+    print(f"Search results: {search_results}")
 
 
 if __name__ == "__main__":
