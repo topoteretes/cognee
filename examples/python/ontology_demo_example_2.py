@@ -20,8 +20,6 @@ async def run_pipeline(ontology_path=None):
 
     pipeline_run = await cognee.cognify(ontology_file_path=ontology_path)
 
-    await cognee.get_pipeline_run_metrics(pipeline_run, include_optional=True)
-
     return pipeline_run
 
 
@@ -37,10 +35,10 @@ async def query_pipeline(questions):
     return answers
 
 
-def print_comparison_table(questions, answers_with, answers_without, col_width=40):
+def print_comparison_table(questions, answers_with, answers_without, col_width=45):
     separator = "-" * (col_width * 3 + 6)
 
-    header = f"{'Question'.ljust(col_width)} | {'WITH Ontology'.ljust(col_width)} | {'WITHOUT Ontology'.ljust(col_width)}"
+    header = f"{'Question'.ljust(col_width)} | {'WITH Ontology (owl grounded facts)'.ljust(col_width)} | {'WITHOUT Ontology'.ljust(col_width)}"
     print(separator)
     print(header)
     print(separator)
