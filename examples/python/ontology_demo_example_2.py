@@ -5,7 +5,6 @@ import os
 import textwrap
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.utils import setup_logging
 
 
 async def run_pipeline(ontology_path=None):
@@ -66,8 +65,6 @@ def print_comparison_table(questions, answers_with, answers_without, col_width=4
 
 
 async def main():
-    setup_logging(logging.ERROR)
-
     questions = [
         "What are common risk factors for Type 2 Diabetes?",
         "What preventive measures reduce the risk of Hypertension?",
