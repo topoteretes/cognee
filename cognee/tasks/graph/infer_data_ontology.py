@@ -2,7 +2,7 @@
 
 import csv
 import json
-import logging
+from cognee.shared.logging_utils import get_logger
 from datetime import datetime, timezone
 from fastapi import status
 from typing import Any, Dict, List, Optional, Union, Type
@@ -27,7 +27,7 @@ from cognee.tasks.graph.models import NodeModel, GraphOntology
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.engine.utils import generate_node_id, generate_node_name
 
-logger = logging.getLogger("task:infer_data_ontology")
+logger = get_logger("task:infer_data_ontology")
 
 
 async def extract_ontology(content: str, response_model: Type[BaseModel]):

@@ -1,11 +1,10 @@
 import cognee
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 import os
 
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.utils import setup_logging
 
 text_1 = """
 1. Audi
@@ -79,7 +78,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    setup_logging(logging.INFO)
+    logger = get_logger()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

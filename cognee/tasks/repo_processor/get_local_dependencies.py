@@ -1,11 +1,11 @@
 import os
-import logging
 import aiofiles
 import importlib
 from typing import AsyncGenerator, Optional
 from uuid import NAMESPACE_OID, uuid5
 import tree_sitter_python as tspython
 from tree_sitter import Language, Node, Parser, Tree
+from cognee.shared.logging_utils import get_logger
 
 from cognee.low_level import DataPoint
 from cognee.shared.CodeGraphEntities import (
@@ -15,7 +15,7 @@ from cognee.shared.CodeGraphEntities import (
     ClassDefinition,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class FileParser:

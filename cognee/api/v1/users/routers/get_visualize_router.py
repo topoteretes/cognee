@@ -1,11 +1,11 @@
-import logging
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def get_visualize_router() -> APIRouter:

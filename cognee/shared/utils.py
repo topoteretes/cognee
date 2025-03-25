@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
-import logging
 import sys
 
 from cognee.base_config import get_base_config
@@ -235,9 +234,6 @@ async def render_graph(
 #     return df.replace([np.inf, -np.inf, np.nan], None)
 
 
-logging.basicConfig(level=logging.INFO)
-
-
 async def convert_to_serializable_graph(G):
     """
     Convert a graph into a serializable format with stringified node and edge attributes.
@@ -321,23 +317,6 @@ def graph_to_tuple(graph):
     nodes = list(graph.nodes(data=True))  # Get nodes with attributes
     edges = list(graph.edges(data=True))  # Get edges with attributes
     return (nodes, edges)
-
-
-def setup_logging(log_level=logging.INFO):
-    """Sets up the logging configuration."""
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s\n")
-
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    stream_handler.setLevel(log_level)
-
-    root_logger = logging.getLogger()
-
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-
-    root_logger.addHandler(stream_handler)
-    root_logger.setLevel(log_level)
 
 
 def start_visualization_server(

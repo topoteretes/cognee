@@ -1,4 +1,4 @@
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import Dict, List, Optional
 
 from cognee.infrastructure.engine.utils import parse_id
@@ -11,7 +11,7 @@ from cognee.infrastructure.engine import DataPoint
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..vector_db_interface import VectorDBInterface
 
-logger = logging.getLogger("QDrantAdapter")
+logger = get_logger("QDrantAdapter")
 
 
 class IndexSchema(DataPoint):

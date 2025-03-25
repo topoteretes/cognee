@@ -1,7 +1,7 @@
 """Neo4j Adapter for Graph Database"""
 
 import json
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
 from typing import Optional, Any, List, Dict
@@ -22,7 +22,7 @@ from .neo4j_metrics_utils import (
     count_self_loops,
 )
 
-logger = logging.getLogger("Neo4jAdapter")
+logger = get_logger("Neo4jAdapter", level=ERROR)
 
 
 class Neo4jAdapter(GraphDBInterface):

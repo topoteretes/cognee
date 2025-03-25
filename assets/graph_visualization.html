@@ -1,59 +1,4 @@
-from cognee.shared.logging_utils import get_logger
-import networkx as nx
-import json
-import os
 
-from cognee.infrastructure.files.storage import LocalStorage
-
-
-logger = get_logger()
-
-
-async def cognee_network_visualization(graph_data, destination_file_path: str = None):
-    nodes_data, edges_data = graph_data
-
-    G = nx.DiGraph()
-
-    nodes_list = []
-    color_map = {
-        "Entity": "#f47710",
-        "EntityType": "#6510f4",
-        "DocumentChunk": "#801212",
-        "TextSummary": "#1077f4",
-        "default": "#D3D3D3",
-    }
-
-    for node_id, node_info in nodes_data:
-        node_info = node_info.copy()
-        node_info["id"] = str(node_id)
-        node_info["color"] = color_map.get(node_info.get("type", "default"), "#D3D3D3")
-        node_info["name"] = node_info.get("name", str(node_id))
-
-        try:
-            del node_info[
-                "updated_at"
-            ]  #:TODO: We should decide what properties to show on the nodes and edges, we dont necessarily need all.
-        except KeyError:
-            pass
-
-        try:
-            del node_info["created_at"]
-        except KeyError:
-            pass
-
-        nodes_list.append(node_info)
-        G.add_node(node_id, **node_info)
-
-    edge_labels = {}
-    links_list = []
-    for source, target, relation, edge_info in edges_data:
-        source = str(source)
-        target = str(target)
-        G.add_edge(source, target)
-        edge_labels[(source, target)] = relation
-        links_list.append({"source": source, "target": target, "relation": relation})
-
-    html_template = """
     <!DOCTYPE html>
     <html>
     <head>
@@ -72,8 +17,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     <body>
         <svg></svg>
         <script>
-            var nodes = {nodes};
-            var links = {links};
+            var nodes = [{"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["text"]}, "type": "DocumentChunk", "text": "Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.", "chunk_size": 34, "chunk_index": 0, "cut_type": "sentence_end", "id": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220", "color": "#801212", "name": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["name"]}, "type": "Entity", "name": "natural language processing", "description": "An interdisciplinary subfield of computer science and information retrieval.", "ontology_valid": false, "id": "bc338a39-64d6-549a-acec-da60846dd90d", "color": "#f47710"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["name"]}, "type": "EntityType", "name": "concept", "description": "concept", "ontology_valid": false, "id": "dd9713b7-dc20-5101-aad0-1c4216811147", "color": "#6510f4"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["name"]}, "type": "Entity", "name": "information retrieval", "description": "The activity of obtaining information system resources that are relevant to an information need.", "ontology_valid": false, "id": "02bdab9a-0981-518c-a0d4-1684e0329447", "color": "#f47710"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["name"]}, "type": "EntityType", "name": "field", "description": "field", "ontology_valid": false, "id": "0198571b-3e94-50ea-8b9f-19e3a31080c0", "color": "#6510f4"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["name"]}, "type": "Entity", "name": "computer science", "description": "The study of computers and computational systems.", "ontology_valid": false, "id": "6218dbab-eb6a-5759-a864-b3419755ffe0", "color": "#f47710"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["name"]}, "type": "TextDocument", "name": "text_46d2fce36f0f7b6ebc0575e353fdba5c", "raw_data_location": "/Users/handekafkas/Documents/local-code/new-cognee/cognee/cognee/.data_storage/data/text_46d2fce36f0f7b6ebc0575e353fdba5c.txt", "external_metadata": "{}", "mime_type": "text/plain", "id": "c07949fe-5a9f-53b9-ac90-5cb48a8a4303", "color": "#D3D3D3"}, {"version": 1, "topological_rank": 0, "metadata": {"index_fields": ["text"]}, "type": "TextSummary", "text": "Natural language processing (NLP) is a cross-disciplinary area of computer science and information extraction.", "id": "9da41e72-8150-5055-9217-eea49d1bc447", "color": "#1077f4", "name": "9da41e72-8150-5055-9217-eea49d1bc447"}];
+            var links = [{"source": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220", "target": "bc338a39-64d6-549a-acec-da60846dd90d", "relation": "contains"}, {"source": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220", "target": "02bdab9a-0981-518c-a0d4-1684e0329447", "relation": "contains"}, {"source": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220", "target": "6218dbab-eb6a-5759-a864-b3419755ffe0", "relation": "contains"}, {"source": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220", "target": "c07949fe-5a9f-53b9-ac90-5cb48a8a4303", "relation": "is_part_of"}, {"source": "bc338a39-64d6-549a-acec-da60846dd90d", "target": "dd9713b7-dc20-5101-aad0-1c4216811147", "relation": "is_a"}, {"source": "bc338a39-64d6-549a-acec-da60846dd90d", "target": "6218dbab-eb6a-5759-a864-b3419755ffe0", "relation": "is_a_subfield_of"}, {"source": "bc338a39-64d6-549a-acec-da60846dd90d", "target": "02bdab9a-0981-518c-a0d4-1684e0329447", "relation": "is_a_subfield_of"}, {"source": "02bdab9a-0981-518c-a0d4-1684e0329447", "target": "0198571b-3e94-50ea-8b9f-19e3a31080c0", "relation": "is_a"}, {"source": "6218dbab-eb6a-5759-a864-b3419755ffe0", "target": "0198571b-3e94-50ea-8b9f-19e3a31080c0", "relation": "is_a"}, {"source": "9da41e72-8150-5055-9217-eea49d1bc447", "target": "b5b7b6b3-3bb7-5efd-a975-5a01e0d40220", "relation": "made_from"}];
 
             var svg = d3.select("svg"),
                 width = window.innerWidth,
@@ -180,20 +125,4 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         </svg>
     </body>
     </html>
-    """
-
-    html_content = html_template.replace("{nodes}", json.dumps(nodes_list))
-    html_content = html_content.replace("{links}", json.dumps(links_list))
-
-    if not destination_file_path:
-        home_dir = os.path.expanduser("~")
-        destination_file_path = os.path.join(home_dir, "graph_visualization.html")
-
-    LocalStorage.ensure_directory_exists(os.path.dirname(destination_file_path))
-
-    with open(destination_file_path, "w") as f:
-        f.write(html_content)
-
-    logger.info(f"Graph visualization saved as {destination_file_path}")
-
-    return html_content
+    
