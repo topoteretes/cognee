@@ -1,6 +1,6 @@
 import os
 import difflib
-import logging
+from cognee.shared.logging_utils import get_logger
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any
 from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
@@ -11,7 +11,7 @@ from cognee.modules.ontology.exceptions import (
     GetSubgraphError,
 )
 
-logger = logging.getLogger("OntologyAdapter")
+logger = get_logger("OntologyAdapter")
 
 
 class OntologyResolver:
@@ -34,7 +34,7 @@ class OntologyResolver:
                 self.ontology = get_ontology(fallback_url)
             self.build_lookup()
         except Exception as e:
-            logger.error("Failed to load ontology: %s", str(e))
+            logger.error("Failed to load ontology", exc_info=e)
             raise OntologyInitializationError() from e
 
     def build_lookup(self):

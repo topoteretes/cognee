@@ -13,6 +13,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.base_config import get_base_config
 
 monitoring = get_base_config().monitoring_tool
+
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 

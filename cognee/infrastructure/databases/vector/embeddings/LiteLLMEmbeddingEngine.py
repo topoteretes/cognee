@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 import math
 from typing import List, Optional
 import litellm
@@ -12,7 +12,7 @@ from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 
 litellm.set_verbose = False
-logger = logging.getLogger("LiteLLMEmbeddingEngine")
+logger = get_logger("LiteLLMEmbeddingEngine")
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):

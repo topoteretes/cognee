@@ -1,13 +1,11 @@
 import os
+import aiofiles
 import importlib
 from typing import AsyncGenerator, Optional
 from uuid import NAMESPACE_OID, uuid5
 import tree_sitter_python as tspython
 from tree_sitter import Language, Node, Parser, Tree
-
-import aiofiles
-
-import logging
+from cognee.shared.logging_utils import get_logger
 
 from cognee.low_level import DataPoint
 from cognee.shared.CodeGraphEntities import (
@@ -17,10 +15,7 @@ from cognee.shared.CodeGraphEntities import (
     ClassDefinition,
 )
 
-logger = logging.getLogger(__name__)
-
-PY_LANGUAGE = Language(tspython.language())
-source_code_parser = Parser(PY_LANGUAGE)
+logger = get_logger()
 
 
 class FileParser:
@@ -28,6 +23,9 @@ class FileParser:
         self.parsed_files = {}
 
     async def parse_file(self, file_path: str) -> tuple[str, Tree]:
+        PY_LANGUAGE = Language(tspython.language())
+        source_code_parser = Parser(PY_LANGUAGE)
+
         if file_path not in self.parsed_files:
             source_code = await get_source_code(file_path)
             source_code_tree = source_code_parser.parse(bytes(source_code, "utf-8"))

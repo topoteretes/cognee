@@ -1,8 +1,8 @@
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
 
 from cognee.exceptions import InvalidValueError
 
-logger = logging.getLogger(__name__)
+logger = get_logger(level=ERROR)
 
 
 async def translate_text(

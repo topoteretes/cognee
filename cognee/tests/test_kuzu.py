@@ -1,5 +1,5 @@
 import os
-import logging
+from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
 import shutil
@@ -8,7 +8,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_forc
 from cognee.infrastructure.engine import DataPoint
 from uuid import uuid4
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def main():

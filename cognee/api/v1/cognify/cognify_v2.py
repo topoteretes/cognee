@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import Union, Optional
 
 from pydantic import BaseModel
@@ -28,7 +28,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 
-logger = logging.getLogger("cognify.v2")
+logger = get_logger("cognify.v2")
 
 update_status_lock = asyncio.Lock()
 

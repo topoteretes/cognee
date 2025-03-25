@@ -1,4 +1,4 @@
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import List
 
 from pydantic import BaseModel
@@ -9,7 +9,7 @@ from cognee.modules.engine.models.EntityType import EntityType
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
-logger = logging.getLogger("llm_entity_extractor")
+logger = get_logger("llm_entity_extractor")
 
 
 class EntityList(BaseModel):
