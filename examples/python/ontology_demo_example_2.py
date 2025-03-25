@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 import os
 import textwrap
 from cognee.api.v1.search import SearchType
@@ -38,9 +38,9 @@ def print_comparison_table(questions, answers_with, answers_without, col_width=4
     separator = "-" * (col_width * 3 + 6)
 
     header = f"{'Question'.ljust(col_width)} | {'WITH Ontology (owl grounded facts)'.ljust(col_width)} | {'WITHOUT Ontology'.ljust(col_width)}"
-    print(separator)
-    print(header)
-    print(separator)
+    logger.info(separator)
+    logger.info(header)
+    logger.info(separator)
 
     for q, with_o, without_o in zip(questions, answers_with, answers_without):
         q_wrapped = textwrap.fill(q, width=col_width)
@@ -57,11 +57,11 @@ def print_comparison_table(questions, answers_with, answers_without, col_width=4
             q_line = q_lines[i] if i < len(q_lines) else ""
             with_line = with_lines[i] if i < len(with_lines) else ""
             without_line = without_lines[i] if i < len(without_lines) else ""
-            print(
+            logger.info(
                 f"{q_line.ljust(col_width)} | {with_line.ljust(col_width)} | {without_line.ljust(col_width)}"
             )
 
-        print(separator)
+        logger.info(separator)
 
 
 async def main():
@@ -78,11 +78,11 @@ async def main():
         "ontology_input_example/enriched_medical_ontology_with_classes.owl",
     )
 
-    print("\n--- Generating answers WITH ontology ---\n")
+    logger.info("\n--- Generating answers WITH ontology ---\n")
     await run_pipeline(ontology_path=ontology_path)
     answers_with_ontology = await query_pipeline(questions)
 
-    print("\n--- Generating answers WITHOUT ontology ---\n")
+    logger.info("\n--- Generating answers WITHOUT ontology ---\n")
     await run_pipeline()
     answers_without_ontology = await query_pipeline(questions)
 
@@ -92,6 +92,8 @@ async def main():
 
 
 if __name__ == "__main__":
+    logger = get_logger()
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
