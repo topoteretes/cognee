@@ -1,7 +1,6 @@
 from typing import Type
 from pydantic import BaseModel
 import instructor
-import anthropic
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
@@ -15,9 +14,12 @@ class AnthropicAdapter(LLMInterface):
     model: str
 
     def __init__(self, max_tokens: int, model: str = None):
+        import anthropic
+
         self.aclient = instructor.patch(
             create=anthropic.Anthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
         )
+
         self.model = model
         self.max_tokens = max_tokens
 

@@ -4,7 +4,6 @@ from typing import Type
 
 from instructor.exceptions import InstructorRetryException
 from pydantic import BaseModel
-from tenacity import RetryError
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -36,7 +35,7 @@ async def extract_code_summary(content: str):
     else:
         try:
             result = await extract_summary(content, response_model=SummarizedCode)
-        except (RetryError, InstructorRetryException) as e:
+        except InstructorRetryException as e:
             logger.error("Failed to extract code summary, falling back to mock summary", exc_info=e)
             result = get_mock_summarized_code()
 

@@ -41,7 +41,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          poetry install --no-interaction
+          poetry install --extras api --no-interaction
 
       - name: Run cognee server
         env:

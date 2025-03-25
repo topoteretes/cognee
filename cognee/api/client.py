@@ -169,9 +169,9 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
-app.include_router(
-    get_code_pipeline_router(), prefix="/api/v1/code-pipeline", tags=["code-pipeline"]
-)
+codegraph_routes = get_code_pipeline_router()
+if codegraph_routes:
+    app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])
 
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):

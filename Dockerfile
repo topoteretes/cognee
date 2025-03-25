@@ -2,6 +2,8 @@ FROM python:3.11-slim
 
 # Define Poetry extras to install
 ARG POETRY_EXTRAS="\
+# API \
+api \
 # Storage & Databases \
 filesystem postgres weaviate qdrant neo4j falkordb milvus kuzu \
 # Notebooks & Interactive Environments \
