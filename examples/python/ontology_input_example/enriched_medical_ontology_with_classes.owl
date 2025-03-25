@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+   xmlns:ns1="http://example.org/ontology#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+>
+  <rdf:Description rdf:about="http://example.org/ontology#Type2Diabetes">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdfs:comment>A chronic condition that affects how the body processes glucose.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Obesity"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#PoorDiet"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#SedentaryLifestyle"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Genetics"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#WeightLoss"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#Exercise"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#ModerateCoffeeConsumption"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#IncreasedThirst"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#FrequentUrination"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Fatigue"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#InsulinResistance">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HighBloodSugar">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#hasPreventiveFactor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/ontology#Disease"/>
+    <rdfs:range rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Hypertension">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdfs:comment>A condition where the force of blood against artery walls is too high.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#HighSaltIntake"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Obesity"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Stress"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Genetics"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#LowSodiumDiet"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#Exercise"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#ModerateCoffeeConsumption"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Headache"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Dizziness"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#BlurredVision"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Cancer">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdfs:comment>A disease of abnormal cell growth with potential to invade or spread.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Smoking"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Radiation"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Infections"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#GeneticMutations"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#Screening"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#HealthyDiet"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#ModerateCoffeeConsumption"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#UnexplainedWeightLoss"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Fatigue"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#LumpFormation"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#hasRiskFactor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/ontology#Disease"/>
+    <rdfs:range rdf:resource="http://example.org/ontology#RiskFactor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#LowSodiumDiet">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#MetabolicSyndrome">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdfs:comment>A cluster of conditions increasing the risk of heart disease and diabetes.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Obesity"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#InsulinResistance"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Hypertension"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#HealthyDiet"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#PhysicalActivity"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#GreenCoffeeBlend"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#IncreasedWaistCircumference"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#HighBloodSugar"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Fatigue"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#ShortnessofBreath">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Disease">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:comment>Disease is a concept used to classify relevant medical terms.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HeartDisease">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Screening">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#AtrialFibrillation">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdfs:comment>An irregular and often rapid heart rhythm that may cause blood clots.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#HeartDisease"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#HighBloodPressure"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#AlcoholUse"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#HealthyDiet"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#Exercise"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#ModerateCoffeeConsumption"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Palpitations"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Weakness"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#ShortnessofBreath"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Genetics">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#ChestPain">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#PhysicalActivity">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#CardiovascularDisease">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdfs:comment>A class of diseases that involve the heart or blood vessels.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Smoking"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#HighBloodPressure"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#HighCholesterol"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Diabetes"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Obesity"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#PhysicalActivity"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#MediterraneanDiet"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#ModerateCoffeeConsumption"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#ChestPain"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#ShortnessofBreath"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Fatigue"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HealthyDiet">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HighSaltIntake">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Diabetes">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Palpitations">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Headache">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#BloodPressureControl">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#PreventiveFactor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:comment>PreventiveFactor is a concept used to classify relevant medical terms.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Symptom">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:comment>Symptom is a concept used to classify relevant medical terms.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#MediterraneanDiet">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HighBloodPressure">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#IncreasedThirst">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Swelling">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#BlurredVision">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HeartFailure">
+    <rdf:type rdf:resource="http://example.org/ontology#Disease"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+    <rdfs:comment>A condition in which the heart is unable to pump sufficiently.</rdfs:comment>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#CoronaryArteryDisease"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Hypertension"/>
+    <ns1:hasRiskFactor rdf:resource="http://example.org/ontology#Diabetes"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#BloodPressureControl"/>
+    <ns1:hasPreventiveFactor rdf:resource="http://example.org/ontology#HealthyLifestyle"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#ShortnessofBreath"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Swelling"/>
+    <ns1:hasSymptom rdf:resource="http://example.org/ontology#Fatigue"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#UnexplainedWeightLoss">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Fatigue">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Infections">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#IncreasedWaistCircumference">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HealthyLifestyle">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#SedentaryLifestyle">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#GreenCoffeeBlend">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#ModerateCoffeeConsumption">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Obesity">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#HighCholesterol">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#GeneticMutations">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#AlcoholUse">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Dizziness">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Radiation">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#LumpFormation">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#PoorDiet">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Smoking">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Stress">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#hasSymptom">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/ontology#Disease"/>
+    <rdfs:range rdf:resource="http://example.org/ontology#Symptom"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#CoronaryArteryDisease">
+    <rdf:type rdf:resource="http://example.org/ontology#RiskFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Exercise">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#Weakness">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#WeightLoss">
+    <rdf:type rdf:resource="http://example.org/ontology#PreventiveFactor"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#FrequentUrination">
+    <rdf:type rdf:resource="http://example.org/ontology#Symptom"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/ontology#RiskFactor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:comment>RiskFactor is a concept used to classify relevant medical terms.</rdfs:comment>
+  </rdf:Description>
+</rdf:RDF>
