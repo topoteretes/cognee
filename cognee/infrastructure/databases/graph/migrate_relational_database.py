@@ -41,7 +41,6 @@ async def migrate_relational_database(graph_db, schema):
             table_node = TableType(
                 id=uuid5(NAMESPACE_OID, name=table_name),
                 name=table_name,
-                text=table_name,
                 description=f"Table: {table_name}",
             )
 
@@ -77,7 +76,7 @@ async def migrate_relational_database(graph_db, schema):
                 row_node = TableRow(
                     id=uuid5(NAMESPACE_OID, name=node_id),
                     name=node_id,
-                    text=node_id,
+                    is_a=table_node,
                     properties=str(row_properties),
                     description=f"Row in {table_name} with {primary_key_col}={primary_key_value}",
                 )

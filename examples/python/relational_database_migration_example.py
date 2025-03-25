@@ -8,7 +8,7 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
 )
-from cognee.shared.utils import setup_logging
+
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 
@@ -37,7 +37,7 @@ async def main():
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
 
-    print("Extracting schema of database to migrate.")
+    print("\nExtracting schema of database to migrate.")
     schema = await engine.extract_schema()
     print(f"Migrated database schema:\n{schema}")
 
@@ -62,7 +62,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    setup_logging(logging.ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

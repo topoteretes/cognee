@@ -1,12 +1,8 @@
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.models.EntityType import EntityType
-from typing import Optional
 
 
 class TableType(DataPoint):
     name: str
-    text: str
-    is_a: Optional[EntityType] = None
     description: str
     ontology_valid: bool = False
 
