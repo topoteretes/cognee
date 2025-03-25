@@ -38,7 +38,11 @@ async def index_data_points(data_points: list[DataPoint]):
         index_name = index_name_and_field[:first_occurence]
         field_name = index_name_and_field[first_occurence + 1 :]
         try:
-            await vector_engine.index_data_points(index_name, field_name, indexable_points)
+            # In case the ammount if indexable points is too large we need to send them in batches
+            batch_size = 1000
+            for i in range(0, len(indexable_points), batch_size):
+                batch = indexable_points[i : i + batch_size]
+                await vector_engine.index_data_points(index_name, field_name, batch)
         except EmbeddingException as e:
             logger.warning(f"Failed to index data points for {index_name}.{field_name}: {e}")
 

@@ -64,28 +64,17 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
                 return [data["embedding"] for data in response["data"]]
             else:
-                embedd = []
-                batch_size = 100
+                response = await litellm.aembedding(
+                    model=self.model,
+                    input=text,
+                    api_key=self.api_key,
+                    api_base=self.endpoint,
+                    api_version=self.api_version,
+                )
 
-                for i in range(0, len(text), batch_size):
-                    # Get a batch of up to 100 elements
-                    batch = text[i : i + batch_size]
+                self.retry_count = 0  # Reset retry count on successful call
 
-                    response = await litellm.aembedding(
-                        model=self.model,
-                        input=batch,
-                        api_key=self.api_key,
-                        api_base=self.endpoint,
-                        api_version=self.api_version,
-                    )
-
-                    self.retry_count = 0  # Reset retry count on successful call
-
-                    # Extract all embeddings from this batch response
-                    batch_embeddings = [data["embedding"] for data in response.data]
-                    embedd.extend(batch_embeddings)
-
-                return embedd
+                return [data["embedding"] for data in response.data]
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list):
