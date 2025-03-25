@@ -1,8 +1,10 @@
 import asyncio
-import httpx
 from cognee.shared.logging_utils import get_logger
+import aiohttp
 from typing import List, Optional
 import os
+
+import aiohttp.http_exceptions
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
@@ -48,14 +50,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if self.mock:
             return [[0.0] * self.dimensions for _ in text]
 
-        embeddings = []
-        async with httpx.AsyncClient() as client:
-            for prompt in text:
-                embedding = await self._get_embedding(client, prompt)
-                embeddings.append(embedding)
+        embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
-    async def _get_embedding(self, client: httpx.AsyncClient, prompt: str) -> List[float]:
+    async def _get_embedding(self, prompt: str) -> List[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
@@ -71,13 +69,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
-                response = await client.post(
-                    self.endpoint, json=payload, headers=headers, timeout=60.0
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["embedding"]
-            except httpx.HTTPStatusError as e:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.endpoint, json=payload, headers=headers, timeout=60.0
+                    ) as response:
+                        data = await response.json()
+                        return data["embedding"]
+            except aiohttp.http_exceptions.HttpBadRequest as e:
                 logger.error(f"HTTP error on attempt {retries + 1}: {e}")
                 retries += 1
                 await asyncio.sleep(min(2**retries, 60))

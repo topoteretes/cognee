@@ -3,7 +3,6 @@ from cognee.shared.logging_utils import get_logger
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
-from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.storage.utils import JSONEncoder
 
@@ -22,11 +21,19 @@ class CodePipelineRetrievePayloadDTO(InDTO):
 
 
 def get_code_pipeline_router() -> APIRouter:
+    try:
+        import run_code_graph_pipeline
+    except ModuleNotFoundError:
+        logger.error("codegraph dependencies not found. Skipping codegraph API routes.")
+        return None
+
     router = APIRouter()
 
     @router.post("/index", response_model=None)
     async def code_pipeline_index(payload: CodePipelineIndexPayloadDTO):
         """This endpoint is responsible for running the indexation on code repo."""
+        from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
+
         try:
             async for result in run_code_graph_pipeline(payload.repo_path, payload.include_docs):
                 logger.info(result)

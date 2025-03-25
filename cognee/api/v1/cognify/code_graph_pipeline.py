@@ -25,6 +25,7 @@ from cognee.tasks.summarization import summarize_text
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
 monitoring = get_base_config().monitoring_tool
+
 if monitoring == MonitoringTool.LANGFUSE:
     from langfuse.decorators import observe
 

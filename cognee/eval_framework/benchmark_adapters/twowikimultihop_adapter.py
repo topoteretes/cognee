@@ -1,8 +1,4 @@
-import requests
-import os
-import json
-import random
-from typing import Optional, Any, List, Tuple
+from typing import Any
 from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 
 
