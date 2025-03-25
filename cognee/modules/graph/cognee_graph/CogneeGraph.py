@@ -1,4 +1,4 @@
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import List, Dict, Union
 
 from cognee.exceptions import InvalidValueError
@@ -8,7 +8,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 import heapq
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CogneeGraph(CogneeAbstractGraph):

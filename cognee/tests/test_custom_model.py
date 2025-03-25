@@ -1,12 +1,12 @@
 import os
-import logging
+from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
 from cognee.modules.search.types import SearchType
 from cognee.shared.utils import render_graph
 from cognee.low_level import DataPoint
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def main():

@@ -1,4 +1,4 @@
-import logging
+from cognee.shared.logging_utils import get_logger
 import os
 from typing import Type
 
@@ -10,7 +10,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import SummarizedCode
 from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 
-logger = logging.getLogger("extract_summary")
+logger = get_logger("extract_summary")
 
 
 async def extract_summary(content: str, response_model: Type[BaseModel]):

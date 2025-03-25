@@ -1,11 +1,11 @@
 import os
-import logging
+from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
 from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def main():

@@ -1,8 +1,7 @@
 import asyncio
 import cognee
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.api.v1.search import SearchType
-from cognee.shared.utils import setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -68,7 +67,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    setup_logging(logging.ERROR)
+    logger = get_logger(level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

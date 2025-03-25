@@ -1,5 +1,5 @@
 from typing import Any, Optional, List
-import logging
+from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
@@ -7,7 +7,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 
 
-logger = logging.getLogger("entity_completion_retriever")
+logger = get_logger("entity_completion_retriever")
 
 
 class EntityCompletionRetriever(BaseRetriever):

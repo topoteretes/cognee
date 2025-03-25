@@ -1,12 +1,12 @@
 from typing import Any, Optional
-import logging
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported, CypherSearchError
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger("CypherSearchRetriever")
+logger = get_logger("CypherSearchRetriever")
 
 
 class CypherSearchRetriever(BaseRetriever):
