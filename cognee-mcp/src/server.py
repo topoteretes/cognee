@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import cognee
-import logging
+from cognee.shared.logging_utils import get_logger
 import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -17,7 +17,7 @@ from cognee.modules.storage.utils import JSONEncoder
 
 mcp = Server("cognee")
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 @mcp.list_tools()
@@ -93,17 +93,29 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 if name == "cognify":
-                    await cognify(
-                        text=arguments["text"],
-                        graph_model_file=arguments.get("graph_model_file", None),
-                        graph_model_name=arguments.get("graph_model_name", None),
+                    asyncio.create_task(
+                        cognify(
+                            text=arguments["text"],
+                            graph_model_file=arguments.get("graph_model_file"),
+                            graph_model_name=arguments.get("graph_model_name"),
+                        )
                     )
 
-                    return [types.TextContent(type="text", text="Ingested")]
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text="Background process launched due to MCP timeout limitations. Estimated completion time up to 4 minutes.",
+                        )
+                    ]
                 if name == "codify":
-                    await codify(arguments.get("repo_path"))
+                    asyncio.create_task(codify(arguments.get("repo_path")))
 
-                    return [types.TextContent(type="text", text="Indexed")]
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text="Background process launched due to MCP timeout limitations. Estimated completion time up to 4 minutes.",
+                        )
+                    ]
                 elif name == "search":
                     search_results = await search(
                         arguments["search_query"], arguments["search_type"]

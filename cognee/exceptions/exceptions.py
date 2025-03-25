@@ -1,7 +1,7 @@
 from fastapi import status
-import logging
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CogneeApiError(Exception):

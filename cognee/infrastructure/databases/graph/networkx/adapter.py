@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 import json
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 from sqlalchemy import text
 from typing import Dict, Any, List, Union
 from uuid import UUID
@@ -20,7 +20,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class NetworkXAdapter(GraphDBInterface):

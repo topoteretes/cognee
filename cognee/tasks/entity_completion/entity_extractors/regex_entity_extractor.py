@@ -1,4 +1,4 @@
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
@@ -6,7 +6,7 @@ from cognee.modules.engine.models import Entity
 from cognee.root_dir import get_absolute_path
 from cognee.tasks.entity_completion.entity_extractors.regex_entity_config import RegexEntityConfig
 
-logger = logging.getLogger("regex_entity_extractor")
+logger = get_logger("regex_entity_extractor")
 
 
 class RegexEntityExtractor(BaseEntityExtractor):

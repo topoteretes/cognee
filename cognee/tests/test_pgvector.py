@@ -1,5 +1,5 @@
 import os
-import logging
+from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
 
@@ -8,7 +8,7 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.users.methods import get_default_user
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location):
