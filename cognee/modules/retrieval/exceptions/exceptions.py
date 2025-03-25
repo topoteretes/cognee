@@ -11,7 +11,7 @@ class CollectionDistancesNotFoundError(CogneeApiError):
     ):
         super().__init__(message, name, status_code)
 
-      
+
 class SearchTypeNotSupported(CogneeApiError):
     def __init__(
         self,
