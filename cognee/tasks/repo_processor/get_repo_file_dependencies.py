@@ -8,7 +8,6 @@ from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, Repository
-from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
 
 
 async def get_source_code_files(repo_path):
@@ -74,6 +73,9 @@ async def get_repo_file_dependencies(
         )
         for chunk_number in range(number_of_chunks)
     ]
+
+    # Codegraph dependencies are not installed by default, so we import where we use them.
+    from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
 
     for start_range, end_range in chunk_ranges:
         # with ProcessPoolExecutor(max_workers=12) as executor:

@@ -40,23 +40,37 @@ class TestGraphCompletionRetriever:
 
     @pytest.mark.asyncio
     async def test_resolve_edges_to_text(self, mock_retriever):
+        node_a = AsyncMock(id="node_a_id", attributes={"text": "Node A text content"})
+        node_b = AsyncMock(id="node_b_id", attributes={"text": "Node B text content"})
+        node_c = AsyncMock(id="node_c_id", attributes={"name": "Node C"})
+
         triplets = [
             AsyncMock(
-                node1=AsyncMock(attributes={"text": "Node A"}),
+                node1=node_a,
                 attributes={"relationship_type": "connects"},
-                node2=AsyncMock(attributes={"text": "Node B"}),
+                node2=node_b,
             ),
             AsyncMock(
-                node1=AsyncMock(attributes={"text": "Node X"}),
+                node1=node_a,
                 attributes={"relationship_type": "links"},
-                node2=AsyncMock(attributes={"text": "Node Y"}),
+                node2=node_c,
             ),
         ]
 
-        result = await mock_retriever.resolve_edges_to_text(triplets)
+        with patch.object(mock_retriever, "_get_title", return_value="Test Title"):
+            result = await mock_retriever.resolve_edges_to_text(triplets)
 
-        expected_output = "Node A -- connects -- Node B\n---\nNode X -- links -- Node Y"
-        assert result == expected_output
+            assert "Nodes:" in result
+            assert "Connections:" in result
+
+            assert "Node: Test Title" in result
+            assert "__node_content_start__" in result
+            assert "Node A text content" in result
+            assert "__node_content_end__" in result
+            assert "Node: Node C" in result
+
+            assert "Test Title --[connects]--> Test Title" in result
+            assert "Test Title --[links]--> Node C" in result
 
     @pytest.mark.asyncio
     @patch(
@@ -124,16 +138,13 @@ class TestGraphCompletionRetriever:
         mock_get_llm_client,
         mock_retriever,
     ):
-        # Setup
         query = "test query with empty graph"
 
-        # Mock graph engine with empty graph
         mock_graph_engine = MagicMock()
         mock_graph_engine.get_graph_data = AsyncMock()
         mock_graph_engine.get_graph_data.return_value = ([], [])
         mock_get_graph_engine.return_value = mock_graph_engine
 
-        # Mock LLM client
         mock_llm_client = MagicMock()
         mock_llm_client.acreate_structured_output = AsyncMock()
         mock_llm_client.acreate_structured_output.return_value = (
@@ -141,9 +152,85 @@ class TestGraphCompletionRetriever:
         )
         mock_get_llm_client.return_value = mock_llm_client
 
-        # Execute
         with pytest.raises(EntityNotFoundError):
             await mock_retriever.get_completion(query)
 
-        # Verify graph engine was called
         mock_graph_engine.get_graph_data.assert_called_once()
+
+    def test_top_n_words(self, mock_retriever):
+        """Test extraction of top frequent words from text."""
+        text = "The quick brown fox jumps over the lazy dog. The fox is quick."
+
+        result = mock_retriever._top_n_words(text)
+        assert len(result.split(", ")) <= 3
+        assert "fox" in result
+        assert "quick" in result
+
+        result = mock_retriever._top_n_words(text, top_n=2)
+        assert len(result.split(", ")) <= 2
+
+        result = mock_retriever._top_n_words(text, separator=" | ")
+        assert " | " in result
+
+        result = mock_retriever._top_n_words(text, stop_words={"fox", "quick"})
+        assert "fox" not in result
+        assert "quick" not in result
+
+    def test_get_title(self, mock_retriever):
+        """Test title generation from text."""
+        text = "This is a long paragraph about various topics that should generate a title. The main topics are AI, programming and data science."
+
+        title = mock_retriever._get_title(text)
+        assert "..." in title
+        assert "[" in title and "]" in title
+
+        title = mock_retriever._get_title(text, first_n_words=3)
+        first_part = title.split("...")[0].strip()
+        assert len(first_part.split()) == 3
+
+        title = mock_retriever._get_title(text, top_n_words=2)
+        top_part = title.split("[")[1].split("]")[0]
+        assert len(top_part.split(", ")) <= 2
+
+    def test_get_nodes(self, mock_retriever):
+        """Test node processing and deduplication."""
+        node_with_text = AsyncMock(id="text_node", attributes={"text": "This is a text node"})
+        node_with_name = AsyncMock(id="name_node", attributes={"name": "Named Node"})
+        node_without_attrs = AsyncMock(id="empty_node", attributes={})
+
+        edges = [
+            AsyncMock(
+                node1=node_with_text, node2=node_with_name, attributes={"relationship_type": "rel1"}
+            ),
+            AsyncMock(
+                node1=node_with_text,
+                node2=node_without_attrs,
+                attributes={"relationship_type": "rel2"},
+            ),
+            AsyncMock(
+                node1=node_with_name,
+                node2=node_without_attrs,
+                attributes={"relationship_type": "rel3"},
+            ),
+        ]
+
+        with patch.object(mock_retriever, "_get_title", return_value="Generated Title"):
+            nodes = mock_retriever._get_nodes(edges)
+
+            assert len(nodes) == 3
+
+            for node_id, info in nodes.items():
+                assert "node" in info
+                assert "name" in info
+                assert "content" in info
+
+            text_node_info = nodes[node_with_text.id]
+            assert text_node_info["name"] == "Generated Title"
+            assert text_node_info["content"] == "This is a text node"
+
+            name_node_info = nodes[node_with_name.id]
+            assert name_node_info["name"] == "Named Node"
+            assert name_node_info["content"] == "Named Node"
+
+            empty_node_info = nodes[node_without_attrs.id]
+            assert empty_node_info["name"] == "Unnamed Node"

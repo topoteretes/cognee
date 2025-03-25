@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 
 from cognee.exceptions import InvalidValueError
@@ -10,7 +10,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
-logger = logging.getLogger("WeaviateAdapter")
+logger = get_logger("WeaviateAdapter")
 
 
 class IndexSchema(DataPoint):
