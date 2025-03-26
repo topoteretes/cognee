@@ -48,6 +48,7 @@ class KuzuAdapter(GraphDBInterface):
                     type STRING,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
+                    user_id STRING,
                     properties STRING
                 )
             """)
@@ -58,6 +59,7 @@ class KuzuAdapter(GraphDBInterface):
                     relationship_name STRING,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
+                    user_id STRING,
                     properties STRING
                 )
             """)
@@ -211,24 +213,25 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    async def add_nodes(self, nodes: List[DataPoint], user: User = None) -> None:
         """Add multiple nodes to the graph in a batch operation."""
         if not nodes:
             return
 
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            user_id = str(user.id) if user else None
 
-            # Prepare all nodes data first
+            # Prepare all nodes data
             node_params = []
             for node in nodes:
                 properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
 
-                # Extract core fields
                 core_properties = {
                     "id": str(properties.get("id", "")),
                     "text": str(properties.get("text", "")),
                     "type": str(properties.get("type", "")),
+                    "user_id": user_id,
                 }
 
                 # Remove core fields from other properties
@@ -266,6 +269,7 @@ class KuzuAdapter(GraphDBInterface):
                         id: node.id,
                         text: node.text,
                         type: node.type,
+                        user_id: node.user_id,
                         properties: node.properties,
                         created_at: timestamp(node.created_at),
                         updated_at: timestamp(node.updated_at)
@@ -402,20 +406,21 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]], user: User = None) -> None:
         """Add multiple edges in a batch operation."""
         if not edges:
             return
 
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            user_id = str(user.id) if user else None
 
-            # Transform edges into the format needed for batch insertion
             edge_params = [
                 {
                     "from_id": from_node,
                     "to_id": to_node,
                     "relationship_name": relationship_name,
+                    "user_id": user_id,
                     "properties": json.dumps(properties, cls=JSONEncoder),
                     "created_at": now,
                     "updated_at": now,
@@ -423,13 +428,13 @@ class KuzuAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
-            # Batch create query
             query = """
             UNWIND $edges AS edge
             MATCH (from:Node), (to:Node)
             WHERE from.id = edge.from_id AND to.id = edge.to_id
             CREATE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name,
+                user_id: edge.user_id,
                 created_at: timestamp(edge.created_at),
                 updated_at: timestamp(edge.updated_at),
                 properties: edge.properties

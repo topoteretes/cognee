@@ -4,7 +4,7 @@ import json
 from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Tuple
 from contextlib import asynccontextmanager
 from uuid import UUID
 from neo4j import AsyncSession
@@ -21,11 +21,13 @@ from .neo4j_metrics_utils import (
     get_size_of_connected_components,
     count_self_loops,
 )
+from datetime import datetime, timezone
+from cognee.domain.entities import User
 
 logger = get_logger("Neo4jAdapter", level=ERROR)
 
 
-class Neo4jAdapter(GraphDBInterface):
+class Neo4jDriverAdapter(GraphDBInterface):
     def __init__(
         self,
         graph_database_url: str,
@@ -69,48 +71,63 @@ class Neo4jAdapter(GraphDBInterface):
         )
         return results[0]["node_exists"] if len(results) > 0 else False
 
-    async def add_node(self, node: DataPoint):
-        serialized_properties = self.serialize_properties(node.model_dump())
+    async def add_node(self, node: DataPoint, user: User = None) -> None:
+        """Add a single node to the graph."""
+        async with self.driver.session() as session:
+            try:
+                properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
+                params = {
+                    "id": str(properties.get("id", "")),
+                    "properties": properties,
+                    "user_id": str(user.id) if user else None,
+                    "timestamp": datetime.now(timezone.utc)
+                }
 
-        query = dedent(
-            """MERGE (node {id: $node_id})
-                ON CREATE SET node += $properties, node.updated_at = timestamp()
-                ON MATCH SET node += $properties, node.updated_at = timestamp()
-                WITH node, $node_label AS label
-                CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
-                RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
-        )
+                query = """
+                MERGE (n:Node {id: $id})
+                SET n += $properties,
+                    n.user_id = $user_id,
+                    n.created_at = COALESCE(n.created_at, $timestamp),
+                    n.updated_at = $timestamp
+                """
+                await session.run(query, params)
 
-        params = {
-            "node_id": str(node.id),
-            "node_label": type(node).__name__,
-            "properties": serialized_properties,
-        }
+            except Exception as e:
+                logger.error(f"Failed to add node: {e}")
+                raise
 
-        return await self.query(query, params)
+    async def add_nodes(self, nodes: List[DataPoint], user: User = None) -> None:
+        """Add multiple nodes to the graph in a batch operation."""
+        if not nodes:
+            return
 
-    async def add_nodes(self, nodes: list[DataPoint]) -> None:
-        query = """
-        UNWIND $nodes AS node
-        MERGE (n {id: node.node_id})
-        ON CREATE SET n += node.properties, n.updated_at = timestamp()
-        ON MATCH SET n += node.properties, n.updated_at = timestamp()
-        WITH n, node.label AS label
-        CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
-        RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
-        """
+        async with self.driver.session() as session:
+            try:
+                # Convert nodes to parameters
+                node_params = []
+                for node in nodes:
+                    properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
+                    node_params.append({
+                        "id": str(properties.get("id", "")),
+                        "properties": properties,
+                        "user_id": str(user.id) if user else None,
+                        "timestamp": datetime.now(timezone.utc)
+                    })
 
-        nodes = [
-            {
-                "node_id": str(node.id),
-                "label": type(node).__name__,
-                "properties": self.serialize_properties(node.model_dump()),
-            }
-            for node in nodes
-        ]
+                # Create nodes with user_id
+                query = """
+                UNWIND $nodes as node
+                MERGE (n:Node {id: node.id})
+                SET n += node.properties,
+                    n.user_id = node.user_id,
+                    n.created_at = COALESCE(n.created_at, node.timestamp),
+                    n.updated_at = node.timestamp
+                """
+                await session.run(query, {"nodes": node_params})
 
-        results = await self.query(query, dict(nodes=nodes))
-        return results
+            except Exception as e:
+                logger.error(f"Failed to add nodes in batch: {e}")
+                raise
 
     async def extract_node(self, node_id: str):
         results = await self.extract_nodes([node_id])
@@ -191,69 +208,74 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def add_edge(
         self,
-        from_node: UUID,
-        to_node: UUID,
+        from_node: str,
+        to_node: str,
         relationship_name: str,
-        edge_properties: Optional[Dict[str, Any]] = {},
-    ):
-        serialized_properties = self.serialize_properties(edge_properties)
+        edge_properties: Dict[str, Any] = {},
+        user: User = None
+    ) -> None:
+        """Add a single edge to the graph."""
+        async with self.driver.session() as session:
+            try:
+                params = {
+                    "from_id": from_node,
+                    "to_id": to_node,
+                    "type": relationship_name,
+                    "properties": edge_properties,
+                    "user_id": str(user.id) if user else None,
+                    "timestamp": datetime.now(timezone.utc)
+                }
 
-        query = dedent(
-            """MATCH (from_node {id: $from_node}),
-            (to_node {id: $to_node})
-            MERGE (from_node)-[r]->(to_node)
-            ON CREATE SET r += $properties, r.updated_at = timestamp(), r.type = $relationship_name
-            ON MATCH SET r += $properties, r.updated_at = timestamp()
-            RETURN r
-        """
-        )
+                query = """
+                MATCH (source:Node {id: $from_id})
+                MATCH (target:Node {id: $to_id})
+                MERGE (source)-[r:RELATES {type: $type}]->(target)
+                SET r += $properties,
+                    r.user_id = $user_id,
+                    r.created_at = COALESCE(r.created_at, $timestamp),
+                    r.updated_at = $timestamp
+                """
+                await session.run(query, params)
 
-        params = {
-            "from_node": str(from_node),
-            "to_node": str(to_node),
-            "relationship_name": relationship_name,
-            "properties": serialized_properties,
-        }
+            except Exception as e:
+                logger.error(f"Failed to add edge: {e}")
+                raise
 
-        return await self.query(query, params)
+    async def add_edges(self, edges: List[Tuple[str, str, str, Dict]], user: User = None) -> None:
+        """Add multiple edges to the graph in a batch operation."""
+        if not edges:
+            return
 
-    async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
-        query = """
-            UNWIND $edges AS edge
-            MATCH (from_node {id: edge.from_node})
-            MATCH (to_node {id: edge.to_node})
-            CALL apoc.merge.relationship(
-                from_node,
-                edge.relationship_name,
-                {
-                    source_node_id: edge.from_node,
-                    target_node_id: edge.to_node
-                },
-                edge.properties,
-                to_node
-            ) YIELD rel
-            RETURN rel"""
+        async with self.driver.session() as session:
+            try:
+                # Convert edges to parameters
+                edge_params = []
+                for source, target, rel_type, properties in edges:
+                    edge_params.append({
+                        "source": source,
+                        "target": target,
+                        "type": rel_type,
+                        "properties": properties,
+                        "user_id": str(user.id) if user else None,
+                        "timestamp": datetime.now(timezone.utc)
+                    })
 
-        edges = [
-            {
-                "from_node": str(edge[0]),
-                "to_node": str(edge[1]),
-                "relationship_name": edge[2],
-                "properties": {
-                    **(edge[3] if edge[3] else {}),
-                    "source_node_id": str(edge[0]),
-                    "target_node_id": str(edge[1]),
-                },
-            }
-            for edge in edges
-        ]
+                # Create edges with user_id
+                query = """
+                UNWIND $edges as edge
+                MATCH (source:Node {id: edge.source})
+                MATCH (target:Node {id: edge.target})
+                MERGE (source)-[r:RELATES {type: edge.type}]->(target)
+                SET r += edge.properties,
+                    r.user_id = edge.user_id,
+                    r.created_at = COALESCE(r.created_at, edge.timestamp),
+                    r.updated_at = edge.timestamp
+                """
+                await session.run(query, {"edges": edge_params})
 
-        try:
-            results = await self.query(query, dict(edges=edges))
-            return results
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+            except Exception as e:
+                logger.error(f"Failed to add edges in batch: {e}")
+                raise
 
     async def get_edges(self, node_id: str):
         query = """
