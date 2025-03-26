@@ -1,3 +1,5 @@
+# PROPOSED TO BE DEPRECATED
+
 from typing import Type, Optional, get_args, get_origin
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface

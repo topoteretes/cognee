@@ -1,6 +1,6 @@
 import asyncio
 from typing import Type, List
-
+from cognee.modules.users.models import User
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -20,6 +20,7 @@ async def integrate_chunk_graphs(
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_adapter: OntologyResolver,
+    user: User = None,
 ) -> List[DocumentChunk]:
     """Updates DocumentChunk objects, integrates data points and edges into databases."""
     graph_engine = await get_graph_engine()
@@ -28,7 +29,7 @@ async def integrate_chunk_graphs(
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
 
-        await add_data_points(chunk_graphs)
+        await add_data_points(chunk_graphs, user=user)
         return data_chunks
 
     existing_edges_map = await retrieve_existing_edges(
@@ -42,21 +43,27 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes)
+        await add_data_points(graph_nodes, user=user)
 
     if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
+        await graph_engine.add_edges(graph_edges, user=user)
 
     return data_chunks
 
 
 async def extract_graph_from_data(
-    data_chunks: list[DocumentChunk],
+    data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_adapter: OntologyResolver = OntologyResolver(),
+    user: User = None,
+    ontology_adapter: OntologyResolver = None,
 ) -> List[DocumentChunk]:
-    """Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model."""
+    """
+    Extracts a knowledge graph from the text content of document chunks using a specified graph model.
+    """
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
+
+    return await integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_adapter or OntologyResolver(), user=user
+    )
