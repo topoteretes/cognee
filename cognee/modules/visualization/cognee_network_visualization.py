@@ -20,6 +20,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         "EntityType": "#6510f4",
         "DocumentChunk": "#801212",
         "TextSummary": "#1077f4",
+        "TableRow": "#f47710",
+        "TableType": "#6510f4",
         "default": "#D3D3D3",
     }
 
@@ -182,8 +184,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     </html>
     """
 
-    html_content = html_template.replace("{nodes}", json.dumps(nodes_list))
-    html_content = html_content.replace("{links}", json.dumps(links_list))
+    html_content = html_template.replace("{nodes}", json.dumps(nodes_list, default=str))
+    html_content = html_content.replace("{links}", json.dumps(links_list, default=str))
 
     if not destination_file_path:
         home_dir = os.path.expanduser("~")

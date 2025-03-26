@@ -7,6 +7,5 @@ class Entity(DataPoint):
     name: str
     is_a: Optional[EntityType] = None
     description: str
-    ontology_valid: bool = False
 
     metadata: dict = {"index_fields": ["name"]}

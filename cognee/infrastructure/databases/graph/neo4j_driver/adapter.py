@@ -199,13 +199,14 @@ class Neo4jAdapter(GraphDBInterface):
         serialized_properties = self.serialize_properties(edge_properties)
 
         query = dedent(
-            """MATCH (from_node {id: $from_node}),
-            (to_node {id: $to_node})
-            MERGE (from_node)-[r]->(to_node)
-            ON CREATE SET r += $properties, r.updated_at = timestamp(), r.type = $relationship_name
+            f"""\
+            MATCH (from_node {{id: $from_node}}),
+                  (to_node {{id: $to_node}})
+            MERGE (from_node)-[r:{relationship_name}]->(to_node)
+            ON CREATE SET r += $properties, r.updated_at = timestamp()
             ON MATCH SET r += $properties, r.updated_at = timestamp()
             RETURN r
-        """
+            """
         )
 
         params = {
