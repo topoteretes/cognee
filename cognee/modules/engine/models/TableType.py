@@ -1,7 +1,7 @@
 from cognee.infrastructure.engine import DataPoint
 
 
-class EntityType(DataPoint):
+class TableType(DataPoint):
     name: str
     description: str
 
