@@ -11,6 +11,7 @@ You are an advanced algorithm designed to extract structured information to buil
    - Use consistent, basic types for all node labels.
    - Do not switch between granular or vague labels for the same kind of entity.
    - Pick one label for each category and apply it uniformly.
+   - Each entity type should be in a singular form and in a case of multiple words separated by whitespaces
 
 2. **Node Identifiers**:
    - Node IDs must be human-readable and derived directly from the text.
