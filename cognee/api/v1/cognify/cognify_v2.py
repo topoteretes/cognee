@@ -140,6 +140,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
                 graph_model=graph_model,
                 ontology_adapter=ontology_adapter,
                 task_config={"batch_size": 10},
+                user=user,
             ),  # Generate knowledge graphs from the document chunks.
             Task(
                 summarize_text,

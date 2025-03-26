@@ -6,6 +6,7 @@ from cognee.shared.relationship_manager import create_relationship
 from functools import wraps
 import inspect
 from cognee.modules.users.models import User
+from cognee.modules.data.models import graph_relationship_ledger
 
 
 def record_graph_changes(func):
@@ -39,25 +40,27 @@ def record_graph_changes(func):
                 if func.__name__ == "add_nodes":
                     nodes = args[0]
                     for node_id, node_props in nodes:
-                        await create_relationship(
-                            session=session,
-                            parent_id=node_id,
-                            child_id=node_id,
+                        relationship = graph_relationship_ledger(
+                            source_node_id=node_id,
+                            destination_node_id=node_id,
                             creator_function=f"{creator}.node",
                             user_id=user.id,
                         )
+                        session.add(relationship)
+                        await session.flush()
 
                 # For add_edges
                 elif func.__name__ == "add_edges":
                     edges = args[0]
                     for source_id, target_id, relationship_type, _ in edges:
-                        await create_relationship(
-                            session=session,
-                            parent_id=source_id,
-                            child_id=target_id,
+                        relationship = graph_relationship_ledger(
+                            source_node_id=source_id,
+                            destination_node_id=target_id,
                             creator_function=f"{creator}.{relationship_type}",
                             user_id=user.id,
                         )
+                        session.add(relationship)
+                        await session.flush()
 
                 await session.commit()
 

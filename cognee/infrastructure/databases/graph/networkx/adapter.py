@@ -15,6 +15,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
 import numpy as np
+from cognee.modules.users.models import User
 
 logger = get_logger()
 
@@ -42,18 +43,12 @@ class NetworkXAdapter(GraphDBInterface):
     async def has_node(self, node_id: str) -> bool:
         return self.graph.has_node(node_id)
 
-    async def add_node(
-        self,
-        node: DataPoint,
-    ) -> None:
+    async def add_node(self, node: DataPoint, user: User = None) -> None:
         self.graph.add_node(node.id, **node.model_dump())
 
         await self.save_graph_to_file(self.filename)
 
-    async def add_nodes(
-        self,
-        nodes: list[DataPoint],
-    ) -> None:
+    async def add_nodes(self, nodes: list[DataPoint], user: User = None) -> None:
         nodes = [(node.id, node.model_dump()) for node in nodes]
 
         self.graph.add_nodes_from(nodes)
@@ -80,6 +75,7 @@ class NetworkXAdapter(GraphDBInterface):
         to_node: str,
         relationship_name: str,
         edge_properties: Dict[str, Any] = {},
+        user: User = None,
     ) -> None:
         edge_properties["updated_at"] = datetime.now(timezone.utc)
         self.graph.add_edge(
@@ -90,10 +86,7 @@ class NetworkXAdapter(GraphDBInterface):
         )
         await self.save_graph_to_file(self.filename)
 
-    async def add_edges(
-        self,
-        edges: tuple[str, str, str, dict],
-    ) -> None:
+    async def add_edges(self, edges: tuple[str, str, str, dict], user: User = None) -> None:
         edges = [
             (
                 edge[0],

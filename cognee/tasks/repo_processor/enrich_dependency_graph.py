@@ -1,3 +1,6 @@
+# PROPOSED TO BE DEPRECATED
+# as its commented out in code_graph_pipeline.py
+
 import networkx as nx
 from typing import AsyncGenerator, Dict, List
 from tqdm.asyncio import tqdm
