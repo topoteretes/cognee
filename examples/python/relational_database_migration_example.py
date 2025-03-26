@@ -43,7 +43,9 @@ async def main():
 
     graph = await get_graph_engine()
     print("Migrating relational database to graph database based on schema.")
-    await graph.migrate_relational_database(schema=schema)
+    from cognee.tasks.ingestion import migrate_relational_database
+
+    await migrate_relational_database(graph, schema=schema)
     print("Relational database migration complete.")
 
     # Define location where to store html visualization of graph of the migrated database

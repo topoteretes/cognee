@@ -12,9 +12,6 @@ import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.databases.graph.migrate_relational_database import (
-    migrate_relational_database,
-)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -464,6 +461,3 @@ class NetworkXAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
-
-    async def migrate_relational_database(self, schema):
-        await migrate_relational_database(self, schema)

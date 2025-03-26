@@ -17,9 +17,6 @@ from kuzu import Connection
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
-from cognee.infrastructure.databases.graph.migrate_relational_database import (
-    migrate_relational_database,
-)
 
 logger = get_logger()
 
@@ -925,6 +922,3 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to import graph from file: {e}")
             raise
-
-    async def migrate_relational_database(self, schema):
-        await migrate_relational_database(self, schema=schema)

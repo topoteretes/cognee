@@ -21,7 +21,6 @@ from .neo4j_metrics_utils import (
     get_size_of_connected_components,
     count_self_loops,
 )
-from cognee.infrastructure.databases.graph import migrate_relational_database
 
 logger = get_logger("Neo4jAdapter", level=ERROR)
 
@@ -652,6 +651,3 @@ class Neo4jAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
-
-    async def migrate_relational_database(self, schema):
-        await migrate_relational_database(self, schema=schema)
