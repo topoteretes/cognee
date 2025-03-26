@@ -1,7 +1,9 @@
 import os
-from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
+from cognee.modules.search.operations import get_history
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.shared.utils import render_graph
 from cognee.low_level import DataPoint
@@ -93,7 +95,8 @@ async def main():
     for chunk in chunks:
         print(chunk)
 
-    history = await cognee.get_search_history()
+    user = await get_default_user()
+    history = await get_history(user.id)
 
     assert len(history) == 8, "Search history is not correct."
 

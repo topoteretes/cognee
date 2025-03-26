@@ -1,6 +1,7 @@
 import cognee
 import asyncio
 from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.modules.metrics.operations import get_pipeline_run_metrics
 
 from cognee.api.v1.search import SearchType
 
@@ -184,7 +185,7 @@ async def main(enable_steps):
 
     # Step 4: Calculate descriptive metrics
     if enable_steps.get("graph_metrics"):
-        await cognee.get_pipeline_run_metrics(pipeline_run, include_optional=True)
+        await get_pipeline_run_metrics(pipeline_run, include_optional=True)
         print("Descriptive graph metrics saved to database.")
 
     # Step 5: Query insights

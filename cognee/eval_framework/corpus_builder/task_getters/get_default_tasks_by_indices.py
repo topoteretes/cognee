@@ -1,5 +1,5 @@
-from typing import List, Awaitable, Optional
-from cognee.api.v1.cognify.cognify_v2 import get_default_tasks
+from typing import List
+from cognee.api.v1.cognify.cognify import get_default_tasks
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 
