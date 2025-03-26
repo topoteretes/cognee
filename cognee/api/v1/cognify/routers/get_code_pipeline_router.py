@@ -22,7 +22,7 @@ class CodePipelineRetrievePayloadDTO(InDTO):
 
 def get_code_pipeline_router() -> APIRouter:
     try:
-        import run_code_graph_pipeline
+        import cognee.api.v1.cognify.code_graph_pipeline
     except ModuleNotFoundError:
         logger.error("codegraph dependencies not found. Skipping codegraph API routes.")
         return None
