@@ -4,6 +4,7 @@ import dlt
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_document
@@ -19,6 +20,9 @@ import inspect
 
 async def ingest_data(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
+
+    if not user:
+        user = await get_default_user()
 
     pipeline = dlt.pipeline(
         pipeline_name="file_load_from_filesystem",

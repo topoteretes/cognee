@@ -221,12 +221,10 @@ async def run_tasks_base(tasks: list[Task], data=None, user: User = None):
             raise error
 
 
-async def run_tasks_with_telemetry(tasks: list[Task], data, pipeline_name: str):
+async def run_tasks_with_telemetry(tasks: list[Task], data, user: User, pipeline_name: str):
     config = get_current_settings()
 
     logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
-
-    user = await get_default_user()
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)
@@ -273,6 +271,7 @@ async def run_tasks(
     tasks: list[Task],
     dataset_id: UUID = uuid4(),
     data: Any = None,
+    user: User = None,
     pipeline_name: str = "unknown_pipeline",
 ):
     pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
@@ -283,7 +282,9 @@ async def run_tasks(
     pipeline_run_id = pipeline_run.pipeline_run_id
 
     try:
-        async for _ in run_tasks_with_telemetry(tasks, data, pipeline_id):
+        async for _ in run_tasks_with_telemetry(
+            tasks=tasks, data=data, user=user, pipeline_name=pipeline_id
+        ):
             pass
 
         yield await log_pipeline_run_complete(pipeline_run_id, pipeline_id, dataset_id, data)
