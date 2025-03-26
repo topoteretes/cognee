@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, List
+from typing import Type, List, Optional
 
 from pydantic import BaseModel
 
@@ -54,9 +54,13 @@ async def extract_graph_from_data(
     data_chunks: list[DocumentChunk],
     graph_model: Type[BaseModel],
     ontology_adapter: OntologyResolver = OntologyResolver(),
+    graph_prompt_path: Optional[str] = None,
 ) -> List[DocumentChunk]:
     """Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model."""
     chunk_graphs = await asyncio.gather(
-        *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        *[
+            extract_content_graph(chunk.text, graph_model, graph_prompt_path)
+            for chunk in data_chunks
+        ]
     )
     return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
