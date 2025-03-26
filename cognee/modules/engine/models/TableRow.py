@@ -7,7 +7,6 @@ class TableRow(DataPoint):
     name: str
     is_a: Optional[TableType] = None
     description: str
-    ontology_valid: bool = False
     properties: str
 
     metadata: dict = {"index_fields": ["properties"]}

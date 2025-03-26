@@ -22,6 +22,7 @@ class DataPoint(BaseModel):
     updated_at: int = Field(
         default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
     )
+    ontology_valid: bool = False
     version: int = 1  # Default version
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
