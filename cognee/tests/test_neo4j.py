@@ -68,6 +68,16 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
+    assert len(search_results) != 0, "Query related summaries don't exist."
+    print("\nExtracted results are:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    search_results = await cognee.search(
+        query_type=SearchType.NATURAL_LANGUAGE,
+        query_text=f"Find nodes connected to node with name {random_node_name}",
+    )
+    assert len(search_results) != 0, "Query related natural language don't exist."
     print("\nExtracted results are:\n")
     for result in search_results:
         print(f"{result}\n")
