@@ -25,6 +25,10 @@ class PlainFileHandler(logging.FileHandler):
 
     def emit(self, record):
         try:
+            # Check if stream is available before trying to write
+            if self.stream is None:
+                self.stream = self._open()
+
             # Extract the message from the structlog record
             if isinstance(record.msg, dict) and "event" in record.msg:
                 # Extract the basic message
