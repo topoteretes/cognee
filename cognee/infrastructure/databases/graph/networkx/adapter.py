@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 import os
 import json
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
+from sqlalchemy import text
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
@@ -16,7 +17,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class NetworkXAdapter(GraphDBInterface):
@@ -88,6 +89,7 @@ class NetworkXAdapter(GraphDBInterface):
             key=relationship_name,
             **(edge_properties if edge_properties else {}),
         )
+
         await self.save_graph_to_file(self.filename)
 
     async def add_edges(
@@ -315,11 +317,13 @@ class NetworkXAdapter(GraphDBInterface):
                             logger.error(e)
                             raise e
 
-                        if isinstance(edge["updated_at"], int):  # Handle timestamp in milliseconds
+                        if isinstance(
+                            edge.get("updated_at"), int
+                        ):  # Handle timestamp in milliseconds
                             edge["updated_at"] = datetime.fromtimestamp(
                                 edge["updated_at"] / 1000, tz=timezone.utc
                             )
-                        elif isinstance(edge["updated_at"], str):
+                        elif isinstance(edge.get("updated_at"), str):
                             edge["updated_at"] = datetime.strptime(
                                 edge["updated_at"], "%Y-%m-%dT%H:%M:%S.%f%z"
                             )

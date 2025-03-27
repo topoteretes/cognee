@@ -1,11 +1,11 @@
 import cognee
 import asyncio
-import logging
+from cognee.modules.metrics.operations import get_pipeline_run_metrics
+from cognee.shared.logging_utils import get_logger
 import os
 
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.utils import setup_logging
 
 text_1 = """
 1. Audi
@@ -65,7 +65,7 @@ async def main():
     print("Knowledge with ontology created.")
 
     # Step 4: Calculate descriptive metrics
-    await cognee.get_pipeline_run_metrics(pipeline_run, include_optional=True)
+    await get_pipeline_run_metrics(pipeline_run, include_optional=True)
     print("Descriptive graph metrics saved to database.")
 
     # Step 5: Query insights
@@ -79,7 +79,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    setup_logging(logging.INFO)
+    logger = get_logger()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

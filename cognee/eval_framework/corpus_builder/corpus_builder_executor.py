@@ -1,11 +1,12 @@
 import cognee
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
 from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.Task import Task
-from cognee.shared.utils import setup_logging
+
+logger = get_logger(level=ERROR)
 
 
 class CorpusBuilderExecutor:
@@ -53,8 +54,6 @@ class CorpusBuilderExecutor:
         return self.questions
 
     async def run_cognee(self, chunk_size=1024, chunker=TextChunker) -> None:
-        setup_logging(logging.ERROR)
-
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 

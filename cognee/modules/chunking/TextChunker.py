@@ -1,11 +1,11 @@
-import logging
+from cognee.shared.logging_utils import get_logger
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph
 from cognee.modules.chunking.Chunker import Chunker
 from .models.DocumentChunk import DocumentChunk
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class TextChunker(Chunker):

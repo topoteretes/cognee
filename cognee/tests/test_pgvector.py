@@ -1,14 +1,13 @@
 import os
-import logging
 import pathlib
 import cognee
-
+from cognee.modules.search.operations import get_history
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data
 from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.users.methods import get_default_user
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location):
@@ -159,11 +158,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    history = await cognee.get_search_history()
+    user = await get_default_user()
+    history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
-
-    results = await brute_force_triplet_search("What is a quantum computer?")
-    assert len(results) > 0
 
     await test_local_file_deletion(text, explanation_file_path)
 

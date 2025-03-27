@@ -2,7 +2,7 @@
 
 import os
 import uvicorn
-import logging
+from cognee.shared.logging_utils import get_logger
 import sentry_sdk
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response
@@ -28,12 +28,7 @@ from cognee.api.v1.users.routers import (
 )
 from contextlib import asynccontextmanager
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,  # Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    format="%(asctime)s [%(levelname)s] %(message)s",  # Set the log message format
-)
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 if os.getenv("ENV", "prod") == "prod":
     sentry_sdk.init(
@@ -169,9 +164,9 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
-app.include_router(
-    get_code_pipeline_router(), prefix="/api/v1/code-pipeline", tags=["code-pipeline"]
-)
+codegraph_routes = get_code_pipeline_router()
+if codegraph_routes:
+    app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])
 
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):

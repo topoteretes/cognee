@@ -1,14 +1,13 @@
 import os
-import logging
-import pathlib
-import cognee
 import shutil
+import cognee
+import pathlib
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.infrastructure.engine import DataPoint
-from uuid import uuid4
+from cognee.modules.search.operations import get_history
+from cognee.modules.users.methods import get_default_user
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def main():
@@ -81,7 +80,8 @@ async def main():
         for result in search_results:
             print(f"{result}\n")
 
-        history = await cognee.get_search_history()
+        user = await get_default_user()
+        history = await get_history(user.id)
         assert len(history) == 6, "Search history is not correct."
 
         await cognee.prune.prune_data()

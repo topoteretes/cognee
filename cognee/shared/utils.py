@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
-import logging
 import sys
 
 from cognee.base_config import get_base_config
@@ -21,7 +20,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 
 from uuid import uuid4
 import pathlib
-import nltk
 from cognee.shared.exceptions import IngestionError
 
 # Analytics Proxy Url, currently hosted by Vercel
@@ -29,7 +27,10 @@ proxy_url = "https://test.prometh.ai"
 
 
 def get_entities(tagged_tokens):
+    import nltk
+
     nltk.download("maxent_ne_chunker", quiet=True)
+
     from nltk.chunk import ne_chunk
 
     return ne_chunk(tagged_tokens)
@@ -37,6 +38,7 @@ def get_entities(tagged_tokens):
 
 def extract_pos_tags(sentence):
     """Extract Part-of-Speech (POS) tags for words in a sentence."""
+    import nltk
 
     # Ensure that the necessary NLTK resources are downloaded
     nltk.download("words", quiet=True)
@@ -232,9 +234,6 @@ async def render_graph(
 #     return df.replace([np.inf, -np.inf, np.nan], None)
 
 
-logging.basicConfig(level=logging.INFO)
-
-
 async def convert_to_serializable_graph(G):
     """
     Convert a graph into a serializable format with stringified node and edge attributes.
@@ -308,37 +307,6 @@ def embed_logo(p, layout_scale, logo_alpha, position):
     )
 
 
-def style_and_render_graph(p, G, layout_positions, node_attribute, node_colors, centrality):
-    """
-    Apply styling and render the graph into the plot.
-    """
-    from bokeh.plotting import figure, from_networkx
-    from bokeh.models import Circle, MultiLine, HoverTool, ColumnDataSource, Range1d
-    from bokeh.plotting import output_file, show
-
-    from bokeh.embed import file_html
-    from bokeh.resources import CDN
-
-    graph_renderer = from_networkx(G, layout_positions)
-    node_radii = [0.02 + 0.1 * centrality[node] for node in G.nodes()]
-    graph_renderer.node_renderer.data_source.data["radius"] = node_radii
-    graph_renderer.node_renderer.data_source.data["fill_color"] = node_colors
-    graph_renderer.node_renderer.glyph = Circle(
-        radius="radius",
-        fill_color="fill_color",
-        fill_alpha=0.9,
-        line_color="#000000",
-        line_width=1.5,
-    )
-    graph_renderer.edge_renderer.glyph = MultiLine(
-        line_color="#000000",
-        line_alpha=0.3,
-        line_width=1.5,
-    )
-    p.renderers.append(graph_renderer)
-    return graph_renderer
-
-
 def graph_to_tuple(graph):
     """
     Converts a networkx graph to a tuple of (nodes, edges).
@@ -349,23 +317,6 @@ def graph_to_tuple(graph):
     nodes = list(graph.nodes(data=True))  # Get nodes with attributes
     edges = list(graph.edges(data=True))  # Get edges with attributes
     return (nodes, edges)
-
-
-def setup_logging(log_level=logging.INFO):
-    """Sets up the logging configuration."""
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s\n")
-
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
-    stream_handler.setLevel(log_level)
-
-    root_logger = logging.getLogger()
-
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-
-    root_logger.addHandler(stream_handler)
-    root_logger.setLevel(log_level)
 
 
 def start_visualization_server(

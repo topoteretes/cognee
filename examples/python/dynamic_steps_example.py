@@ -1,9 +1,9 @@
 import cognee
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.modules.metrics.operations import get_pipeline_run_metrics
 
 from cognee.api.v1.search import SearchType
-from cognee.shared.utils import setup_logging
 
 job_1 = """
 CV 1: Relevant
@@ -185,7 +185,7 @@ async def main(enable_steps):
 
     # Step 4: Calculate descriptive metrics
     if enable_steps.get("graph_metrics"):
-        await cognee.get_pipeline_run_metrics(pipeline_run, include_optional=True)
+        await get_pipeline_run_metrics(pipeline_run, include_optional=True)
         print("Descriptive graph metrics saved to database.")
 
     # Step 5: Query insights
@@ -197,7 +197,7 @@ async def main(enable_steps):
 
 
 if __name__ == "__main__":
-    setup_logging(logging.ERROR)
+    logger = get_logger(level=ERROR)
 
     rebuild_kg = True
     retrieve = True

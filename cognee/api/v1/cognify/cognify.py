@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import Union, Optional
 
 from pydantic import BaseModel
@@ -17,7 +17,6 @@ from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents import (
     check_permissions_on_documents,
     classify_documents,
@@ -28,7 +27,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 
-logger = logging.getLogger("cognify.v2")
+logger = get_logger("cognify")
 
 update_status_lock = asyncio.Lock()
 
@@ -76,8 +75,6 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
     dataset_id = dataset.id
     dataset_name = generate_dataset_name(dataset.name)
 
-    send_telemetry("cognee.cognify EXECUTION STARTED", user.id)
-
     # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
     task_status = await get_pipeline_status([dataset_id])
 
@@ -88,26 +85,20 @@ async def run_cognify_pipeline(dataset: Dataset, user: User, tasks: list[Task]):
         logger.info("Dataset %s is already being processed.", dataset_name)
         return
 
-    try:
-        if not isinstance(tasks, list):
-            raise ValueError("Tasks must be a list")
+    if not isinstance(tasks, list):
+        raise ValueError("Tasks must be a list")
 
-        for task in tasks:
-            if not isinstance(task, Task):
-                raise ValueError(f"Task {task} is not an instance of Task")
+    for task in tasks:
+        if not isinstance(task, Task):
+            raise ValueError(f"Task {task} is not an instance of Task")
 
-        pipeline_run = run_tasks(tasks, dataset.id, data_documents, "cognify_pipeline")
-        pipeline_run_status = None
+    pipeline_run = run_tasks(tasks, dataset.id, data_documents, "cognify_pipeline")
+    pipeline_run_status = None
 
-        async for run_status in pipeline_run:
-            pipeline_run_status = run_status
+    async for run_status in pipeline_run:
+        pipeline_run_status = run_status
 
-        send_telemetry("cognee.cognify EXECUTION COMPLETED", user.id)
-        return pipeline_run_status
-
-    except Exception as error:
-        send_telemetry("cognee.cognify EXECUTION ERRORED", user.id)
-        raise error
+    return pipeline_run_status
 
 
 def generate_dataset_name(dataset_name: str) -> str:
@@ -124,31 +115,30 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     if user is None:
         user = await get_default_user()
 
-    try:
-        cognee_config = get_cognify_config()
-        ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
-        default_tasks = [
-            Task(classify_documents),
-            Task(check_permissions_on_documents, user=user, permissions=["write"]),
-            Task(
-                extract_chunks_from_documents,
-                max_chunk_size=chunk_size or get_max_chunk_tokens(),
-                chunker=chunker,
-            ),  # Extract text chunks based on the document type.
-            Task(
-                extract_graph_from_data,
-                graph_model=graph_model,
-                ontology_adapter=ontology_adapter,
-                task_config={"batch_size": 10},
-            ),  # Generate knowledge graphs from the document chunks.
-            Task(
-                summarize_text,
-                summarization_model=cognee_config.summarization_model,
-                task_config={"batch_size": 10},
-            ),
-            Task(add_data_points, task_config={"batch_size": 10}),
-        ]
-    except Exception as error:
-        send_telemetry("cognee.cognify DEFAULT TASKS CREATION ERRORED", user.id)
-        raise error
+    cognee_config = get_cognify_config()
+
+    ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
+
+    default_tasks = [
+        Task(classify_documents),
+        Task(check_permissions_on_documents, user=user, permissions=["write"]),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            chunker=chunker,
+        ),  # Extract text chunks based on the document type.
+        Task(
+            extract_graph_from_data,
+            graph_model=graph_model,
+            ontology_adapter=ontology_adapter,
+            task_config={"batch_size": 10},
+        ),  # Generate knowledge graphs from the document chunks.
+        Task(
+            summarize_text,
+            summarization_model=cognee_config.summarization_model,
+            task_config={"batch_size": 10},
+        ),
+        Task(add_data_points, task_config={"batch_size": 10}),
+    ]
+
     return default_tasks

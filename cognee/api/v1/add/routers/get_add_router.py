@@ -2,14 +2,14 @@ from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 from typing import List
-import aiohttp
 import subprocess
-import logging
-import os
+from cognee.shared.logging_utils import get_logger
+import requests
+
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def get_add_router() -> APIRouter:
@@ -36,17 +36,12 @@ def get_add_router() -> APIRouter:
                     )
                 else:
                     # Fetch and store the data from other types of URL using curl
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(data) as resp:
-                            if resp.status == 200:
-                                file_data = await resp.read()
-                                filename = os.path.basename(data)
-                                with open(f".data/{filename}", "wb") as f:
-                                    f.write(file_data)
-                                await cognee_add(
-                                    "data://.data/",
-                                    f"{data.split('/')[-1]}",
-                                )
+                    response = requests.get(data)
+                    response.raise_for_status()
+
+                    file_data = await response.content()
+
+                    return await cognee_add(file_data)
             else:
                 await cognee_add(
                     data,

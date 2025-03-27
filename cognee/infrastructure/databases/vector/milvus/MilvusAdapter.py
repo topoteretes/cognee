@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 
 from cognee.infrastructure.engine import DataPoint
@@ -11,7 +11,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
-logger = logging.getLogger("MilvusAdapter")
+logger = get_logger("MilvusAdapter")
 
 
 class IndexSchema(DataPoint):

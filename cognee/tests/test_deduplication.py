@@ -1,12 +1,12 @@
 import hashlib
 import os
-import logging
+from cognee.shared.logging_utils import get_logger
 import pathlib
 
 import cognee
 from cognee.infrastructure.databases.relational import get_relational_engine
 
-logging.basicConfig(level=logging.DEBUG)
+logger = get_logger()
 
 
 async def test_deduplication():

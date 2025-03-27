@@ -2,9 +2,9 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Any, Union, Tuple
 import os
 import json
-import logging
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class BaseBenchmarkAdapter(ABC):

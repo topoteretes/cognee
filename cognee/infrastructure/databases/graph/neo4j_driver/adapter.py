@@ -1,7 +1,7 @@
 """Neo4j Adapter for Graph Database"""
 
 import json
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
 from typing import Optional, Any, List, Dict
@@ -22,7 +22,7 @@ from .neo4j_metrics_utils import (
     count_self_loops,
 )
 
-logger = logging.getLogger("Neo4jAdapter")
+logger = get_logger("Neo4jAdapter", level=ERROR)
 
 
 class Neo4jAdapter(GraphDBInterface):
@@ -199,13 +199,14 @@ class Neo4jAdapter(GraphDBInterface):
         serialized_properties = self.serialize_properties(edge_properties)
 
         query = dedent(
-            """MATCH (from_node {id: $from_node}),
-            (to_node {id: $to_node})
-            MERGE (from_node)-[r]->(to_node)
-            ON CREATE SET r += $properties, r.updated_at = timestamp(), r.type = $relationship_name
+            f"""\
+            MATCH (from_node {{id: $from_node}}),
+                  (to_node {{id: $to_node}})
+            MERGE (from_node)-[r:{relationship_name}]->(to_node)
+            ON CREATE SET r += $properties, r.updated_at = timestamp()
             ON MATCH SET r += $properties, r.updated_at = timestamp()
             RETURN r
-        """
+            """
         )
 
         params = {

@@ -1,15 +1,11 @@
-from fastapi import Form, UploadFile, Depends
+from fastapi import Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
-from typing import List
-import aiohttp
-import subprocess
-import logging
-import os
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def get_visualize_router() -> APIRouter:

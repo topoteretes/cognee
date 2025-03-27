@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from cognee.shared.logging_utils import get_logger, ERROR
 from typing import List, Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -8,6 +8,9 @@ from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
+from cognee.modules.retrieval.exceptions import CollectionDistancesNotFoundError
+
+logger = get_logger(level=ERROR)
 
 
 def format_triplets(edges):
@@ -134,7 +137,7 @@ async def brute_force_search(
     try:
         vector_engine = get_vector_engine()
     except Exception as e:
-        logging.error("Failed to initialize vector engine: %s", e)
+        logger.error("Failed to initialize vector engine: %s", e)
         raise RuntimeError("Initialization error") from e
 
     send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
@@ -146,6 +149,9 @@ async def brute_force_search(
                 for collection in collections
             ]
         )
+
+        if all(not item for item in results):
+            raise CollectionDistancesNotFoundError()
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
@@ -159,7 +165,7 @@ async def brute_force_search(
         return results
 
     except Exception as error:
-        logging.error(
+        logger.error(
             "Error during brute force search for user: %s, query: %s. Error: %s",
             user.id,
             query,
