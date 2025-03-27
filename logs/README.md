@@ -22,7 +22,7 @@ This directory contains the application logs for Cognee.
 
 ## Retention Policy
 
-Log files are not automatically removed. Implement a log rotation mechanism if needed for long-running deployments.
+The system automatically keeps only the 10 most recent log files. Older log files are automatically deleted when new log files are created. This prevents excessive disk usage in long-running deployments.
 
 ## Usage
 

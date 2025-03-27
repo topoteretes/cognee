@@ -19,6 +19,9 @@ _is_configured = False
 # Path to logs directory
 LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
 
+# Maximum number of log files to keep
+MAX_LOG_FILES = 10
+
 
 class PlainFileHandler(logging.FileHandler):
     """A custom file handler that writes simpler plain text log entries."""
@@ -116,6 +119,36 @@ def get_logger(name=None, level=INFO):
         _is_configured = True
 
     return structlog.get_logger(name if name else __name__)
+
+
+def cleanup_old_logs(logs_dir, max_files):
+    """
+    Removes old log files, keeping only the most recent ones.
+
+    Args:
+        logs_dir: Directory containing log files
+        max_files: Maximum number of log files to keep
+    """
+    try:
+        # Get all .log files in the directory (excluding README and other files)
+        log_files = [f for f in logs_dir.glob("*.log") if f.is_file()]
+
+        # Sort log files by modification time (newest first)
+        log_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+        # Remove old files that exceed the maximum
+        if len(log_files) > max_files:
+            for old_file in log_files[max_files:]:
+                try:
+                    old_file.unlink()
+                    print(f"Deleted old log file: {old_file}")
+                except Exception as e:
+                    print(f"Failed to delete old log file {old_file}: {e}")
+
+        return True
+    except Exception as e:
+        print(f"Error cleaning up log files: {e}")
+        return False
 
 
 def setup_logging(log_level=INFO, name=None):
@@ -227,6 +260,9 @@ def setup_logging(log_level=INFO, name=None):
     root_logger.addHandler(stream_handler)
     root_logger.addHandler(file_handler)
     root_logger.setLevel(log_level)
+
+    # Clean up old log files, keeping only the most recent ones
+    cleanup_old_logs(LOGS_DIR, MAX_LOG_FILES)
 
     # Return a configured logger
     return structlog.get_logger(name if name else __name__)
