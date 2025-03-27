@@ -18,6 +18,7 @@ _is_configured = False
 
 # Path to logs directory
 LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
+LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
 
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
