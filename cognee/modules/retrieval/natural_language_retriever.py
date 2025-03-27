@@ -25,6 +25,13 @@ class NaturalLanguageRetriever(BaseRetriever):
 
     async def _get_graph_schema(self, graph_engine) -> tuple:
         """Retrieve the node and edge schemas from the graph database."""
+        node_schemas = await graph_engine.query(
+            """
+            MATCH (n)
+            UNWIND keys(n) AS prop
+            RETURN DISTINCT labels(n) AS NodeLabels, collect(DISTINCT prop) AS Properties;
+            """
+        )
         edge_schemas = await graph_engine.query(
             """
             MATCH ()-[r]->()
@@ -32,7 +39,7 @@ class NaturalLanguageRetriever(BaseRetriever):
             RETURN DISTINCT key;
             """
         )
-        return edge_schemas
+        return node_schemas, edge_schemas
 
     async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
         """Generate a Cypher query using LLM based on natural language query and schema information."""
