@@ -123,7 +123,7 @@ def setup_logging(log_level=INFO, name=None):
                 self.handleError(record)
 
     # Use our custom handler
-    stream_handler = NewlineStreamHandler(sys.stdout)
+    stream_handler = NewlineStreamHandler(sys.stderr)
     stream_handler.setFormatter(formatter)
     stream_handler.setLevel(log_level)
 
