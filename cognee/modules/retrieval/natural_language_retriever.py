@@ -34,15 +34,16 @@ class NaturalLanguageRetriever(BaseRetriever):
         )
         return edge_schemas
 
-    async def _generate_cypher_query(
-        self, query: str, edge_schemas, previous_attempts=None
-    ) -> str:
+    async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
         """Generate a Cypher query using LLM based on natural language query and schema information."""
         llm_client = get_llm_client()
-        system_prompt = render_prompt(self.system_prompt_path, context={
-            "edge_schemas": edge_schemas,
-            "previous_attempts": previous_attempts or "No attempts yet",
-        })
+        system_prompt = render_prompt(
+            self.system_prompt_path,
+            context={
+                "edge_schemas": edge_schemas,
+                "previous_attempts": previous_attempts or "No attempts yet",
+            },
+        )
 
         return await llm_client.acreate_structured_output(
             text_input=query,
