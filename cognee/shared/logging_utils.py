@@ -10,6 +10,15 @@ WARNING = logging.WARNING
 ERROR = logging.ERROR
 CRITICAL = logging.CRITICAL
 
+log_levels = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
+
 # Track if logging has been configured
 _is_configured = False
 
@@ -43,8 +52,7 @@ def setup_logging(log_level=None, name=None):
         A configured structlog logger instance
     """
 
-    loggin_name_mapping = logging.getLevelNamesMapping()
-    log_level = log_level if log_level else loggin_name_mapping[os.getenv("LOG_LEVEL", "INFO")]
+    log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
 
     def exception_handler(logger, method_name, event_dict):
         """Custom processor to handle uncaught exceptions."""
