@@ -1,9 +1,10 @@
 import os
-from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
+from cognee.modules.search.operations import get_history
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 
 logger = get_logger()
 
@@ -69,16 +70,23 @@ async def main():
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
     assert len(search_results) != 0, "Query related summaries don't exist."
-    print("\nExtracted summaries are:\n")
+    print("\nExtracted results are:\n")
     for result in search_results:
         print(f"{result}\n")
 
-    history = await cognee.get_search_history()
+    search_results = await cognee.search(
+        query_type=SearchType.NATURAL_LANGUAGE,
+        query_text=f"Find nodes connected to node with name {random_node_name}",
+    )
+    assert len(search_results) != 0, "Query related natural language don't exist."
+    print("\nExtracted results are:\n")
+    for result in search_results:
+        print(f"{result}\n")
 
-    assert len(history) == 6, "Search history is not correct."
+    user = await get_default_user()
+    history = await get_history(user.id)
 
-    results = await brute_force_triplet_search("What is a quantum computer?")
-    assert len(results) > 0
+    assert len(history) == 10, "Search history is not correct."
 
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"

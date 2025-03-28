@@ -4,8 +4,9 @@ import pathlib
 import cognee
 
 from cognee.modules.data.models import Data
-from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.search.types import SearchType
+from cognee.modules.search.operations import get_history
 
 logger = get_logger()
 
@@ -151,7 +152,8 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    history = await cognee.get_search_history()
+    user = await get_default_user()
+    history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
 
     await cognee.prune.prune_data()
