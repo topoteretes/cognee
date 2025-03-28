@@ -1,0 +1,125 @@
+name: Reusable Vector DB Tests
+
+on:
+  workflow_call:
+    inputs:
+      databases:
+        required: false
+        type: string
+        default: '["chromadb", "weaviate", "kuzu", "milvus"]'
+        description: "List of vector databases to test"
+    secrets:
+      inherit: true
+
+jobs:
+  run-vector-db-tests:
+    name: ${{ matrix.db }} Tests
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        db: ${{ fromJSON(inputs.databases) }}
+      fail-fast: false
+    
+    services:
+      chromadb:
+        image: chromadb/chroma:0.6.3
+        env:
+          CHROMA_SERVER_AUTH_CREDENTIALS: "test-token"
+          CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: "chromadb.auth.token.TokenAuthCredentialsProvider"
+          CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
+        ports:
+          - 3002:8000
+        if: ${{ matrix.db == 'chromadb' }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+          
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install ChromaDB Dependencies
+        if: ${{ matrix.db == 'chromadb' }}
+        run: poetry install --extras chromadb --no-interaction
+        
+      - name: Install Weaviate Dependencies
+        if: ${{ matrix.db == 'weaviate' }}
+        run: poetry install --extras weaviate --no-interaction
+        
+      - name: Install Kuzu Dependencies
+        if: ${{ matrix.db == 'kuzu' }}
+        run: poetry install --extras kuzu --no-interaction
+        
+      - name: Install Milvus Dependencies
+        if: ${{ matrix.db == 'milvus' }}
+        run: poetry install --extras milvus --no-interaction
+
+      - name: Run ChromaDB Tests
+        if: ${{ matrix.db == 'chromadb' }}
+        env:
+          ENV: 'dev'
+          VECTOR_DB_PROVIDER: chromadb
+          VECTOR_DB_URL: http://localhost:3002
+          VECTOR_DB_KEY: test-token
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_chromadb.py
+        
+      - name: Run Weaviate Tests
+        if: ${{ matrix.db == 'weaviate' }}
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_weaviate.py
+        
+      - name: Run Kuzu Tests
+        if: ${{ matrix.db == 'kuzu' }}
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_kuzu.py
+        
+      - name: Run Milvus Tests
+        if: ${{ matrix.db == 'milvus' }}
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_milvus.py 
