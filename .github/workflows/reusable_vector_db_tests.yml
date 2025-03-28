@@ -6,10 +6,8 @@ on:
       databases:
         required: false
         type: string
-        default: '["chromadb", "weaviate", "kuzu", "milvus"]'
-        description: "List of vector databases to test"
-    secrets:
-      inherit: true
+        default: "all"
+        description: "Which vector databases to test (comma-separated list or 'all')"
 
 jobs:
   run-vector-db-tests:

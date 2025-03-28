@@ -6,26 +6,27 @@ on:
       examples:
         required: false
         type: string
-        default: '["multi-metric-qa", "graphrag-vs-rag", "multimedia", "deduplication", "eval-framework", "descriptive-graph-metrics"]'
-        description: "List of examples to test"
-    secrets:
-      inherit: true
+        default: "all"
+        description: "Which examples to run (comma-separated list or 'all')"
 
 jobs:
   run-examples-tests:
-    name: ${{ matrix.example }} Tests
-    runs-on: ubuntu-22.04
+    name: Example Tests
+    runs-on: ubuntu-latest
     strategy:
-      matrix:
-        example: ${{ fromJSON(inputs.examples) }}
       fail-fast: false
-    
+      matrix:
+        example:
+          - multimetric-qa
+          - graphrag-vs-rag
+          - multimedia
+          - deduplication
+          - eval-framework
+          - descriptive-graph-metrics
     steps:
-      - name: Check out
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+        
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -37,51 +38,53 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-
-      - name: Install Dependencies
+          
+      - name: Install dependencies
         run: poetry install --no-interaction --all-extras
-
-      - name: Run Multi-Metric QA Evaluation
-        if: ${{ matrix.example == 'multi-metric-qa' }}
-        env:
-          ENV: 'dev'
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: poetry run python ./examples/python/multimetric_qa_eval_run.py
         
-      - name: Run GraphRAG vs RAG Test
-        if: ${{ matrix.example == 'graphrag-vs-rag' }}
+      - name: Run Multi-metric QA Example
+        if: matrix.example == 'multimetric-qa'
         env:
-          ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/graphrag_vs_rag_notebook.py
+        run: poetry run python ./examples/python/multimetric_qa_eval_run.py
+        
+      - name: Run GraphRAG vs RAG Example
+        if: matrix.example == 'graphrag-vs-rag'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        run: poetry run python ./examples/python/graphrag_vs_rag.py
         
       - name: Run Multimedia Example
-        if: ${{ matrix.example == 'multimedia' }}
+        if: matrix.example == 'multimedia'
         env:
-          ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./examples/python/multimedia_example.py
         
-      - name: Run Deduplication Tests
-        if: ${{ matrix.example == 'deduplication' }}
+      - name: Run Deduplication Example
+        if: matrix.example == 'deduplication'
         env:
-          ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./examples/python/deduplication.py
         
-      - name: Run Eval Framework Tests
-        if: ${{ matrix.example == 'eval-framework' }}
+      - name: Run Evaluation Framework Example
+        if: matrix.example == 'eval-framework'
         env:
-          ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./examples/python/eval_framework.py
         
-      - name: Run Descriptive Graph Metrics Tests
-        if: ${{ matrix.example == 'descriptive-graph-metrics' }}
+      - name: Run Descriptive Graph Metrics Example
+        if: matrix.example == 'descriptive-graph-metrics'
         env:
-          ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
