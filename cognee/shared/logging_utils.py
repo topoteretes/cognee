@@ -1,5 +1,6 @@
 import sys
 import os
+import threading
 import logging
 import structlog
 import traceback
@@ -15,6 +16,9 @@ CRITICAL = logging.CRITICAL
 
 # Track if logging has been configured
 _is_configured = False
+
+# Create a lock for thread-safe initialization
+_setup_lock = threading.Lock()
 
 # Path to logs directory
 LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
@@ -115,9 +119,15 @@ def get_logger(name=None, level=INFO):
         A configured structlog logger instance
     """
     global _is_configured
+
+    # Always first check if logger is already configured to not use threading lock if not necessary
     if not _is_configured:
-        setup_logging(level)
-        _is_configured = True
+        # Use threading lock to make sure setup_logging can be called only once
+        with _setup_lock:
+            # Unfortunately we also need a second check in case lock was entered twice at the same time
+            if not _is_configured:
+                setup_logging(level)
+                _is_configured = True
 
     return structlog.get_logger(name if name else __name__)
 
