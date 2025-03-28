@@ -99,18 +99,86 @@ jobs:
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
 
-  # Matrix-based vector database tests
-  vector-db-tests:
-    name: Vector DB Tests
+  # Vector database tests
+  chromadb-tests:
+    name: ChromaDB Tests
     needs: integration-tests
     uses: ./.github/workflows/reusable_vector_db_tests.yml
+    with:
+      databases: '["chromadb"]'
     secrets: inherit
 
-  # Matrix-based example tests
-  example-tests:
-    name: Example Tests
+  weaviate-tests:
+    name: Weaviate Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_vector_db_tests.yml
+    with:
+      databases: '["weaviate"]'
+    secrets: inherit
+
+  kuzu-tests:
+    name: Kuzu Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_vector_db_tests.yml
+    with:
+      databases: '["kuzu"]'
+    secrets: inherit
+
+  milvus-tests:
+    name: Milvus Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_vector_db_tests.yml
+    with:
+      databases: '["milvus"]'
+    secrets: inherit
+
+  # Example tests
+  multi-metric-qa-tests:
+    name: Multi-Metric QA Tests
     needs: integration-tests
     uses: ./.github/workflows/reusable_examples_tests.yml
+    with:
+      examples: '["multi-metric-qa"]'
+    secrets: inherit
+
+  graphrag-vs-rag-tests:
+    name: GraphRAG vs RAG Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_examples_tests.yml
+    with:
+      examples: '["graphrag-vs-rag"]'
+    secrets: inherit
+
+  multimedia-tests:
+    name: Multimedia Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_examples_tests.yml
+    with:
+      examples: '["multimedia"]'
+    secrets: inherit
+
+  deduplication-tests:
+    name: Deduplication Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_examples_tests.yml
+    with:
+      examples: '["deduplication"]'
+    secrets: inherit
+
+  eval-framework-tests:
+    name: Eval Framework Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_examples_tests.yml
+    with:
+      examples: '["eval-framework"]'
+    secrets: inherit
+
+  descriptive-graph-metrics-tests:
+    name: Descriptive Graph Metrics Tests
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_examples_tests.yml
+    with:
+      examples: '["descriptive-graph-metrics"]'
     secrets: inherit
 
   # Additional LLM tests
@@ -130,8 +198,16 @@ jobs:
       ollama-tests, 
       notebook-tests, 
       python-version-tests,
-      vector-db-tests,
-      example-tests,
+      chromadb-tests,
+      weaviate-tests,
+      kuzu-tests,
+      milvus-tests,
+      multi-metric-qa-tests,
+      graphrag-vs-rag-tests,
+      multimedia-tests,
+      deduplication-tests,
+      eval-framework-tests,
+      descriptive-graph-metrics-tests,
       gemini-tests
     ]
     runs-on: ubuntu-latest
@@ -146,8 +222,16 @@ jobs:
                 "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
                 "${{ needs.python-version-tests.result }}" == "success" &&
-                "${{ needs.vector-db-tests.result }}" == "success" &&
-                "${{ needs.example-tests.result }}" == "success" &&
+                "${{ needs.chromadb-tests.result }}" == "success" &&
+                "${{ needs.weaviate-tests.result }}" == "success" &&
+                "${{ needs.kuzu-tests.result }}" == "success" &&
+                "${{ needs.milvus-tests.result }}" == "success" &&
+                "${{ needs.multi-metric-qa-tests.result }}" == "success" &&
+                "${{ needs.graphrag-vs-rag-tests.result }}" == "success" &&
+                "${{ needs.multimedia-tests.result }}" == "success" &&
+                "${{ needs.deduplication-tests.result }}" == "success" &&
+                "${{ needs.eval-framework-tests.result }}" == "success" &&
+                "${{ needs.descriptive-graph-metrics-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else

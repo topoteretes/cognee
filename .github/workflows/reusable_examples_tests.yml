@@ -12,14 +12,10 @@ on:
       inherit: true
 
 jobs:
-  run-examples-tests:
-    name: ${{ matrix.example }} Tests
+  run-multi-metric-qa:
+    name: Multi-Metric QA Tests
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        example: ${{ fromJSON(inputs.examples) }}
-      fail-fast: false
-    
+    if: ${{ contains(fromJSON(inputs.examples), 'multi-metric-qa') }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -42,14 +38,37 @@ jobs:
         run: poetry install --no-interaction --all-extras
 
       - name: Run Multi-Metric QA Evaluation
-        if: ${{ matrix.example == 'multi-metric-qa' }}
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run python ./examples/python/multimetric_qa_eval_run.py
         
+  run-graphrag-vs-rag:
+    name: GraphRAG vs RAG Tests
+    runs-on: ubuntu-22.04
+    if: ${{ contains(fromJSON(inputs.examples), 'graphrag-vs-rag') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+          
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install Dependencies
+        run: poetry install --no-interaction --all-extras
+        
       - name: Run GraphRAG vs RAG Test
-        if: ${{ matrix.example == 'graphrag-vs-rag' }}
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -57,29 +76,125 @@ jobs:
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./examples/python/graphrag_vs_rag_notebook.py
         
+  run-multimedia:
+    name: Multimedia Tests
+    runs-on: ubuntu-22.04
+    if: ${{ contains(fromJSON(inputs.examples), 'multimedia') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+          
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install Dependencies
+        run: poetry install --no-interaction --all-extras
+        
       - name: Run Multimedia Example
-        if: ${{ matrix.example == 'multimedia' }}
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run python ./examples/python/multimedia_example.py
         
+  run-deduplication:
+    name: Deduplication Tests
+    runs-on: ubuntu-22.04
+    if: ${{ contains(fromJSON(inputs.examples), 'deduplication') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+          
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install Dependencies
+        run: poetry install --no-interaction --all-extras
+        
       - name: Run Deduplication Tests
-        if: ${{ matrix.example == 'deduplication' }}
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run python ./examples/python/deduplication.py
         
+  run-eval-framework:
+    name: Eval Framework Tests
+    runs-on: ubuntu-22.04
+    if: ${{ contains(fromJSON(inputs.examples), 'eval-framework') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+          
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install Dependencies
+        run: poetry install --no-interaction --all-extras
+        
       - name: Run Eval Framework Tests
-        if: ${{ matrix.example == 'eval-framework' }}
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: poetry run python ./examples/python/eval_framework.py
         
+  run-descriptive-graph-metrics:
+    name: Descriptive Graph Metrics Tests
+    runs-on: ubuntu-22.04
+    if: ${{ contains(fromJSON(inputs.examples), 'descriptive-graph-metrics') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+          
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install Dependencies
+        run: poetry install --no-interaction --all-extras
+        
       - name: Run Descriptive Graph Metrics Tests
-        if: ${{ matrix.example == 'descriptive-graph-metrics' }}
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
