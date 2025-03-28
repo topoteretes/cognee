@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [[project.authors]]
-name = "Rita Aleksziev"
-email = "rita@topoteretes.com"
+name = "Boris Arzentar"
+email = "boris@topoteretes.com"
 
 [build-system]
 requires = [ "hatchling", ]
