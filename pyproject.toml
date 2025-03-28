@@ -29,7 +29,7 @@ numpy = "1.26.4"
 pandas = "2.2.3"
 boto3 = "^1.26.125"
 botocore="^1.35.54"
-sqlalchemy = "2.0.36"
+sqlalchemy = "2.0.39"
 aiosqlite = "^0.20.0"
 tiktoken = "<=0.9.0"
 litellm = ">=1.57.4"
@@ -52,7 +52,7 @@ fastapi = {version = "0.115.7", optional = true}
 fastapi-users = {version = "14.0.0", extras = ["sqlalchemy"]}
 uvicorn = {version = "0.34.0", optional = true}
 gunicorn = {version = "^20.1.0", optional = true}
-dlt = {extras = ["sqlalchemy"], version = "^1.4.1"}
+dlt = {extras = ["sqlalchemy"], version = "^1.9.0"}
 qdrant-client = {version = "^1.9.0", optional = true}
 weaviate-client = {version = "4.9.6", optional = true}
 neo4j = {version = "^5.20.0", optional = true}

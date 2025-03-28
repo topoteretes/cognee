@@ -1,3 +1,4 @@
+import os
 import sys
 import logging
 import structlog
@@ -13,12 +14,12 @@ CRITICAL = logging.CRITICAL
 _is_configured = False
 
 
-def get_logger(name=None, level=INFO):
+def get_logger(name=None, level=None):
     """Get a configured structlog logger.
 
     Args:
         name: Logger name (default: None, uses __name__)
-        level: Logging level (default: INFO)
+        level: Logging level (default: None)
 
     Returns:
         A configured structlog logger instance
@@ -31,16 +32,19 @@ def get_logger(name=None, level=INFO):
     return structlog.get_logger(name if name else __name__)
 
 
-def setup_logging(log_level=INFO, name=None):
+def setup_logging(log_level=None, name=None):
     """Sets up the logging configuration with structlog integration.
 
     Args:
-        log_level: The logging level to use (default: INFO)
+        log_level: The logging level to use (default: None, uses INFO)
         name: Optional logger name (default: None, uses __name__)
 
     Returns:
         A configured structlog logger instance
     """
+
+    loggin_name_mapping = logging.getLevelNamesMapping()
+    log_level = log_level if log_level else loggin_name_mapping[os.getenv("LOG_LEVEL", "INFO")]
 
     def exception_handler(logger, method_name, event_dict):
         """Custom processor to handle uncaught exceptions."""
@@ -133,6 +137,17 @@ def setup_logging(log_level=INFO, name=None):
         root_logger.handlers.clear()
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(log_level)
+
+    if log_level > logging.WARNING:
+        import warnings
+        from sqlalchemy.exc import SAWarning
+
+        warnings.filterwarnings(
+            "ignore", category=SAWarning, module="dlt.destinations.impl.sqlalchemy.merge_job"
+        )
+        warnings.filterwarnings(
+            "ignore", category=SAWarning, module="dlt.destinations.impl.sqlalchemy.load_jobs"
+        )
 
     # Return a configured logger
     return structlog.get_logger(name if name else __name__)
