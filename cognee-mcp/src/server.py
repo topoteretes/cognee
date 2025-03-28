@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import cognee
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import get_logger, get_log_file_location
 import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -92,6 +92,8 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
     try:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
+                log_file = get_log_file_location()
+
                 if name == "cognify":
                     asyncio.create_task(
                         cognify(
@@ -101,19 +103,31 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
                         )
                     )
 
+                    text = (
+                        f"Background process launched due to MCP timeout limitations.\n"
+                        f"Average completion time is around 4 minutes.\n"
+                        f"For current cognify status you can check the log file at: {log_file}"
+                    )
+
                     return [
                         types.TextContent(
                             type="text",
-                            text="Background process launched due to MCP timeout limitations. Estimated completion time up to 4 minutes.",
+                            text=text,
                         )
                     ]
                 if name == "codify":
                     asyncio.create_task(codify(arguments.get("repo_path")))
 
+                    text = (
+                        f"Background process launched due to MCP timeout limitations.\n"
+                        f"Average completion time is around 4 minutes.\n"
+                        f"For current codify status you can check the log file at: {log_file}"
+                    )
+
                     return [
                         types.TextContent(
                             type="text",
-                            text="Background process launched due to MCP timeout limitations. Estimated completion time up to 4 minutes.",
+                            text=text,
                         )
                     ]
                 elif name == "search":
@@ -133,6 +147,7 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
     """Build knowledge graph from the input text"""
+    logger.info("Cognify process starting.")
     if graph_model_file and graph_model_name:
         graph_model = load_class(graph_model_file, graph_model_name)
     else:
@@ -141,14 +156,23 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     await cognee.add(text)
 
     try:
-        asyncio.create_task(cognee.cognify(graph_model=graph_model))
+        await cognee.cognify(graph_model=graph_model)
+        logger.info("Cognify process finished.")
     except Exception as e:
+        logger.error("Cognify process failed.")
         raise ValueError(f"Failed to cognify: {str(e)}")
 
 
 async def codify(repo_path: str):
+    logger.info("Codify process starting.")
+    results = []
     async for result in run_code_graph_pipeline(repo_path, False):
+        results.append(result)
         logger.info(result)
+    if all(results):
+        logger.info("Codify process finished succesfully.")
+    else:
+        logger.info("Codify process failed.")
 
 
 async def search(search_query: str, search_type: str) -> str:
