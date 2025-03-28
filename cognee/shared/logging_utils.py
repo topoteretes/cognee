@@ -141,6 +141,8 @@ def cleanup_old_logs(logs_dir, max_files):
         max_files: Maximum number of log files to keep
     """
     try:
+        logger = structlog.get_logger()
+
         # Get all .log files in the directory (excluding README and other files)
         log_files = [f for f in logs_dir.glob("*.log") if f.is_file()]
 
@@ -152,13 +154,13 @@ def cleanup_old_logs(logs_dir, max_files):
             for old_file in log_files[max_files:]:
                 try:
                     old_file.unlink()
-                    print(f"Deleted old log file: {old_file}")
+                    logger.info(f"Deleted old log file: {old_file}")
                 except Exception as e:
-                    print(f"Failed to delete old log file {old_file}: {e}")
+                    logger.error(f"Failed to delete old log file {old_file}: {e}")
 
         return True
     except Exception as e:
-        print(f"Error cleaning up log files: {e}")
+        logger.error(f"Error cleaning up log files: {e}")
         return False
 
 
@@ -260,7 +262,7 @@ def setup_logging(log_level=INFO, name=None):
 
     # Create a file handler that uses our custom PlainFileHandler
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_file_path = LOGS_DIR / f"{current_time}.log"
+    log_file_path = os.path.join(LOGS_DIR, f"{current_time}.log")
     file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
     file_handler.setLevel(DEBUG)
 
