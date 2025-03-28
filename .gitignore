@@ -73,6 +73,11 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Cognee logs directory - keep directory, ignore contents
+logs/*
+!logs/.gitkeep
+!logs/README.md
+
 # Flask stuff:
 instance/
 .webassets-cache
