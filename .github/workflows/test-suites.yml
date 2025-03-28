@@ -23,17 +23,27 @@ jobs:
         with:
           python-version: '3.11'
           
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest
+          pip install -e .
+          
       - name: Run Linting
-        uses: ./.github/workflows/ruff_lint.yaml
+        uses: astral-sh/ruff-action@v2
         
       - name: Run Formatting Check
-        uses: ./.github/workflows/ruff_format.yaml
+        uses: astral-sh/ruff-action@v2
+        with:
+          args: "format --check"
         
       - name: Run Simple Examples
-        uses: ./.github/workflows/test_simple_example.yml
+        run: |
+          pytest tests/examples/test_simple_example.py -v
         
       - name: Run Basic Graph Tests
-        uses: ./.github/workflows/test_code_graph_example.yml
+        run: |
+          pytest tests/examples/test_code_graph_example.py -v
 
   integration-tests:
     name: Integration Tests
@@ -47,17 +57,26 @@ jobs:
         with:
           python-version: '3.11'
           
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+          
       - name: Run Server Tests
-        uses: ./.github/workflows/test_cognee_server_start.yml
+        run: |
+          pytest tests/test_cognee_server_start.py -v
         
       - name: Run Telemetry Tests
-        uses: ./.github/workflows/test_telemetry.yml
+        run: |
+          pytest tests/test_telemetry.py -v
         
       - name: Run Dynamic Steps Tests
-        uses: ./.github/workflows/test_dynamic_steps_example.yml
+        run: |
+          pytest tests/examples/test_dynamic_steps_example.py -v
         
       - name: Run Graph Metrics Tests
-        uses: ./.github/workflows/test_descriptive_graph_metrics.yml
+        run: |
+          pytest tests/examples/test_descriptive_graph_metrics.py -v
 
   complex-tests:
     name: Complex Tests
@@ -74,23 +93,38 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test,all]
+          
+      - name: Start Neo4j
+        run: |
+          docker-compose -f docker/docker-compose.yml up -d neo4j
+          
       - name: Run Database Tests
-        uses: ./.github/workflows/test_neo4j.yml
+        run: |
+          pytest tests/databases/test_neo4j.py -v
         
       - name: Run Vector Store Tests
-        uses: ./.github/workflows/test_pgvector.yml
+        run: |
+          pytest tests/databases/test_pgvector.py -v
         
       - name: Run LLM Integration Tests
-        uses: ./.github/workflows/test_ollama.yml
+        run: |
+          pytest tests/test_ollama.py -v
         
       - name: Run Notebook Tests
-        uses: ./.github/workflows/test_notebook.yml
+        run: |
+          pytest tests/test_notebook.py -v
         
       - name: Run Multi-Metric QA Evaluation
-        uses: ./.github/workflows/test_multimetric_qa_eval_run.yaml
+        run: |
+          pytest tests/examples/test_multimetric_qa_eval_run.py -v
         
       - name: Run Graph RAG Tests
-        uses: ./.github/workflows/test_graphrag_vs_rag_notebook.yml
+        run: |
+          pytest tests/examples/test_graphrag_vs_rag_notebook.py -v
 
   notify:
     name: Notify Test Completion
