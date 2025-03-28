@@ -8,8 +8,6 @@ on:
         type: boolean
         default: true
         description: "Whether to run all notebook tests"
-    secrets:
-      inherit: true
 
 jobs:
   run-main-notebook:
