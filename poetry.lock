@@ -268,7 +268,6 @@ files = [
     {file = "argon2_cffi-23.1.0-py3-none-any.whl", hash = "sha256:c670642b78ba29641818ab2e68bd4e6a78ba53b7eff7b4c3815ae16abf91c7ea"},
     {file = "argon2_cffi-23.1.0.tar.gz", hash = "sha256:879c3e79a2729ce768ebb7d36d4609e3a78a4ca2ec3a9f12286ca057e3d0db08"},
 ]
-markers = {main = "extra == \"api\""}
 
 [package.dependencies]
 argon2-cffi-bindings = "*"
@@ -309,7 +308,6 @@ files = [
     {file = "argon2_cffi_bindings-21.2.0-pp38-pypy38_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:ed2937d286e2ad0cc79a7087d3c272832865f779430e0cc2b4f3718d3159b0cb"},
     {file = "argon2_cffi_bindings-21.2.0-pp38-pypy38_pp73-win_amd64.whl", hash = "sha256:5e00316dabdaea0b2dd82d141cc66889ced0cdcbfa599e8b471cf22c620c329a"},
 ]
-markers = {main = "extra == \"api\""}
 
 [package.dependencies]
 cffi = ">=1.0.1"
@@ -590,7 +588,6 @@ description = "Modern password hashing for your software and your servers"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"api\" or extra == \"chromadb\""
 files = [
     {file = "bcrypt-4.3.0-cp313-cp313t-macosx_10_12_universal2.whl", hash = "sha256:f01e060f14b6b57bbb72fc5b4a83ac21c443c9a2ee708e04a10e9192f90a6281"},
     {file = "bcrypt-4.3.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c5eeac541cefd0bb887a371ef73c62c3cd78535e4887b310626036a7c0a817bb"},
@@ -908,7 +905,6 @@ files = [
     {file = "cffi-1.17.1-cp39-cp39-win_amd64.whl", hash = "sha256:d016c76bdd850f3c626af19b0542c9677ba156e4ee4fccfdd7848803533ef662"},
     {file = "cffi-1.17.1.tar.gz", hash = "sha256:1c39c6016c32bc48dd54561950ebd6836e1670f2ae46128f67cf49e789c52824"},
 ]
-markers = {main = "(extra == \"deepeval\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\") and (sys_platform == \"linux\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\") and (platform_python_implementation != \"PyPy\" or extra == \"api\" or python_version >= \"3.13\")"}
 
 [package.dependencies]
 pycparser = "*"
@@ -1348,7 +1344,6 @@ description = "cryptography is a package which provides cryptographic recipes an
 optional = false
 python-versions = "!=3.9.0,!=3.9.1,>=3.7"
 groups = ["main"]
-markers = "extra == \"deepeval\" and sys_platform == \"linux\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\""
 files = [
     {file = "cryptography-44.0.2-cp37-abi3-macosx_10_9_universal2.whl", hash = "sha256:efcfe97d1b3c79e486554efddeb8f6f53a4cdd4cf6086642784fa31fc384e1d7"},
     {file = "cryptography-44.0.2-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:29ecec49f3ba3f3849362854b7253a9f59799e3763b0c9d0826259a88efa02f1"},
@@ -1856,7 +1851,6 @@ description = "DNS toolkit"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "dnspython-2.7.0-py3-none-any.whl", hash = "sha256:b4c34b7d10b51bcc3a5071e7b8dee77939f1e878477eeecc965e9835f63c6c86"},
     {file = "dnspython-2.7.0.tar.gz", hash = "sha256:ce9c432eda0dc91cf618a5cedf1a4e142651196bbcd2c80e89ed5a907e5cfaf1"},
@@ -1916,7 +1910,6 @@ description = "A robust email address syntax and deliverability validation libra
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "email_validator-2.2.0-py3-none-any.whl", hash = "sha256:561977c2d73ce3611850a06fa56b414621e0c8faa9d66f2611407d87465da631"},
     {file = "email_validator-2.2.0.tar.gz", hash = "sha256:cb690f344c617a714f22e66ae771445a1ceb46821152df8e165c5f9a364582b7"},
@@ -2045,7 +2038,6 @@ description = "Ready-to-use and customizable users management for FastAPI"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "fastapi_users-14.0.0-py3-none-any.whl", hash = "sha256:e1230e044ddc2209b890b5b5c6fc1d13def961298d40e01c2d28f8bc2fe8c4c7"},
     {file = "fastapi_users-14.0.0.tar.gz", hash = "sha256:6dceefbd2db87a17f791ef431d616bb5ce40cb123da7922969b704cbee5e7384"},
@@ -2073,7 +2065,6 @@ description = "FastAPI Users database adapter for SQLAlchemy"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "fastapi_users_db_sqlalchemy-7.0.0-py3-none-any.whl", hash = "sha256:5fceac018e7cfa69efc70834dd3035b3de7988eb4274154a0dbe8b14f5aa001e"},
     {file = "fastapi_users_db_sqlalchemy-7.0.0.tar.gz", hash = "sha256:6823eeedf8a92f819276a2b2210ef1dcfd71fe8b6e37f7b4da8d1c60e3dfd595"},
@@ -2595,7 +2586,7 @@ description = "Lightweight in-process concurrent programming"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "(platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\") and (extra == \"api\" or extra == \"llama-index\" or extra == \"deepeval\" or python_version < \"3.11\")"
+markers = "platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\""
 files = [
     {file = "greenlet-3.1.1-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:0bbae94a29c9e5c7e4a2b7f0aae5c17e8e90acbfd3bf6270eeba60c39fce3563"},
     {file = "greenlet-3.1.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0fde093fb93f35ca72a556cf72c92ea3ebfda3d79fc35bb19fbe685853869a83"},
@@ -7285,7 +7276,6 @@ description = "Modern password hashing for Python"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "pwdlib-0.2.1-py3-none-any.whl", hash = "sha256:1823dc6f22eae472b540e889ecf57fd424051d6a4023ec0bcf7f0de2d9d7ef8c"},
     {file = "pwdlib-0.2.1.tar.gz", hash = "sha256:9a1d8a8fa09a2f7ebf208265e55d7d008103cbdc82b9e4902ffdd1ade91add5e"},
@@ -7470,7 +7460,6 @@ files = [
     {file = "pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc"},
     {file = "pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6"},
 ]
-markers = {main = "(extra == \"deepeval\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\") and (platform_python_implementation != \"PyPy\" or extra == \"api\" or python_version >= \"3.13\") and (sys_platform == \"linux\" or extra == \"api\" or extra == \"weaviate\" or extra == \"docs\" or python_version >= \"3.13\")"}
 
 [[package]]
 name = "pydantic"
@@ -7649,7 +7638,6 @@ description = "JSON Web Token implementation in Python"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "PyJWT-2.9.0-py3-none-any.whl", hash = "sha256:3b02fb0f44517787776cf48f2ae25d8e14f300e6d7545a4315cee571a415e850"},
     {file = "pyjwt-2.9.0.tar.gz", hash = "sha256:7e1e5b56cc735432a7369cbfa0efe50fa113ebecdc04ae6922deba8b84582d0c"},
@@ -8070,7 +8058,6 @@ description = "A streaming multipart parser for Python"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"api\""
 files = [
     {file = "python_multipart-0.0.17-py3-none-any.whl", hash = "sha256:15dc4f487e0a9476cc1201261188ee0940165cffc94429b6fc565c4d3045cb5d"},
     {file = "python_multipart-0.0.17.tar.gz", hash = "sha256:41330d831cae6e2f22902704ead2826ea038d0419530eadff3ea80175aec5538"},
@@ -11253,7 +11240,7 @@ type = ["pytest-mypy"]
 
 [extras]
 anthropic = ["anthropic"]
-api = ["fastapi", "fastapi-users", "gunicorn", "uvicorn"]
+api = ["gunicorn", "uvicorn"]
 chromadb = ["chromadb"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 deepeval = ["deepeval"]
@@ -11282,4 +11269,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "c3211cc33eda58ac3b92c65a67ecec191f209f852a667c0a8816000f4e09e9e5"
+content-hash = "4bda223028508503b326912854c60fa4a5f60349370d26f22dd997d0dec11e01"
