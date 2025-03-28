@@ -1,0 +1,107 @@
+name: Test Suites
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  basic-tests:
+    name: Basic Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Run Linting
+        uses: ./.github/workflows/ruff_lint.yaml
+        
+      - name: Run Formatting Check
+        uses: ./.github/workflows/ruff_format.yaml
+        
+      - name: Run Simple Examples
+        uses: ./.github/workflows/test_simple_example.yml
+        
+      - name: Run Basic Graph Tests
+        uses: ./.github/workflows/test_code_graph_example.yml
+
+  integration-tests:
+    name: Integration Tests
+    needs: basic-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Run Server Tests
+        uses: ./.github/workflows/test_cognee_server_start.yml
+        
+      - name: Run Telemetry Tests
+        uses: ./.github/workflows/test_telemetry.yml
+        
+      - name: Run Dynamic Steps Tests
+        uses: ./.github/workflows/test_dynamic_steps_example.yml
+        
+      - name: Run Graph Metrics Tests
+        uses: ./.github/workflows/test_descriptive_graph_metrics.yml
+
+  complex-tests:
+    name: Complex Tests
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Run Database Tests
+        uses: ./.github/workflows/test_neo4j.yml
+        
+      - name: Run Vector Store Tests
+        uses: ./.github/workflows/test_pgvector.yml
+        
+      - name: Run LLM Integration Tests
+        uses: ./.github/workflows/test_ollama.yml
+        
+      - name: Run Notebook Tests
+        uses: ./.github/workflows/test_notebook.yml
+        
+      - name: Run Multi-Metric QA Evaluation
+        uses: ./.github/workflows/test_multimetric_qa_eval_run.yaml
+        
+      - name: Run Graph RAG Tests
+        uses: ./.github/workflows/test_graphrag_vs_rag_notebook.yml
+
+  notify:
+    name: Notify Test Completion
+    needs: [basic-tests, integration-tests, complex-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check Test Status
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      
+      - name: Notify Success
+        if: success()
+        run: echo "All test suites completed successfully!" 
