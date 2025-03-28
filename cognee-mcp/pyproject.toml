@@ -1,13 +1,13 @@
 [project]
 name = "cognee-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "A MCP server project"
 readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
     "cognee[postgres,codegraph,gemini,huggingface]",
-    "mcp==1.3.0",
+    "mcp==1.5.0",
     "uv>=0.6.3",
 ]
 
