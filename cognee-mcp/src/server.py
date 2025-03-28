@@ -133,6 +133,7 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
     """Build knowledge graph from the input text"""
+    logger.info("Cognify process starting.")
     if graph_model_file and graph_model_name:
         graph_model = load_class(graph_model_file, graph_model_name)
     else:
@@ -141,14 +142,23 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
     await cognee.add(text)
 
     try:
-        asyncio.create_task(cognee.cognify(graph_model=graph_model))
+        await cognee.cognify(graph_model=graph_model)
+        logger.info("Cognify process finished.")
     except Exception as e:
+        logger.error("Cognify process failed.")
         raise ValueError(f"Failed to cognify: {str(e)}")
 
 
 async def codify(repo_path: str):
+    logger.info("Codify process starting.")
+    results = []
     async for result in run_code_graph_pipeline(repo_path, False):
+        results.append(result)
         logger.info(result)
+    if all(results):
+        logger.info("Codify process finished succesfully.")
+    else:
+        logger.info("Codify process failed.")
 
 
 async def search(search_query: str, search_type: str) -> str:
