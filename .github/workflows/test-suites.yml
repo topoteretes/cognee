@@ -87,18 +87,8 @@ jobs:
   notebook-tests:
     name: Notebook Tests
     needs: integration-tests
-    uses: ./.github/workflows/reusable_notebook.yml
-    with:
-      notebook-location: notebooks/cognee_demo.ipynb
-    secrets:
-      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+    uses: ./.github/workflows/reusable_notebooks_tests.yml
+    secrets: inherit
 
   python-version-tests:
     name: Python Version Tests
@@ -179,25 +169,6 @@ jobs:
     needs: integration-tests
     uses: ./.github/workflows/test_descriptive_graph_metrics.yml
     secrets: inherit
-    
-  # Additional notebook tests
-  llama-index-integration:
-    name: LlamaIndex Integration
-    needs: integration-tests
-    uses: ./.github/workflows/test_llama_index_cognee_integration_notebook.yml
-    secrets: inherit
-    
-  cognee-llama-index:
-    name: Cognee LlamaIndex
-    needs: integration-tests
-    uses: ./.github/workflows/test_cognee_llama_index_notebook.yml
-    secrets: inherit
-    
-  cognee-multimedia:
-    name: Cognee Multimedia
-    needs: integration-tests
-    uses: ./.github/workflows/test_cognee_multimedia_notebook.yml
-    secrets: inherit
 
   notify:
     name: Test Completion Status
@@ -219,10 +190,7 @@ jobs:
       multimedia-example,
       deduplication-tests,
       eval-framework,
-      descriptive-graph-metrics,
-      llama-index-integration,
-      cognee-llama-index,
-      cognee-multimedia
+      descriptive-graph-metrics
     ]
     runs-on: ubuntu-latest
     if: always()
@@ -246,10 +214,7 @@ jobs:
                 "${{ needs.multimedia-example.result }}" == "success" &&
                 "${{ needs.deduplication-tests.result }}" == "success" &&
                 "${{ needs.eval-framework.result }}" == "success" &&
-                "${{ needs.descriptive-graph-metrics.result }}" == "success" &&
-                "${{ needs.llama-index-integration.result }}" == "success" &&
-                "${{ needs.cognee-llama-index.result }}" == "success" &&
-                "${{ needs.cognee-multimedia.result }}" == "success" ]]; then
+                "${{ needs.descriptive-graph-metrics.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
             echo "One or more test suites failed."
