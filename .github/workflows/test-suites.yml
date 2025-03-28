@@ -181,7 +181,7 @@ jobs:
         image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: cognee
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB: cognee_db
         options: >-
           --health-cmd pg_isready
