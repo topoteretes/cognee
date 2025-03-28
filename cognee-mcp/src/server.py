@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import cognee
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import get_logger, get_log_file_location
 import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -92,6 +92,8 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
     try:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
+                log_file = get_log_file_location()
+
                 if name == "cognify":
                     asyncio.create_task(
                         cognify(
@@ -101,19 +103,31 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
                         )
                     )
 
+                    text = (
+                        f"Background process launched due to MCP timeout limitations.\n"
+                        f"Average completion time is around 4 minutes.\n"
+                        f"For current cognify status you can check the log file at: {log_file}"
+                    )
+
                     return [
                         types.TextContent(
                             type="text",
-                            text="Background process launched due to MCP timeout limitations. Estimated completion time up to 4 minutes.",
+                            text=text,
                         )
                     ]
                 if name == "codify":
                     asyncio.create_task(codify(arguments.get("repo_path")))
 
+                    text = (
+                        f"Background process launched due to MCP timeout limitations.\n"
+                        f"Average completion time is around 4 minutes.\n"
+                        f"For current codify status you can check the log file at: {log_file}"
+                    )
+
                     return [
                         types.TextContent(
                             type="text",
-                            text="Background process launched due to MCP timeout limitations. Estimated completion time up to 4 minutes.",
+                            text=text,
                         )
                     ]
                 elif name == "search":

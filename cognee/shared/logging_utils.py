@@ -279,3 +279,13 @@ def setup_logging(log_level=INFO, name=None):
 
     # Return a configured logger
     return structlog.get_logger(name if name else __name__)
+
+
+def get_log_file_location():
+    # Get the root logger
+    root_logger = logging.getLogger()
+
+    # Loop through handlers to find the FileHandler
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            return handler.baseFilename
