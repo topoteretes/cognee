@@ -1,6 +1,5 @@
 import os
 import sys
-import os
 import threading
 import logging
 import structlog
