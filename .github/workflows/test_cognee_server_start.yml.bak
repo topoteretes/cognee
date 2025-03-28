@@ -1,28 +1,23 @@
-name: test | test telemetry
+name: test | test server start
 
 on:
-  workflow_call:
-    secrets:
-      inherit: true
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
-  ENV: 'local'
+  ENV: 'dev'
 
 jobs:
 
-  run_common:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # These labels correspond to:
-        # - ubuntu-22.04: Linux
-        os: [ubuntu-22.04]
+  run_server:
+    name: Test cognee server start
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
@@ -45,15 +40,12 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
-
-      - name: Add telemetry identifier
         run: |
-          echo "test-machine" > .anon_id
+          poetry install --extras api --no-interaction
 
-      - name: Run default basic pipeline
+      - name: Run cognee server
         env:
-          ENV: 'local'
+          ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -62,10 +54,25 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_library.py
+        run: |
+          poetry run uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000 &
+          echo $! > server.pid
+          sleep 10
+
+      - name: Check server process
+        run: |
+          if ! ps -p $(cat server.pid) > /dev/null; then
+            echo "::error::Server failed to start"
+            exit 1
+          fi
+
+      - name: Stop server
+        run: |
+          kill $(cat server.pid) || true
 
       - name: Clean up disk space
         run: |
           sudo rm -rf ~/.cache
           sudo rm -rf /tmp/*
+          sudo rm server.pid
           df -h

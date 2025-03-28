@@ -1,18 +1,20 @@
-name: test | simple example
+name: test | eval_framework
 
 on:
-  workflow_call:
-    secrets:
-      inherit: true
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  run_simple_example_test:
+  run_eval_framework_test:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
-        example-location: ./examples/python/simple_example.py
+        example-location: ./cognee/eval_framework/run_eval.py
       secrets:
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

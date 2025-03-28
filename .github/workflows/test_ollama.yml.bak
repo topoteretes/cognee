@@ -1,9 +1,10 @@
 name: test | ollama
 
 on:
-  workflow_call:
-    secrets:
-      inherit: true
+  workflow_dispatch:
+  pull_request:
+    types: [ labeled, synchronize ]
+
 jobs:
 
   run_simple_example_test:

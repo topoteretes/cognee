@@ -19,340 +19,74 @@ env:
 jobs:
   basic-tests:
     name: Basic Tests
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.11.x-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install --no-interaction --all-extras
-
-      - name: Run Linting
-        uses: astral-sh/ruff-action@v2
-        
-      - name: Run Formatting Check
-        uses: astral-sh/ruff-action@v2
-        with:
-          args: "format --check"
-        
-      - name: Run Simple Examples
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/simple_example.py
-        
-      - name: Run Basic Graph Tests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/code_graph_example.py
-
-  verify-basic:
-    name: Verify Basic Tests
-    needs: basic-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Basic Tests Status
-        run: |
-          if [[ "${{ needs.basic-tests.result }}" == "success" ]]; then
-            echo "Basic tests passed successfully. Proceeding to integration tests."
-            exit 0
-          else
-            echo "Basic tests failed or were cancelled."
-            exit 1
-          fi
+    uses: ./.github/workflows/reusable_basic_tests.yml
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
 
   integration-tests:
     name: Integration Tests
-    needs: verify-basic
-    runs-on: ubuntu-22.04
-    services:
-      chromadb:
-        image: chromadb/chroma:0.6.3
-        env:
-          CHROMA_SERVER_AUTH_CREDENTIALS: "test-token"
-          CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: "chromadb.auth.token.TokenAuthCredentialsProvider"
-          CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
-        ports:
-          - 3002:8000
+    needs: basic-tests
+    uses: ./.github/workflows/reusable_integration_tests.yml
+    secrets:
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
 
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11.x'
-          
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.11.x-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install --extras chromadb --no-interaction
-          
-      - name: Run Server Tests
-        env:
-          VECTOR_DB_PROVIDER: chromadb
-          VECTOR_DB_URL: http://localhost:3002
-          VECTOR_DB_KEY: test-token
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_cognee_server_start.py
-        
-      - name: Run Telemetry Tests
-        env:
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_telemetry.py
-        
-      - name: Run Dynamic Steps Tests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/dynamic_steps_example.py
-
-  verify-integration:
-    name: Verify Integration Tests
+  database-postgres-tests:
+    name: PostgreSQL Tests
     needs: integration-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Integration Tests Status
-        run: |
-          if [[ "${{ needs.integration-tests.result }}" == "success" ]]; then
-            echo "Integration tests passed successfully. Proceeding to complex tests."
-            exit 0
-          else
-            echo "Integration tests failed or were cancelled."
-            exit 1
-          fi
+    uses: ./.github/workflows/reusable_database_tests.yml
+    with:
+      database-type: 'postgres'
+    secrets:
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
 
-  database-tests:
-    name: Database Tests
-    needs: verify-integration
-    runs-on: ubuntu-22.04
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB: cognee_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11.x'
-          
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.11.x-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install -E postgres --no-interaction
-                    
-      - name: Run Vector Store Tests
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_pgvector.py
-
-  neo4j-tests:
+  database-neo4j-tests:
     name: Neo4j Tests
-    needs: verify-integration
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11.x'
-          
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.11.x-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install -E neo4j --no-interaction
-          
-      - name: Start Neo4j
-        run: |
-          docker-compose -f docker/docker-compose.yml up -d neo4j
-          echo "Waiting for Neo4j to start..."
-          sleep 30
-          
-      - name: Run Database Tests
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_neo4j.py
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_database_tests.yml
+    with:
+      database-type: 'neo4j'
+    secrets:
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
   ollama-tests:
     name: Ollama Tests
-    needs: verify-integration
-    runs-on: buildjet-4vcpu-ubuntu-2204
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12.x'
-          
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install dependencies
-        run: |
-          poetry install --no-interaction --all-extras
-          poetry add torch
-
-      - name: Start Ollama container
-        run: |
-          docker run -d --name ollama -p 11434:11434 ollama/ollama
-          sleep 5
-          docker exec -d ollama bash -c "ollama serve --openai"
-          
-      - name: Wait for Ollama to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:11434/v1/models > /dev/null; then
-              echo "Ollama is ready"
-              exit 0
-            fi
-            echo "Waiting for Ollama... attempt $i"
-            sleep 2
-          done
-          echo "Ollama failed to start"
-          exit 1
-
-      - name: Pull Ollama models
-        run: |
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "phi4"}'
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
-        
-      - name: Run LLM Integration Tests
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-          PYTHONFAULTHANDLER: 1
-          LLM_PROVIDER: "ollama"
-          LLM_API_KEY: "ollama"
-          LLM_ENDPOINT: "http://localhost:11434/v1/"
-          LLM_MODEL: "phi4"
-          EMBEDDING_PROVIDER: "ollama"
-          EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://localhost:11434/v1/"
-          EMBEDDING_DIMENSIONS: "4096"
-          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
-        run: poetry run python ./cognee/tests/test_ollama.py
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_ollama_tests.yml
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
 
   notebook-tests:
     name: Notebook Tests
-    needs: verify-integration
+    needs: integration-tests
     uses: ./.github/workflows/reusable_notebook.yml
     with:
       notebook-location: notebooks/cognee_demo.ipynb
@@ -368,82 +102,156 @@ jobs:
 
   python-version-tests:
     name: Python Version Tests
-    needs: verify-integration
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        python-version: ['3.10.x', '3.11.x', '3.12.x']
-      fail-fast: false
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
+    needs: integration-tests
+    uses: ./.github/workflows/reusable_python_version_tests.yml
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+  # Add various database tests similar to chromadb, weaviate, kuzu, etc.
+  chromadb-tests:
+    name: ChromaDB Tests
+    needs: integration-tests
+    uses: ./.github/workflows/test_chromadb.yml
+    secrets: inherit
 
-      - name: Install dependencies
-        run: poetry install --no-interaction --all-extras
-          
-      - name: Run Basic Examples
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/simple_example.py
+  weaviate-tests:
+    name: Weaviate Tests
+    needs: integration-tests
+    uses: ./.github/workflows/test_weaviate.yml
+    secrets: inherit
+
+  kuzu-tests:
+    name: Kuzu Tests
+    needs: integration-tests
+    uses: ./.github/workflows/test_kuzu.yml
+    secrets: inherit
+    
+  # Additional tests from existing workflows
+  multi-metric-qa-eval:
+    name: Multi-Metric QA Evaluation
+    needs: integration-tests
+    uses: ./.github/workflows/test_multimetric_qa_eval_run.yaml
+    secrets: inherit
+    
+  graphrag-vs-rag:
+    name: GraphRAG vs RAG Test
+    needs: integration-tests
+    uses: ./.github/workflows/test_graphrag_vs_rag_notebook.yml
+    secrets: inherit
+
+  # Additional vector databases
+  milvus-tests:
+    name: Milvus Tests
+    needs: integration-tests
+    uses: ./.github/workflows/test_milvus.yml
+    secrets: inherit
+    
+  # Additional LLM tests
+  gemini-tests:
+    name: Gemini Tests
+    needs: integration-tests
+    uses: ./.github/workflows/test_gemini.yml
+    secrets: inherit
+    
+  # Additional examples and frameworks
+  multimedia-example:
+    name: Multimedia Example
+    needs: integration-tests
+    uses: ./.github/workflows/test_multimedia_example.yaml
+    secrets: inherit
+    
+  deduplication-tests:
+    name: Deduplication Tests
+    needs: integration-tests
+    uses: ./.github/workflows/test_deduplication.yml
+    secrets: inherit
+    
+  eval-framework:
+    name: Evaluation Framework
+    needs: integration-tests
+    uses: ./.github/workflows/test_eval_framework.yml
+    secrets: inherit
+    
+  descriptive-graph-metrics:
+    name: Descriptive Graph Metrics
+    needs: integration-tests
+    uses: ./.github/workflows/test_descriptive_graph_metrics.yml
+    secrets: inherit
+    
+  # Additional notebook tests
+  llama-index-integration:
+    name: LlamaIndex Integration
+    needs: integration-tests
+    uses: ./.github/workflows/test_llama_index_cognee_integration_notebook.yml
+    secrets: inherit
+    
+  cognee-llama-index:
+    name: Cognee LlamaIndex
+    needs: integration-tests
+    uses: ./.github/workflows/test_cognee_llama_index_notebook.yml
+    secrets: inherit
+    
+  cognee-multimedia:
+    name: Cognee Multimedia
+    needs: integration-tests
+    uses: ./.github/workflows/test_cognee_multimedia_notebook.yml
+    secrets: inherit
 
   notify:
-    name: Notify Test Completion
-    needs: [basic-tests, verify-basic, integration-tests, verify-integration, database-tests, neo4j-tests, ollama-tests, notebook-tests, python-version-tests]
+    name: Test Completion Status
+    needs: [
+      basic-tests, 
+      integration-tests, 
+      database-postgres-tests, 
+      database-neo4j-tests, 
+      ollama-tests, 
+      notebook-tests, 
+      python-version-tests,
+      chromadb-tests,
+      weaviate-tests,
+      kuzu-tests,
+      multi-metric-qa-eval,
+      graphrag-vs-rag,
+      milvus-tests,
+      gemini-tests,
+      multimedia-example,
+      deduplication-tests,
+      eval-framework,
+      descriptive-graph-metrics,
+      llama-index-integration,
+      cognee-llama-index,
+      cognee-multimedia
+    ]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check Test Status
+      - name: Check Status
         run: |
-          if [[ "${{ needs.basic-tests.result }}" != "success" ]]; then
-            echo "Basic tests failed"
-            exit 1
-          elif [[ "${{ needs.verify-basic.result }}" != "success" ]]; then
-            echo "Basic tests verification failed"
-            exit 1
-          elif [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
-            echo "Integration tests failed"
-            exit 1
-          elif [[ "${{ needs.verify-integration.result }}" != "success" ]]; then
-            echo "Integration tests verification failed"
-            exit 1
-          elif [[ "${{ needs.database-tests.result }}" != "success" ]]; then
-            echo "Database tests failed"
-            exit 1
-          elif [[ "${{ needs.neo4j-tests.result }}" != "success" ]]; then
-            echo "Neo4j tests failed"
-            exit 1
-          elif [[ "${{ needs.ollama-tests.result }}" != "success" ]]; then
-            echo "Ollama tests failed"
-            exit 1
-          elif [[ "${{ needs.notebook-tests.result }}" != "success" ]]; then
-            echo "Notebook tests failed"
-            exit 1
-          elif [[ "${{ needs.python-version-tests.result }}" != "success" ]]; then
-            echo "Python version tests failed"
-            exit 1
-          else
+          if [[ "${{ needs.basic-tests.result }}" == "success" && 
+                "${{ needs.integration-tests.result }}" == "success" && 
+                "${{ needs.database-postgres-tests.result }}" == "success" && 
+                "${{ needs.database-neo4j-tests.result }}" == "success" && 
+                "${{ needs.ollama-tests.result }}" == "success" &&
+                "${{ needs.notebook-tests.result }}" == "success" &&
+                "${{ needs.python-version-tests.result }}" == "success" &&
+                "${{ needs.chromadb-tests.result }}" == "success" &&
+                "${{ needs.weaviate-tests.result }}" == "success" &&
+                "${{ needs.kuzu-tests.result }}" == "success" &&
+                "${{ needs.multi-metric-qa-eval.result }}" == "success" &&
+                "${{ needs.graphrag-vs-rag.result }}" == "success" &&
+                "${{ needs.milvus-tests.result }}" == "success" &&
+                "${{ needs.gemini-tests.result }}" == "success" &&
+                "${{ needs.multimedia-example.result }}" == "success" &&
+                "${{ needs.deduplication-tests.result }}" == "success" &&
+                "${{ needs.eval-framework.result }}" == "success" &&
+                "${{ needs.descriptive-graph-metrics.result }}" == "success" &&
+                "${{ needs.llama-index-integration.result }}" == "success" &&
+                "${{ needs.cognee-llama-index.result }}" == "success" &&
+                "${{ needs.cognee-multimedia.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
+          else
+            echo "One or more test suites failed."
+            exit 1
           fi 

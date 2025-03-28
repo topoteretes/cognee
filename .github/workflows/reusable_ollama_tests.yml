@@ -1,30 +1,35 @@
-name: test | ollama
+name: Reusable Ollama Tests
 
 on:
   workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '3.12.x'
     secrets:
-      inherit: true
+      OPENAI_API_KEY:
+        required: true
+      GRAPHISTRY_USERNAME:
+        required: true
+      GRAPHISTRY_PASSWORD:
+        required: true
+
 jobs:
-
-  run_simple_example_test:
-
-    # needs 16 Gb RAM for phi4
+  run-ollama-tests:
+    name: Ollama Tests
     runs-on: buildjet-4vcpu-ubuntu-2204
-#    services:
-#      ollama:
-#        image: ollama/ollama
-#        ports:
-#          - 11434:11434
-
     steps:
-      - name: Checkout repository
+      - name: Check out
         uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12.x'
-
+          python-version: ${{ inputs.python-version }}
+          
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
@@ -37,23 +42,12 @@ jobs:
           poetry install --no-interaction --all-extras
           poetry add torch
 
-#      - name: Install ollama
-#        run: curl -fsSL https://ollama.com/install.sh | sh
-#      - name: Run ollama
-#        run: |
-#          ollama serve --openai &
-#          ollama pull llama3.2 &
-#          ollama pull avr/sfr-embedding-mistral:latest
-
       - name: Start Ollama container
         run: |
           docker run -d --name ollama -p 11434:11434 ollama/ollama
           sleep 5
           docker exec -d ollama bash -c "ollama serve --openai"
-
-      - name: Check Ollama logs
-        run: docker logs ollama
-
+          
       - name: Wait for Ollama to be ready
         run: |
           for i in {1..30}; do
@@ -67,37 +61,12 @@ jobs:
           echo "Ollama failed to start"
           exit 1
 
-      - name: Pull required Ollama models
+      - name: Pull Ollama models
         run: |
           curl -X POST http://localhost:11434/api/pull -d '{"name": "phi4"}'
           curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
-
-      - name: Call ollama API
-        run: |
-          curl -X POST http://localhost:11434/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -d '{
-              "model": "phi4",
-              "stream": false,
-              "messages": [
-                { "role": "system", "content": "You are a helpful assistant." },
-                { "role": "user", "content": "Whatever I say, answer with Yes." }
-              ]
-            }'
-          curl -X POST http://127.0.0.1:11434/v1/embeddings \
-            -H "Content-Type: application/json" \
-             -d '{
-              "model": "avr/sfr-embedding-mistral:latest",
-            "input": "This is a test sentence to generate an embedding."
-            }'
-
-      - name: Dump Docker logs
-        run: |
-          docker ps
-          docker logs $(docker ps --filter "ancestor=ollama/ollama" --format "{{.ID}}")
-
-
-      - name: Run example test
+        
+      - name: Run LLM Integration Tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
@@ -112,4 +81,4 @@ jobs:
           EMBEDDING_ENDPOINT: "http://localhost:11434/v1/"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
-        run: poetry run python ./examples/python/simple_example.py
+        run: poetry run python ./cognee/tests/test_ollama.py 
