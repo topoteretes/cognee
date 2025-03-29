@@ -19,6 +19,10 @@ class TestTelemetry(unittest.TestCase):
         # Ensure telemetry is enabled for this test
         if "TELEMETRY_DISABLED" in os.environ:
             del os.environ["TELEMETRY_DISABLED"]
+            
+        # Make sure ENV is not test or dev
+        original_env = os.environ.get("ENV")
+        os.environ["ENV"] = "prod"  # Set to prod to ensure telemetry is sent
 
         # Generate a random user ID for testing
         test_user_id = str(uuid.uuid4())
@@ -35,17 +39,29 @@ class TestTelemetry(unittest.TestCase):
         # Get the args that were passed to post
         args, kwargs = mock_post.call_args
 
-        # Check that the URL was correctly formed
-        self.assertTrue(len(args) > 0)
-
         # Check that the payload contains our data
         self.assertIn("json", kwargs)
         payload = kwargs["json"]
 
         # Verify payload contains expected data
         self.assertEqual(payload.get("event_name"), event_name)
-        self.assertEqual(payload.get("user_id"), test_user_id)
-        self.assertEqual(payload.get("additional_properties", {}).get("test_key"), "test_value")
+        
+        # Check that user_id is in the correct nested structure
+        self.assertIn("user_properties", payload)
+        self.assertEqual(payload["user_properties"].get("user_id"), str(test_user_id))
+        
+        # Also check that user_id is in the properties
+        self.assertIn("properties", payload)
+        self.assertEqual(payload["properties"].get("user_id"), str(test_user_id))
+        
+        # Check that additional properties are included
+        self.assertEqual(payload["properties"].get("test_key"), "test_value")
+        
+        # Restore original ENV if it existed
+        if original_env is not None:
+            os.environ["ENV"] = original_env
+        else:
+            del os.environ["ENV"]
 
     @patch("cognee.shared.utils.requests.post")
     def test_telemetry_disabled(self, mock_post):
@@ -60,6 +76,27 @@ class TestTelemetry(unittest.TestCase):
 
         # Clean up
         del os.environ["TELEMETRY_DISABLED"]
+        
+    @patch("cognee.shared.utils.requests.post")
+    def test_telemetry_dev_env(self, mock_post):
+        # Set ENV to dev which should disable telemetry
+        original_env = os.environ.get("ENV")
+        os.environ["ENV"] = "dev"
+        
+        if "TELEMETRY_DISABLED" in os.environ:
+            del os.environ["TELEMETRY_DISABLED"]
+
+        # Test sending telemetry
+        send_telemetry("dev_test", "user123", {"key": "value"})
+
+        # Verify telemetry was not sent in dev environment
+        mock_post.assert_not_called()
+
+        # Restore original ENV if it existed
+        if original_env is not None:
+            os.environ["ENV"] = original_env
+        else:
+            del os.environ["ENV"]
 
     def test_anon_id_file_exists(self):
         """Test that .anon_id file exists for telemetry."""
