@@ -8,6 +8,11 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+    secrets:
+      WEAVIATE_API_URL:
+        required: false
+      WEAVIATE_API_KEY:
+        required: false
 
 jobs:
   run-chromadb-tests:
@@ -96,6 +101,8 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          VECTOR_DB_URL: ${{ secrets.WEAVIATE_API_URL }}
+          VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
         run: poetry run python ./cognee/tests/test_weaviate.py
 
   run-kuzu-tests:

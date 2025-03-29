@@ -14,6 +14,24 @@ on:
         required: true
       GRAPHISTRY_PASSWORD:
         required: true
+      WEAVIATE_API_URL:
+        required: true
+      WEAVIATE_API_KEY:
+        required: true
+      LLM_MODEL:
+        required: false
+      LLM_ENDPOINT:
+        required: false
+      LLM_API_VERSION:
+        required: false
+      EMBEDDING_MODEL:
+        required: false
+      EMBEDDING_ENDPOINT:
+        required: false
+      EMBEDDING_API_KEY:
+        required: false
+      EMBEDDING_API_VERSION:
+        required: false
 
 jobs:
   run-python-version-tests:
@@ -57,4 +75,13 @@ jobs:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+          VECTOR_DB_URL: ${{ secrets.WEAVIATE_API_URL }}
+          VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: poetry run python ./examples/python/simple_example.py 
