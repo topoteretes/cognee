@@ -13,6 +13,7 @@ jobs:
         example-location: ./examples/python/simple_example.py
         arguments: "--embedding_provider=gemini --embedding_model=gemini/text-embedding-004 --embedding_endpoint=https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004 --embedding_api_version=v1beta --embedding_dimensions=768 --embedding_max_tokens=8076 --llm_provider=gemini --llm_model=gemini/gemini-1.5-flash --llm_endpoint=https://generativelanguage.googleapis.com/ --llm_api_version=v1beta"
       secrets:
+        LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
@@ -24,7 +25,7 @@ jobs:
         EMBEDDING_DIMENSIONS: 768
         EMBEDDING_MAX_TOKENS: 8076
         LLM_PROVIDER: "gemini"
-        LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         LLM_MODEL: "gemini/gemini-1.5-flash"
         LLM_ENDPOINT: "https://generativelanguage.googleapis.com/"
         LLM_API_VERSION: "v1beta"
