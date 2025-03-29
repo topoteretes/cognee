@@ -19,7 +19,7 @@ class TestTelemetry(unittest.TestCase):
         # Ensure telemetry is enabled for this test
         if "TELEMETRY_DISABLED" in os.environ:
             del os.environ["TELEMETRY_DISABLED"]
-            
+
         # Make sure ENV is not test or dev
         original_env = os.environ.get("ENV")
         os.environ["ENV"] = "prod"  # Set to dev to ensure telemetry is sent
@@ -45,18 +45,18 @@ class TestTelemetry(unittest.TestCase):
 
         # Verify payload contains expected data
         self.assertEqual(payload.get("event_name"), event_name)
-        
+
         # Check that user_id is in the correct nested structure
         self.assertIn("user_properties", payload)
         self.assertEqual(payload["user_properties"].get("user_id"), str(test_user_id))
-        
+
         # Also check that user_id is in the properties
         self.assertIn("properties", payload)
         self.assertEqual(payload["properties"].get("user_id"), str(test_user_id))
-        
+
         # Check that additional properties are included
         self.assertEqual(payload["properties"].get("test_key"), "test_value")
-        
+
         # Restore original ENV if it existed
         if original_env is not None:
             os.environ["ENV"] = original_env
@@ -76,13 +76,13 @@ class TestTelemetry(unittest.TestCase):
 
         # Clean up
         del os.environ["TELEMETRY_DISABLED"]
-        
+
     @patch("cognee.shared.utils.requests.post")
     def test_telemetry_dev_env(self, mock_post):
         # Set ENV to dev which should disable telemetry
         original_env = os.environ.get("ENV")
         os.environ["ENV"] = "dev"
-        
+
         if "TELEMETRY_DISABLED" in os.environ:
             del os.environ["TELEMETRY_DISABLED"]
 
