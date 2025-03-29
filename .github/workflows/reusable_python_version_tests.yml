@@ -14,10 +14,6 @@ on:
         required: true
       GRAPHISTRY_PASSWORD:
         required: true
-      WEAVIATE_API_URL:
-        required: true
-      WEAVIATE_API_KEY:
-        required: true
       LLM_MODEL:
         required: false
       LLM_ENDPOINT:
