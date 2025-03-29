@@ -70,12 +70,11 @@ jobs:
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_API_KEY: ""
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "ollama"
-          LLM_API_KEY: "ollama"
           LLM_ENDPOINT: "http://localhost:11434/v1/"
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
