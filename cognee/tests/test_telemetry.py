@@ -22,7 +22,7 @@ class TestTelemetry(unittest.TestCase):
             
         # Make sure ENV is not test or dev
         original_env = os.environ.get("ENV")
-        os.environ["ENV"] = "prod"  # Set to prod to ensure telemetry is sent
+        os.environ["ENV"] = "prod"  # Set to dev to ensure telemetry is sent
 
         # Generate a random user ID for testing
         test_user_id = str(uuid.uuid4())
