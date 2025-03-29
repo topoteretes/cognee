@@ -1,28 +1,25 @@
-name: test | test telemetry
+name: test | milvus
 
 on:
-  workflow_call:
-    secrets:
-      inherit: true
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
-  ENV: 'local'
+  ENV: 'dev'
 
 jobs:
 
-  run_common:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  run_milvus:
+    name: test
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
-      matrix:
-        # These labels correspond to:
-        # - ubuntu-22.04: Linux
-        os: [ubuntu-22.04]
     defaults:
       run:
         shell: bash
@@ -34,7 +31,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12.x'
+          python-version:  '3.11.x'
 
       - name: Install Poetry
         # https://github.com/snok/install-poetry#running-on-windows
@@ -45,15 +42,11 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install --no-interaction
-
-      - name: Add telemetry identifier
-        run: |
-          echo "test-machine" > .anon_id
+        run: poetry install -E milvus --no-interaction
 
       - name: Run default basic pipeline
         env:
-          ENV: 'local'
+          ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -62,7 +55,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_library.py
+        run: poetry run python ./cognee/tests/test_milvus.py
 
       - name: Clean up disk space
         run: |
