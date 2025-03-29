@@ -18,7 +18,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
-        pipeline_name="file_load_from_filesystem",
+        pipeline_name="metadata_extraction_pipeline",
         destination=destination,
     )
 
@@ -119,6 +119,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
 
                 await give_permission_on_document(user, data_id, "read")
                 await give_permission_on_document(user, data_id, "write")
+
         return file_paths
 
     db_engine = get_relational_engine()
