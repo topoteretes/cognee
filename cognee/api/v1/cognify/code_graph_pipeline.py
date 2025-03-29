@@ -1,8 +1,11 @@
+import os
+import pathlib
 import asyncio
 from cognee.shared.logging_utils import get_logger
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.api.v1.search import SearchType, search
+from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines import run_tasks
@@ -78,10 +81,13 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 if __name__ == "__main__":
 
     async def main():
-        async for data_points in run_code_graph_pipeline("YOUR_REPO_PATH"):
-            print(data_points)
+        async for run_status in run_code_graph_pipeline("/Users/borisarzentar/Projects/graphrag"):
+            print(f"{run_status.pipeline_name}: {run_status.status}")
 
-        await render_graph()
+        file_path = os.path.join(
+            pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"
+        )
+        await visualize_graph(file_path)
 
         search_results = await search(
             query_type=SearchType.CODE,
@@ -89,6 +95,6 @@ if __name__ == "__main__":
         )
 
         for file in search_results:
-            print(file.filename)
+            print(file["name"])
 
     asyncio.run(main())
