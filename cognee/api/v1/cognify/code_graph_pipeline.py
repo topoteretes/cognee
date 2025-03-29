@@ -81,7 +81,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 if __name__ == "__main__":
 
     async def main():
-        async for run_status in run_code_graph_pipeline("/Users/borisarzentar/Projects/graphrag"):
+        async for run_status in run_code_graph_pipeline("REPO_PATH"):
             print(f"{run_status.pipeline_name}: {run_status.status}")
 
         file_path = os.path.join(
