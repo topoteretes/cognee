@@ -1,12 +1,9 @@
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List
 import asyncio
 import aiofiles
 from pydantic import BaseModel
 
-from cognee.low_level import DataPoint
-from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
@@ -98,11 +95,11 @@ class CodeRetriever(BaseRetriever):
                         {"id": res.id, "score": res.score, "payload": res.payload}
                     )
 
-        file_ids = [str(item["id"]) for item in similar_filenames]
-        code_ids = [str(item["id"]) for item in similar_codepieces]
-
         relevant_triplets = await asyncio.gather(
-            *[graph_engine.get_connections(node_id) for node_id in code_ids + file_ids]
+            *[
+                graph_engine.get_connections(similar_piece["id"])
+                for similar_piece in similar_filenames + similar_codepieces
+            ]
         )
 
         paths = set()
