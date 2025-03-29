@@ -56,20 +56,8 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/multimetric_qa_eval_run.py
-        
-      - name: Run GraphRAG vs RAG Example
-        if: matrix.example == 'graphrag-vs-rag'
-        env:
-          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/graphrag_vs_rag.py
+        run: poetry run python .evals/multimetric_qa_eval_run.py
+
         
       - name: Run Multimedia Example
         if: matrix.example == 'multimedia'
@@ -91,7 +79,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./examples/python/deduplication.py
+        run: poetry run python ./cognee/tests/test_deduplication.py
         
       - name: Run Evaluation Framework Example
         if: matrix.example == 'eval-framework'
@@ -107,7 +95,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/eval_framework.py
+        run: poetry run python ./cognee/eval_framework/run_eval.py
         
       - name: Run Descriptive Graph Metrics Example
         if: matrix.example == 'descriptive-graph-metrics'
@@ -123,4 +111,4 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python ./examples/python/descriptive_graph_metrics.py 
+        run: poetry run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py
