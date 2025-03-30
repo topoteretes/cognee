@@ -25,6 +25,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
+from cognee.tasks.node_set import apply_node_set
 from cognee.modules.chunking.TextChunker import TextChunker
 
 logger = get_logger("cognify")
@@ -139,6 +140,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": 10},
         ),
         Task(add_data_points, task_config={"batch_size": 10}),
+        Task(apply_node_set, task_config={"batch_size": 10}),  # Apply NodeSet values to DataPoints
     ]
 
     return default_tasks

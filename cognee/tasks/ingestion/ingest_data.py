@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
 import dlt
 import cognee.modules.ingestion as ingestion
@@ -12,9 +12,10 @@ from .save_data_item_to_storage import save_data_item_to_storage
 
 from typing import Union, BinaryIO
 import inspect
+import json
 
 
-async def ingest_data(data: Any, dataset_name: str, user: User):
+async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optional[List[str]] = None):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
@@ -43,9 +44,10 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                     "mime_type": file_metadata["mime_type"],
                     "content_hash": file_metadata["content_hash"],
                     "owner_id": str(user.id),
+                    "node_set": json.dumps(NodeSet) if NodeSet else None,
                 }
 
-    async def store_data_to_dataset(data: Any, dataset_name: str, user: User):
+    async def store_data_to_dataset(data: Any, dataset_name: str, user: User, NodeSet: Optional[List[str]] = None):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
             data = [data]
@@ -81,6 +83,10 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                         await session.execute(select(Data).filter(Data.id == data_id))
                     ).scalar_one_or_none()
 
+                    ext_metadata = get_external_metadata_dict(data_item)
+                    if NodeSet:
+                        ext_metadata["node_set"] = NodeSet
+
                     if data_point is not None:
                         data_point.name = file_metadata["name"]
                         data_point.raw_data_location = file_metadata["file_path"]
@@ -88,7 +94,8 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                         data_point.mime_type = file_metadata["mime_type"]
                         data_point.owner_id = user.id
                         data_point.content_hash = file_metadata["content_hash"]
-                        data_point.external_metadata = (get_external_metadata_dict(data_item),)
+                        data_point.external_metadata = ext_metadata
+                        data_point.node_set = json.dumps(NodeSet) if NodeSet else None
                         await session.merge(data_point)
                     else:
                         data_point = Data(
@@ -99,7 +106,8 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                             mime_type=file_metadata["mime_type"],
                             owner_id=user.id,
                             content_hash=file_metadata["content_hash"],
-                            external_metadata=get_external_metadata_dict(data_item),
+                            external_metadata=ext_metadata,
+                            node_set=json.dumps(NodeSet) if NodeSet else None,
                             token_count=-1,
                         )
 
@@ -124,7 +132,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
 
     db_engine = get_relational_engine()
 
-    file_paths = await store_data_to_dataset(data, dataset_name, user)
+    file_paths = await store_data_to_dataset(data, dataset_name, user, NodeSet)
 
     # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
     # can't be used inside the pipeline

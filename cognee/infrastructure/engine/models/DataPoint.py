@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -27,6 +27,7 @@ class DataPoint(BaseModel):
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
+    NodeSet: Optional[List[str]] = None  # List of nodes this data point is associated with
 
     def __init__(self, **data):
         super().__init__(**data)
