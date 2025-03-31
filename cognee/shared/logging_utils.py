@@ -69,7 +69,7 @@ class PlainFileHandler(logging.FileHandler):
                 logger_name = record.msg.get("logger", record.name)
 
                 # Format timestamp
-                timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                timestamp = get_timestamp()
 
                 # Create the log entry
                 log_entry = f"{timestamp} [{record.levelname.ljust(8)}] {message}{context_str} [{logger_name}]\n"
@@ -337,3 +337,17 @@ def get_log_file_location():
     for handler in root_logger.handlers:
         if isinstance(handler, logging.FileHandler):
             return handler.baseFilename
+
+
+def get_timestamp():
+    # NOTE: Some users have complained that Cognee crashes when trying to get microsecond value
+    #       Added handler to not use microseconds if users can't access it
+    logger = structlog.get_logger()
+    try:
+        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    except Exception as e:
+        logger.debug(f"Exception caught: {e}")
+        logger.debug(
+            "Could not use microseconds for the logging timestamp, defaulting to use hours minutes and seconds only"
+        )
+        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
