@@ -143,7 +143,7 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 3. cognee with Ollama
 
-[Simple GraphRAG demo](https://github.com/user-attachments/assets/834baf9a-c371-4ecf-92dd-e144bd0eb3f6)
+[cognee with local models](https://github.com/user-attachments/assets/834baf9a-c371-4ecf-92dd-e144bd0eb3f6)
 
 
 ## Code of Conduct
