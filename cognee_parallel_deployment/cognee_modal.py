@@ -7,7 +7,7 @@ import signal
 import json
 from dotenv import dotenv_values
 
-from cognee.shared.utils import setup_logging
+from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.modules.search.types import SearchType
 
 logger = logging.getLogger("MODAL_DEPLOYED_INSTANCE")
@@ -15,8 +15,8 @@ logger = logging.getLogger("MODAL_DEPLOYED_INSTANCE")
 app = modal.App("cognee-runner")
 
 local_env_vars = dict(dotenv_values(".env"))
-print("Modal deployment started with the following environmental variables:")
-print(json.dumps(local_env_vars, indent=4))
+logger.info("Modal deployment started with the following environmental variables:")
+logger.info(json.dumps(local_env_vars, indent=4))
 
 image = (
     modal.Image.from_dockerfile(path="Dockerfile_modal", force_build=False)
@@ -29,11 +29,10 @@ image = (
 )
 
 
-@app.function(image=image, max_containers=10, retries=3)
+@app.function(image=image, max_containers=3, retries=3)
 async def entry(name: str, text: str):
-    setup_logging(logging.INFO)
-    logger.info(f"file_name: {name}")
-    setup_logging(logging.ERROR)
+    logger_container = get_logger(level=ERROR)
+    logger_container.info(f"file_name: {name}")
     await cognee.add(text)
     await cognee.cognify()
 
