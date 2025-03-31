@@ -3,15 +3,12 @@ from typing import Any, List
 import dlt
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.methods import create_dataset
+from cognee.modules.data.methods import create_dataset, get_dataset_data, get_datasets_by_name
 from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_document
-from cognee.shared.utils import send_telemetry
 from .get_dlt_destination import get_dlt_destination
-from .save_data_item_to_storage import (
-    save_data_item_to_storage,
-)
+from .save_data_item_to_storage import save_data_item_to_storage
 
 from typing import Union, BinaryIO
 import inspect
@@ -21,7 +18,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
-        pipeline_name="file_load_from_filesystem",
+        pipeline_name="metadata_extraction_pipeline",
         destination=destination,
     )
 
@@ -48,7 +45,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
                     "owner_id": str(user.id),
                 }
 
-    async def data_storing(data: Any, dataset_name: str, user: User):
+    async def store_data_to_dataset(data: Any, dataset_name: str, user: User):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
             data = [data]
@@ -122,20 +119,19 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
 
                 await give_permission_on_document(user, data_id, "read")
                 await give_permission_on_document(user, data_id, "write")
-        return file_paths
 
-    send_telemetry("cognee.add EXECUTION STARTED", user_id=user.id)
+        return file_paths
 
     db_engine = get_relational_engine()
 
-    file_paths = await data_storing(data, dataset_name, user)
+    file_paths = await store_data_to_dataset(data, dataset_name, user)
 
     # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
     # can't be used inside the pipeline
     if db_engine.engine.dialect.name == "sqlite":
         # To use sqlite with dlt dataset_name must be set to "main".
         # Sqlite doesn't support schemas
-        run_info = pipeline.run(
+        pipeline.run(
             data_resources(file_paths, user),
             table_name="file_metadata",
             dataset_name="main",
@@ -143,13 +139,15 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
         )
     else:
         # Data should be stored in the same schema to allow deduplication
-        run_info = pipeline.run(
+        pipeline.run(
             data_resources(file_paths, user),
             table_name="file_metadata",
             dataset_name="public",
             write_disposition="merge",
         )
 
-    send_telemetry("cognee.add EXECUTION COMPLETED", user_id=user.id)
+    datasets = await get_datasets_by_name(dataset_name, user.id)
+    dataset = datasets[0]
+    data_documents = await get_dataset_data(dataset_id=dataset.id)
 
-    return run_info
+    return data_documents

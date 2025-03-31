@@ -277,7 +277,7 @@ async def run_tasks(
 ):
     pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
 
-    pipeline_run = await log_pipeline_run_start(pipeline_id, dataset_id, data)
+    pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
 
     yield pipeline_run
     pipeline_run_id = pipeline_run.pipeline_run_id
@@ -286,8 +286,12 @@ async def run_tasks(
         async for _ in run_tasks_with_telemetry(tasks, data, pipeline_id):
             pass
 
-        yield await log_pipeline_run_complete(pipeline_run_id, pipeline_id, dataset_id, data)
+        yield await log_pipeline_run_complete(
+            pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data
+        )
 
     except Exception as e:
-        yield await log_pipeline_run_error(pipeline_run_id, pipeline_id, dataset_id, data, e)
+        yield await log_pipeline_run_error(
+            pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, e
+        )
         raise e
