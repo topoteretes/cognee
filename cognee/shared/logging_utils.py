@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 import threading
 import logging
 import structlog
@@ -13,6 +13,15 @@ INFO = logging.INFO
 WARNING = logging.WARNING
 ERROR = logging.ERROR
 CRITICAL = logging.CRITICAL
+
+log_levels = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
 
 # Track if logging has been configured
 _is_configured = False
@@ -108,12 +117,29 @@ class PlainFileHandler(logging.FileHandler):
             self.flush()
 
 
-def get_logger(name=None, level=INFO):
+class LoggerInterface:
+    def info(self, msg, *args, **kwargs):
+        pass
+
+    def warning(self, msg, *args, **kwargs):
+        pass
+
+    def error(self, msg, *args, **kwargs):
+        pass
+
+    def critical(self, msg, *args, **kwargs):
+        pass
+
+    def debug(self, msg, *args, **kwargs):
+        pass
+
+
+def get_logger(name=None, level=None) -> LoggerInterface:
     """Get a configured structlog logger.
 
     Args:
         name: Logger name (default: None, uses __name__)
-        level: Logging level (default: INFO)
+        level: Logging level (default: None)
 
     Returns:
         A configured structlog logger instance
@@ -164,16 +190,18 @@ def cleanup_old_logs(logs_dir, max_files):
         return False
 
 
-def setup_logging(log_level=INFO, name=None):
+def setup_logging(log_level=None, name=None):
     """Sets up the logging configuration with structlog integration.
 
     Args:
-        log_level: The logging level to use (default: INFO)
+        log_level: The logging level to use (default: None, uses INFO)
         name: Optional logger name (default: None, uses __name__)
 
     Returns:
         A configured structlog logger instance
     """
+
+    log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
 
     def exception_handler(logger, method_name, event_dict):
         """Custom processor to handle uncaught exceptions."""
@@ -256,7 +284,7 @@ def setup_logging(log_level=INFO, name=None):
                 self.handleError(record)
 
     # Use our custom handler for console output
-    stream_handler = NewlineStreamHandler(sys.stdout)
+    stream_handler = NewlineStreamHandler(sys.stderr)
     stream_handler.setFormatter(console_formatter)
     stream_handler.setLevel(log_level)
 
@@ -274,8 +302,29 @@ def setup_logging(log_level=INFO, name=None):
     root_logger.addHandler(file_handler)
     root_logger.setLevel(log_level)
 
+    if log_level > logging.WARNING:
+        import warnings
+        from sqlalchemy.exc import SAWarning
+
+        warnings.filterwarnings(
+            "ignore", category=SAWarning, module="dlt.destinations.impl.sqlalchemy.merge_job"
+        )
+        warnings.filterwarnings(
+            "ignore", category=SAWarning, module="dlt.destinations.impl.sqlalchemy.load_jobs"
+        )
+
     # Clean up old log files, keeping only the most recent ones
     cleanup_old_logs(LOGS_DIR, MAX_LOG_FILES)
 
     # Return a configured logger
     return structlog.get_logger(name if name else __name__)
+
+
+def get_log_file_location():
+    # Get the root logger
+    root_logger = logging.getLogger()
+
+    # Loop through handlers to find the FileHandler
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            return handler.baseFilename
