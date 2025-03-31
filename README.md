@@ -133,9 +133,17 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 ## Demos
 
-What is AI memory:
+1. What is AI memory:
 
 [Learn about cognee](https://github.com/user-attachments/assets/8b2a0050-5ec4-424c-b417-8269971503f0)
+
+2. Simple GraphRAG demo
+
+[Simple GraphRAG demo](https://github.com/user-attachments/assets/f57fd9ea-1dc0-4904-86eb-de78519fdc32)
+
+3. cognee with Ollama
+
+[cognee with local models](https://github.com/user-attachments/assets/834baf9a-c371-4ecf-92dd-e144bd0eb3f6)
 
 
 ## Code of Conduct
