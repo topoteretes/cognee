@@ -111,6 +111,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    graph_prompt_path: Optional[str] = None,
 ) -> list[Task]:
     if user is None:
         user = await get_default_user()
@@ -131,6 +132,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=ontology_adapter,
+            graph_prompt_path=graph_prompt_path,
             task_config={"batch_size": 10},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
