@@ -69,7 +69,7 @@ class PlainFileHandler(logging.FileHandler):
                 logger_name = record.msg.get("logger", record.name)
 
                 # Format timestamp
-                timestamp = get_timestamp()
+                timestamp = datetime.now().strftime(get_timestamp_format())
 
                 # Create the log entry
                 log_entry = f"{timestamp} [{record.levelname.ljust(8)}] {message}{context_str} [{logger_name}]\n"
@@ -226,7 +226,7 @@ def setup_logging(log_level=None, name=None):
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.TimeStamper(fmt=get_timestamp_format(), utc=True),
             structlog.processors.StackInfoRenderer(),
             exception_handler,  # Add our custom exception handler
             structlog.processors.UnicodeDecoder(),
@@ -339,15 +339,21 @@ def get_log_file_location():
             return handler.baseFilename
 
 
-def get_timestamp():
+def get_timestamp_format():
     # NOTE: Some users have complained that Cognee crashes when trying to get microsecond value
     #       Added handler to not use microseconds if users can't access it
     logger = structlog.get_logger()
     try:
-        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        # We call datetime.now() here to test if microseconds are supported.
+        # If they are not supported a ValueError will be raised
+        datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+        return "%Y-%m-%dT%H:%M:%S.%f"
     except Exception as e:
         logger.debug(f"Exception caught: {e}")
         logger.debug(
             "Could not use microseconds for the logging timestamp, defaulting to use hours minutes and seconds only"
         )
-        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        # We call datetime.now() here to test if won't break.
+        datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        # We return the timestamp format without microseconds as they are not supported
+        return "%Y-%m-%dT%H:%M:%S"
