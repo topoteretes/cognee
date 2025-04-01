@@ -198,7 +198,7 @@ async def main():
     try:
         from mcp.server.stdio import stdio_server
 
-        logger.info("Starting Cognee MCP server...")
+        logger.info("Cognee MCP server started...")
 
         async with stdio_server() as (read_stream, write_stream):
             await mcp.run(
@@ -215,7 +215,8 @@ async def main():
                 raise_exceptions=True,
             )
 
-        logger.info("Cognee MCP server started.")
+            logger.info("Cognee MCP server closed.")
+
     except Exception as e:
         logger.error(f"Server failed to start: {str(e)}", exc_info=True)
         raise
