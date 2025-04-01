@@ -139,11 +139,11 @@ For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> do
 
 2. Simple GraphRAG demo
 
-[Simple GraphRAG demo](https://github.com/user-attachments/assets/f57fd9ea-1dc0-4904-86eb-de78519fdc32)
+[Simple GraphRAG demo](https://github.com/user-attachments/assets/d80b0776-4eb9-4b8e-aa22-3691e2d44b8f)
 
 3. cognee with Ollama
 
-[cognee with local models](https://github.com/user-attachments/assets/834baf9a-c371-4ecf-92dd-e144bd0eb3f6)
+[cognee with local models](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
 
 
 ## Code of Conduct
