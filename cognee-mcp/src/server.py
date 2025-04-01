@@ -91,6 +91,8 @@ async def list_tools() -> list[types.Tool]:
 @mcp.call_tool()
 async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
     try:
+        # NOTE: MCP uses stdout to communicate, we must redirect all output
+        #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             log_file = get_log_file_location()
 
@@ -145,6 +147,9 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
     """Build knowledge graph from the input text"""
+    # NOTE: MCP uses stdout to communicate, we must redirect all output
+    #       going to stdout ( like the print function ) to stderr.
+    #       As cognify is an async background job the output had to be redirected again.
     with redirect_stdout(sys.stderr):
         logger.info("Cognify process starting.")
         if graph_model_file and graph_model_name:
@@ -163,6 +168,9 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
 
 
 async def codify(repo_path: str):
+    # NOTE: MCP uses stdout to communicate, we must redirect all output
+    #       going to stdout ( like the print function ) to stderr.
+    #       As codify is an async background job the output had to be redirected again.
     with redirect_stdout(sys.stderr):
         logger.info("Codify process starting.")
         results = []
@@ -177,6 +185,8 @@ async def codify(repo_path: str):
 
 async def search(search_query: str, search_type: str) -> str:
     """Search the knowledge graph"""
+    # NOTE: MCP uses stdout to communicate, we must redirect all output
+    #       going to stdout ( like the print function ) to stderr.
     with redirect_stdout(sys.stderr):
         search_results = await cognee.search(
             query_type=SearchType[search_type.upper()], query_text=search_query
