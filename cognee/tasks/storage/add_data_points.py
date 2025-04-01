@@ -6,7 +6,7 @@ from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 
 
-async def add_data_points(data_points: list[DataPoint]):
+async def add_data_points(data_points: list[DataPoint], indexing_edges: bool = True):
     nodes = []
     edges = []
 
@@ -40,6 +40,7 @@ async def add_data_points(data_points: list[DataPoint]):
     await graph_engine.add_edges(edges)
 
     # This step has to happen after adding nodes and edges because we query the graph.
-    await index_graph_edges()
+    if indexing_edges:
+        await index_graph_edges()
 
     return data_points

@@ -42,7 +42,7 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes)
+        await add_data_points(graph_nodes, indexing_edges=False)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
