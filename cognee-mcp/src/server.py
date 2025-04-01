@@ -1,10 +1,11 @@
 import asyncio
 import json
 import os
+import sys
 import cognee
 from cognee.shared.logging_utils import get_logger, get_log_file_location
 import importlib.util
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 
 # from PIL import Image as PILImage
 import mcp.types as types
@@ -90,56 +91,53 @@ async def list_tools() -> list[types.Tool]:
 @mcp.call_tool()
 async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
     try:
-        with open(os.devnull, "w") as fnull:
-            with redirect_stdout(fnull), redirect_stderr(fnull):
-                log_file = get_log_file_location()
+        with redirect_stdout(sys.stderr):
+            log_file = get_log_file_location()
 
-                if name == "cognify":
-                    asyncio.create_task(
-                        cognify(
-                            text=arguments["text"],
-                            graph_model_file=arguments.get("graph_model_file"),
-                            graph_model_name=arguments.get("graph_model_name"),
-                        )
+            if name == "cognify":
+                asyncio.create_task(
+                    cognify(
+                        text=arguments["text"],
+                        graph_model_file=arguments.get("graph_model_file"),
+                        graph_model_name=arguments.get("graph_model_name"),
                     )
+                )
 
-                    text = (
-                        f"Background process launched due to MCP timeout limitations.\n"
-                        f"Average completion time is around 4 minutes.\n"
-                        f"For current cognify status you can check the log file at: {log_file}"
+                text = (
+                    f"Background process launched due to MCP timeout limitations.\n"
+                    f"Average completion time is around 4 minutes.\n"
+                    f"For current cognify status you can check the log file at: {log_file}"
+                )
+
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=text,
                     )
+                ]
+            if name == "codify":
+                asyncio.create_task(codify(arguments.get("repo_path")))
 
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=text,
-                        )
-                    ]
-                if name == "codify":
-                    asyncio.create_task(codify(arguments.get("repo_path")))
+                text = (
+                    f"Background process launched due to MCP timeout limitations.\n"
+                    f"Average completion time is around 4 minutes.\n"
+                    f"For current codify status you can check the log file at: {log_file}"
+                )
 
-                    text = (
-                        f"Background process launched due to MCP timeout limitations.\n"
-                        f"Average completion time is around 4 minutes.\n"
-                        f"For current codify status you can check the log file at: {log_file}"
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=text,
                     )
+                ]
+            elif name == "search":
+                search_results = await search(arguments["search_query"], arguments["search_type"])
 
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=text,
-                        )
-                    ]
-                elif name == "search":
-                    search_results = await search(
-                        arguments["search_query"], arguments["search_type"]
-                    )
+                return [types.TextContent(type="text", text=search_results)]
+            elif name == "prune":
+                await prune()
 
-                    return [types.TextContent(type="text", text=search_results)]
-                elif name == "prune":
-                    await prune()
-
-                    return [types.TextContent(type="text", text="Pruned")]
+                return [types.TextContent(type="text", text="Pruned")]
     except Exception as e:
         logger.error(f"Error calling tool '{name}': {str(e)}")
         return [types.TextContent(type="text", text=f"Error calling tool '{name}': {str(e)}")]
@@ -147,45 +145,48 @@ async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
     """Build knowledge graph from the input text"""
-    logger.info("Cognify process starting.")
-    if graph_model_file and graph_model_name:
-        graph_model = load_class(graph_model_file, graph_model_name)
-    else:
-        graph_model = KnowledgeGraph
+    with redirect_stdout(sys.stderr):
+        logger.info("Cognify process starting.")
+        if graph_model_file and graph_model_name:
+            graph_model = load_class(graph_model_file, graph_model_name)
+        else:
+            graph_model = KnowledgeGraph
 
-    await cognee.add(text)
+        await cognee.add(text)
 
-    try:
-        await cognee.cognify(graph_model=graph_model)
-        logger.info("Cognify process finished.")
-    except Exception as e:
-        logger.error("Cognify process failed.")
-        raise ValueError(f"Failed to cognify: {str(e)}")
+        try:
+            await cognee.cognify(graph_model=graph_model)
+            logger.info("Cognify process finished.")
+        except Exception as e:
+            logger.error("Cognify process failed.")
+            raise ValueError(f"Failed to cognify: {str(e)}")
 
 
 async def codify(repo_path: str):
-    logger.info("Codify process starting.")
-    results = []
-    async for result in run_code_graph_pipeline(repo_path, False):
-        results.append(result)
-        logger.info(result)
-    if all(results):
-        logger.info("Codify process finished succesfully.")
-    else:
-        logger.info("Codify process failed.")
+    with redirect_stdout(sys.stderr):
+        logger.info("Codify process starting.")
+        results = []
+        async for result in run_code_graph_pipeline(repo_path, False):
+            results.append(result)
+            logger.info(result)
+        if all(results):
+            logger.info("Codify process finished succesfully.")
+        else:
+            logger.info("Codify process failed.")
 
 
 async def search(search_query: str, search_type: str) -> str:
     """Search the knowledge graph"""
-    search_results = await cognee.search(
-        query_type=SearchType[search_type.upper()], query_text=search_query
-    )
+    with redirect_stdout(sys.stderr):
+        search_results = await cognee.search(
+            query_type=SearchType[search_type.upper()], query_text=search_query
+        )
 
-    if search_type.upper() == "CODE":
-        return json.dumps(search_results, cls=JSONEncoder)
-    else:
-        results = retrieved_edges_to_string(search_results)
-        return results
+        if search_type.upper() == "CODE":
+            return json.dumps(search_results, cls=JSONEncoder)
+        else:
+            results = retrieved_edges_to_string(search_results)
+            return results
 
 
 async def prune():
