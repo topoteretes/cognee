@@ -91,7 +91,6 @@ async def test_relational_db_migration(setup_test_db):
         """
         rows = await graph_engine.query(query_str)
         for row in rows:
-            r_data = row[0]
             n_data = row[1]
             m_data = row[2]
 
