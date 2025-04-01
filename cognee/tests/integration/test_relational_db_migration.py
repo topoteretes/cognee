@@ -14,6 +14,16 @@ from cognee.tasks.ingestion import migrate_relational_database
 from cognee.modules.search.types import SearchType
 import cognee
 
+def nodes_dict(nodes):
+    return {n_id: data for (n_id, data) in nodes}
+
+def normalize_node_name(node_name: str) -> str:
+    if node_name and ":" in node_name:
+        prefix, suffix = node_name.split(":", 1)
+        prefix = prefix.capitalize()
+        return f"{prefix}:{suffix}"
+    return node_name
+
 @pytest_asyncio.fixture()
 async def setup_test_db():
 
@@ -24,14 +34,12 @@ async def setup_test_db():
     await create_pgvector_db_and_tables()
 
     relational_engine = get_migration_relational_engine()
-
     return relational_engine
 
 @pytest.mark.asyncio
 async def test_relational_db_migration(setup_test_db):
 
     relational_engine = setup_test_db  
-
     schema = await relational_engine.extract_schema()
 
     graph_engine = await get_graph_engine()
@@ -47,37 +55,40 @@ async def test_relational_db_migration(setup_test_db):
     #2. Assert that the search results contain "AC/DC"
     assert any("AC/DC" in r for r in search_results), "AC/DC not found in search results!"
 
-    #3. Directly verify the 'ReportsTo' hierarchy
-    db_provider = os.getenv("GRAPH_DATABASE_PROVIDER", "networkx").lower()
+    relational_db_provider = os.getenv("MIGRATION_DB_PROVIDER", "sqlite").lower()
+    if relational_db_provider == "postgres":
+        relationship_label = "reports_to"
+    else:
+        relationship_label = "ReportsTo"
+
+    #3. Directly verify the 'reports to' hierarchy
+    graph_db_provider = os.getenv("GRAPH_DATABASE_PROVIDER", "networkx").lower()
 
     distinct_node_names = set()
     found_edges = set()
 
-    if db_provider == "neo4j":
-        query_str = """
-        MATCH (n)-[r:ReportsTo]->(m)
+    if graph_db_provider == "neo4j":
+        query_str = f"""
+        MATCH (n)-[r:{relationship_label}]->(m)
         RETURN n, r, m
         """
         rows = await graph_engine.query(query_str)
         for row in rows:
             n_data = row["n"]
-            r_data = row["r"]  
             m_data = row["m"]
 
-            source_name = n_data["name"]
-            target_name = m_data["name"]
+            source_name = normalize_node_name(n_data.get("name", ""))
+            target_name = normalize_node_name(m_data.get("name", ""))
 
             found_edges.add((source_name, target_name))
-            distinct_node_names.add(source_name)
-            distinct_node_names.add(target_name)
+            distinct_node_names.update([source_name, target_name])
 
-    elif db_provider == "kuzu":
-        query_str = """
+    elif graph_db_provider == "kuzu":
+        query_str = f"""
         MATCH (n:Node)-[r:EDGE]->(m:Node)
-        WHERE r.relationship_name = 'ReportsTo'
+        WHERE r.relationship_name = '{relationship_label}'
         RETURN r, n, m
         """
-
         rows = await graph_engine.query(query_str)
         for row in rows:
             r_data = row[0]
@@ -87,33 +98,30 @@ async def test_relational_db_migration(setup_test_db):
             source_props = {}
             if "properties" in n_data and n_data["properties"]:
                 source_props = json.loads(n_data["properties"])
-
-            source_name = source_props.get("name", f"id:{n_data['id']}")
-
             target_props = {}
             if "properties" in m_data and m_data["properties"]:
                 target_props = json.loads(m_data["properties"])
 
-            target_name = target_props.get("name", f"id:{m_data['id']}")
+            source_name = normalize_node_name(source_props.get("name", f"id:{n_data['id']}"))
+            target_name = normalize_node_name(target_props.get("name", f"id:{m_data['id']}"))
 
             found_edges.add((source_name, target_name))
-            distinct_node_names.add(source_name)
-            distinct_node_names.add(target_name)
+            distinct_node_names.update([source_name, target_name])
 
-    elif db_provider == "networkx":
+    elif graph_db_provider == "networkx":
         nodes, edges = await graph_engine.get_graph_data()
+        node_map = nodes_dict(nodes)
         for (src, tgt, key, edge_data) in edges:
-            if key == "ReportsTo":
-                source_name = nodes_dict(nodes).get(src, {}).get("name", None)
-                target_name = nodes_dict(nodes).get(tgt, {}).get("name", None)
-                if source_name and target_name:
-                    found_edges.add((source_name, target_name))
-                    distinct_node_names.add(source_name)
-                    distinct_node_names.add(target_name)
+            if key == relationship_label:
+                src_name = normalize_node_name(node_map[src].get("name"))
+                tgt_name = normalize_node_name(node_map[tgt].get("name"))
+                if src_name and tgt_name:
+                    found_edges.add((src_name, tgt_name))
+                    distinct_node_names.update([src_name, tgt_name])
 
+  
     assert len(distinct_node_names) == 8, f"Expected 8 distinct node references, found {len(distinct_node_names)}"
-
-    assert len(found_edges) == 7, f"Expected 7 'ReportsTo' edges, got {len(found_edges)}"
+    assert len(found_edges) == 7, f"Expected 7 {relationship_label} edges, got {len(found_edges)}"
 
     expected_edges = {
         ("Employee:5", "Employee:2"),
@@ -125,14 +133,6 @@ async def test_relational_db_migration(setup_test_db):
         ("Employee:3", "Employee:2"),
     }
     for e in expected_edges:
-        assert e in found_edges, f"Edge {e} not found in the actual 'ReportsTo' edges!"
+        assert e in found_edges, f"Edge {e} not found in the actual '{relationship_label}' edges!"
 
-    print(f"All checks passed for {db_provider} with single-edge-query approach.")
-
-
-def nodes_dict(nodes):
-    """
-    Helper for the NetworkX branch:
-    Takes a list of (node_id, data) and returns {node_id: data}.
-    """
-    return {n_id: data for (n_id, data) in nodes}
+    print(f"All checks passed for {graph_db_provider} provider with '{relationship_label}' edges!")
