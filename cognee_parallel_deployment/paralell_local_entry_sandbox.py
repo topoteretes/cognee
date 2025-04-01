@@ -26,7 +26,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph import extract_graph_from_data
-from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage import add_data_points, index_graph_edges
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 
@@ -68,7 +68,7 @@ async def get_modal_tasks(
             summarization_model=cognee_config.summarization_model,
             task_config={"batch_size": 10},
         ),
-        Task(add_data_points, task_config={"batch_size": 10}),
+        Task(add_data_points, indexing_edges=False, task_config={"batch_size": 10}),
     ]
 
     return modal_tasks
@@ -78,7 +78,7 @@ async def main():
     ############MASTER NODE (local for now)
     dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
-    batch_size = 10
+    batch_size = 100
 
     # Cleaning the db + adding all the documents to metastore
     await cognee.prune.prune_data()
@@ -97,20 +97,21 @@ async def main():
         data_to_submit = {}
         batch = documents[i : i + batch_size]
         for doc in batch:
-            document_hash = doc.id
-            data_to_submit[document_hash] = []
+            document_name = doc.name
+            data_to_submit[document_name] = []
 
             async for chunk in run_tasks_with_telemetry(
                 preprocessing_tasks, data=[doc], pipeline_name="preprocessing_steps"
             ):
-                data_to_submit[document_hash].append(chunk)
+                data_to_submit[document_name].append(chunk)
 
+        # MODAL CALL WITH DATA_TO_SUBMIT
         for file in data_to_submit:
             async for _ in run_tasks_with_telemetry(
                 modal_tasks, data=data_to_submit.get(file), pipeline_name="modal_dummy"
             ):
                 pass
-            print()
+    await index_graph_edges()
 
     print()
 

@@ -9,6 +9,30 @@ from dotenv import dotenv_values
 
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.modules.search.types import SearchType
+from typing import Optional
+
+from pydantic import BaseModel
+
+from cognee.infrastructure.llm import get_max_chunk_tokens
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.tasks.documents import (
+    check_permissions_on_documents,
+    classify_documents,
+    extract_chunks_from_documents,
+)
+from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.storage import add_data_points
+from cognee.tasks.summarization import summarize_text
+from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.pipelines.operations.run_tasks import run_tasks_with_telemetry
+
 
 logger = logging.getLogger("MODAL_DEPLOYED_INSTANCE")
 
@@ -29,42 +53,107 @@ image = (
 )
 
 
-@app.function(image=image, max_containers=3, retries=3)
-async def entry(name: str, text: str):
-    logger_container = get_logger(level=ERROR)
-    logger_container.info(f"file_name: {name}")
-    await cognee.add(text)
-    await cognee.cognify()
+async def get_preprocessing_steps(user: User = None, chunker=TextChunker) -> list[Task]:
+    if user is None:
+        user = await get_default_user()
+
+    preprocessing_tasks = [
+        Task(classify_documents),
+        Task(check_permissions_on_documents, user=user, permissions=["write"]),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=None or get_max_chunk_tokens(),
+            chunker=chunker,
+        ),
+    ]
+
+    return preprocessing_tasks
 
 
-def batch_files(file_list, batch_size):
-    for i in range(0, len(file_list), batch_size):
-        yield file_list[i : i + batch_size]
+async def get_modal_tasks(
+    graph_model: BaseModel = KnowledgeGraph,
+    ontology_file_path: Optional[str] = None,
+) -> list[Task]:
+    cognee_config = get_cognify_config()
+
+    ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
+
+    modal_tasks = [
+        Task(
+            extract_graph_from_data,
+            graph_model=graph_model,
+            ontology_adapter=ontology_adapter,
+            task_config={"batch_size": 10},
+        ),
+        Task(
+            summarize_text,
+            summarization_model=cognee_config.summarization_model,
+            task_config={"batch_size": 10},
+        ),
+        Task(add_data_points, indexing_edges=False, task_config={"batch_size": 10}),
+    ]
+
+    return modal_tasks
+
+
+@app.function(image=image, max_containers=5)
+async def entry(file, chunk_list):
+    print(f"File execution started: {file}")
+
+    modal_tasks = await get_modal_tasks()
+    async for _ in run_tasks_with_telemetry(
+        modal_tasks, data=chunk_list, pipeline_name=f"modal_execution_file_{file}"
+    ):
+        pass
+
+    print(f"File execution finished: {file}")
 
 
 @app.local_entrypoint()
 async def main():
+    ############MASTER NODE (local for now)
+    dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
-    batch_size = 20
+    batch_size = 100
 
-    files = [
-        os.path.join(directory_name, f)
-        for f in os.listdir(directory_name)
-        if os.path.isfile(os.path.join(directory_name, f))
-    ]
+    # Cleaning the db + adding all the documents to metastore
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await cognee.add(data=os.path.abspath(directory_name), dataset_name=dataset_name)
 
-    for batch in batch_files(files, batch_size):
-        print("Processing batch:")
-        files = []
-        for file_path in batch:
-            with open(file_path, "r") as file:
-                content = file.read()
-                # Process the content as needed.
-                print(f"Read data from {file_path}")
+    # Preparing the dataset
+    user = await get_default_user()
+    dataset = await get_datasets_by_name(dataset_name, user.id)
+    documents = await get_dataset_data(dataset_id=dataset[0].id)
 
-                files.append({"name": file_path, "text": content})
+    # Creating chunks
+    preprocessing_tasks = await get_preprocessing_steps()
+    for i in range(0, len(documents), batch_size):
+        data_to_submit = {}
+        batch = documents[i : i + batch_size]
+        for doc in batch:
+            document_name = doc.name
+            data_to_submit[document_name] = []
+
+            async for chunk in run_tasks_with_telemetry(
+                preprocessing_tasks, data=[doc], pipeline_name="preprocessing_steps"
+            ):
+                data_to_submit[document_name].append(chunk)
+
         print("Batch reading finished...")
-        tasks = [entry.remote.aio(item["name"], item["text"]) for item in files]
-        await asyncio.gather(*tasks)
+        tasks = [entry.remote.aio(file, chunk_list) for file, chunk_list in data_to_submit.items()]
+
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     os.kill(os.getpid(), signal.SIGTERM)
+
+
+if __name__ == "__main__":
+    logger = get_logger(level=ERROR)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
