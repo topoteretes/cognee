@@ -1,1 +1,8 @@
-from .Task import Task, TaskConfig, TaskExecutionResult
+from .Task import (
+    Task,
+    TaskConfig,
+    TaskExecutionInfo,
+    TaskExecutionCompleted,
+    TaskExecutionStarted,
+    TaskExecutionErrored,
+)

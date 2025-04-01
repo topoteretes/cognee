@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 
-from cognee.modules.pipelines.tasks import Task, TaskConfig
+from cognee.modules.pipelines.tasks import Task, TaskConfig, TaskExecutionInfo
 from cognee.modules.pipelines.exceptions import WrongTaskOrderException
-from cognee.modules.pipelines.operations.run_tasks_v2 import run_tasks_base
+from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 
 
 async def run_and_check_tasks():
@@ -27,12 +27,12 @@ async def run_and_check_tasks():
         async for task_run_info in run_tasks_base(
             [
                 Task(number_generator),
-                Task(add_one, task_config=TaskConfig(inputs=[number_generator, multiply_by_two])),
-                Task(multiply_by_two, task_config=TaskConfig(inputs=[add_one])),
+                Task(add_one, task_config=TaskConfig(needs=[number_generator, multiply_by_two])),
+                Task(multiply_by_two, task_config=TaskConfig(needs=[add_one])),
             ],
             data=10,
         ):
-            if not task_run_info.is_done:
+            if isinstance(task_run_info, TaskExecutionInfo):
                 assert task_run_info.result == expected_results[index], (
                     f"at {index = }: {task_run_info.result = } != {expected_results[index] = }"
                 )

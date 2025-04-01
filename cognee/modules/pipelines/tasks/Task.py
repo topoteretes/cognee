@@ -3,19 +3,35 @@ from typing import Callable, Any, Union
 
 from pydantic import BaseModel
 
-from ..operations.input_output import MergeInputs
+from ..operations.needs import MergeNeeds
 
 # TaskExecutable = Union[Callable[..., Any], Callable[..., Coroutine[Any, Any, Any]], AsyncGenerator[Any, Any], Generator[Any, Any, Any]]
 
 
-class TaskExecutionResult(BaseModel):
-    is_done: bool
+class TaskExecutionStarted(BaseModel):
+    task: Callable
+
+
+class TaskExecutionCompleted(BaseModel):
+    task: Callable
     result: Any = None
+
+
+class TaskExecutionErrored(BaseModel):
+    task: Callable
+    error: Exception
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class TaskExecutionInfo(BaseModel):
+    result: Any = None
+    task: Callable
 
 
 class TaskConfig(BaseModel):
     output_batch_size: int = 1
-    inputs: list[Union[Callable, MergeInputs]] = []
+    needs: list[Union[Callable, MergeNeeds]] = []
 
 
 class Task:
@@ -36,63 +52,63 @@ class Task:
             **kwargs,
         }
 
-        if inspect.iscoroutinefunction(self.executable):  # Async function
-            result = await self.executable(*combined_args, **combined_kwargs)
-            yield TaskExecutionResult(
-                is_done=True,
-                result=result,
+        yield TaskExecutionStarted(
+            task=self.executable,
+        )
+
+        try:
+            if inspect.iscoroutinefunction(self.executable):  # Async function
+                task_result = await self.executable(*combined_args, **combined_kwargs)
+
+            elif inspect.isgeneratorfunction(self.executable):  # Generator
+                result = []
+                task_result = []
+
+                for value in self.executable(*combined_args, **combined_kwargs):
+                    result.append(value)  # Store the last yielded value
+                    task_result.append(value)
+
+                    if self.task_config.output_batch_size == 1:
+                        yield TaskExecutionInfo(
+                            result=value,
+                            task=self.executable,
+                        )
+                    elif self.task_config.output_batch_size == len(result):
+                        yield TaskExecutionInfo(
+                            result=result,
+                            task=self.executable,
+                        )
+                        result = []  # Reset for the next batch
+
+            elif inspect.isasyncgenfunction(self.executable):  # Async Generator
+                result = []
+                task_result = []
+
+                async for value in self.executable(*combined_args, **combined_kwargs):
+                    result.append(value)  # Store the last yielded value
+                    task_result.append(value)
+
+                    if self.task_config.output_batch_size == 1:
+                        yield TaskExecutionInfo(
+                            result=value,
+                            task=self.executable,
+                        )
+                    elif self.task_config.output_batch_size == len(result):
+                        yield TaskExecutionInfo(
+                            result=result,
+                            task=self.executable,
+                        )
+                        result = []  # Reset for the next batch
+
+            else:  # Regular function
+                task_result = self.executable(*combined_args, **combined_kwargs)
+
+            yield TaskExecutionCompleted(
+                task=self.executable,
+                result=task_result,
             )
-
-        elif inspect.isgeneratorfunction(self.executable):  # Generator
-            result = []
-
-            for value in self.executable(*combined_args, **combined_kwargs):
-                result.append(value)  # Store the last yielded value
-
-                if self.task_config.output_batch_size == 1:
-                    yield TaskExecutionResult(
-                        is_done=False,
-                        result=value,
-                    )
-                elif self.task_config.output_batch_size == len(result):
-                    yield TaskExecutionResult(
-                        is_done=False,
-                        result=result,
-                    )
-                    result = []  # Reset for the next batch
-
-            yield TaskExecutionResult(
-                is_done=True,
-                result=result,
-            )
-
-        elif inspect.isasyncgenfunction(self.executable):  # Async Generator
-            result = []
-
-            async for value in self.executable(*combined_args, **combined_kwargs):
-                result.append(value)  # Store the last yielded value
-
-                if self.task_config.output_batch_size == 1:
-                    yield TaskExecutionResult(
-                        is_done=False,
-                        result=value,
-                    )
-                elif self.task_config.output_batch_size == len(result):
-                    yield TaskExecutionResult(
-                        is_done=False,
-                        result=result,
-                    )
-                    result = []  # Reset for the next batch
-
-            yield TaskExecutionResult(
-                is_done=True,
-                result=result,
-            )
-
-        else:  # Regular function
-            result = self.executable(*combined_args, **combined_kwargs)
-
-            yield TaskExecutionResult(
-                is_done=True,
-                result=result,
+        except Exception as error:
+            yield TaskExecutionErrored(
+                task=self.executable,
+                error=error,
             )
