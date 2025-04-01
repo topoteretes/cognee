@@ -117,7 +117,8 @@ async def test_relational_db_migration(setup_test_db):
                 if src_name and tgt_name:
                     found_edges.add((src_name, tgt_name))
                     distinct_node_names.update([src_name, tgt_name])
-
+    else:
+        pytest.fail(f"Unsupported graph database provider: {graph_db_provider}")
   
     assert len(distinct_node_names) == 8, f"Expected 8 distinct node references, found {len(distinct_node_names)}"
     assert len(found_edges) == 7, f"Expected 7 {relationship_label} edges, got {len(found_edges)}"
