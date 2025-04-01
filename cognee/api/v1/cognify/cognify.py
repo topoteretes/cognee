@@ -10,10 +10,10 @@ from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
-from cognee.modules.pipelines import run_tasks
+from cognee.modules.pipelines import run_tasks, merge_inputs
+from cognee.modules.pipelines.tasks import Task, TaskConfig
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -121,24 +121,33 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     default_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_documents, user=user, permissions=["write"]),
         Task(
+            check_permissions_on_documents,
+            user=user,
+            permissions=["write"],
+            task_config=TaskConfig(inputs=[classify_documents]),
+        ),
+        Task(  # Extract text chunks based on the document type.
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
-        ),  # Extract text chunks based on the document type.
-        Task(
+            task_config=TaskConfig(inputs=[check_permissions_on_documents], output_batch_size=10),
+        ),
+        Task(  # Generate knowledge graphs from the document chunks.
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=ontology_adapter,
-            task_config={"batch_size": 10},
-        ),  # Generate knowledge graphs from the document chunks.
+            task_config=TaskConfig(inputs=[extract_chunks_from_documents]),
+        ),
         Task(
             summarize_text,
             summarization_model=cognee_config.summarization_model,
-            task_config={"batch_size": 10},
+            task_config=TaskConfig(inputs=[extract_chunks_from_documents]),
         ),
-        Task(add_data_points, task_config={"batch_size": 10}),
+        Task(
+            add_data_points,
+            task_config=TaskConfig(inputs=[merge_inputs(summarize_text, extract_graph_from_data)]),
+        ),
     ]
 
     return default_tasks
