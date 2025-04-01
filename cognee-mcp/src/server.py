@@ -215,6 +215,8 @@ async def main():
                 raise_exceptions=True,
             )
 
+            logger.info("Cognee MCP server closed.")
+
     except Exception as e:
         logger.error(f"Server failed to start: {str(e)}", exc_info=True)
         raise
