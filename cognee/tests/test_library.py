@@ -89,9 +89,9 @@ async def main():
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    assert not os.path.exists(get_relational_engine().db_path), (
-        "SQLite relational database is not empty"
-    )
+    with open(get_relational_engine().db_path, "r") as file:
+        content = file.read()
+        assert content == "", "SQLite relational database is not empty"
 
     from cognee.infrastructure.databases.graph import get_graph_config
 

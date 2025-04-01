@@ -20,6 +20,7 @@ class PipelineRun(Base):
 
     status = Column(Enum(PipelineRunStatus))
     pipeline_run_id = Column(UUID, index=True)
+    pipeline_name = Column(String)
     pipeline_id = Column(UUID, index=True)
     dataset_id = Column(UUID, index=True)
     run_info = Column(JSON)

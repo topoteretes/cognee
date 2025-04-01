@@ -70,14 +70,23 @@ async def main():
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
     assert len(search_results) != 0, "Query related summaries don't exist."
-    print("\nExtracted summaries are:\n")
+    print("\nExtracted results are:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    search_results = await cognee.search(
+        query_type=SearchType.NATURAL_LANGUAGE,
+        query_text=f"Find nodes connected to node with name {random_node_name}",
+    )
+    assert len(search_results) != 0, "Query related natural language don't exist."
+    print("\nExtracted results are:\n")
     for result in search_results:
         print(f"{result}\n")
 
     user = await get_default_user()
     history = await get_history(user.id)
 
-    assert len(history) == 6, "Search history is not correct."
+    assert len(history) == 8, "Search history is not correct."
 
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
