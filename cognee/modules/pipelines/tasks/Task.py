@@ -124,11 +124,11 @@ class Task:
         except Exception as error:
             import traceback
 
-            error_details = {
-                "type": type(error).__name__,
-                "message": str(error),
-                "traceback": traceback.format_exc(),
-            }
+            error_details = TaskExecutionException(
+                type=type(error).__name__,
+                message=str(error),
+                traceback=traceback.format_exc(),
+            )
 
             yield TaskExecutionErrored(
                 task=self.executable,
