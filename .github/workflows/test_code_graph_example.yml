@@ -15,7 +15,7 @@ jobs:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
         example-location: ./examples/python/code_graph_example.py
-        arguments: "--repo_path ./evals"
+        arguments: "--repo_path ./cognee/exceptions"
       secrets:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
