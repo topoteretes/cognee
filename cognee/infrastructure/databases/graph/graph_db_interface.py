@@ -2,7 +2,7 @@ from typing import Protocol, Optional, Dict, Any, List
 from abc import abstractmethod, ABC
 from uuid import UUID
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.shared.relationship_manager import create_relationship
+from cognee.modules.graph.relationship_manager import create_relationship
 from functools import wraps
 import inspect
 from cognee.modules.users.models import User

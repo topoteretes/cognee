@@ -36,7 +36,7 @@ async def get_cascade_graph_tasks(
                 extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
             ),  # Extract text chunks based on the document type.
             Task(
-                extract_graph_from_data, task_config={"batch_size": 10}, user=user
+                extract_graph_from_data, task_config={"batch_size": 10}
             ),  # Generate knowledge graphs using cascade extraction
             Task(
                 summarize_text,

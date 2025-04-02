@@ -60,14 +60,13 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
         non_code_tasks = [
             Task(get_non_py_files, task_config={"batch_size": 50}),
             Task(ingest_data, dataset_name="repo_docs", user=user),
-            Task(get_data_list_for_user, dataset_name="repo_docs", user=user),
+            Task(get_data_list_for_user, dataset_name="repo_docs"),
             Task(classify_documents),
             Task(extract_chunks_from_documents, max_chunk_size=get_max_chunk_tokens()),
             Task(
                 extract_graph_from_data,
                 graph_model=KnowledgeGraph,
                 task_config={"batch_size": 50},
-                user=user,
             ),
             Task(
                 summarize_text,

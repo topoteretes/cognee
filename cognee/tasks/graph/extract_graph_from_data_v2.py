@@ -1,6 +1,6 @@
 import asyncio
 from typing import List
-from cognee.modules.users.models import User
+
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
@@ -17,7 +17,6 @@ from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     n_rounds: int = 2,
-    user: User = None,
     ontology_adapter: OntologyResolver = None,
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks in multiple steps."""
@@ -46,5 +45,4 @@ async def extract_graph_from_data(
         chunk_graphs=chunk_graphs,
         graph_model=KnowledgeGraph,
         ontology_adapter=ontology_adapter or OntologyResolver(),
-        user=user,
     )
