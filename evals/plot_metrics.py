@@ -53,12 +53,12 @@ def load_metrics(system_dir):
     system_name_lower = system_dir.name.split("_")[0].lower()
     is_optimized = "optimized" in system_dir.name.lower()
 
-    # --- Human-LLM Correctness Loading (Standard Check First) --- 
-    human_metrics = load_human_eval_metrics(system_dir) 
+    # --- Human-LLM Correctness Loading (Standard Check First) ---
+    human_metrics = load_human_eval_metrics(system_dir)
     # ^ This loads from dedicated *_human_eval.json files if they exist
     metrics.update(human_metrics)
 
-    # --- DeepEval Metrics & Special Cognee Optimized Handling --- 
+    # --- DeepEval Metrics & Special Cognee Optimized Handling ---
     metrics_file = None
     if system_name_lower == "graphiti":
         metrics_file = system_dir / "aggregate_metrics_graphiti.json"
@@ -71,43 +71,51 @@ def load_metrics(system_dir):
             # Files for Cognee Optimized (dreamify)
             deepeval_file = system_dir / "aggregate_metrics_4o_cognee_10.json"
             if not deepeval_file.exists():
-                deepeval_file = system_dir / "aggregate_metrics_4o_cognee_10_short.json" # Fallback
-                
+                deepeval_file = system_dir / "aggregate_metrics_4o_cognee_10_short.json"  # Fallback
+
             # DeepEval metrics file (including Correctness, F1, EM)
-            deepeval_metrics_file = system_dir / "aggregate_metrics_4o_cognee_10_short_deepeval.json"
-            
-            print(f"Processing Cognee Optimized (dreamify)")
-            
+            deepeval_metrics_file = (
+                system_dir / "aggregate_metrics_4o_cognee_10_short_deepeval.json"
+            )
+
+            print("Processing Cognee Optimized (dreamify)")
+
             # --- 1. Load Human-LLM from main file ---
             if deepeval_file.exists():
                 try:
                     with open(deepeval_file) as f:
                         data = json.load(f)
-                    
+
                     # Load Human-LLM Correctness from the correctness field in main file
-                    if "correctness" in data and isinstance(data["correctness"], dict) and "mean" in data["correctness"]:
+                    if (
+                        "correctness" in data
+                        and isinstance(data["correctness"], dict)
+                        and "mean" in data["correctness"]
+                    ):
                         metrics["Human-LLM Correctness"] = {
                             "mean": data["correctness"]["mean"],
-                            "ci_low": data["correctness"].get("ci_lower", data["correctness"]["mean"]),
-                            "ci_high": data["correctness"].get("ci_upper", data["correctness"]["mean"]),
+                            "ci_low": data["correctness"].get(
+                                "ci_lower", data["correctness"]["mean"]
+                            ),
+                            "ci_high": data["correctness"].get(
+                                "ci_upper", data["correctness"]["mean"]
+                            ),
                         }
-                        print(f"Found Human-LLM Correctness in {deepeval_file}: mean={metrics['Human-LLM Correctness']['mean']:.4f}")
+                        print(
+                            f"Found Human-LLM Correctness in {deepeval_file}: mean={metrics['Human-LLM Correctness']['mean']:.4f}"
+                        )
                 except Exception as e:
                     print(f"Error loading metrics from {deepeval_file}: {e}")
-            
+
             # --- 2. Load ALL DeepEval metrics (Correctness, F1, EM) from the dedicated file ---
             if deepeval_metrics_file.exists():
                 try:
                     with open(deepeval_metrics_file) as f:
                         data = json.load(f)
-                    
+
                     # Look for ALL metrics in the deepeval file
-                    deepeval_metrics = {
-                        "correctness": "Correctness",
-                        "f1": "F1", 
-                        "EM": "EM"
-                    }
-                    
+                    deepeval_metrics = {"correctness": "Correctness", "f1": "F1", "EM": "EM"}
+
                     for key, display_name in deepeval_metrics.items():
                         metric_key = f"DeepEval {display_name}"
                         if key in data and isinstance(data[key], dict) and "mean" in data[key]:
@@ -116,11 +124,13 @@ def load_metrics(system_dir):
                                 "ci_low": data[key].get("ci_lower", data[key]["mean"]),
                                 "ci_high": data[key].get("ci_upper", data[key]["mean"]),
                             }
-                            print(f"Found DeepEval {display_name} in {deepeval_metrics_file}: mean={metrics[metric_key]['mean']:.4f}")
+                            print(
+                                f"Found DeepEval {display_name} in {deepeval_metrics_file}: mean={metrics[metric_key]['mean']:.4f}"
+                            )
                 except Exception as e:
                     print(f"Error loading DeepEval metrics from {deepeval_metrics_file}: {e}")
-            
-        else: # Regular Cognee
+
+        else:  # Regular Cognee
             metrics_file = system_dir / "aggregate_metrics_v_deepeval.json"
             print(f"Processing Regular Cognee DeepEval from {metrics_file}")
 
@@ -135,7 +145,7 @@ def load_metrics(system_dir):
             for key, display_name in standard_metrics_keys.items():
                 metric_key = f"DeepEval {display_name}"
                 if key in data and isinstance(data[key], dict) and "mean" in data[key]:
-                     # Load DeepEval metric if found
+                    # Load DeepEval metric if found
                     metrics[metric_key] = {
                         "mean": data[key]["mean"],
                         "ci_low": data[key].get("ci_lower", data[key]["mean"]),
@@ -150,7 +160,12 @@ def load_metrics(system_dir):
         print(f"DeepEval metrics file not found: {metrics_file}")
 
     # Make sure all standard metrics exist with defaults if missing
-    all_expected_metrics = ["Human-LLM Correctness", "DeepEval Correctness", "DeepEval F1", "DeepEval EM"]
+    all_expected_metrics = [
+        "Human-LLM Correctness",
+        "DeepEval Correctness",
+        "DeepEval F1",
+        "DeepEval EM",
+    ]
     for metric_name in all_expected_metrics:
         if metric_name not in metrics:
             metrics[metric_name] = {"mean": 0.0, "ci_low": 0.0, "ci_high": 0.0}
@@ -322,8 +337,8 @@ def plot_metrics(all_systems_metrics, output_file="metrics_comparison.png"):
     plt.tight_layout()
 
     # Define output file paths
-    output_base = output_file.rsplit('.', 1)[0]
-    output_ext = output_file.rsplit('.', 1)[1] if '.' in output_file else 'png'
+    output_base = output_file.rsplit(".", 1)[0]
+    output_ext = output_file.rsplit(".", 1)[1] if "." in output_file else "png"
     logo_output_file = f"{output_base}_with_logo.{output_ext}"
 
     # Save plot first without logo
@@ -383,21 +398,21 @@ def main():
         print(f"\nChecking system directory: {system_dir}")
         system_name = system_dir.name.split("_")[0].capitalize()
         metrics = load_metrics(system_dir)
-        
+
         # Special handling for cognee_optimized
         if "optimized" in system_dir.name.lower():
             system_name = "Cognee (dreamify)"
-            
+
         if metrics:
             all_systems_metrics[system_name] = metrics
             print(f"Found metrics for {system_name}: {metrics}")
-    
+
     # Plot cognee comparison if both regular and optimized are present
     if "Cognee" in all_systems_metrics and "Cognee (dreamify)" in all_systems_metrics:
         print("\nGenerating Cognee vs Cognee (dreamify) comparison plot.")
         cognee_metrics = {
             "Cognee": all_systems_metrics["Cognee"],
-            "Cognee (dreamify)": all_systems_metrics["Cognee (dreamify)"]
+            "Cognee (dreamify)": all_systems_metrics["Cognee (dreamify)"],
         }
         plot_metrics(cognee_metrics, output_file="cognee_comparison.png")
 
@@ -406,13 +421,13 @@ def main():
     if not all_systems_metrics:
         print("No metrics data found!")
         return
-    
+
     # Plot metrics for all systems - excluding both Falkor and Cognee (dreamify)
     systems_for_comparison = {}
     for system_name, system_metrics in all_systems_metrics.items():
         if system_name not in ["Cognee (dreamify)", "Falkor"]:
             systems_for_comparison[system_name] = system_metrics
-    
+
     if systems_for_comparison:
         print("\nGenerating main metrics comparison (excluding Falkor and Cognee dreamify)")
         plot_metrics(systems_for_comparison, output_file="metrics_comparison.png")
