@@ -43,7 +43,7 @@ async def add(
             ingest_data,
             dataset_name,
             user,
-            task_config=TaskConfig(inputs=[resolve_data_directories]),
+            task_config=TaskConfig(needs=[resolve_data_directories]),
         ),
     ]
 
