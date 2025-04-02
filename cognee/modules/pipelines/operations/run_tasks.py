@@ -107,11 +107,12 @@ async def run_tasks_with_telemetry(
 
 async def run_tasks(
     tasks: list[Task],
-    dataset_id: UUID = uuid4(),
+    dataset_id: UUID,
     data: Any = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
 ):
+    dataset_id = dataset_id or uuid4()
     pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
 
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)

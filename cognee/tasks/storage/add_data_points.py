@@ -6,7 +6,8 @@ from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 
 
-async def add_data_points(data_points: list[DataPoint], data_point_connections: list = []):
+async def add_data_points(data_points: list[DataPoint], data_point_connections: list = None):
+    data_point_connections = data_point_connections or []
     nodes = []
     edges = []
 

@@ -7,14 +7,14 @@ from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 
 
 async def run_and_check_tasks():
-    def number_generator(num, context={}):
+    def number_generator(num, context=None):
         for i in range(num):
             yield i + 1
 
-    async def add_one(num, context={}):
+    async def add_one(num, context=None):
         yield num + 1
 
-    async def multiply_by_two(num, context={}):
+    async def multiply_by_two(num, context=None):
         yield num * 2
 
     index = 0
