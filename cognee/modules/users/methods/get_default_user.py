@@ -13,11 +13,7 @@ async def get_default_user() -> SimpleNamespace:
     default_email = base_config.default_user_email or "default_user@example.com"
 
     async with db_engine.get_async_session() as session:
-        query = (
-            select(User)
-            .options(selectinload(User.roles))
-            .where(User.email == default_email)
-        )
+        query = select(User).options(selectinload(User.roles)).where(User.email == default_email)
 
         result = await session.execute(query)
         user = result.scalars().first()
