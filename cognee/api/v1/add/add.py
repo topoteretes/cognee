@@ -1,4 +1,4 @@
-from typing import Union, BinaryIO
+from typing import Union, BinaryIO, List, Optional
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines import run_tasks, Task
@@ -16,6 +16,7 @@ async def add(
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
     dataset_name: str = "main_dataset",
     user: User = None,
+    NodeSet: Optional[List[str]] = None,
 ):
     # Create tables for databases
     await create_relational_db_and_tables()
@@ -36,7 +37,7 @@ async def add(
     if user is None:
         user = await get_default_user()
 
-    tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user)]
+    tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user, NodeSet)]
 
     dataset_id = uuid5(NAMESPACE_OID, dataset_name)
     pipeline = run_tasks(
