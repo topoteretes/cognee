@@ -15,7 +15,7 @@ import inspect
 import json
 
 
-async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optional[List[str]] = None):
+async def ingest_data(data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
@@ -44,10 +44,10 @@ async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optiona
                     "mime_type": file_metadata["mime_type"],
                     "content_hash": file_metadata["content_hash"],
                     "owner_id": str(user.id),
-                    "node_set": json.dumps(NodeSet) if NodeSet else None,
+                    "node_set": json.dumps(node_set) if node_set else None,
                 }
 
-    async def store_data_to_dataset(data: Any, dataset_name: str, user: User, NodeSet: Optional[List[str]] = None):
+    async def store_data_to_dataset(data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
             data = [data]
@@ -84,8 +84,8 @@ async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optiona
                     ).scalar_one_or_none()
 
                     ext_metadata = get_external_metadata_dict(data_item)
-                    if NodeSet:
-                        ext_metadata["node_set"] = NodeSet
+                    if node_set:
+                        ext_metadata["node_set"] = node_set
 
                     if data_point is not None:
                         data_point.name = file_metadata["name"]
@@ -95,7 +95,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optiona
                         data_point.owner_id = user.id
                         data_point.content_hash = file_metadata["content_hash"]
                         data_point.external_metadata = ext_metadata
-                        data_point.node_set = json.dumps(NodeSet) if NodeSet else None
+                        data_point.node_set = json.dumps(node_set) if node_set else None
                         await session.merge(data_point)
                     else:
                         data_point = Data(
@@ -107,7 +107,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optiona
                             owner_id=user.id,
                             content_hash=file_metadata["content_hash"],
                             external_metadata=ext_metadata,
-                            node_set=json.dumps(NodeSet) if NodeSet else None,
+                            node_set=json.dumps(node_set) if node_set else None,
                             token_count=-1,
                         )
 
@@ -132,7 +132,7 @@ async def ingest_data(data: Any, dataset_name: str, user: User, NodeSet: Optiona
 
     db_engine = get_relational_engine()
 
-    file_paths = await store_data_to_dataset(data, dataset_name, user, NodeSet)
+    file_paths = await store_data_to_dataset(data, dataset_name, user, node_set)
 
     # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
     # can't be used inside the pipeline
