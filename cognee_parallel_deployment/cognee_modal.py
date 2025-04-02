@@ -96,7 +96,7 @@ async def get_modal_tasks(
     return modal_tasks
 
 
-@app.function(image=image, max_containers=4)
+@app.function(image=image, max_containers=4, retries=5)
 async def entry(file, chunk_list):
     print(f"File execution started: {file}")
 
