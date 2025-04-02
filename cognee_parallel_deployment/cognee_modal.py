@@ -28,7 +28,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph import extract_graph_from_data
-from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage import add_data_points, index_graph_edges
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.operations.run_tasks import run_tasks_with_telemetry
@@ -96,7 +96,7 @@ async def get_modal_tasks(
     return modal_tasks
 
 
-@app.function(image=image, max_containers=20)
+@app.function(image=image, max_containers=4)
 async def entry(file, chunk_list):
     print(f"File execution started: {file}")
 
@@ -114,7 +114,7 @@ async def main():
     ############MASTER NODE (local for now)
     dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
-    batch_size = 100
+    batch_size = 30
 
     # Cleaning the db + adding all the documents to metastore
     await cognee.prune.prune_data()
@@ -145,6 +145,7 @@ async def main():
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    await index_graph_edges()
     os.kill(os.getpid(), signal.SIGTERM)
 
 

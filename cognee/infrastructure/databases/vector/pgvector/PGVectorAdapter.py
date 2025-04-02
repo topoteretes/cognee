@@ -74,19 +74,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 return False
 
     async def create_collection(self, collection_name: str, payload_schema=None):
-        vector_size = self.embedding_engine.get_vector_size()
-        if not await self.has_collection(collection_name):
-            async with self.engine.begin() as connection:
-                # We do this instead of create_all to avoid problems in parallelization
-                create_table_sql = text(f"""
-                    CREATE TABLE IF NOT EXISTS "{collection_name}" (
-                        primary_key UUID NOT NULL PRIMARY KEY,
-                        id UUID NOT NULL,
-                        payload JSON,
-                        vector VECTOR({vector_size})
-                    );
-                """)
-                await connection.execute(create_table_sql)
+        try:
+            vector_size = self.embedding_engine.get_vector_size()
+            if not await self.has_collection(collection_name):
+                async with self.engine.begin() as connection:
+                    create_table_sql = text(f"""
+                        CREATE TABLE IF NOT EXISTS "{collection_name}" (
+                            primary_key UUID NOT NULL PRIMARY KEY,
+                            id UUID NOT NULL,
+                            payload JSON,
+                            vector VECTOR({vector_size})
+                        );
+                    """)
+                    await connection.execute(create_table_sql)
+        except Exception as e:
+            logger.warning(f"An error occurred during table creation: {e}")
+            pass
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         data_point_types = get_type_hints(DataPoint)
@@ -130,7 +133,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
-        await self.create_collection(f"{index_name}_{index_property_name}")
+        try:
+            await self.create_collection(f"{index_name}_{index_property_name}")
+        except Exception as e:
+            logger.warning(f"An error occurred during table creation: {e}")
+            pass
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
