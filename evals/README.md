@@ -5,7 +5,7 @@ This repository contains a comparative analysis of three different question-answ
 ## Dataset
 
 The analysis uses two key data files:
-- `hotpot_50_corpus.json`: Contains 50 randomly selected documents from HotpotQA
+- `hotpot_50_corpus.json`: Contains 50 randomly selected instances from HotpotQA
 - `hotpot_50_qa_pairs.json`: Contains corresponding question-answer pairs
 
 ### Generating the Dataset
@@ -64,24 +64,12 @@ Results are available in:
 - `aggregate_metrics_graphiti.json`
 - `aggregate_metrics_graphiti_direct_llm.json`
 
-### 3. Falkor's GraphRAG-SDK
 
-An LLM-powered system that automatically generates ontologies and knowledge graphs.
-
-#### Setup and Running
-1. Clone the repository: `git clone https://github.com/FalkorDB/GraphRAG-SDK.git`
-2. Install dependencies: `pip install python-dotenv`
-3. Create `.env` file with your `OPENAI_API_KEY`
-4. Copy the dataset JSON files to the repo root
-5. Run the analysis script: `python hotpot_qa_falkor_graphrag_sdk.py`
-
-Note: The system processes data in batches due to handling limitations with unbatched data.
-
-Results are available in the corresponding metrics output files.
 
 #### Human Evaluation
 
-In order to make sure the results are accurate as possible, we analyzed the dataset by having a Human compare golden answer and the
+In order to make sure the results are accurate as possible, we analyzed the dataset by having a Human compare golden answer we spent time manually going over each failed question in the dataset and validating it. 
+Since we did not check for false positives, it might increase the scores to a degree, but we assume the difference to be relatively small.
 
 #### Problems with the Approach
 
