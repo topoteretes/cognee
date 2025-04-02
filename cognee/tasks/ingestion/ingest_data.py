@@ -15,7 +15,9 @@ import inspect
 import json
 
 
-async def ingest_data(data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None):
+async def ingest_data(
+    data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None
+):
     destination = get_dlt_destination()
 
     pipeline = dlt.pipeline(
@@ -47,7 +49,9 @@ async def ingest_data(data: Any, dataset_name: str, user: User, node_set: Option
                     "node_set": json.dumps(node_set) if node_set else None,
                 }
 
-    async def store_data_to_dataset(data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None):
+    async def store_data_to_dataset(
+        data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None
+    ):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
             data = [data]

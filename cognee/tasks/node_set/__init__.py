@@ -1,1 +1,1 @@
-from .apply_node_set import apply_node_set 
+from .apply_node_set import apply_node_set
