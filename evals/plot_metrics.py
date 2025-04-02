@@ -279,12 +279,12 @@ def plot_metrics(all_systems_metrics):
                color=colors[i % len(colors)],
                alpha=0.85,
                yerr=yerr,
-               capsize=5,
-               error_kw={'elinewidth': 2, 'capthick': 2, 'ecolor': brand_colors['abyss_black']})
-    
+               capsize=4,
+               error_kw={'elinewidth': 1.5, 'capthick': 1.5, 'ecolor': brand_colors['dark_grey'], 'alpha': 0.5})
+
     # Customize plot with Cognee styling
     ax.set_ylabel('Score', fontsize=14, fontweight='bold', color=brand_colors['abyss_black'])
-    ax.set_title('Cognee\'s AI Memory - Benchmark Results', fontsize=18, pad=20, fontweight='bold', color=brand_colors['data_dream_violet'])
+    ax.set_title('AI Memory - Benchmark Results', fontsize=18, pad=20, fontweight='bold', color=brand_colors['data_dream_violet'])
     ax.set_xticks(x)
     ax.set_xticklabels(systems, rotation=45, ha='right', fontsize=12, fontweight='bold', color=brand_colors['abyss_black'])
     ax.tick_params(axis='y', labelsize=11, colors=brand_colors['abyss_black'])
@@ -309,20 +309,22 @@ def plot_metrics(all_systems_metrics):
     # Style the legend text with brand colors
     plt.setp(legend.get_title(), fontweight='bold', color=brand_colors['data_dream_violet'])
     
-    # Add value labels on top of bars
+    # Add value labels on top of bars with improved visibility
     for i, metric in enumerate(metrics):
         for j, system in enumerate(systems):
             if metric in all_systems_metrics[system]:
                 value = all_systems_metrics[system][metric]["mean"]
                 if value > 0:  # Only show label if value is greater than 0
+                    # Create a small white background for the text to improve legibility
                     ax.text(j + i * width - (len(metrics)-1) * width/2,
                            value + 0.02,
                            f'{value:.2f}',
                            ha='center',
                            va='bottom',
-                           fontsize=10,
+                           fontsize=11,
                            fontweight='bold',
-                           color=brand_colors['abyss_black'])
+                           color=brand_colors['data_dream_violet'],
+                           bbox=dict(facecolor='white', alpha=0.7, pad=1, edgecolor='none'))
     
     # Add border to the plot
     for spine in ax.spines.values():
