@@ -14,8 +14,10 @@ from cognee.tasks.ingestion import migrate_relational_database
 from cognee.modules.search.types import SearchType
 import cognee
 
+
 def nodes_dict(nodes):
     return {n_id: data for (n_id, data) in nodes}
+
 
 def normalize_node_name(node_name: str) -> str:
     if node_name and ":" in node_name:
@@ -24,9 +26,9 @@ def normalize_node_name(node_name: str) -> str:
         return f"{prefix}:{suffix}"
     return node_name
 
+
 @pytest_asyncio.fixture()
 async def setup_test_db():
-
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -36,23 +38,22 @@ async def setup_test_db():
     relational_engine = get_migration_relational_engine()
     return relational_engine
 
+
 @pytest.mark.asyncio
 async def test_relational_db_migration(setup_test_db):
-
-    relational_engine = setup_test_db  
+    relational_engine = setup_test_db
     schema = await relational_engine.extract_schema()
 
     graph_engine = await get_graph_engine()
     await migrate_relational_database(graph_engine, schema=schema)
 
-    #1. Search the graph
+    # 1. Search the graph
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Tell me about the artist AC/DC"
+        query_type=SearchType.GRAPH_COMPLETION, query_text="Tell me about the artist AC/DC"
     )
     print("Search results:", search_results)
 
-    #2. Assert that the search results contain "AC/DC"
+    # 2. Assert that the search results contain "AC/DC"
     assert any("AC/DC" in r for r in search_results), "AC/DC not found in search results!"
 
     relational_db_provider = os.getenv("MIGRATION_DB_PROVIDER", "sqlite").lower()
@@ -61,7 +62,7 @@ async def test_relational_db_migration(setup_test_db):
     else:
         relationship_label = "ReportsTo"
 
-    #3. Directly verify the 'reports to' hierarchy
+    # 3. Directly verify the 'reports to' hierarchy
     graph_db_provider = os.getenv("GRAPH_DATABASE_PROVIDER", "networkx").lower()
 
     distinct_node_names = set()
@@ -110,7 +111,7 @@ async def test_relational_db_migration(setup_test_db):
     elif graph_db_provider == "networkx":
         nodes, edges = await graph_engine.get_graph_data()
         node_map = nodes_dict(nodes)
-        for (src, tgt, key, edge_data) in edges:
+        for src, tgt, key, edge_data in edges:
             if key == relationship_label:
                 src_name = normalize_node_name(node_map[src].get("name"))
                 tgt_name = normalize_node_name(node_map[tgt].get("name"))
@@ -119,8 +120,10 @@ async def test_relational_db_migration(setup_test_db):
                     distinct_node_names.update([src_name, tgt_name])
     else:
         pytest.fail(f"Unsupported graph database provider: {graph_db_provider}")
-  
-    assert len(distinct_node_names) == 8, f"Expected 8 distinct node references, found {len(distinct_node_names)}"
+
+    assert len(distinct_node_names) == 8, (
+        f"Expected 8 distinct node references, found {len(distinct_node_names)}"
+    )
     assert len(found_edges) == 7, f"Expected 7 {relationship_label} edges, got {len(found_edges)}"
 
     expected_edges = {
