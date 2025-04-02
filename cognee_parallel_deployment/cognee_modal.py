@@ -48,7 +48,7 @@ image = (
     .add_local_file("poetry.lock", remote_path="/root/poetry.lock", copy=True)
     .env(local_env_vars)
     .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
-    .pip_install("protobuf", "h2", "neo4j")
+    .pip_install("protobuf", "h2", "neo4j", "asyncpg", "pgvector")
     .add_local_python_source("cognee")
 )
 
@@ -96,7 +96,7 @@ async def get_modal_tasks(
     return modal_tasks
 
 
-@app.function(image=image, max_containers=5)
+@app.function(image=image, max_containers=20)
 async def entry(file, chunk_list):
     print(f"File execution started: {file}")
 

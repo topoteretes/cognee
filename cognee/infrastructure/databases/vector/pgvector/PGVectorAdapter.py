@@ -2,8 +2,9 @@ import asyncio
 from typing import List, Optional, get_type_hints
 from uuid import UUID, uuid4
 
+from cognee.shared.logging_utils import get_logger
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.exceptions import InvalidValueError
@@ -19,6 +20,8 @@ from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
 from ..utils import normalize_distances
+
+logger = get_logger()
 
 
 class IndexSchema(DataPoint):
@@ -71,30 +74,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 return False
 
     async def create_collection(self, collection_name: str, payload_schema=None):
-        data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
-
         if not await self.has_collection(collection_name):
-
-            class PGVectorDataPoint(Base):
-                __tablename__ = collection_name
-                __table_args__ = {"extend_existing": True}
-                # PGVector requires one column to be the primary key
-                primary_key: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-                id: Mapped[data_point_types["id"]]
-                payload = Column(JSON)
-                vector = Column(self.Vector(vector_size))
-
-                def __init__(self, id, payload, vector):
-                    self.id = id
-                    self.payload = payload
-                    self.vector = vector
-
             async with self.engine.begin() as connection:
-                if len(Base.metadata.tables.keys()) > 0:
-                    await connection.run_sync(
-                        Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
-                    )
+                # We do this instead of create_all to avoid problems in parallelization
+                create_table_sql = text(f"""
+                    CREATE TABLE IF NOT EXISTS "{collection_name}" (
+                        primary_key UUID NOT NULL PRIMARY KEY,
+                        id UUID NOT NULL,
+                        payload JSON,
+                        vector VECTOR({vector_size})
+                    );
+                """)
+                await connection.execute(create_table_sql)
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         data_point_types = get_type_hints(DataPoint)
