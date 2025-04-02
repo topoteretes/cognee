@@ -68,8 +68,17 @@ Results are available in:
 
 #### Human Evaluation
 
-In order to make sure the results are accurate as possible, we analyzed the dataset by having a Human compare golden answer we spent time manually going over each failed question in the dataset and validating it. 
-Since we did not check for false positives, it might increase the scores to a degree, but we assume the difference to be relatively small.
+In order to ensure the highest possible accuracy of our results, we conducted a thorough human evaluation of the dataset. We had human evaluators compare responses against golden answers, and we manually reviewed each failed question to validate the results. 
+
+Since we focused on validating false negatives rather than checking for false positives, the scores might be slightly higher than a comprehensive evaluation. However, we believe this difference is relatively small and doesn't significantly impact the comparative analysis.
+
+<img src="metrics_comparison.png" width="600" alt="Competitor Comparison">
+
+#### Adding Dreamify
+
+When we enhanced Cognee with Dreamify optimization, we saw significant improvements across all evaluation metrics, particularly in DeepEval F1 and EM scores.
+
+<img src="cognee_comparison.png" width="600" alt="Cognee with Dreamify Comparison">
 
 #### Problems with the Approach
 
