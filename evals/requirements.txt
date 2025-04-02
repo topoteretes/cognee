@@ -1,0 +1,6 @@
+# Requirements for running the plot_metrics.py script
+numpy==1.26.4
+matplotlib==3.10.0
+seaborn==0.13.2
+scipy==1.11.4
+pathlib 
