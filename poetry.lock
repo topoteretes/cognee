@@ -7850,6 +7850,63 @@ files = [
 dev = ["build", "flake8", "mypy", "pytest", "twine"]
 
 [[package]]
+name = "pyside6"
+version = "6.8.3"
+description = "Python bindings for the Qt cross-platform application and UI framework"
+optional = true
+python-versions = "<3.14,>=3.9"
+groups = ["main"]
+markers = "extra == \"gui\""
+files = [
+    {file = "PySide6-6.8.3-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:31f390c961b54067ae41360e5ea3b340ce0e0e5feadea2236c28226d3b37edcc"},
+    {file = "PySide6-6.8.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:8e53e2357bfbdee1fa86c48312bf637460a2c26d49e7af0b3fae2e179ccc7052"},
+    {file = "PySide6-6.8.3-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:5bf5153cab9484629315f57c56a9ad4b7d075b4dd275f828f7549abf712c590b"},
+    {file = "PySide6-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:722dc0061d8ef6dbb8c0b99864f21e83a5b49ece1ecb2d0b890840d969e1e461"},
+]
+
+[package.dependencies]
+PySide6-Addons = "6.8.3"
+PySide6-Essentials = "6.8.3"
+shiboken6 = "6.8.3"
+
+[[package]]
+name = "pyside6-addons"
+version = "6.8.3"
+description = "Python bindings for the Qt cross-platform application and UI framework (Addons)"
+optional = true
+python-versions = "<3.14,>=3.9"
+groups = ["main"]
+markers = "extra == \"gui\""
+files = [
+    {file = "PySide6_Addons-6.8.3-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:ea46649e40b9e6ab11a0da2da054d3914bff5607a5882885e9c3bc2eef200036"},
+    {file = "PySide6_Addons-6.8.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:6983d3b01fad53637bad5360930d5923509c744cc39704f9c1190eb9934e33da"},
+    {file = "PySide6_Addons-6.8.3-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:7949a844a40ee10998eb2734e2c06c4c7182dfcd4c21cc4108a6b96655ebe59f"},
+    {file = "PySide6_Addons-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:67548f6db11f4e1b7e4b6efd9c3fc2e8d275188a7b2feac388961128572a6955"},
+]
+
+[package.dependencies]
+PySide6-Essentials = "6.8.3"
+shiboken6 = "6.8.3"
+
+[[package]]
+name = "pyside6-essentials"
+version = "6.8.3"
+description = "Python bindings for the Qt cross-platform application and UI framework (Essentials)"
+optional = true
+python-versions = "<3.14,>=3.9"
+groups = ["main"]
+markers = "extra == \"gui\""
+files = [
+    {file = "PySide6_Essentials-6.8.3-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:aa56c135db924ecfaf50088baf32f737d28027419ca5fee67c0c7141b29184e3"},
+    {file = "PySide6_Essentials-6.8.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:fd57fa0c886ef99b3844173322c0023ec77cc946a0c9a0cdfbc2ac5c511053c1"},
+    {file = "PySide6_Essentials-6.8.3-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:b4f4823f870b5bed477d6f7b6a3041839b859f70abfd703cf53208c73c2fe4cd"},
+    {file = "PySide6_Essentials-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:3c0fae5550aff69f2166f46476c36e0ef56ce73d84829eac4559770b0c034b07"},
+]
+
+[package.dependencies]
+shiboken6 = "6.8.3"
+
+[[package]]
 name = "pysocks"
 version = "1.7.1"
 description = "A Python SOCKS client module. See https://github.com/Anorov/PySocks for more information."
@@ -9377,6 +9434,21 @@ groups = ["main"]
 files = [
     {file = "shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"},
     {file = "shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de"},
+]
+
+[[package]]
+name = "shiboken6"
+version = "6.8.3"
+description = "Python/C++ bindings helper module"
+optional = true
+python-versions = "<3.14,>=3.9"
+groups = ["main"]
+markers = "extra == \"gui\""
+files = [
+    {file = "shiboken6-6.8.3-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:483efc7dd53c69147b8a8ade71f7619c79ffc683efcb1dc4f4cb6c40bb23d29b"},
+    {file = "shiboken6-6.8.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:295a003466ca2cccf6660e2f2ceb5e6cef4af192a48a196a32d46b6f0c9ec5cb"},
+    {file = "shiboken6-6.8.3-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:2b1a41348102952d2a5fbf3630bddd4d44112e18058b5e4cf505e51f2812429d"},
+    {file = "shiboken6-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:bca3a94513ce9242f7d4bbdca902072a1631888e0aa3a8711a52cc5dbe93588f"},
 ]
 
 [[package]]
@@ -11251,7 +11323,7 @@ filesystem = ["botocore"]
 gemini = []
 graphiti = ["graphiti-core"]
 groq = ["groq"]
-gui = ["qasync"]
+gui = ["pyside6", "qasync"]
 huggingface = ["transformers"]
 kuzu = ["kuzu"]
 langchain = ["langchain_text_splitters", "langsmith"]
@@ -11269,4 +11341,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "4bda223028508503b326912854c60fa4a5f60349370d26f22dd997d0dec11e01"
+content-hash = "25b759ffc908ce0b4df33344424d2043dd3126d944c6d2e9b24031bd24e1152b"
