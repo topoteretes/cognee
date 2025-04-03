@@ -22,6 +22,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         return OllamaEmbeddingEngine(
             model=config.embedding_model,
             dimensions=config.embedding_dimensions,
+            endpoint=config.embedding_endpoint,
             max_tokens=config.embedding_max_tokens,
             huggingface_tokenizer=config.huggingface_tokenizer,
         )
