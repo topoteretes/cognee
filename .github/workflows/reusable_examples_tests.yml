@@ -44,7 +44,11 @@ jobs:
         
       - name: Run Multi-metric QA Example
         if: matrix.example == 'multimetric-qa'
-        env:
+        uses: ./.github/workflows/reusable_python_example.yml
+        with:
+          example-location: ./evals/multimetric_qa_eval_run.py
+          arguments: "--params_file evals/qa_eval_parameters.json --out_dir dirname"
+        secrets:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -56,7 +60,6 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-        run: poetry run python .evals/multimetric_qa_eval_run.py
 
         
       - name: Run Multimedia Example
