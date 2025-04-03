@@ -22,7 +22,7 @@ async def run_and_check_tasks():
 
     with pytest.raises(
         WrongTaskOrderException,
-        match="1/3 tasks executed. You likely have some disconneted tasks or circular dependency.",
+        match="1/3 tasks executed. You likely have some disconnected tasks or circular dependency.",
     ):
         async for task_run_info in run_tasks_base(
             [

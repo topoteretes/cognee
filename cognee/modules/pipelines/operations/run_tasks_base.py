@@ -26,8 +26,8 @@ async def run_tasks_base(tasks: list[Task], data=None, context=None):
     # Build task dependency graph
     for task in tasks:
         task_graph[task.executable] = get_task_needs(task.task_config.needs)
-        for dependendent_task in task_graph[task.executable]:
-            dependents.setdefault(dependendent_task, []).append(task.executable)
+        for dependent_task in task_graph[task.executable]:
+            dependents.setdefault(dependent_task, []).append(task.executable)
 
     # Find tasks without dependencies
     ready_queue = deque([task for task in tasks if not task_graph[task.executable]])
@@ -52,12 +52,12 @@ async def run_tasks_base(tasks: list[Task], data=None, context=None):
             yield task_execution_info
 
         # Process tasks depending on this task
-        for dependendent_task in dependents.get(task.executable, []):
-            task_graph[dependendent_task].remove(task.executable)  # Mark dependency as resolved
-            if not task_graph[dependendent_task]:  # If all dependencies resolved, add to queue
-                ready_queue.append(tasks_map[dependendent_task])
+        for dependent_task in dependents.get(task.executable, []):
+            task_graph[dependent_task].remove(task.executable)  # Mark dependency as resolved
+            if not task_graph[dependent_task]:  # If all dependencies resolved, add to queue
+                ready_queue.append(tasks_map[dependent_task])
 
     if number_of_executed_tasks != len(tasks):
         raise WrongTaskOrderException(
-            f"{number_of_executed_tasks}/{len(tasks)} tasks executed. You likely have some disconneted tasks or circular dependency."
+            f"{number_of_executed_tasks}/{len(tasks)} tasks executed. You likely have some disconnected tasks or circular dependency."
         )
