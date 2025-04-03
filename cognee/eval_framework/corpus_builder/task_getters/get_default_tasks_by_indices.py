@@ -40,65 +40,36 @@ async def get_no_summary_tasks(
     ontology_file_path=None,
 ) -> List[Task]:
     """Returns default tasks without summarization tasks."""
-    if user is None:
-        user = await get_default_user()
+    # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
+    base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
 
     ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
 
-    tasks = [
-        Task(classify_documents),
-        Task(
-            check_permissions_on_documents,
-            user=user,
-            permissions=["write"],
-            task_config=TaskConfig(needs=[classify_documents]),
-        ),
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
-            chunker=chunker,
-            task_config=TaskConfig(needs=[check_permissions_on_documents], output_batch_size=10),
-        ),
-        Task(
-            extract_graph_from_data,
-            graph_model=graph_model,
-            ontology_adapter=ontology_adapter,
-            task_config=TaskConfig(needs=[extract_chunks_from_documents]),
-        ),
-        Task(
-            add_data_points,
-            task_config=TaskConfig(needs=[extract_graph_from_data]),
-        ),
-    ]
+    graph_task = Task(
+        extract_graph_from_data,
+        graph_model=graph_model,
+        ontology_adapter=ontology_adapter,
+        task_config=TaskConfig(needs=[extract_chunks_from_documents]),
+    )
 
-    return tasks
+    add_data_points_task = Task(
+        add_data_points,
+        task_config=TaskConfig(needs=[extract_graph_from_data]),
+    )
+
+    return base_tasks + [graph_task, add_data_points_task]
 
 
 async def get_just_chunks_tasks(
     chunk_size: int = None, chunker=TextChunker, user=None
 ) -> List[Task]:
     """Returns default tasks with only chunk extraction and data points addition."""
-    if user is None:
-        user = await get_default_user()
+    # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
+    base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
 
-    tasks = [
-        Task(classify_documents),
-        Task(
-            check_permissions_on_documents,
-            user=user,
-            permissions=["write"],
-            task_config=TaskConfig(needs=[classify_documents]),
-        ),
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
-            chunker=chunker,
-            task_config=TaskConfig(needs=[check_permissions_on_documents], output_batch_size=10),
-        ),
-        Task(
-            add_data_points,
-            task_config=TaskConfig(needs=[extract_chunks_from_documents]),
-        ),
-    ]
+    add_data_points_task = Task(
+        add_data_points,
+        task_config=TaskConfig(needs=[extract_chunks_from_documents]),
+    )
 
-    return tasks
+    return base_tasks + [add_data_points_task]
