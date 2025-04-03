@@ -23,45 +23,42 @@ jobs:
           - deduplication
           - eval-framework
           - descriptive-graph-metrics
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11.x'
-          
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-          
+
       - name: Install dependencies
         run: poetry install --no-interaction --all-extras
-        
+
       - name: Run Multi-metric QA Example
         if: matrix.example == 'multimetric-qa'
-        uses: ./.github/workflows/reusable_python_example.yml
-        with:
-          example-location: ./evals/multimetric_qa_eval_run.py
-          arguments: "--params_file evals/qa_eval_parameters.json --out_dir dirname"
-        secrets:
+        env:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Until we add support for azure for DeepEval
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        run: poetry run python ./evals/multimetric_qa_eval_run.py --params_file evals/qa_eval_parameters.json --out_dir dirname
 
-        
       - name: Run Multimedia Example
         if: matrix.example == 'multimedia'
         env:
@@ -70,20 +67,59 @@ jobs:
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./examples/python/multimedia_example.py
-        
+
       - name: Run Deduplication Example
         if: matrix.example == 'deduplication'
-        env:
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_deduplication.py
-        
+        runs-on: ubuntu-latest
+        defaults:
+          run:
+            shell: bash
+        services:
+          postgres:
+            image: pgvector/pgvector:pg17
+            env:
+              POSTGRES_USER: cognee
+              POSTGRES_PASSWORD: cognee
+              POSTGRES_DB: cognee_db
+            options: >-
+              --health-cmd pg_isready
+              --health-interval 10s
+              --health-timeout 5s
+              --health-retries 5
+            ports:
+              - 5432:5432
+        steps:
+          - name: Checkout repository
+            uses: actions/checkout@v4
+
+          - name: Setup Python
+            uses: actions/setup-python@v5
+            with:
+              python-version: '3.11.x'
+
+          - name: Install Poetry
+            uses: snok/install-poetry@v1.4.1
+            with:
+              virtualenvs-create: true
+              virtualenvs-in-project: true
+              installer-parallel: true
+
+          - name: Install dependencies
+            run: poetry install -E postgres --no-interaction
+
+          - name: Run Deduplication Test
+            env:
+              ENV: 'dev'
+              LLM_MODEL: ${{ secrets.LLM_MODEL }}
+              LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+              LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+              LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+              EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+              EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+              EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+              EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+            run: poetry run python ./cognee/tests/test_deduplication.py
+
       - name: Run Evaluation Framework Example
         if: matrix.example == 'eval-framework'
         env:
@@ -91,7 +127,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Until we add support for azure for DeepEval
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -99,7 +135,7 @@ jobs:
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./cognee/eval_framework/run_eval.py
-        
+
       - name: Run Descriptive Graph Metrics Example
         if: matrix.example == 'descriptive-graph-metrics'
         env:
@@ -107,7 +143,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Until we add support for azure for DeepEval
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
