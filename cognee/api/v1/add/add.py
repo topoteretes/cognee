@@ -1,7 +1,8 @@
 from typing import Union, BinaryIO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines import run_tasks, Task
+from cognee.modules.pipelines import run_tasks
+from cognee.modules.pipelines.tasks import TaskConfig, Task
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -36,7 +37,15 @@ async def add(
     if user is None:
         user = await get_default_user()
 
-    tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user)]
+    tasks = [
+        Task(resolve_data_directories),
+        Task(
+            ingest_data,
+            dataset_name,
+            user,
+            task_config=TaskConfig(needs=[resolve_data_directories]),
+        ),
+    ]
 
     dataset_id = uuid5(NAMESPACE_OID, dataset_name)
     pipeline = run_tasks(
