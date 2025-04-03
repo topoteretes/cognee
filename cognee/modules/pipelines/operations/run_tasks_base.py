@@ -6,7 +6,7 @@ from .needs import get_need_task_results, get_task_needs
 from ..tasks.Task import Task, TaskExecutionCompleted, TaskExecutionInfo
 from ..exceptions import WrongTaskOrderException
 
-logger = get_logger("run_tasks(tasks: [Task], data)")
+logger = get_logger("run_tasks_base(tasks: list[Task], data)")
 
 
 async def run_tasks_base(tasks: list[Task], data=None, context=None):
