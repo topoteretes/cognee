@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -76,6 +77,12 @@ async def main():
 
     assert len(history) == 6, "Search history is not correct."
 
+    # await render_graph()
+    graph_file_path = os.path.join(
+        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"
+    )
+    await visualize_graph(graph_file_path)
+
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
@@ -89,9 +96,9 @@ async def main():
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    assert not os.path.exists(get_relational_engine().db_path), (
-        "SQLite relational database is not empty"
-    )
+    with open(get_relational_engine().db_path, "r") as file:
+        content = file.read()
+        assert content == "", "SQLite relational database is not empty"
 
     from cognee.infrastructure.databases.graph import get_graph_config
 

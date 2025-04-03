@@ -1,4 +1,4 @@
-from uuid import UUID, uuid4
+from uuid import UUID
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
@@ -6,7 +6,7 @@ from typing import Any
 
 
 async def log_pipeline_run_complete(
-    pipeline_run_id: UUID, pipeline_id: str, dataset_id: UUID, data: Any
+    pipeline_run_id: UUID, pipeline_id: str, pipeline_name: str, dataset_id: UUID, data: Any
 ):
     if not data:
         data_info = "None"
@@ -17,6 +17,7 @@ async def log_pipeline_run_complete(
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
+        pipeline_name=pipeline_name,
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
         dataset_id=dataset_id,

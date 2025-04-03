@@ -5,7 +5,6 @@ import os
 import json
 import asyncio
 from cognee.shared.logging_utils import get_logger
-from sqlalchemy import text
 from typing import Dict, Any, List, Union
 from uuid import UUID
 import aiofiles
