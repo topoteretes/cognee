@@ -76,6 +76,11 @@ jobs:
         run: |
           poetry install --no-interaction --all-extras
 
+      - name: Install Gemini dependencies
+        if: ${{ contains(inputs.arguments, '--llm_provider=gemini') || contains(secrets.LLM_PROVIDER, 'gemini') }}
+        run: |
+          poetry add google-generative-ai
+
       - name: Parse Arguments to Environment Variables
         if: ${{ inputs.arguments != '' }}
         run: |
