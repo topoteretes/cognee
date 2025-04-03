@@ -3,6 +3,7 @@ from uuid import uuid5
 import cognee
 import asyncio
 
+from cognee.modules.pipelines import merge_needs
 from cognee.modules.pipelines.operations.run_tasks import run_tasks_with_telemetry
 import os
 
@@ -16,7 +17,7 @@ from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.Task import Task, TaskConfig, TaskExecutionCompleted
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -37,11 +38,17 @@ async def get_preprocessing_steps(user: User = None, chunker=TextChunker) -> lis
 
     preprocessing_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_documents, user=user, permissions=["write"]),
         Task(
+            check_permissions_on_documents,
+            user=user,
+            permissions=["write"],
+            task_config=TaskConfig(needs=[classify_documents]),
+        ),
+        Task(  # Extract text chunks based on the document type.
             extract_chunks_from_documents,
             max_chunk_size=None or get_max_chunk_tokens(),
             chunker=chunker,
+            task_config=TaskConfig(needs=[check_permissions_on_documents], output_batch_size=10),
         ),
     ]
 
@@ -57,18 +64,20 @@ async def get_modal_tasks(
     ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
 
     modal_tasks = [
-        Task(
+        Task(  # Generate knowledge graphs from the document chunks.
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=ontology_adapter,
-            task_config={"batch_size": 10},
         ),
         Task(
             summarize_text,
             summarization_model=cognee_config.summarization_model,
-            task_config={"batch_size": 10},
         ),
-        Task(add_data_points, indexing_edges=False, task_config={"batch_size": 10}),
+        Task(
+            add_data_points,
+            index_edges=False,
+            task_config=TaskConfig(needs=[merge_needs(summarize_text, extract_graph_from_data)]),
+        ),
     ]
 
     return modal_tasks
@@ -78,7 +87,7 @@ async def main():
     ############MASTER NODE (local for now)
     dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
-    batch_size = 100
+    batch_size = 10
 
     # Cleaning the db + adding all the documents to metastore
     await cognee.prune.prune_data()
@@ -100,10 +109,14 @@ async def main():
             document_name = doc.name
             data_to_submit[document_name] = []
 
-            async for chunk in run_tasks_with_telemetry(
+            async for event in run_tasks_with_telemetry(
                 preprocessing_tasks, data=[doc], pipeline_name="preprocessing_steps"
             ):
-                data_to_submit[document_name].append(chunk)
+                if (
+                    isinstance(event, TaskExecutionCompleted)
+                    and event.task is extract_chunks_from_documents
+                ):
+                    data_to_submit[document_name].extend(event.result)
 
         # MODAL CALL WITH DATA_TO_SUBMIT
         for file in data_to_submit:
