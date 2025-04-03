@@ -57,7 +57,7 @@ async def specific_search(
         SearchType.SUMMARIES: SummariesRetriever().get_completion,
         SearchType.INSIGHTS: InsightsRetriever().get_completion,
         SearchType.CHUNKS: ChunksRetriever().get_completion,
-        SearchType.COMPLETION: CompletionRetriever(
+        SearchType.RAG_COMPLETION: CompletionRetriever(
             system_prompt_path=system_prompt_path
         ).get_completion,
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
