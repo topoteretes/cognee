@@ -1,0 +1,952 @@
+[
+    {
+        "question": "In what year was the university where Sergei Aleksandrovich Tokarev was a professor founded?",
+        "answer": "1755",
+        "golden_answer": "1755",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The actual output matches the expected output exactly with no contradictions or omissions."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Black Book starred the actress and writer of what heritage?",
+        "answer": "Jewish",
+        "golden_answer": "dutch",
+        "metrics": {
+            "correctness": {
+                "score": 0.1516911530779163,
+                "reason": "The actual output states 'Jewish' while the expected output specifies 'Dutch', which is a direct contradiction regarding the heritage."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Which actor does American Beauty and American Beauty have in common?",
+        "answer": "Kevin Spacey",
+        "golden_answer": "kevin spacey",
+        "metrics": {
+            "correctness": {
+                "score": 0.9652779272706994,
+                "reason": "The actual output matches the expected output in terms of factual correctness, differing only in capitalization, which is acceptable."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Ken Pruitt  was a Republican member of an upper house of the legislature with how many members ?",
+        "answer": "28 members",
+        "golden_answer": "40 members",
+        "metrics": {
+            "correctness": {
+                "score": 0.06811182045889698,
+                "reason": "The actual output states 28 members, which contradicts the expected output of 40 members, leading to a complete mismatch in factual accuracy."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.5,
+                "reason": "F1: 0.50 (Precision: 0.50, Recall: 0.50)"
+            }
+        }
+    },
+    {
+        "question": "Between Greyia and Calibanus, which genus contains more species?",
+        "answer": "Greyia",
+        "golden_answer": "greyia",
+        "metrics": {
+            "correctness": {
+                "score": 0.5413287736671829,
+                "reason": "The actual output provides a correct genus name, Greyia, matching the expected genus name 'greyia', though with a capitalization mismatch. There is no factual contradiction in species count, but the omission of detail about the number of species affects the score."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Did John Updike and Tom Clancy both publish more than 15 bestselling novels?",
+        "answer": "No.",
+        "golden_answer": "yes",
+        "metrics": {
+            "correctness": {
+                "score": 0.011665819944729103,
+                "reason": "The actual output contradicts the expected output, as it states 'No' instead of 'yes'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Who was hung for assisting the attempted surrender of a defector from the American Continental Army to the British Army?",
+        "answer": "John André",
+        "golden_answer": "john andré",
+        "metrics": {
+            "correctness": {
+                "score": 0.9164842594734586,
+                "reason": "The actual output correctly identifies John André as the person who was executed, matching the expected output, although it uses capital letters instead of all lowercase."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "which Mexican and American film actress is Ethel Houbiers  French voice of ",
+        "answer": "Salma Hayek and Penélope Cruz",
+        "golden_answer": "salma hayek pinault",
+        "metrics": {
+            "correctness": {
+                "score": 0.2512616273708377,
+                "reason": "The actual output mentions Salma Hayek, which is correct, but it omits the full name 'Salma Hayek Pinault' as specified in the expected output, and includes an incorrect mention of Penélope Cruz."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.5,
+                "reason": "F1: 0.50 (Precision: 0.40, Recall: 0.67)"
+            }
+        }
+    },
+    {
+        "question": "Which major international airport in south-east England ranks as the 8th busiest airport in Europe and replaced Croydon Airport?",
+        "answer": "Gatwick Airport",
+        "golden_answer": "gatwick airport",
+        "metrics": {
+            "correctness": {
+                "score": 0.9744205258104126,
+                "reason": "The actual output 'Gatwick Airport' accurately identifies the airport and matches the expected output 'gatwick airport', differing only in case which is permissible."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Isabella Kelly was born at a ruined castle characterized as one of the most isolated fortifications in Britain by who?",
+        "answer": "'The Changing Scottish Landscape'",
+        "golden_answer": "the changing scottish landscape",
+        "metrics": {
+            "correctness": {
+                "score": 0.8215842716560738,
+                "reason": "The actual output includes the source title, but it uses inconsistent capitalization compared to the expected output, indicating a lack of attention to detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "The facility where Robert Croft worked as a navy instructor was also known as?",
+        "answer": "US Naval Submarine Base New London",
+        "golden_answer": "\"home of the submarine force\"",
+        "metrics": {
+            "correctness": {
+                "score": 0.35274070822990194,
+                "reason": "While the actual output provides the correct facility name, it fails to include the detail mentioned in the expected output that describes it as 'home of the submarine force,' leading to a significant omission."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.1818181818181818,
+                "reason": "F1: 0.18 (Precision: 0.17, Recall: 0.20)"
+            }
+        }
+    },
+    {
+        "question": "Who released the song \"With or Without You\" first, Jai McDowall or U2?",
+        "answer": "U2",
+        "golden_answer": "u2",
+        "metrics": {
+            "correctness": {
+                "score": 0.9741231396604345,
+                "reason": "The actual output correctly identifies U2 as the artist who released the song first, matching the expected output despite the case difference."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which \"Roseanne\" star is in Scream 2?",
+        "answer": "Laurie Metcalf",
+        "golden_answer": "laurie metcalf",
+        "metrics": {
+            "correctness": {
+                "score": 0.9567543838178784,
+                "reason": "The actual output provides the correct answer, 'Laurie Metcalf', which matches the expected output, 'laurie metcalf', albeit with a difference in capitalization. There are no contradictions with the facts."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "In what city is the company that Fastjet Tanzania was originally founded as a part of prior to rebranding based?",
+        "answer": "Nairobi",
+        "golden_answer": "nairobi, kenya",
+        "metrics": {
+            "correctness": {
+                "score": 0.6146464512636055,
+                "reason": "The actual output provides the correct city but omits the country detail, which is present in the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.6666666666666666,
+                "reason": "F1: 0.67 (Precision: 1.00, Recall: 0.50)"
+            }
+        }
+    },
+    {
+        "question": "What is the name of the Australian specialist electronic music magazine that features avant-rock, experimental sound art, and experimental hip hop?",
+        "answer": "Cyclic Defrost",
+        "golden_answer": "cyclic defrost",
+        "metrics": {
+            "correctness": {
+                "score": 0.8748697728680277,
+                "reason": "The actual output correctly identifies 'Cyclic Defrost,' which matches the expected output when case sensitivity is disregarded. There are no contradictions in facts, and the details are adequately provided."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What is the population of the city that Munsonville is in the northwest corner of?",
+        "answer": "Unknown",
+        "golden_answer": "729 at the 2010 census",
+        "metrics": {
+            "correctness": {
+                "score": 0.023827366639971995,
+                "reason": "The actual output states 'Unknown', which contradicts the expected output that specifies a population of 729 at the 2010 census, leading to a significant omission of detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "A Pair of Brown Eyes and Wild Mountain Thyme is based from what artists song?",
+        "answer": "Francis McPeake",
+        "golden_answer": "francis mcpeake",
+        "metrics": {
+            "correctness": {
+                "score": 0.9083953603125151,
+                "reason": "The actual output identifies the artist correctly as Francis McPeake, matching the expected output, but the capitalization differs slightly, which impacts the adherence to detail."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Armageddon in Retrospect was written by the author who was best known for what 1969 satire novel?",
+        "answer": "Slaughterhouse-Five",
+        "golden_answer": "slaughterhouse-five",
+        "metrics": {
+            "correctness": {
+                "score": 0.9755864900982664,
+                "reason": "The actual output correctly identifies the novel 'Slaughterhouse-Five', which matches the expected output, with no contradictions or omissions."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What class of instrument does Apatim Majumdar play?",
+        "answer": "String instrument",
+        "golden_answer": "strings",
+        "metrics": {
+            "correctness": {
+                "score": 0.5957032794648195,
+                "reason": "The actual output states 'String instrument', which is not a direct contradiction to 'strings', but it is more detailed and specific than necessary, leading to a slight penalty for not being concise."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": " Which movie did Disney produce first,  The Many Adventures of Winnie the Pooh or Ride a Wild Pony?",
+        "answer": "The Many Adventures of Winnie the Pooh",
+        "golden_answer": "ride a wild pony",
+        "metrics": {
+            "correctness": {
+                "score": 0.2471993638452164,
+                "reason": "The actual output states 'The Many Adventures of Winnie the Pooh', which is correct, but the expected output contradicts that by stating 'ride a wild pony', indicating factual inconsistency."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Pandikona and Berger Blanc Suisse are both what kinds of animals?",
+        "answer": "Dogs",
+        "golden_answer": "dogs",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The actual output 'Dogs' is consistent with the expected output 'dogs', as they both accurately identify the animals without contradiction or omission."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "The Prussian General Carl von Clausewitz is associated with what type of realism?",
+        "answer": "Classical Realism",
+        "golden_answer": "modern thinkers associated with classical realism are carl von clausewitz",
+        "metrics": {
+            "correctness": {
+                "score": 0.45893327668045336,
+                "reason": "While the actual output identifies Clausewitz with classical realism, it fails to mention the phrase 'modern thinkers associated with classical realism,' which is a critical omission of detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.33333333333333337,
+                "reason": "F1: 0.33 (Precision: 1.00, Recall: 0.20)"
+            }
+        }
+    },
+    {
+        "question": "What where both Hawker Hurricane and No. 1455 Flight apart of?",
+        "answer": "Royal Air Force",
+        "golden_answer": "royal air force",
+        "metrics": {
+            "correctness": {
+                "score": 0.9533663675462775,
+                "reason": "The actual output matches the expected output, displaying no contradictions or omissions."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "what language did the ethnic group which Torstein Ellingsen was its drumer  speaks ",
+        "answer": "Sudanese Arabic",
+        "golden_answer": "norwegian language",
+        "metrics": {
+            "correctness": {
+                "score": 0.010417677901840285,
+                "reason": "The actual output states 'Sudanese Arabic', which contradicts the expected output of 'norwegian language', violating the first evaluation step."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "From March 631 to April 631, Farrukhzad Khosrau V was the king of an empire that succeeded which empire?",
+        "answer": "Parthian Empire",
+        "golden_answer": "the parthian empire",
+        "metrics": {
+            "correctness": {
+                "score": 0.9277567328086379,
+                "reason": "The actual output accurately states 'Parthian Empire', which matches the expected output in meaning, though it uses slightly different capitalization."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.8,
+                "reason": "F1: 0.80 (Precision: 1.00, Recall: 0.67)"
+            }
+        }
+    },
+    {
+        "question": "Beer Wars covers the differences between large corporate breweries, and small breweries, such as what brewery that is headquartered in Escondido, california?",
+        "answer": "Stone Brewing Co.",
+        "golden_answer": "stone brewing",
+        "metrics": {
+            "correctness": {
+                "score": 0.7696242452153286,
+                "reason": "The actual output correctly identifies the brewery as Stone Brewing Co., which aligns with the expected output 'stone brewing', but the use of 'Co.' is an omission of detail that slightly detracts from the score."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.8,
+                "reason": "F1: 0.80 (Precision: 0.67, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which head coach has led their team for a longer period of time, Tim Cluess or Steve Prohm?",
+        "answer": "Tim Cluess",
+        "golden_answer": "tim cluess",
+        "metrics": {
+            "correctness": {
+                "score": 0.8769517795439207,
+                "reason": "The actual output correctly identifies Tim Cluess, which aligns with the expected output. The only difference is capitalization, which does not affect the factual accuracy."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "During what war were the Russia-United Kingdom relations in a state of rivalry after the abdication of Emperor Nicholas II? ",
+        "answer": "None",
+        "golden_answer": "the cold war (1947–91)",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The actual output provides no information, which fails to address the input question and omits the expected detail regarding the Cold War."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "How far from Sacramento is the flight school in Atwater?",
+        "answer": "115 miles",
+        "golden_answer": "about 115 miles (185 km)",
+        "metrics": {
+            "correctness": {
+                "score": 0.7318106213374399,
+                "reason": "The actual output provides a correct distance of 115 miles, but it omits the conversion to kilometers, which is specified in the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.5714285714285715,
+                "reason": "F1: 0.57 (Precision: 1.00, Recall: 0.40)"
+            }
+        }
+    },
+    {
+        "question": "Baraki Barak District is situated in the western part of a province whose capital is what?",
+        "answer": "Logar Province",
+        "golden_answer": "puli alam",
+        "metrics": {
+            "correctness": {
+                "score": 0.22311598081764444,
+                "reason": "The actual output identifies Logar Province, which is correct, but fails to specify the capital as Puli Alam as required by the expected output, indicating a significant omission of detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "What was the 2010 population of the town where Black Crescent Mountain was located? ",
+        "answer": "196",
+        "golden_answer": "310",
+        "metrics": {
+            "correctness": {
+                "score": 0.04867760013425768,
+                "reason": "The actual output of 196 contradicts the expected output of 310, indicating a significant factual error."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "In the NASA mission where Moon trees were taken into space, what was the nickname of the Command Module?",
+        "answer": "Kitty Hawk",
+        "golden_answer": "\"kitty hawk\"",
+        "metrics": {
+            "correctness": {
+                "score": 0.8917800488625602,
+                "reason": "The actual output accurately states the nickname of the Command Module as 'Kitty Hawk,' which matches the expected output, although the expected output is in lowercase."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which comic series involves characters such as Nick Fury and Baron von Strucker?",
+        "answer": "Nick Fury: Agent of S.H.I.E.L.D.",
+        "golden_answer": "marvel",
+        "metrics": {
+            "correctness": {
+                "score": 0.2901710872123221,
+                "reason": "The actual output mentions 'Nick Fury: Agent of S.H.I.E.L.D.' which is related but does not explicitly answer the question regarding the series, and it lacks the broader context of 'marvel' as in the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "College Humor is a 1933 American pre-Code musical comedy film that starred what American singer and actor who has a trademark warm bass-baritone voice?",
+        "answer": "Bing Crosby",
+        "golden_answer": "harry lillis \"bing\" crosby jr.",
+        "metrics": {
+            "correctness": {
+                "score": 0.38648706911633857,
+                "reason": "While 'Bing Crosby' is correct, it omits his full name and the detail of 'harry lillis' and 'jr.', which are important for completeness."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.5714285714285715,
+                "reason": "F1: 0.57 (Precision: 1.00, Recall: 0.40)"
+            }
+        }
+    },
+    {
+        "question": "Who is writing a book about the Koch family who control the second-largest privately owned company in the United States?",
+        "answer": "Unknown",
+        "golden_answer": "jane mayer",
+        "metrics": {
+            "correctness": {
+                "score": 0.03979175575266881,
+                "reason": "The actual output states 'Unknown', which contradicts the expected output that specifies 'jane mayer'. There is a complete omission of detail regarding the author."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "New York State Route 9R rejoins its parent in a hamlet located  in what New York County?",
+        "answer": "Essex County",
+        "golden_answer": "albany",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The actual output states Essex County, which directly contradicts the expected output of Albany."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "12 Years a Slave starred what British actor born 10 July 1977)",
+        "answer": "Chiwetel Ejiofor",
+        "golden_answer": "chiwetel ejiofor",
+        "metrics": {
+            "correctness": {
+                "score": 0.9252744305765163,
+                "reason": "The actual output 'Chiwetel Ejiofor' correctly identifies the actor as per the input, which matches the expected output format, disregarding case sensitivity."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What was the capital of India when the Taj Mahal was commissioned?",
+        "answer": "Agra",
+        "golden_answer": "agra",
+        "metrics": {
+            "correctness": {
+                "score": 0.9099517116097993,
+                "reason": "The actual output provides the correct answer 'Agra,' consistent with the expected output 'agra,' despite the difference in capitalization."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "In what city did the \"Prince of tenors\" star in a film based on an opera by Giacomo Puccini?",
+        "answer": "Tuscany",
+        "golden_answer": "rome",
+        "metrics": {
+            "correctness": {
+                "score": 0.02072679430977809,
+                "reason": "The actual output 'Tuscany' contradicts the expected output 'rome', indicating a complete lack of correctness and detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "What river can a  large African bovine be seen bathing in in the Mwabvi Wildlife Reserve?",
+        "answer": "Mwabvi river",
+        "golden_answer": "buffalo",
+        "metrics": {
+            "correctness": {
+                "score": 0.20357250743465896,
+                "reason": "The actual output mentions 'Mwabvi river,' which contradicts the expected output of 'buffalo,' indicating a misunderstanding of the question."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Jalen Jones plays basketball for an NBA team that plays their home games in what arena?",
+        "answer": "Smoothie King Center",
+        "golden_answer": "smoothie king center",
+        "metrics": {
+            "correctness": {
+                "score": 0.981323994039772,
+                "reason": "The actual output correctly identifies the arena as 'Smoothie King Center', which matches the expected output in content, though it has a capitalization difference."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "The On Tour Forever album gave Blues Traveler the opportunity to display what musical trademark?",
+        "answer": "Live performances",
+        "golden_answer": "extensive use of segues",
+        "metrics": {
+            "correctness": {
+                "score": 0.21304082381028241,
+                "reason": "The actual output mentions 'live performances,' which does not directly contradict the expected output but fails to include the important detail of 'extensive use of segues,' leading to a low score for omission."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Which Victorian poet was born in a 15th-century castle home to the Earl of Southesk?",
+        "answer": "Lady Charlotte Elliot",
+        "golden_answer": "charlotte carnegie",
+        "metrics": {
+            "correctness": {
+                "score": 0.05123635779958491,
+                "reason": "The actual output incorrectly identifies the poet as 'Lady Charlotte Elliot,' while the expected output is 'charlotte carnegie,' which indicates a complete mismatch in factual detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.4,
+                "reason": "F1: 0.40 (Precision: 0.33, Recall: 0.50)"
+            }
+        }
+    },
+    {
+        "question": "Alexander Petrovich Nikolayev received the title Hero of the Soviet Union and the Order of Lenin for his actions during the   the final major offensive of the European theatre of what war?",
+        "answer": "World War II",
+        "golden_answer": "world war ii",
+        "metrics": {
+            "correctness": {
+                "score": 0.9987568351136321,
+                "reason": "The actual output correctly identifies 'World War II', which matches the expected output 'world war ii' despite the minor case difference."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Where did Cale Gundy's brother play football in college?",
+        "answer": "Oklahoma State University",
+        "golden_answer": "oklahoma state university",
+        "metrics": {
+            "correctness": {
+                "score": 0.8773834691382791,
+                "reason": "The actual output provides the correct answer, but it uses uppercase letters, while the expected output is in lowercase."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Who has released more solo albums, Nick Carter or Brady Seals?",
+        "answer": "Brady Seals.",
+        "golden_answer": "brady seals",
+        "metrics": {
+            "correctness": {
+                "score": 0.5326275541061523,
+                "reason": "While the actual output correctly identifies Brady Seals, it omits detail about the number of albums and comparison to Nick Carter, failing to fully address the input question."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which Istanbul mosque is unique for retaining a Baroque style of architecture, the Bayezid II Mosque or the Nusretiye Mosque?",
+        "answer": "Nusretiye Mosque",
+        "golden_answer": "nusretiye mosque",
+        "metrics": {
+            "correctness": {
+                "score": 0.9801784650901422,
+                "reason": "The actual output correctly identifies the Nusretiye Mosque as the unique mosque with Baroque style, matching the expected output while maintaining accuracy."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What university did the last Detroit Pistons player to wear the number retired in honor of a player nicknamed \"The Worm\" attend?",
+        "answer": "Georgetown University",
+        "golden_answer": "georgetown university",
+        "metrics": {
+            "correctness": {
+                "score": 0.9725300707965576,
+                "reason": "The actual output 'Georgetown University' correctly identifies the university, but it has capitalization discrepancies compared to the expected output 'georgetown university'."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "The Atik Valide Mosque and Valens Aqueduct are found in what country?",
+        "answer": "Turkey",
+        "golden_answer": "turkey",
+        "metrics": {
+            "correctness": {
+                "score": 0.9816380323545841,
+                "reason": "The actual output matches the expected output in terms of factual accuracy and content, despite the case difference in 'Turkey' and 'turkey'."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which of the four US Presidents who have been assinated was shot on the grounds of the Pan-American Exposition at the Temple of Music in Buffalo, New York?",
+        "answer": "William McKinley",
+        "golden_answer": "william mckinley",
+        "metrics": {
+            "correctness": {
+                "score": 0.997966764532167,
+                "reason": "The actual output 'William McKinley' is correct and matches the expected output 'william mckinley' when case sensitivity is considered, with no contradictions or omissions."
+            },
+            "EM": {
+                "score": 1.0,
+                "reason": "Exact match"
+            },
+            "f1": {
+                "score": 1.0,
+                "reason": "F1: 1.00 (Precision: 1.00, Recall: 1.00)"
+            }
+        }
+    }
+]
