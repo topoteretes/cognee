@@ -13,6 +13,23 @@ jobs:
   run-examples-tests:
     name: Example Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     strategy:
       fail-fast: false
       matrix:
@@ -70,55 +87,17 @@ jobs:
 
       - name: Run Deduplication Example
         if: matrix.example == 'deduplication'
-        runs-on: ubuntu-latest
-        defaults:
-          run:
-            shell: bash
-        services:
-          postgres:
-            image: pgvector/pgvector:pg17
-            env:
-              POSTGRES_USER: cognee
-              POSTGRES_PASSWORD: cognee
-              POSTGRES_DB: cognee_db
-            options: >-
-              --health-cmd pg_isready
-              --health-interval 10s
-              --health-timeout 5s
-              --health-retries 5
-            ports:
-              - 5432:5432
-        steps:
-          - name: Checkout repository
-            uses: actions/checkout@v4
-
-          - name: Setup Python
-            uses: actions/setup-python@v5
-            with:
-              python-version: '3.11.x'
-
-          - name: Install Poetry
-            uses: snok/install-poetry@v1.4.1
-            with:
-              virtualenvs-create: true
-              virtualenvs-in-project: true
-              installer-parallel: true
-
-          - name: Install dependencies
-            run: poetry install -E postgres --no-interaction
-
-          - name: Run Deduplication Test
-            env:
-              ENV: 'dev'
-              LLM_MODEL: ${{ secrets.LLM_MODEL }}
-              LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-              LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-              LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-              EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-              EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-              EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-              EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-            run: poetry run python ./cognee/tests/test_deduplication.py
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_deduplication.py
 
       - name: Run Evaluation Framework Example
         if: matrix.example == 'eval-framework'
