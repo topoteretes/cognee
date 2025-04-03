@@ -20,8 +20,8 @@ jobs:
         EMBEDDING_MODEL: "gemini/text-embedding-004"
         EMBEDDING_ENDPOINT: "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004"
         EMBEDDING_API_VERSION: "v1beta"
-        EMBEDDING_DIMENSIONS: 768
-        EMBEDDING_MAX_TOKENS: 8076
+        EMBEDDING_DIMENSIONS: "768"
+        EMBEDDING_MAX_TOKENS: "8076"
         LLM_PROVIDER: "gemini"
         LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         LLM_MODEL: "gemini/gemini-1.5-flash"
