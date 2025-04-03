@@ -97,15 +97,13 @@ jobs:
     if: ${{ inputs.database-type == 'neo4j' }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
+        uses: actions/checkout@master
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ inputs.python-version }}
-          
+          python-version: '3.11.x'
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
@@ -113,23 +111,10 @@ jobs:
           virtualenvs-in-project: true
           installer-parallel: true
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-neo4j
-
-      - name: Install dependencies for Neo4j
+      - name: Install dependencies
         run: poetry install -E neo4j --no-interaction
-          
-      - name: Start Neo4j
-        run: |
-          docker-compose -f docker/docker-compose.yml up -d neo4j
-          echo "Waiting for Neo4j to start..."
-          sleep 30
-          
-      - name: Run Neo4j Tests
+
+      - name: Run default Neo4j
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -140,4 +125,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_neo4j.py 
+          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
+          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
+          GRAPH_DATABASE_USERNAME: "neo4j"
+        run: poetry run python ./cognee/tests/test_neo4j.py
