@@ -46,25 +46,18 @@ class CorpusBuilderExecutor:
         chunker=TextChunker,
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
-        graph_prompt_path: Optional[str] = None,
     ) -> List[str]:
         self.load_corpus(
             limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
         )
-        await self.run_cognee(
-            chunk_size=chunk_size, chunker=chunker, graph_prompt_path=graph_prompt_path
-        )
+        await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
         return self.questions
 
-    async def run_cognee(
-        self, chunk_size=1024, chunker=TextChunker, graph_prompt_path: Optional[str] = None
-    ) -> None:
+    async def run_cognee(self, chunk_size=1024, chunker=TextChunker) -> None:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
         await cognee.add(self.raw_corpus)
 
-        tasks = await self.task_getter(
-            chunk_size=chunk_size, chunker=chunker, graph_prompt_path=graph_prompt_path
-        )
+        tasks = await self.task_getter(chunk_size=chunk_size, chunker=chunker)
         await cognee.cognify(tasks=tasks)
