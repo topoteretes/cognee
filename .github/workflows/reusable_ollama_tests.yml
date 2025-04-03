@@ -70,7 +70,7 @@ jobs:
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LLM_API_KEY: ""
+          LLM_API_KEY: "ollama"
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
           PYTHONFAULTHANDLER: 1
