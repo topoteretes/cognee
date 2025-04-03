@@ -2,6 +2,20 @@ from typing import List
 from cognee.api.v1.cognify.cognify import get_default_tasks
 from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.pipelines.tasks import TaskConfig
+from cognee.tasks.documents import (
+    classify_documents,
+    check_permissions_on_documents,
+    extract_chunks_from_documents,
+)
+from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.storage import add_data_points
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.modules.pipelines import run_tasks, merge_needs
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.infrastructure.llm import get_max_chunk_tokens
 
 
 async def get_default_tasks_by_indices(
@@ -18,15 +32,44 @@ async def get_default_tasks_by_indices(
     return [all_tasks[i] for i in indices]
 
 
-async def get_no_summary_tasks(chunk_size: int = None, chunker=TextChunker) -> List[Task]:
+async def get_no_summary_tasks(
+    chunk_size: int = None,
+    chunker=TextChunker,
+    user=None,
+    graph_model=KnowledgeGraph,
+    ontology_file_path=None,
+) -> List[Task]:
     """Returns default tasks without summarization tasks."""
-    # Default tasks indices: 0=classify, 1=check_permissions, 2=extract_chunks, 3=extract_graph, 4=summarize, 5=add_data_points
-    return await get_default_tasks_by_indices(
-        [0, 1, 2, 3, 5], chunk_size=chunk_size, chunker=chunker
+    # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
+    base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
+
+    ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
+
+    graph_task = Task(
+        extract_graph_from_data,
+        graph_model=graph_model,
+        ontology_adapter=ontology_adapter,
+        task_config=TaskConfig(needs=[extract_chunks_from_documents]),
     )
 
+    add_data_points_task = Task(
+        add_data_points,
+        task_config=TaskConfig(needs=[extract_graph_from_data]),
+    )
 
-async def get_just_chunks_tasks(chunk_size: int = None, chunker=TextChunker) -> List[Task]:
+    return base_tasks + [graph_task, add_data_points_task]
+
+
+async def get_just_chunks_tasks(
+    chunk_size: int = None, chunker=TextChunker, user=None
+) -> List[Task]:
     """Returns default tasks with only chunk extraction and data points addition."""
-    # Default tasks indices: 0=classify, 1=check_permissions, 2=extract_chunks, 3=extract_graph, 4=summarize, 5=add_data_points
-    return await get_default_tasks_by_indices([0, 1, 2, 5], chunk_size=chunk_size, chunker=chunker)
+    # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
+    base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
+
+    add_data_points_task = Task(
+        add_data_points,
+        task_config=TaskConfig(needs=[extract_chunks_from_documents]),
+    )
+
+    return base_tasks + [add_data_points_task]
