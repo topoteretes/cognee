@@ -14,7 +14,10 @@ from concurrent.futures import ThreadPoolExecutor
 import kuzu
 from kuzu.database import Database
 from kuzu import Connection
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    record_graph_changes,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 import aiofiles
@@ -211,6 +214,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
+    @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
         """Add multiple nodes to the graph in a batch operation."""
         if not nodes:
@@ -401,6 +405,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
+    @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
         """Add multiple edges in a batch operation."""
         if not edges:

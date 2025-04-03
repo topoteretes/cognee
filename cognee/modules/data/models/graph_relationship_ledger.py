@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.relational import Base
 
 
 # not the best name for this model
-class graph_relationship_ledger(Base):
+class GraphRelationshipLedger(Base):
     __tablename__ = "graph_relationship_ledger"
 
     id = Column(UUID, primary_key=True, default=uuid4)
@@ -16,7 +16,7 @@ class graph_relationship_ledger(Base):
     creator_function = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime(timezone=True), nullable=True)
-    user_id = Column(UUID, nullable=False)
+    user_id = Column(UUID, nullable=True)
 
     # Create indexes
     __table_args__ = (

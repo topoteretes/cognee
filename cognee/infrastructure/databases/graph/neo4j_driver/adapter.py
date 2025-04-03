@@ -11,7 +11,10 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    record_graph_changes,
+)
 from cognee.modules.storage.utils import JSONEncoder
 from .neo4j_metrics_utils import (
     get_avg_clustering,
@@ -21,6 +24,7 @@ from .neo4j_metrics_utils import (
     get_size_of_connected_components,
     count_self_loops,
 )
+from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
 
 logger = get_logger("Neo4jAdapter", level=ERROR)
 
@@ -89,6 +93,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
+    @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         query = """
         UNWIND $nodes AS node
@@ -218,6 +223,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
+    @record_graph_changes
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         query = """
             UNWIND $edges AS edge

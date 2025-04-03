@@ -10,7 +10,10 @@ from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    record_graph_changes,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -47,9 +50,9 @@ class NetworkXAdapter(GraphDBInterface):
 
         await self.save_graph_to_file(self.filename)
 
+    @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         nodes = [(node.id, node.model_dump()) for node in nodes]
-
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
 
@@ -68,6 +71,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         return result
 
+    @record_graph_changes
     async def add_edge(
         self,
         from_node: str,
@@ -84,6 +88,7 @@ class NetworkXAdapter(GraphDBInterface):
         )
         await self.save_graph_to_file(self.filename)
 
+    @record_graph_changes
     async def add_edges(self, edges: tuple[str, str, str, dict]) -> None:
         edges = [
             (

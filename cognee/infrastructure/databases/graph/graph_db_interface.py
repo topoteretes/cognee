@@ -1,20 +1,21 @@
 from typing import Protocol, Optional, Dict, Any, List
 from abc import abstractmethod, ABC
-from uuid import UUID
-from cognee.infrastructure.databases.relational import get_relational_engine
+from uuid import UUID, uuid4
 from cognee.modules.graph.relationship_manager import create_relationship
 from functools import wraps
 import inspect
-from cognee.modules.users.models import User
-from cognee.modules.data.models import graph_relationship_ledger
+from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
+from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
 
 
 def record_graph_changes(func):
     """Decorator to record graph changes in the relationship database."""
+    # Get the engine once when the decorator is defined
+    db_engine = get_relational_engine()
 
     @wraps(func)
-    async def wrapper(self, *args, user: User = None, **kwargs):
-        # Get caller information
+    async def wrapper(self, *args, **kwargs):
+        # Get caller information for logging
         frame = inspect.currentframe()
         while frame:
             if frame.f_back and frame.f_back.f_code.co_name != "wrapper":
@@ -30,39 +31,89 @@ def record_graph_changes(func):
         )
         creator = f"{caller_class}.{caller_name}" if caller_class else caller_name
 
+        print(f"DEBUG: Recording changes for {func.__name__}")
+        print(f"DEBUG: First arg type: {type(args[0])}")
+        if isinstance(args[0], list) and args[0]:
+            print(f"DEBUG: First item in list: {args[0][0]}")
+
         # Execute original function
         result = await func(self, *args, **kwargs)
 
-        if user:
-            db_engine = get_relational_engine()
-            async with db_engine.get_async_session() as session:
-                # For add_nodes
-                if func.__name__ == "add_nodes":
-                    nodes = args[0]
-                    for node_id, node_props in nodes:
-                        relationship = graph_relationship_ledger(
-                            source_node_id=node_id,
-                            destination_node_id=node_id,
-                            creator_function=f"{creator}.node",
-                            user_id=user.id,
-                        )
-                        session.add(relationship)
-                        await session.flush()
+        async with db_engine.get_async_session() as session:
+            # For add_nodes
+            if func.__name__ == "add_nodes":
+                nodes = args[0]
+                print(f"DEBUG: Processing nodes: {nodes[:2]}")  # Debug print
+                if isinstance(nodes, list):
+                    for node in nodes:
+                        try:
+                            # Handle DataPoint objects (original input)
+                            if hasattr(node, "id"):
+                                node_id = (
+                                    node.id if isinstance(node.id, UUID) else UUID(str(node.id))
+                                )
+                            # Handle Neo4j dictionary format
+                            elif isinstance(node, dict) and "node_id" in node:
+                                node_id = UUID(str(node["node_id"]))
+                            # Handle tuple format
+                            elif isinstance(node, tuple) and len(node) >= 1:
+                                node_id = UUID(str(node[0]))
+                            else:
+                                print(f"DEBUG: Unhandled node format: {type(node)}")  # Debug print
+                                continue
 
-                # For add_edges
-                elif func.__name__ == "add_edges":
-                    edges = args[0]
-                    for source_id, target_id, relationship_type, _ in edges:
-                        relationship = graph_relationship_ledger(
-                            source_node_id=source_id,
-                            destination_node_id=target_id,
-                            creator_function=f"{creator}.{relationship_type}",
-                            user_id=user.id,
-                        )
-                        session.add(relationship)
-                        await session.flush()
+                            relationship = GraphRelationshipLedger(
+                                id=uuid4(),
+                                source_node_id=node_id,
+                                destination_node_id=node_id,
+                                creator_function=f"{creator}.node",
+                            )
+                            session.add(relationship)
+                            await session.flush()
+                            print(f"DEBUG: Added relationship for node: {node_id}")  # Debug print
+                        except Exception as e:
+                            print(f"DEBUG: Error adding relationship: {e}")  # Debug print
 
+            # For add_edges
+            elif func.__name__ == "add_edges":
+                edges = args[0]
+                print(f"DEBUG: Processing edges: {edges[:2]}")  # Debug print
+                if isinstance(edges, list):
+                    for edge in edges:
+                        try:
+                            # Handle Neo4j format
+                            if isinstance(edge, dict):
+                                source_id = UUID(str(edge.get("from_node")))
+                                target_id = UUID(str(edge.get("to_node")))
+                                rel_type = str(edge.get("relationship_name"))
+                            # Handle tuple format
+                            elif isinstance(edge, tuple):
+                                source_id = UUID(str(edge[0]))
+                                target_id = UUID(str(edge[1]))
+                                rel_type = str(edge[2]) if len(edge) > 2 else "UNKNOWN"
+                            else:
+                                print(f"DEBUG: Unhandled edge format: {type(edge)}")  # Debug print
+                                continue
+
+                            relationship = GraphRelationshipLedger(
+                                id=uuid4(),
+                                source_node_id=source_id,
+                                destination_node_id=target_id,
+                                creator_function=f"{creator}.{rel_type}",
+                            )
+                            session.add(relationship)
+                            await session.flush()
+                            print(
+                                f"DEBUG: Added relationship for edge: {source_id}->{target_id}"
+                            )  # Debug print
+                        except Exception as e:
+                            print(f"DEBUG: Error adding relationship: {e}")  # Debug print
+
+            try:
                 await session.commit()
+                print("DEBUG: Successfully committed session")  # Debug print
+            except Exception as e:
+                print(f"DEBUG: Error committing session: {e}")  # Debug print
 
         return result
 
@@ -82,7 +133,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     @record_graph_changes
-    async def add_nodes(self, nodes: list, user: User = None) -> None:
+    async def add_nodes(self, nodes: list) -> None:
         """Add nodes to the graph database."""
         pass
 
@@ -115,7 +166,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     @record_graph_changes
-    async def add_edges(self, edges: list, user: User = None) -> None:
+    async def add_edges(self, edges: list) -> None:
         """Add edges to the graph database."""
         pass
 
