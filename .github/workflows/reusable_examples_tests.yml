@@ -1,0 +1,132 @@
+name: Reusable Examples Tests
+
+on:
+  workflow_call:
+    inputs:
+      examples:
+        required: false
+        type: string
+        default: "all"
+        description: "Which examples to run (comma-separated list or 'all')"
+
+jobs:
+  run-examples-tests:
+    name: Example Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - multimetric-qa
+          - graphrag-vs-rag
+          - multimedia
+          - deduplication
+          - eval-framework
+          - descriptive-graph-metrics
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --all-extras
+
+#      - name: Run Multi-metric QA Example
+#        if: matrix.example == 'multimetric-qa'
+#        env:
+#          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+#          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+#          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+#          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+#          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+#          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+#          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+#          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+#          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+#          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+#          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+#        run: poetry run python ./evals/multimetric_qa_eval_run.py --params_file evals/qa_eval_parameters.json --out_dir dirname
+
+      - name: Run Multimedia Example
+        if: matrix.example == 'multimedia'
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        run: poetry run python ./examples/python/multimedia_example.py
+
+      - name: Run Deduplication Example
+        if: matrix.example == 'deduplication'
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_deduplication.py
+
+      - name: Run Evaluation Framework Example
+        if: matrix.example == 'eval-framework'
+        env:
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        run: poetry run python ./cognee/eval_framework/run_eval.py
+
+      - name: Run Descriptive Graph Metrics Example
+        if: matrix.example == 'descriptive-graph-metrics'
+        env:
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        run: poetry run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py

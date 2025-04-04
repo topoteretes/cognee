@@ -8,15 +8,22 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   run_dynamic_steps_example_test:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
         example-location: ./examples/python/dynamic_steps_example.py
+        EMBEDDING_DIMENSIONS: 3072
+        EMBEDDING_MAX_TOKENS: 8191
       secrets:
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
         GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+        EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+        EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
