@@ -5,15 +5,15 @@ name: Workflow Modification Guide
 # BEFORE (original workflow with independent triggers):
 # --------------------------------------------------------
 # name: test | chromadb
-# 
+#
 # on:
 #   workflow_dispatch:
 #   pull_request:
 #     types: [labeled, synchronize]
-# 
+#
 # concurrency:
 #   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-#   cancel-in-progress: true
+#   cancel-in-progress: false
 #
 # jobs:
 #   run_chromadb_integration_test:
@@ -24,12 +24,12 @@ name: Workflow Modification Guide
 # AFTER (modified to only run when called by test-suites.yml):
 # --------------------------------------------------------
 # name: test | chromadb
-# 
+#
 # on:
 #   workflow_call:
 #     secrets:
 #       inherit: true
-# 
+#
 # jobs:
 #   run_chromadb_integration_test:
 #     name: chromadb test
@@ -40,4 +40,4 @@ name: Workflow Modification Guide
 # 1. Make all independent workflow files reusable by changing their 'on:' section
 # 2. Remove push/pull_request/workflow_dispatch triggers
 # 3. Add the workflow_call trigger with inherit: true for secrets
-# 4. Keep the rest of the workflow file unchanged 
+# 4. Keep the rest of the workflow file unchanged

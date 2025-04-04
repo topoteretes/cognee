@@ -65,7 +65,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   run_chromadb_integration_test:
@@ -94,4 +94,4 @@ jobs:
 
 - **CI/CD Workflows**: Don't modify workflows for CI/CD pipelines like cd.yaml and cd_prd.yaml
 - **Shared Workflows**: Keep reusable_*.yml workflows as they are, since they're already designed to be called by other workflows
-- **Infrastructure Workflows**: Don't modify workflows that handle infrastructure or deployments 
+- **Infrastructure Workflows**: Don't modify workflows that handle infrastructure or deployments

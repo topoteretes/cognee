@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -86,12 +86,12 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
-      basic-tests, 
-      integration-tests, 
-      database-postgres-tests, 
-      database-neo4j-tests, 
-      ollama-tests, 
-      notebook-tests, 
+      basic-tests,
+      integration-tests,
+      database-postgres-tests,
+      database-neo4j-tests,
+      ollama-tests,
+      notebook-tests,
       python-version-tests,
       vector-db-tests,
       example-tests,
@@ -102,10 +102,10 @@ jobs:
     steps:
       - name: Check Status
         run: |
-          if [[ "${{ needs.basic-tests.result }}" == "success" && 
-                "${{ needs.integration-tests.result }}" == "success" && 
-                "${{ needs.database-postgres-tests.result }}" == "success" && 
-                "${{ needs.database-neo4j-tests.result }}" == "success" && 
+          if [[ "${{ needs.basic-tests.result }}" == "success" &&
+                "${{ needs.integration-tests.result }}" == "success" &&
+                "${{ needs.database-postgres-tests.result }}" == "success" &&
+                "${{ needs.database-neo4j-tests.result }}" == "success" &&
                 "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
                 "${{ needs.python-version-tests.result }}" == "success" &&
@@ -116,4 +116,4 @@ jobs:
           else
             echo "One or more test suites failed."
             exit 1
-          fi 
+          fi
