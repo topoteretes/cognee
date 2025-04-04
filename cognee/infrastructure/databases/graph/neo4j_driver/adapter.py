@@ -1,3 +1,5 @@
+#
+
 """Neo4j Adapter for Graph Database"""
 
 import json
@@ -95,6 +97,7 @@ class Neo4jAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
+        print(f"DEBUG: Raw nodes data: {nodes[:2]}")
         query = """
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})

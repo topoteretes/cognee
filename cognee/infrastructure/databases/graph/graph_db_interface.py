@@ -49,30 +49,42 @@ def record_graph_changes(func):
                         try:
                             # Handle DataPoint objects (original input)
                             if hasattr(node, "id"):
-                                node_id = (
-                                    node.id if isinstance(node.id, UUID) else UUID(str(node.id))
-                                )
+                                node_id = node.id  # Already a UUID object
+                                node_label = type(node).__name__
+                                print(f"DEBUG: DataPoint node label: {node_label}")
                             # Handle Neo4j dictionary format
                             elif isinstance(node, dict) and "node_id" in node:
                                 node_id = UUID(str(node["node_id"]))
+                                node_label = node.get("label")
+                                print(f"DEBUG: Neo4j node label: {node_label}")
                             # Handle tuple format
                             elif isinstance(node, tuple) and len(node) >= 1:
                                 node_id = UUID(str(node[0]))
+                                if len(node) > 1 and isinstance(node[1], dict):
+                                    node_label = node[1].get("type") or node[1].get("label")
+                                else:
+                                    node_label = "Unknown"
+                                print(f"DEBUG: Tuple node label: {node_label}")
                             else:
                                 print(f"DEBUG: Unhandled node format: {type(node)}")  # Debug print
                                 continue
 
                             relationship = GraphRelationshipLedger(
                                 id=uuid4(),
-                                source_node_id=node_id,
-                                destination_node_id=node_id,
+                                source_node_id=node_id,  # Now a UUID object
+                                destination_node_id=node_id,  # Now a UUID object
                                 creator_function=f"{creator}.node",
+                                node_label=node_label,
                             )
                             session.add(relationship)
                             await session.flush()
-                            print(f"DEBUG: Added relationship for node: {node_id}")  # Debug print
+                            print(
+                                f"DEBUG: Added relationship for node: {node_id} with label: {node_label}"
+                            )  # Debug print
                         except Exception as e:
-                            print(f"DEBUG: Error adding relationship: {e}")  # Debug print
+                            print(f"DEBUG: Error adding relationship: {e}")
+                            await session.rollback()  # Explicitly rollback on error
+                            continue  # Continue with next node
 
             # For add_edges
             elif func.__name__ == "add_edges":

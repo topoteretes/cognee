@@ -1,3 +1,5 @@
+#
+
 from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import UUID, Column, DateTime, String, Index
@@ -14,6 +16,7 @@ class GraphRelationshipLedger(Base):
     source_node_id = Column(UUID, nullable=False)
     destination_node_id = Column(UUID, nullable=False)
     creator_function = Column(String, nullable=False)
+    node_label = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     user_id = Column(UUID, nullable=True)
