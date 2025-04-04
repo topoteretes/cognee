@@ -106,7 +106,7 @@ async def get_modal_tasks(
     return modal_tasks
 
 
-@app.function(image=image, max_containers=4, retries=5)
+@app.function(image=image, max_containers=2, timeout=86400)
 async def entry(file, chunk_list):
     print(f"File execution started: {file}")
 
@@ -124,7 +124,7 @@ async def main():
     ############MASTER NODE (local for now)
     dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
-    batch_size = 10
+    batch_size = 200
 
     # Cleaning the db + adding all the documents to metastore
     await cognee.prune.prune_data()
