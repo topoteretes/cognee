@@ -41,6 +41,7 @@ logger = logging.getLogger("MODAL_DEPLOYED_INSTANCE")
 app = modal.App("cognee-runner")
 
 queue = Queue.from_name("graph_nodes_and_edges", create_if_missing=True)
+queue.clear()
 
 local_env_vars = dict(dotenv_values(".env"))
 logger.info("Modal deployment started with the following environmental variables:")
@@ -112,7 +113,7 @@ async def get_graph_tasks_parallelized(
     return step_two_tasks
 
 
-@app.function(image=image, max_containers=90)
+@app.function(image=image, max_containers=3, timeout=86400)
 async def entry(file, chunk_list):
     print(f"File execution started: {file}")
 
@@ -148,7 +149,7 @@ async def main():
     dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
     batch_size = 100
-    number_of_consumers = 1
+    number_of_consumers = 3
 
     # Cleaning the db + adding all the documents to metastore
     await cognee.prune.prune_data()
