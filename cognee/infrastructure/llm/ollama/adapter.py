@@ -3,7 +3,11 @@ from pydantic import BaseModel
 import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.rate_limiter import rate_limit_async, rate_limit_sync, sleep_and_retry_async
+from cognee.infrastructure.llm.rate_limiter import (
+    rate_limit_async,
+    rate_limit_sync,
+    sleep_and_retry_async,
+)
 from openai import OpenAI
 import base64
 import os

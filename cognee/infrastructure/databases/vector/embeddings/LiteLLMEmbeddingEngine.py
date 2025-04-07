@@ -12,7 +12,7 @@ from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.infrastructure.llm.rate_limiter import (
     embedding_rate_limit_async,
-    embedding_sleep_and_retry_async
+    embedding_sleep_and_retry_async,
 )
 
 litellm.set_verbose = False

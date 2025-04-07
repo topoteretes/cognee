@@ -6,63 +6,68 @@ from cognee.api.v1.search import SearchType
 from cognee.infrastructure.llm.rate_limiter import LLMRateLimiter
 from cognee.infrastructure.llm.config import get_llm_config
 
+
 async def test_rate_limiting():
     """Test the rate limiting feature with 60 requests per minute."""
     print("\n=== Testing Rate Limiting Feature ===")
-    
+
     # Configure rate limiting
     print("Configuring rate limiting: 60 requests per minute")
     import os
+
     os.environ["LLM_RATE_LIMIT_ENABLED"] = "true"
     os.environ["LLM_RATE_LIMIT_REQUESTS"] = "60"
     os.environ["LLM_RATE_LIMIT_INTERVAL"] = "60"
-    
+
     # Create a fresh limiter instance
     limiter = LLMRateLimiter()
     config = get_llm_config()
-    print(f"Rate limit settings: {config.llm_rate_limit_enabled=}, {config.llm_rate_limit_requests=}, {config.llm_rate_limit_interval=}")
-    
+    print(
+        f"Rate limit settings: {config.llm_rate_limit_enabled=}, {config.llm_rate_limit_requests=}, {config.llm_rate_limit_interval=}"
+    )
+
     # Track successful and failed requests
     successes = []
     failures = []
-    
+
     print("Making 70 test requests (expecting ~60 to succeed)...")
     start_time = time.time()
-    
+
     # Try 70 requests (more than our limit of 60)
     for i in range(70):
         if limiter.hit_limit():
             successes.append(i)
         else:
             failures.append(i)
-    
+
     end_time = time.time()
     elapsed = end_time - start_time
-    
+
     # Print results
     print(f"Test completed in {elapsed:.2f} seconds")
     print(f"Successful requests: {len(successes)}")
     print(f"Failed requests: {len(failures)}")
-    
+
     if failures:
         print(f"First failure occurred at request #{failures[0]}")
-    
+
     # Calculate effective rate
     rate_per_minute = len(successes) / (elapsed / 60)
     print(f"Effective rate: {rate_per_minute:.1f} requests per minute")
-    
+
     # Verify results
     if 58 <= len(successes) <= 62:
         print("✅ PASS: Rate limiting correctly allowed ~60 requests")
     else:
         print(f"❌ FAIL: Expected ~60 successful requests, got {len(successes)}")
-    
+
     if len(failures) > 0:
         print("✅ PASS: Rate limiting correctly blocked excess requests")
     else:
         print("❌ FAIL: Expected some requests to be rate-limited")
-    
+
     print("=== Rate Limiting Test Complete ===\n")
+
 
 async def main():
     # Create a clean slate for cognee -- reset data and system state
@@ -123,4 +128,4 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(main())
     finally:
-        loop.run_until_complete(loop.shutdown_asyncgens()) 
+        loop.run_until_complete(loop.shutdown_asyncgens())

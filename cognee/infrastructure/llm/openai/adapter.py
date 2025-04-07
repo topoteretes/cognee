@@ -11,10 +11,10 @@ from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.rate_limiter import (
-    rate_limit_async, 
-    rate_limit_sync, 
-    sleep_and_retry_async, 
-    sleep_and_retry_sync
+    rate_limit_async,
+    rate_limit_sync,
+    sleep_and_retry_async,
+    sleep_and_retry_sync,
 )
 from cognee.base_config import get_base_config
 

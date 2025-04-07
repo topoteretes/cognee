@@ -11,7 +11,7 @@ from cognee.infrastructure.databases.exceptions.EmbeddingException import Embedd
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.rate_limiter import (
     embedding_rate_limit_async,
-    embedding_sleep_and_retry_async
+    embedding_sleep_and_retry_async,
 )
 
 logger = get_logger("OllamaEmbeddingEngine")
@@ -78,7 +78,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             ) as response:
                 data = await response.json()
                 return data["embedding"]
-        
+
     def get_vector_size(self) -> int:
         return self.dimensions
 
