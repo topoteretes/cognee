@@ -141,7 +141,7 @@ async def test_embedding_rate_limiting_realistic():
     total_rate_limited += batch_rate_limited
 
     # Log overall results
-    logger.info(f"\n--- Test Summary ---")
+    logger.info("\n--- Test Summary ---")
     logger.info(f"Total requests: {total_requests}")
     logger.info(f"Total successes: {total_successes}")
     logger.info(f"Total rate limited: {total_rate_limited}")
