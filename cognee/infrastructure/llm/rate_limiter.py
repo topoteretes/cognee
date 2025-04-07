@@ -72,6 +72,8 @@ RATE_LIMIT_ERROR_PATTERNS = [
     "request limit exceeded",
     "maximum requests",
     "exceeded your current quota",
+    "throttled",
+    "throttling",
 ]
 
 # Default retry settings
