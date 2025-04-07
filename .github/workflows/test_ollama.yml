@@ -110,7 +110,7 @@ jobs:
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://localhost:11434/v1/"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/api/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: poetry run python ./examples/python/simple_example.py
