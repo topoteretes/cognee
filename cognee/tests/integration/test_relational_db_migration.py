@@ -137,7 +137,7 @@ async def test_relational_db_migration(setup_test_db):
     }
     for e in expected_edges:
         assert e in found_edges, f"Edge {e} not found in the actual '{relationship_label}' edges!"
-    
+
     # 4. Verify the total number of nodes and edges in the graph
     if relational_db_provider == "sqlite":
         if graph_db_provider == "neo4j":
@@ -165,11 +165,11 @@ async def test_relational_db_migration(setup_test_db):
             node_count = len(nodes)
             edge_count = len(edges)
 
-        # NOTE: Because of the different size of the postgres and sqlite databases, 
+        # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
         assert node_count == 227, f"Expected 227 nodes, got {node_count}"
         assert edge_count == 580, f"Expected 580 edges, got {edge_count}"
-    
+
     elif relational_db_provider == "postgres":
         if graph_db_provider == "neo4j":
             query_str = """
@@ -196,14 +196,11 @@ async def test_relational_db_migration(setup_test_db):
             node_count = len(nodes)
             edge_count = len(edges)
 
-        # NOTE: Because of the different size of the postgres and sqlite databases, 
+        # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
         assert node_count == 115, f"Expected 115 nodes, got {node_count}"
         assert edge_count == 356, f"Expected 356 edges, got {edge_count}"
 
-
     print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
 
     print(f"All checks passed for {graph_db_provider} provider with '{relationship_label}' edges!")
-
-
