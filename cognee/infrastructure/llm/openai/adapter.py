@@ -10,6 +10,12 @@ from cognee.shared.data_models import MonitoringTool
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.rate_limiter import (
+    rate_limit_async, 
+    rate_limit_sync, 
+    sleep_and_retry_async, 
+    sleep_and_retry_sync
+)
 from cognee.base_config import get_base_config
 
 monitoring = get_base_config().monitoring_tool
@@ -49,6 +55,8 @@ class OpenAIAdapter(LLMInterface):
         self.streaming = streaming
 
     @observe(as_type="generation")
+    @sleep_and_retry_async()
+    @rate_limit_async
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
@@ -75,6 +83,8 @@ class OpenAIAdapter(LLMInterface):
         )
 
     @observe
+    @sleep_and_retry_sync()
+    @rate_limit_sync
     def create_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
@@ -100,6 +110,7 @@ class OpenAIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
 
+    @rate_limit_sync
     def create_transcript(self, input):
         """Generate a audio transcript from a user query."""
 
@@ -120,6 +131,7 @@ class OpenAIAdapter(LLMInterface):
 
         return transcription
 
+    @rate_limit_sync
     def transcribe_image(self, input) -> BaseModel:
         with open(input, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
@@ -132,7 +144,7 @@ class OpenAIAdapter(LLMInterface):
                     "content": [
                         {
                             "type": "text",
-                            "text": "What’s in this image?",
+                            "text": "What's in this image?",
                         },
                         {
                             "type": "image_url",
