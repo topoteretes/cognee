@@ -165,7 +165,8 @@ async def test_relational_db_migration(setup_test_db):
             node_count = len(nodes)
             edge_count = len(edges)
 
-        # Expect 227 nodes, 580 edges
+        # NOTE: Because of the different size of the postgres and sqlite databases, 
+        #       different number of nodes and edges are expected
         assert node_count == 227, f"Expected 227 nodes, got {node_count}"
         assert edge_count == 580, f"Expected 580 edges, got {edge_count}"
     
@@ -195,7 +196,8 @@ async def test_relational_db_migration(setup_test_db):
             node_count = len(nodes)
             edge_count = len(edges)
 
-        # Expect 115 nodes, 356 edges
+        # NOTE: Because of the different size of the postgres and sqlite databases, 
+        #       different number of nodes and edges are expected
         assert node_count == 115, f"Expected 115 nodes, got {node_count}"
         assert edge_count == 356, f"Expected 356 edges, got {edge_count}"
 
