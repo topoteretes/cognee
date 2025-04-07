@@ -140,7 +140,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": 10},
         ),
         Task(add_data_points, task_config={"batch_size": 10}),
-        Task(apply_node_set, task_config={"batch_size": 10}),  # Apply NodeSet values to DataPoints
+        Task(apply_node_set, task_config={"batch_size": 10}),  # Apply NodeSet values and create set nodes
     ]
 
     return default_tasks
