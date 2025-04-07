@@ -137,5 +137,71 @@ async def test_relational_db_migration(setup_test_db):
     }
     for e in expected_edges:
         assert e in found_edges, f"Edge {e} not found in the actual '{relationship_label}' edges!"
+    
+    # 4. Verify the total number of nodes and edges in the graph
+    if relational_db_provider == "sqlite":
+        if graph_db_provider == "neo4j":
+            query_str = """
+            MATCH (n)
+            WITH count(n) AS node_count
+            MATCH ()-[r]->()
+            RETURN node_count, count(r) AS edge_count
+            """
+            rows = await graph_engine.query(query_str)
+            node_count = rows[0]["node_count"]
+            edge_count = rows[0]["edge_count"]
+
+        elif graph_db_provider == "kuzu":
+            query_nodes = "MATCH (n:Node) RETURN count(n) as c"
+            rows_n = await graph_engine.query(query_nodes)
+            node_count = rows_n[0]["c"]
+
+            query_edges = "MATCH (n:Node)-[r:EDGE]->(m:Node) RETURN count(r) as c"
+            rows_e = await graph_engine.query(query_edges)
+            edge_count = rows_e[0]["c"]
+
+        elif graph_db_provider == "networkx":
+            nodes, edges = await graph_engine.get_graph_data()
+            node_count = len(nodes)
+            edge_count = len(edges)
+
+        # Expect 227 nodes, 580 edges
+        assert node_count == 227, f"Expected 227 nodes, got {node_count}"
+        assert edge_count == 580, f"Expected 580 edges, got {edge_count}"
+    
+    elif relational_db_provider == "postgres":
+        if graph_db_provider == "neo4j":
+            query_str = """
+            MATCH (n)
+            WITH count(n) AS node_count
+            MATCH ()-[r]->()
+            RETURN node_count, count(r) AS edge_count
+            """
+            rows = await graph_engine.query(query_str)
+            node_count = rows[0]["node_count"]
+            edge_count = rows[0]["edge_count"]
+
+        elif graph_db_provider == "kuzu":
+            query_nodes = "MATCH (n:Node) RETURN count(n) as c"
+            rows_n = await graph_engine.query(query_nodes)
+            node_count = rows_n[0]["c"]
+
+            query_edges = "MATCH (n:Node)-[r:EDGE]->(m:Node) RETURN count(r) as c"
+            rows_e = await graph_engine.query(query_edges)
+            edge_count = rows_e[0]["c"]
+
+        elif graph_db_provider == "networkx":
+            nodes, edges = await graph_engine.get_graph_data()
+            node_count = len(nodes)
+            edge_count = len(edges)
+
+        # Expect 115 nodes, 356 edges
+        assert node_count == 115, f"Expected 115 nodes, got {node_count}"
+        assert edge_count == 356, f"Expected 356 edges, got {edge_count}"
+
+
+    print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
 
     print(f"All checks passed for {graph_db_provider} provider with '{relationship_label}' edges!")
+
+
