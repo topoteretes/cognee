@@ -6,8 +6,8 @@ import logging
 
 from cognee.infrastructure.llm.config import LLMConfig, get_llm_config
 from cognee.infrastructure.llm.rate_limiter import EmbeddingRateLimiter
-from cognee.infrastructure.databases.vector.embeddings.OpenAIEmbeddingEngine import (
-    OpenAIEmbeddingEngine,
+from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+    LiteLLMEmbeddingEngine,
 )
 
 # Configure logging
@@ -39,7 +39,7 @@ async def test_embedding_rate_limiting():
     )
 
     # Create an embedding engine
-    engine = OpenAIEmbeddingEngine()
+    engine = LiteLLMEmbeddingEngine()
 
     # Make 10 embedding requests (should be rate limited after 5)
     texts = [f"Test text {i}" for i in range(10)]

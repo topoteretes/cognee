@@ -6,8 +6,8 @@ import logging
 
 from cognee.infrastructure.llm.config import LLMConfig, get_llm_config
 from cognee.infrastructure.llm.rate_limiter import EmbeddingRateLimiter
-from cognee.infrastructure.databases.vector.embeddings.OpenAIEmbeddingEngine import (
-    OpenAIEmbeddingEngine,
+from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+    LiteLLMEmbeddingEngine,
 )
 
 # Configure logging
@@ -42,7 +42,7 @@ async def test_embedding_rate_limiting_realistic():
     )
 
     # Create an embedding engine
-    engine = OpenAIEmbeddingEngine()
+    engine = LiteLLMEmbeddingEngine()
 
     # Track overall statistics
     total_requests = 0
