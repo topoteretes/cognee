@@ -52,6 +52,56 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_edges(self) -> List[Edge]:
         return self.edges
 
+    async def _retrieve_graph_data(self, adapter, memory_fragment_filter):
+        """Retrieve graph data from the adapter."""
+        if len(memory_fragment_filter) == 0:
+            nodes_data, edges_data = await adapter.get_graph_data()
+        else:
+            nodes_data, edges_data = await adapter.get_filtered_graph_data(
+                attribute_filters=memory_fragment_filter
+            )
+
+        if not nodes_data:
+            raise EntityNotFoundError(message="No node data retrieved from the database.")
+        if not edges_data:
+            raise EntityNotFoundError(message="No edge data retrieved from the database.")
+
+        return nodes_data, edges_data
+
+    def _create_nodes_from_data(self, nodes_data, node_properties_to_project, node_dimension):
+        """Create node objects from database data."""
+        for node_id, properties in nodes_data:
+            node_attributes = {key: properties.get(key) for key in node_properties_to_project}
+            self.add_node(Node(str(node_id), node_attributes, dimension=node_dimension))
+
+    def _create_edges_from_data(
+        self, edges_data, edge_properties_to_project, directed, edge_dimension
+    ):
+        """Create edge objects from database data."""
+        for source_id, target_id, relationship_type, properties in edges_data:
+            source_node = self.get_node(str(source_id))
+            target_node = self.get_node(str(target_id))
+
+            if not source_node or not target_node:
+                raise EntityNotFoundError(
+                    message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                )
+
+            edge_attributes = {key: properties.get(key) for key in edge_properties_to_project}
+            edge_attributes["relationship_type"] = relationship_type
+
+            edge = Edge(
+                source_node,
+                target_node,
+                attributes=edge_attributes,
+                directed=directed,
+                dimension=edge_dimension,
+            )
+            self.add_edge(edge)
+
+            source_node.add_skeleton_edge(edge)
+            target_node.add_skeleton_edge(edge)
+
     async def project_graph_from_db(
         self,
         adapter: Union[GraphDBInterface],
@@ -66,54 +116,28 @@ class CogneeGraph(CogneeAbstractGraph):
             raise InvalidValueError(message="Dimensions must be positive integers")
 
         try:
-            if len(memory_fragment_filter) == 0:
-                nodes_data, edges_data = await adapter.get_graph_data()
-            else:
-                nodes_data, edges_data = await adapter.get_filtered_graph_data(
-                    attribute_filters=memory_fragment_filter
-                )
+            # Retrieve graph data
+            nodes_data, edges_data = await self._retrieve_graph_data(
+                adapter, memory_fragment_filter
+            )
 
-            if not nodes_data:
-                raise EntityNotFoundError(message="No node data retrieved from the database.")
-            if not edges_data:
-                raise EntityNotFoundError(message="No edge data retrieved from the database.")
+            # Create nodes
+            self._create_nodes_from_data(nodes_data, node_properties_to_project, node_dimension)
 
-            for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(Node(str(node_id), node_attributes, dimension=node_dimension))
+            # Create edges
+            self._create_edges_from_data(
+                edges_data, edge_properties_to_project, directed, edge_dimension
+            )
 
-            for source_id, target_id, relationship_type, properties in edges_data:
-                source_node = self.get_node(str(source_id))
-                target_node = self.get_node(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = {
-                        key: properties.get(key) for key in edge_properties_to_project
-                    }
-                    edge_attributes["relationship_type"] = relationship_type
-
-                    edge = Edge(
-                        source_node,
-                        target_node,
-                        attributes=edge_attributes,
-                        directed=directed,
-                        dimension=edge_dimension,
-                    )
-                    self.add_edge(edge)
-
-                    source_node.add_skeleton_edge(edge)
-                    target_node.add_skeleton_edge(edge)
-
-                else:
-                    raise EntityNotFoundError(
-                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
-                    )
-
-        except (ValueError, TypeError) as e:
-            print(f"Error projecting graph: {e}")
+        except EntityNotFoundError as e:
+            logger.error(f"Entity not found: {e}")
             raise e
-        except Exception as ex:
-            print(f"Unexpected error: {ex}")
-            raise ex
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error projecting graph: {e}")
+            raise e
+        except Exception as e:
+            logger.error(f"Unexpected error in graph projection: {e}")
+            raise e
 
     async def map_vector_distances_to_graph_nodes(self, node_distances) -> None:
         for category, scored_results in node_distances.items():
