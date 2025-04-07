@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -75,6 +76,12 @@ async def main():
     history = await get_history(user.id)
 
     assert len(history) == 6, "Search history is not correct."
+
+    # await render_graph()
+    graph_file_path = os.path.join(
+        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"
+    )
+    await visualize_graph(graph_file_path)
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
