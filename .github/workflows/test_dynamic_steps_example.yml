@@ -15,8 +15,6 @@ jobs:
       uses: ./.github/workflows/reusable_python_example.yml
       with:
         example-location: ./examples/python/dynamic_steps_example.py
-        EMBEDDING_DIMENSIONS: 3072
-        EMBEDDING_MAX_TOKENS: 8191
       secrets:
         LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
