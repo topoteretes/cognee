@@ -1,0 +1,68 @@
+name: Reusable Windows Tests
+
+on:
+  workflow_call:
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+      GRAPHISTRY_USERNAME:
+        required: true
+      GRAPHISTRY_PASSWORD:
+        required: true
+      LLM_MODEL:
+        required: false
+      LLM_ENDPOINT:
+        required: false
+      LLM_API_VERSION:
+        required: false
+      EMBEDDING_MODEL:
+        required: false
+      EMBEDDING_ENDPOINT:
+        required: false
+      EMBEDDING_API_KEY:
+        required: false
+      EMBEDDING_API_VERSION:
+        required: false
+
+jobs:
+  run-windows-tests:
+    name: Windows Tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --all-extras
+
+      - name: Execute Dynamic Steps Example
+        env:
+          ENV: 'dev'
+          PYTHONFAULTHANDLER: 1
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+        run: poetry run python ./examples/python/dynamic_steps_example.py 
