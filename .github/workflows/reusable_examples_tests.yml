@@ -2,12 +2,6 @@ name: Reusable Examples Tests
 
 on:
   workflow_call:
-    inputs:
-      examples:
-        required: false
-        type: string
-        default: "all"
-        description: "Which examples to run (comma-separated list or 'all')"
 
 jobs:
   run-examples-tests:
@@ -62,7 +56,6 @@ jobs:
 
 
       - name: Run Multimedia Example
-        if: matrix.example == 'multimedia'
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -71,7 +64,6 @@ jobs:
         run: poetry run python ./examples/python/multimedia_example.py
 
       - name: Run Deduplication Example
-        if: matrix.example == 'deduplication'
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -85,7 +77,6 @@ jobs:
         run: poetry run python ./cognee/tests/test_deduplication.py
 
       - name: Run Evaluation Framework Example
-        if: matrix.example == 'eval-framework'
         env:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -101,7 +92,6 @@ jobs:
         run: poetry run python ./cognee/eval_framework/run_eval.py
 
       - name: Run Descriptive Graph Metrics Example
-        if: matrix.example == 'descriptive-graph-metrics'
         env:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -115,3 +105,18 @@ jobs:
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py
+
+      - name: Run Dynamic Steps Tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./examples/python/dynamic_steps_example.py
