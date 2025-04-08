@@ -138,9 +138,7 @@ class Neo4jAdapter(GraphDBInterface):
         return [result["node"] for result in results]
 
     async def delete_node(self, node_id: str):
-        node_id = id.replace(":", "_")
-
-        query = f"MATCH (node:`{node_id}` {{id: $node_id}}) DETACH DELETE n"
+        query = "MATCH (node {id: $node_id}) DETACH DELETE node"
         params = {"node_id": node_id}
 
         return await self.query(query, params)
@@ -660,3 +658,51 @@ class Neo4jAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
+
+    async def get_document_subgraph(self, content_hash: str):
+        query = """
+        MATCH (doc:TextDocument)
+        WHERE doc.name = 'text_' + $content_hash
+
+        OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
+        OPTIONAL MATCH (chunk)-[:contains]->(entity:Entity)
+        WHERE NOT EXISTS {
+            MATCH (entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc:TextDocument)
+            WHERE otherDoc.id <> doc.id
+        }
+        OPTIONAL MATCH (chunk)<-[:made_from]-(made_node:TextSummary)
+        OPTIONAL MATCH (entity)-[:is_a]->(type:EntityType)
+        WHERE NOT EXISTS {
+            MATCH (type)<-[:is_a]-(otherEntity:Entity)
+            WHERE NOT EXISTS {
+                MATCH (otherEntity)<-[:contains]-(:DocumentChunk)
+            }
+        }
+
+        RETURN
+            collect(DISTINCT doc) as document,
+            collect(DISTINCT chunk) as chunks,
+            collect(DISTINCT entity) as orphan_entities,
+            collect(DISTINCT made_node) as made_from_nodes,
+            collect(DISTINCT type) as orphan_types
+        """
+        result = await self.query(query, {"content_hash": content_hash})
+        return result[0] if result else None
+
+    async def get_degree_one_entity_nodes(self):
+        query = """
+        MATCH (n:Entity)
+        WHERE COUNT { MATCH (n)--() } = 1
+        RETURN n
+        """
+        result = await self.query(query)
+        return [record["n"] for record in result] if result else []
+
+    async def get_degree_one_entity_types(self):
+        query = """
+        MATCH (n:EntityType)
+        WHERE COUNT { MATCH (n)--() } = 1
+        RETURN n
+        """
+        result = await self.query(query)
+        return [record["n"] for record in result] if result else []

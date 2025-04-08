@@ -201,3 +201,13 @@ class GraphDBInterface(ABC):
     async def has_edges(self, edges: list) -> list:
         """Check if edges exist in the graph database."""
         pass
+
+    @abstractmethod
+    async def get_document_subgraph(self, content_hash: str) -> Dict[str, list]:
+        """Get all nodes connected to a document that should be deleted with it.
+
+        Returns:
+            Dict with keys: 'document', 'chunks', 'orphan_entities',
+            'made_from_nodes', 'orphan_types'
+        """
+        pass

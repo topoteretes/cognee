@@ -925,3 +925,71 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to import graph from file: {e}")
             raise
+
+    async def get_document_subgraph(self, content_hash: str):
+        """Get all nodes that should be deleted when removing a document."""
+        query = """
+        MATCH (doc:Node)
+        WHERE doc.type = 'TextDocument' AND doc.content_hash = $content_hash
+
+        OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
+        WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
+
+        OPTIONAL MATCH (chunk)-[e2:EDGE]->(entity:Node)
+        WHERE e2.relationship_name = 'contains' AND entity.type = 'Entity'
+        AND NOT EXISTS {
+            MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
+            WHERE e3.relationship_name = 'contains'
+            AND e4.relationship_name = 'is_part_of'
+            AND otherDoc.type = 'TextDocument'
+            AND otherDoc.id <> doc.id
+        }
+
+        OPTIONAL MATCH (chunk)<-[e5:EDGE]-(made_node:Node)
+        WHERE e5.relationship_name = 'made_from' AND made_node.type = 'TextSummary'
+
+        OPTIONAL MATCH (entity)-[e6:EDGE]->(type:Node)
+        WHERE e6.relationship_name = 'instance_of' AND type.type = 'EntityType'
+        AND NOT EXISTS {
+            MATCH (type)<-[e7:EDGE]-(otherEntity:Node)
+            WHERE e7.relationship_name = 'instance_of'
+            AND otherEntity.type = 'Entity'
+            AND NOT EXISTS {
+                MATCH (otherEntity)<-[e8:EDGE]-(:Node)
+                WHERE e8.relationship_name = 'contains'
+            }
+        }
+
+        RETURN
+            COLLECT(DISTINCT doc) as document,
+            COLLECT(DISTINCT chunk) as chunks,
+            COLLECT(DISTINCT entity) as orphan_entities,
+            COLLECT(DISTINCT made_node) as made_from_nodes,
+            COLLECT(DISTINCT type) as orphan_types
+        """
+        result = await self.query(query, {"content_hash": content_hash})
+        return result[0] if result else None
+
+    async def get_degree_one_entity_nodes(self):
+        """Get all entity nodes that have only one connection."""
+        query = """
+        MATCH (n:Node)
+        WHERE n.type = 'Entity'
+        WITH n, COUNT { MATCH (n)--() } as degree
+        WHERE degree = 1
+        RETURN n
+        """
+        result = await self.query(query)
+        return [record["n"] for record in result] if result else []
+
+    async def get_degree_one_entity_types(self):
+        """Get all entity type nodes that have only one connection."""
+        query = """
+        MATCH (n:Node)
+        WHERE n.type = 'EntityType'
+        WITH n, COUNT { MATCH (n)--() } as degree
+        WHERE degree = 1
+        RETURN n
+        """
+        result = await self.query(query)
+        return [record["n"] for record in result] if result else []

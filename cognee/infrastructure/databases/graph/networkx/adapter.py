@@ -453,3 +453,94 @@ class NetworkXAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
+
+    async def get_document_subgraph(self, content_hash: str):
+        """Get all nodes that should be deleted when removing a document."""
+        # Find the document node
+        document = None
+        for node, attrs in self.graph.nodes(data=True):
+            if attrs.get("type") == "TextDocument" and attrs.get("content_hash") == content_hash:
+                document = {"id": node, **attrs}
+                break
+
+        if not document:
+            return None
+
+        # Find chunks connected via is_part_of
+        chunks = []
+        for node, attrs in self.graph.nodes(data=True):
+            edges = self.graph.out_edges(node, data=True)
+            for _, target, edge_data in edges:
+                if edge_data.get("relationship_name") == "is_part_of" and target == document["id"]:
+                    chunks.append({"id": node, **attrs})
+
+        # Find orphaned entities (connected only to these chunks)
+        orphan_entities = []
+        for node, attrs in self.graph.nodes(data=True):
+            if attrs.get("type") != "Entity":
+                continue
+
+            # Get all chunks that contain this entity
+            containing_chunks = []
+            for source, target, edge_data in self.graph.in_edges(node, data=True):
+                if edge_data.get("relationship_name") == "contains":
+                    containing_chunks.append(source)
+
+            # Check if all containing chunks are in our chunks list
+            chunk_ids = [chunk["id"] for chunk in chunks]
+            if containing_chunks and all(c in chunk_ids for c in containing_chunks):
+                orphan_entities.append({"id": node, **attrs})
+
+        # Find nodes connected via made_from
+        made_from_nodes = []
+        for source, target, edge_data in self.graph.in_edges(document["id"], data=True):
+            if edge_data.get("relationship_name") == "made_from":
+                made_from_nodes.append({"id": source, **self.graph.nodes[source]})
+
+        # Find orphaned entity types
+        orphan_types = []
+        for entity in orphan_entities:
+            for _, target, edge_data in self.graph.out_edges(entity["id"], data=True):
+                if edge_data.get("relationship_name") == "instance_of":
+                    # Check if this type is only connected to entities we're deleting
+                    type_node = self.graph.nodes[target]
+                    if type_node.get("type") == "EntityType":
+                        is_orphaned = True
+                        for source, _, edge_data in self.graph.in_edges(target, data=True):
+                            if edge_data.get(
+                                "relationship_name"
+                            ) == "instance_of" and source not in [e["id"] for e in orphan_entities]:
+                                is_orphaned = False
+                                break
+                        if is_orphaned:
+                            orphan_types.append({"id": target, **type_node})
+
+        return {
+            "document": [document] if document else [],
+            "chunks": chunks,
+            "orphan_entities": orphan_entities,
+            "made_from_nodes": made_from_nodes,
+            "orphan_types": orphan_types,
+        }
+
+    async def get_degree_one_entity_nodes(self):
+        """Get all entity nodes that have only one connection."""
+        degree_one_entities = []
+        for node, attrs in self.graph.nodes(data=True):
+            if attrs.get("type") == "Entity":
+                # Count all edges (both incoming and outgoing)
+                degree = len(list(self.graph.edges(node))) + len(list(self.graph.in_edges(node)))
+                if degree == 1:
+                    degree_one_entities.append({"id": node, **attrs})
+        return degree_one_entities
+
+    async def get_degree_one_entity_types(self):
+        """Get all entity type nodes that have only one connection."""
+        degree_one_types = []
+        for node, attrs in self.graph.nodes(data=True):
+            if attrs.get("type") == "EntityType":
+                # Count all edges (both incoming and outgoing)
+                degree = len(list(self.graph.edges(node))) + len(list(self.graph.in_edges(node)))
+                if degree == 1:
+                    degree_one_types.append({"id": node, **attrs})
+        return degree_one_types
