@@ -50,11 +50,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
 
       - name: Load cached venv
         id: cached-poetry-dependencies
