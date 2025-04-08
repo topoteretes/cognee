@@ -16,24 +16,18 @@ jobs:
     with:
       notebook-location: notebooks/cognee_demo.ipynb
     secrets: inherit
-    
+
   run-llama-index-integration:
     name: LlamaIndex Integration Notebook
-    needs: run-main-notebook
-    if: ${{ inputs.include-all || success() }}
     uses: ./.github/workflows/test_llama_index_cognee_integration_notebook.yml
     secrets: inherit
-    
+
   run-cognee-llama-index:
     name: Cognee LlamaIndex Notebook
-    needs: run-main-notebook
-    if: ${{ inputs.include-all || success() }}
     uses: ./.github/workflows/test_cognee_llama_index_notebook.yml
     secrets: inherit
-    
+
   run-cognee-multimedia:
     name: Cognee Multimedia Notebook
-    needs: run-main-notebook
-    if: ${{ inputs.include-all || success() }}
     uses: ./.github/workflows/test_cognee_multimedia_notebook.yml
-    secrets: inherit 
+    secrets: inherit
