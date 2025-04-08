@@ -107,44 +107,6 @@ jobs:
           VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
         run: poetry run python ./cognee/tests/test_weaviate.py
 
-  run-kuzu-tests:
-    name: Kuzu Tests
-    runs-on: ubuntu-22.04
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install Kuzu Dependencies
-        run: poetry install --extras kuzu --no-interaction
-
-      - name: Run Kuzu Tests
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_kuzu.py
-
   run-milvus-tests:
     name: Milvus Tests
     runs-on: ubuntu-22.04
