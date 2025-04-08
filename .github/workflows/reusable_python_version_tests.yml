@@ -59,7 +59,7 @@ jobs:
           pip install poetry
 
       - name: Install dependencies
-        run: poetry install --no-interaction --all-extras
+        run: poetry install --no-interaction -E docs -E evals
 
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
