@@ -62,6 +62,7 @@ async def test_embedding_rate_limiting_realistic():
         try:
             logger.info(f"Making request #{i + 1}")
             embedding = await engine.embed_text([text])
+            logger.info(str(embedding))
             batch_successes += 1
             logger.info(f"Request #{i + 1} succeeded")
         except Exception as e:
@@ -94,6 +95,7 @@ async def test_embedding_rate_limiting_realistic():
         try:
             logger.info(f"Making request #{i + 1}")
             embedding = await engine.embed_text([text])
+            logger.info(str(embedding))
             batch_successes += 1
             logger.info(f"Request #{i + 1} succeeded")
         except Exception as e:
@@ -126,6 +128,7 @@ async def test_embedding_rate_limiting_realistic():
         try:
             logger.info(f"Making request #{i + 1}")
             embedding = await engine.embed_text([text])
+            logger.info(str(embedding))
             batch_successes += 1
             logger.info(f"Request #{i + 1} succeeded")
         except Exception as e:

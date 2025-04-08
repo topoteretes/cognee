@@ -52,6 +52,7 @@ async def test_embedding_rate_limiting():
         try:
             logger.info(f"Making request #{i + 1}")
             embedding = await engine.embed_text([text])
+            logger.info(str(embedding))
             results.append(embedding)
             logger.info(f"Request #{i + 1} succeeded")
         except Exception as e:
