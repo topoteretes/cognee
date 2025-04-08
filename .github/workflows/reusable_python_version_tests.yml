@@ -36,19 +36,19 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ubuntu-22.04, macos-13, macos-15]
+        os: [ubuntu-22.04, macos-13, macos-15, windows-latest]
       fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
@@ -64,8 +64,8 @@ jobs:
           key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install --no-interaction --all-extras
-          
+        run: poetry install --no-interaction
+
       - name: Run Basic Examples
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -79,4 +79,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./examples/python/simple_example.py 
+        run: poetry run python ./examples/python/simple_example.py
