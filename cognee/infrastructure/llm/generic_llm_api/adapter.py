@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_retry_async
 import litellm
 
 
@@ -27,6 +28,8 @@ class GenericAPIAdapter(LLMInterface):
             litellm.acompletion, mode=instructor.Mode.JSON, api_key=api_key
         )
 
+    @sleep_and_retry_async()
+    @rate_limit_async
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
