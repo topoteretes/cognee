@@ -15,6 +15,10 @@ on:
       GRAPHISTRY_PASSWORD:
         required: true
 
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
 jobs:
   run-basic-tests:
     name: Basic Tests
@@ -49,12 +53,18 @@ jobs:
 
       - name: Run Linting
         uses: astral-sh/ruff-action@v2
-        
+
       - name: Run Formatting Check
         uses: astral-sh/ruff-action@v2
         with:
           args: "format --check"
-        
+
+      - name: Run unit tests
+        run: poetry run pytest cognee/tests/unit/
+
+      - name: Run integration tests
+        run: poetry run pytest cognee/tests/integration/
+
       - name: Run Simple Examples
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -62,7 +72,7 @@ jobs:
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: poetry run python ./examples/python/simple_example.py
-        
+
       - name: Run Basic Graph Tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
