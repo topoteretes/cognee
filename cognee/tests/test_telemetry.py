@@ -16,6 +16,25 @@ class TestTelemetry(unittest.TestCase):
         mock_response.status_code = 200
         mock_post.return_value = mock_response
 
+        # Check if .anon_id exists in the project root
+        anon_id_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".anon_id"
+        )
+
+        if not os.path.exists(anon_id_path):
+            # Create the file with a test ID if it doesn't exist
+            with open(anon_id_path, "w") as f:
+                f.write("test-machine")
+            print(f"Created .anon_id file at {anon_id_path}", file=sys.stderr)
+
+        self.assertTrue(os.path.exists(anon_id_path), "The .anon_id file should exist")
+
+        # Verify the file has content
+        with open(anon_id_path, "r") as f:
+            content = f.read().strip()
+
+        self.assertTrue(len(content) > 0, "The .anon_id file should not be empty")
+
         # Ensure telemetry is enabled for this test
         if "TELEMETRY_DISABLED" in os.environ:
             del os.environ["TELEMETRY_DISABLED"]
@@ -97,27 +116,6 @@ class TestTelemetry(unittest.TestCase):
             os.environ["ENV"] = original_env
         else:
             del os.environ["ENV"]
-
-    def test_anon_id_file_exists(self):
-        """Test that .anon_id file exists for telemetry."""
-        # Check if .anon_id exists in the project root
-        anon_id_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".anon_id"
-        )
-
-        if not os.path.exists(anon_id_path):
-            # Create the file with a test ID if it doesn't exist
-            with open(anon_id_path, "w") as f:
-                f.write("test-machine")
-            print(f"Created .anon_id file at {anon_id_path}", file=sys.stderr)
-
-        self.assertTrue(os.path.exists(anon_id_path), "The .anon_id file should exist")
-
-        # Verify the file has content
-        with open(anon_id_path, "r") as f:
-            content = f.read().strip()
-
-        self.assertTrue(len(content) > 0, "The .anon_id file should not be empty")
 
 
 if __name__ == "__main__":
