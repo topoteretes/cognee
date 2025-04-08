@@ -2,12 +2,6 @@ name: Reusable Notebook Tests
 
 on:
   workflow_call:
-    inputs:
-      include-all:
-        required: false
-        type: boolean
-        default: true
-        description: "Whether to run all notebook tests"
 
 jobs:
   run-main-notebook:
@@ -19,15 +13,21 @@ jobs:
 
   run-llama-index-integration:
     name: LlamaIndex Integration Notebook
-    uses: ./.github/workflows/test_llama_index_cognee_integration_notebook.yml
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/llama_index_cognee_integration.ipynb
     secrets: inherit
 
   run-cognee-llama-index:
     name: Cognee LlamaIndex Notebook
-    uses: ./.github/workflows/test_cognee_llama_index_notebook.yml
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/cognee_llama_index.ipynb
     secrets: inherit
 
   run-cognee-multimedia:
     name: Cognee Multimedia Notebook
-    uses: ./.github/workflows/test_cognee_multimedia_notebook.yml
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/cognee_multimedia_demo.ipynb
     secrets: inherit
