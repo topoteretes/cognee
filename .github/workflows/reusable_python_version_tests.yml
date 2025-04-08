@@ -70,4 +70,12 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./examples/python/simple_example.py
+        run: poetry run python ./cognee/tests/test_library.py
+
+      - name: Build with Poetry
+        run: poetry build
+
+      - name: Install Package
+        run: |
+          cd dist
+          pip install *.whl
