@@ -1,9 +1,14 @@
-name: test
+name: test | windows (DEPRECATED)
 
 on:
   workflow_dispatch:
-  pull_request:
-    types: [labeled, synchronize]
+  # Commenting out triggers as this has been moved to the test suite
+  # pull_request:
+  #   types: [labeled, synchronize]
+
+# This workflow has been moved to the test suite
+# See .github/workflows/test-suites.yml and .github/workflows/reusable_windows_tests.yml
+# This file is kept for reference but will be removed in a future update
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

@@ -31,11 +31,12 @@ on:
 
 jobs:
   run-python-version-tests:
-    name: Python ${{ matrix.python-version }} Tests
-    runs-on: ubuntu-22.04
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
+        os: [ubuntu-22.04, macos-13, macos-15]
       fail-fast: false
     steps:
       - name: Check out
