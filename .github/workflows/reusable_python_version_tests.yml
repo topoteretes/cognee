@@ -29,6 +29,10 @@ on:
       EMBEDDING_API_VERSION:
         required: false
 
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
 jobs:
   run-python-version-tests:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -63,7 +67,7 @@ jobs:
       - name: Run integration tests
         run: poetry run pytest cognee/tests/integration/
 
-      - name: Run Basic Examples
+      - name: Run default basic pipeline
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
