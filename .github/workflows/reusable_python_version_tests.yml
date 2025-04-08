@@ -86,6 +86,7 @@ jobs:
         run: poetry build
 
       - name: Install Package
+        if: ${{ !contains(matrix.os, 'windows') }}
         run: |
           cd dist
           pip install *.whl
