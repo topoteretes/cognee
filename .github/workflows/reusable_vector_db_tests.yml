@@ -38,7 +38,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11.x'
-          
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
@@ -48,7 +48,7 @@ jobs:
 
       - name: Install ChromaDB Dependencies
         run: poetry install --extras chromadb --no-interaction
-        
+
       - name: Run ChromaDB Tests
         env:
           ENV: 'dev'
@@ -79,17 +79,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11.x'
-          
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-        
+
       - name: Install Weaviate Dependencies
         run: poetry install --extras weaviate --no-interaction
-        
+
       - name: Run Weaviate Tests
         env:
           ENV: 'dev'
@@ -119,17 +119,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11.x'
-          
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-        
+
       - name: Install Kuzu Dependencies
         run: poetry install --extras kuzu --no-interaction
-        
+
       - name: Run Kuzu Tests
         env:
           ENV: 'dev'
@@ -157,17 +157,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11.x'
-          
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-        
+
       - name: Install Milvus Dependencies
         run: poetry install --extras milvus --no-interaction
-        
+
       - name: Run Milvus Tests
         env:
           ENV: 'dev'
@@ -182,7 +182,7 @@ jobs:
         run: poetry run python ./cognee/tests/test_milvus.py
 
   run_qdrant_integration_test:
-    name: test
+    name: Qdrant Tests
     runs-on: ubuntu-latest
     defaults:
       run:
