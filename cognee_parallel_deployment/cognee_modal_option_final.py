@@ -235,8 +235,8 @@ async def main():
     finished_producers.clear()
     dataset_name = "dataset_to_parallelize"
     directory_name = "cognee_parallel_deployment/modal_input/"
-    number_of_consumers = 3  # Total number of consumer functions to spawn
-    batch_size = 100  # Batch size for producers
+    number_of_consumers = 1  # Total number of consumer functions to spawn
+    batch_size = 300  # Batch size for producers
     results = []
     consumer_futures = []
 
