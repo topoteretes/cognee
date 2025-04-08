@@ -23,6 +23,7 @@ def get_embedding_engine() -> EmbeddingEngine:
             model=config.embedding_model,
             dimensions=config.embedding_dimensions,
             max_tokens=config.embedding_max_tokens,
+            endpoint=config.embedding_endpoint,
             huggingface_tokenizer=config.huggingface_tokenizer,
         )
 
