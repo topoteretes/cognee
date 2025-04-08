@@ -1,66 +1,35 @@
-name: Reusable Database Tests
+name: Reusable Vector DB Tests
 
 on:
   workflow_call:
     inputs:
-      python-version:
+      databases:
         required: false
         type: string
-        default: '3.11.x'
-      database-type:
-        required: true
-        type: string
-        description: "Type of database to test (postgres, neo4j)"
+        default: "all"
+        description: "Which vector databases to test (comma-separated list or 'all')"
     secrets:
-      LLM_MODEL:
-        required: true
-      LLM_ENDPOINT:
-        required: true
-      LLM_API_KEY:
-        required: true
-      LLM_API_VERSION:
-        required: true
-      EMBEDDING_MODEL:
-        required: true
-      EMBEDDING_ENDPOINT:
-        required: true
-      EMBEDDING_API_KEY:
-        required: true
-      EMBEDDING_API_VERSION:
-        required: true
-      POSTGRES_PASSWORD:
+      WEAVIATE_API_URL:
+        required: false
+      WEAVIATE_API_KEY:
         required: false
 
 jobs:
-  run-postgres-tests:
-    name: PostgreSQL Tests
+  run-kuzu-tests:
+    name: Kuzu Tests
     runs-on: ubuntu-22.04
-    if: ${{ inputs.database-type == 'postgres' }}
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB: cognee_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ inputs.python-version }}
-          
+          python-version: '3.11.x'
+
       - name: Install Poetry
         uses: snok/install-poetry@v1.4.1
         with:
@@ -68,17 +37,10 @@ jobs:
           virtualenvs-in-project: true
           installer-parallel: true
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-postgres
+      - name: Install Kuzu Dependencies
+        run: poetry install --extras kuzu --no-interaction
 
-      - name: Install dependencies for Postgres
-        run: poetry install -E postgres --no-interaction
-          
-      - name: Run PGVector Tests
+      - name: Run Kuzu Tests
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -89,12 +51,12 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_pgvector.py
-  
+        run: poetry run python ./cognee/tests/test_kuzu.py
+
   run-neo4j-tests:
     name: Neo4j Tests
     runs-on: ubuntu-22.04
-    if: ${{ inputs.database-type == 'neo4j' }}
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j') }}
     steps:
       - name: Check out
         uses: actions/checkout@master

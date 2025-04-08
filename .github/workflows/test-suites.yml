@@ -27,20 +27,10 @@ jobs:
     uses: ./.github/workflows/reusable_integration_tests.yml
     secrets: inherit
 
-  database-postgres-tests:
-    name: PostgreSQL Tests
+  graph-db-tests:
+    name: Graph Database Tests
     needs: [basic-tests, integration-tests]
-    uses: ./.github/workflows/reusable_database_tests.yml
-    with:
-      database-type: 'postgres'
-    secrets: inherit
-
-  database-neo4j-tests:
-    name: Neo4j Tests
-    needs: [basic-tests, integration-tests]
-    uses: ./.github/workflows/reusable_database_tests.yml
-    with:
-      database-type: 'neo4j'
+    uses: ./.github/workflows/reusable_graph_db_tests.yml
     secrets: inherit
 
   notebook-tests:
@@ -89,8 +79,7 @@ jobs:
     needs: [
       basic-tests,
       integration-tests,
-      database-postgres-tests,
-      database-neo4j-tests,
+      graph-db-tests,
       notebook-tests,
       python-version-tests,
       vector-db-tests,
@@ -106,8 +95,7 @@ jobs:
     needs: [
       basic-tests,
       integration-tests,
-      database-postgres-tests,
-      database-neo4j-tests,
+      graph-db-tests,
       notebook-tests,
       python-version-tests,
       vector-db-tests,
@@ -123,8 +111,7 @@ jobs:
         run: |
           if [[ "${{ needs.basic-tests.result }}" == "success" &&
                 "${{ needs.integration-tests.result }}" == "success" &&
-                "${{ needs.database-postgres-tests.result }}" == "success" &&
-                "${{ needs.database-neo4j-tests.result }}" == "success" &&
+                "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
                 "${{ needs.python-version-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&

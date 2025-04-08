@@ -13,6 +13,8 @@ on:
         required: false
       WEAVIATE_API_KEY:
         required: false
+      POSTGRES_PASSWORD:
+        required: false
 
 jobs:
   run-chromadb-tests:
@@ -184,6 +186,7 @@ jobs:
   run_qdrant_integration_test:
     name: Qdrant Tests
     runs-on: ubuntu-latest
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'qdrant') }}
     defaults:
       run:
         shell: bash
@@ -221,3 +224,62 @@ jobs:
           VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
           VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
         run: poetry run python ./cognee/tests/test_qdrant.py
+
+  run-postgres-tests:
+    name: PostgreSQL Tests
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-postgres
+
+      - name: Install dependencies for Postgres
+        run: poetry install -E postgres --no-interaction
+
+      - name: Run PGVector Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_pgvector.py
