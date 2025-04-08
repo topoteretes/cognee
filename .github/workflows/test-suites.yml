@@ -24,13 +24,12 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    needs: basic-tests
     uses: ./.github/workflows/reusable_integration_tests.yml
     secrets: inherit
 
   database-postgres-tests:
     name: PostgreSQL Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_database_tests.yml
     with:
       database-type: 'postgres'
@@ -38,7 +37,7 @@ jobs:
 
   database-neo4j-tests:
     name: Neo4j Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_database_tests.yml
     with:
       database-type: 'neo4j'
@@ -46,48 +45,59 @@ jobs:
 
   notebook-tests:
     name: Notebook Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_notebooks_tests.yml
     secrets: inherit
 
   python-version-tests:
     name: Python Version Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_python_version_tests.yml
     secrets: inherit
 
   # Matrix-based vector database tests
   vector-db-tests:
     name: Vector DB Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_vector_db_tests.yml
     secrets: inherit
 
   # Matrix-based example tests
   example-tests:
     name: Example Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_examples_tests.yml
     secrets: inherit
 
   # Windows tests
   windows-tests:
     name: Windows Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/reusable_windows_tests.yml
     secrets: inherit
 
   # Additional LLM tests
   gemini-tests:
     name: Gemini Tests
-    needs: integration-tests
+    needs: [basic-tests, integration-tests]
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
   # Ollama tests moved to the end
   ollama-tests:
     name: Ollama Tests
-    needs: integration-tests
+    needs: [
+      basic-tests,
+      integration-tests,
+      database-postgres-tests,
+      database-neo4j-tests,
+      notebook-tests,
+      python-version-tests,
+      vector-db-tests,
+      example-tests,
+      windows-tests,
+      gemini-tests
+    ]
     uses: ./.github/workflows/reusable_ollama_tests.yml
     secrets: inherit
 
