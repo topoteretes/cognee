@@ -39,40 +39,40 @@ jobs:
 
   graph-db-tests:
     name: Graph Database Tests
-    needs: [basic-tests, server-tests]
+    needs: [basic-tests, server-tests, docker-compose-test, docker-ci-test]
     uses: ./.github/workflows/reusable_graph_db_tests.yml
     secrets: inherit
 
   notebook-tests:
     name: Notebook Tests
-    needs: [basic-tests, server-tests]
+    needs: [basic-tests, server-tests, docker-compose-test, docker-ci-test]
     uses: ./.github/workflows/reusable_notebooks_tests.yml
     secrets: inherit
 
   python-version-tests:
     name: Python Version Tests
-    needs: [basic-tests, server-tests]
+    needs: [basic-tests, server-tests, docker-compose-test, docker-ci-test]
     uses: ./.github/workflows/reusable_python_version_tests.yml
     secrets: inherit
 
   # Matrix-based vector database tests
   vector-db-tests:
     name: Vector DB Tests
-    needs: [basic-tests, server-tests]
+    needs: [basic-tests, server-tests, docker-compose-test, docker-ci-test]
     uses: ./.github/workflows/reusable_vector_db_tests.yml
     secrets: inherit
 
   # Matrix-based example tests
   example-tests:
     name: Example Tests
-    needs: [basic-tests, server-tests]
+    needs: [basic-tests, server-tests, docker-compose-test, docker-ci-test]
     uses: ./.github/workflows/reusable_examples_tests.yml
     secrets: inherit
 
   # Additional LLM tests
   gemini-tests:
     name: Gemini Tests
-    needs: [basic-tests, server-tests]
+    needs: [basic-tests, server-tests, docker-compose-test, docker-ci-test]
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
@@ -87,7 +87,9 @@ jobs:
       python-version-tests,
       vector-db-tests,
       example-tests,
-      gemini-tests
+      gemini-tests,
+      docker-compose-test,
+      docker-ci-test,
     ]
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
@@ -103,7 +105,9 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
-      ollama-tests
+      ollama-tests,
+      docker-compose-test,
+      docker-ci-test,
     ]
     runs-on: ubuntu-latest
     if: always()
@@ -118,6 +122,8 @@ jobs:
                 "${{ needs.vector-db-tests.result }}" == "success" &&
                 "${{ needs.example-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
+                "${{ needs.docker-compose-test.result }}" == "success" &&
+                "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.ollama-tests.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
