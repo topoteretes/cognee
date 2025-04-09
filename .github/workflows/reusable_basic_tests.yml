@@ -53,6 +53,15 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --all-extras
 
+      # Debug steps to verify .venv is created
+      - name:
+          Debug: List current directory
+        run: ls -la
+
+      - name:
+          Debug: List .venv directory if exists
+        run: ls -la .venv || echo ".venv not found"
+
       - name: Upload virtual environment artifact
         id: upload-artifact
         uses: actions/upload-artifact@v4
