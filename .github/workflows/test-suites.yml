@@ -27,6 +27,16 @@ jobs:
     uses: ./.github/workflows/reusable_server_tests.yml
     secrets: inherit
 
+  docker-compose-test:
+    name: server Tests
+    uses: ./.github/workflows/docker_compose.yml
+    secrets: inherit
+
+  docker-ci-test:
+    name: server Tests
+    uses: ./.github/workflows/ci.yaml
+    secrets: inherit
+
   graph-db-tests:
     name: Graph Database Tests
     needs: [basic-tests, server-tests]
