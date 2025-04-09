@@ -25,20 +25,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install Kuzu Dependencies
-        run: poetry install --extras kuzu --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Run Kuzu Tests
         env:
@@ -61,20 +51,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@master
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install dependencies
-        run: poetry install -E neo4j --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Run default Neo4j
         env:

@@ -46,22 +46,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@master
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install dependencies
-        run: |
-          poetry install --no-interaction --all-extras
-          poetry add jupyter --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Execute Jupyter Notebook
         env:

@@ -36,20 +36,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install ChromaDB Dependencies
-        run: poetry install --extras chromadb --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Run ChromaDB Tests
         env:
@@ -77,20 +67,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install Weaviate Dependencies
-        run: poetry install --extras weaviate --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Run Weaviate Tests
         env:
@@ -117,20 +97,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install Milvus Dependencies
-        run: poetry install --extras milvus --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Run Milvus Tests
         env:
@@ -157,20 +127,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@master
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install dependencies
-        run: poetry install -E qdrant --no-interaction
+          python-version: ${{ inputs.python-version }}
 
       - name: Run default Qdrant
         env:
@@ -211,27 +171,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-postgres
-
-      - name: Install dependencies for Postgres
-        run: poetry install -E postgres --no-interaction
 
       - name: Run PGVector Tests
         env:

@@ -48,18 +48,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install Poetry
-        run: |
-          python -m pip install --upgrade pip
-          pip install poetry
-
-      - name: Install dependencies
-        run: poetry install --no-interaction -E docs -E evals
+          python-version: ${{ inputs.python-version }}
 
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
