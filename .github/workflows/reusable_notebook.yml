@@ -51,6 +51,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install specific db dependency
+        run: |
+          poetry install -E notebook
+
       - name: Execute Jupyter Notebook
         env:
           ENV: 'dev'

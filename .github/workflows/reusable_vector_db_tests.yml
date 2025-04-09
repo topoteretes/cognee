@@ -41,6 +41,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install specific db dependency
+        run: |
+          poetry install -E chromadb
+
       - name: Run ChromaDB Tests
         env:
           ENV: 'dev'
@@ -72,6 +76,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install specific db dependency
+        run: |
+          poetry install -E weaviate
+
       - name: Run Weaviate Tests
         env:
           ENV: 'dev'
@@ -102,6 +110,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install specific db dependency
+        run: |
+          poetry install -E milvus
+
       - name: Run Milvus Tests
         env:
           ENV: 'dev'
@@ -131,6 +143,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E qdrant
 
       - name: Run default Qdrant
         env:
@@ -175,6 +191,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E postgres
 
       - name: Run PGVector Tests
         env:

@@ -30,6 +30,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install specific db dependency
+        run: |
+          poetry install -E kuzu
+
       - name: Run Kuzu Tests
         env:
           ENV: 'dev'
@@ -55,6 +59,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E neo4j
 
       - name: Run default Neo4j
         env:
