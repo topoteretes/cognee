@@ -5,7 +5,6 @@ import os
 import signal
 import requests
 import sys
-from pathlib import Path
 
 
 class TestCogneeServerStart(unittest.TestCase):
@@ -14,8 +13,8 @@ class TestCogneeServerStart(unittest.TestCase):
         # Start the Cognee server - just check if the server can start without errors
         cls.server_process = subprocess.Popen(
             [
-                "poetry",
-                "run",
+                sys.executable,
+                "-m",
                 "uvicorn",
                 "cognee.api.client:app",
                 "--host",
