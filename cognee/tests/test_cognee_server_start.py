@@ -44,22 +44,15 @@ class TestCogneeServerStart(unittest.TestCase):
 
     def test_server_is_running(self):
         """Test that the server is running and can accept connections."""
-        try:
-            # Test health endpoint
-            health_response = requests.get("http://localhost:8000/health", timeout=10)
-            self.assertEqual(health_response.status_code, 200)
+        # Test health endpoint
+        health_response = requests.get("http://localhost:8000/health", timeout=10)
+        self.assertEqual(health_response.status_code, 200)
 
-            # Test root endpoint
-            root_response = requests.get("http://localhost:8000/", timeout=10)
-            self.assertEqual(root_response.status_code, 200)
-            self.assertIn("message", root_response.json())
-            self.assertEqual(root_response.json()["message"], "Hello, World, I am alive!")
-        except requests.RequestException as e:
-            # Instead of failing, print the error and pass the test
-            # This makes the test more robust in CI environments where networking might be restricted
-            print(f"Warning: Server may be running but connection failed: {e}", file=sys.stderr)
-            # Check server process is still alive
-            self.assertIsNone(self.server_process.poll(), "Server process should still be running")
+        # Test root endpoint
+        root_response = requests.get("http://localhost:8000/", timeout=10)
+        self.assertEqual(root_response.status_code, 200)
+        self.assertIn("message", root_response.json())
+        self.assertEqual(root_response.json()["message"], "Hello, World, I am alive!")
 
 
 if __name__ == "__main__":
