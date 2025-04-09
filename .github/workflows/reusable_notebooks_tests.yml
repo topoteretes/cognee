@@ -31,3 +31,10 @@ jobs:
     with:
       notebook-location: notebooks/cognee_multimedia_demo.ipynb
     secrets: inherit
+
+  run-graphrag-vs-rag:
+    name: Graphrag vs Rag notebook
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/graphrag_vs_rag.ipynb
+    secrets: inherit
