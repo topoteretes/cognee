@@ -3,7 +3,7 @@ name: test | ollama
 on:
   workflow_call:
     secrets:
-      inherit: true
+      inherit
 jobs:
 
   run_simple_example_test:
