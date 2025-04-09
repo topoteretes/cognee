@@ -3,10 +3,6 @@ name: test | docker compose
 on:
   workflow_call:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
-
 jobs:
   docker-compose-test:
     runs-on: ubuntu-22.04
