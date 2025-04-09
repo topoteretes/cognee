@@ -53,6 +53,9 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install psycopg2 binary
+        run: pip install psycopg2-binary
+
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
 
