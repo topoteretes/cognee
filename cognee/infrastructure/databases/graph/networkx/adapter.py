@@ -111,13 +111,9 @@ class NetworkXAdapter(GraphDBInterface):
             self.graph.out_edges(node_id, data=True)
         )
 
-    async def delete_node(self, node_id: str) -> None:
+    async def delete_node(self, node_id: UUID) -> None:
         """Asynchronously delete a node and all its relationships from the graph if it exists."""
-        # Ensure graph is loaded
-        if self.graph is None:
-            await self.load_graph_from_file()
 
-        print(f"Deleting node: {node_id}")
         if self.graph.has_node(node_id):
             # First remove all edges connected to the node
             for edge in list(self.graph.edges(node_id, data=True)):
@@ -136,7 +132,7 @@ class NetworkXAdapter(GraphDBInterface):
         else:
             print(f"Node {node_id} not found in graph")
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: List[UUID]) -> None:
         self.graph.remove_nodes_from(node_ids)
         await self.save_graph_to_file(self.filename)
 
@@ -584,27 +580,25 @@ class NetworkXAdapter(GraphDBInterface):
 
         print(f"Found {len(made_from_nodes)} made_from nodes")
 
-        # Convert all UUIDs to strings in the final return value
+        # Return UUIDs directly without string conversion
         return {
-            "document": [
-                {"id": str(document["id"]), **{k: v for k, v in document.items() if k != "id"}}
-            ]
+            "document": [{"id": document["id"], **{k: v for k, v in document.items() if k != "id"}}]
             if document
             else [],
             "chunks": [
-                {"id": str(chunk["id"]), **{k: v for k, v in chunk.items() if k != "id"}}
+                {"id": chunk["id"], **{k: v for k, v in chunk.items() if k != "id"}}
                 for chunk in chunks
             ],
             "orphan_entities": [
-                {"id": str(entity["id"]), **{k: v for k, v in entity.items() if k != "id"}}
+                {"id": entity["id"], **{k: v for k, v in entity.items() if k != "id"}}
                 for entity in orphan_entities
             ],
             "made_from_nodes": [
-                {"id": str(node["id"]), **{k: v for k, v in node.items() if k != "id"}}
+                {"id": node["id"], **{k: v for k, v in node.items() if k != "id"}}
                 for node in made_from_nodes
             ],
             "orphan_types": [
-                {"id": str(type_node["id"]), **{k: v for k, v in type_node.items() if k != "id"}}
+                {"id": type_node["id"], **{k: v for k, v in type_node.items() if k != "id"}}
                 for type_node in orphan_types
             ],
         }
@@ -614,14 +608,11 @@ class NetworkXAdapter(GraphDBInterface):
         degree_one_entities = []
         for node_id, attrs in self.graph.nodes(data=True):
             if attrs.get("type") == "Entity":
-                # Count all edges (both incoming and outgoing) with keys=True
-                in_edges = list(self.graph.in_edges(node_id, data=True, keys=True))
-                out_edges = list(self.graph.out_edges(node_id, data=True, keys=True))
-                total_edges = in_edges + out_edges
-                if len(total_edges) == 1:
-                    degree_one_entities.append(
-                        {"id": str(node_id), **attrs}
-                    )  # Convert UUID to string
+                # Get all connections for this node
+                connections = await self.get_connections(node_id)
+                # If there's only one connection, it's a degree-one node
+                if len(connections) == 1:
+                    degree_one_entities.append({"id": node_id, **attrs})  # Keep as UUID
         return degree_one_entities
 
     async def get_degree_one_entity_types(self):
@@ -629,10 +620,9 @@ class NetworkXAdapter(GraphDBInterface):
         degree_one_types = []
         for node_id, attrs in self.graph.nodes(data=True):
             if attrs.get("type") == "EntityType":
-                # Count all edges (both incoming and outgoing) with keys=True
-                in_edges = list(self.graph.in_edges(node_id, data=True, keys=True))
-                out_edges = list(self.graph.out_edges(node_id, data=True, keys=True))
-                total_edges = in_edges + out_edges
-                if len(total_edges) == 1:
-                    degree_one_types.append({"id": str(node_id), **attrs})  # Convert UUID to string
+                # Get all connections for this node
+                connections = await self.get_connections(node_id)
+                # If there's only one connection, it's a degree-one node
+                if len(connections) == 1:
+                    degree_one_types.append({"id": node_id, **attrs})  # Keep as UUID
         return degree_one_types
