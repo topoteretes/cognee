@@ -25,6 +25,11 @@ jobs:
     name: Run Linting
     runs-on: ubuntu-22.04
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
@@ -37,6 +42,11 @@ jobs:
     name: Run Formatting Check
     runs-on: ubuntu-22.04
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
@@ -51,6 +61,11 @@ jobs:
     name: Run Unit Tests
     runs-on: ubuntu-22.04
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
@@ -63,6 +78,11 @@ jobs:
     name: Run Integration Tests
     runs-on: ubuntu-22.04
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
@@ -80,6 +100,11 @@ jobs:
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
@@ -97,6 +122,11 @@ jobs:
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
