@@ -28,13 +28,13 @@ jobs:
     secrets: inherit
 
   docker-compose-test:
-    name: server Tests
+    name: Docker Compose Test
     needs: [basic-tests, server-tests]
     uses: ./.github/workflows/docker_compose.yml
     secrets: inherit
 
   docker-ci-test:
-    name: server Tests
+    name: Docker CI test
     needs: [basic-tests, server-tests]
     uses: ./.github/workflows/ci.yaml
     secrets: inherit
