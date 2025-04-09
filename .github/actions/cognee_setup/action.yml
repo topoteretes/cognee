@@ -25,4 +25,4 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: poetry install --no-interaction --all-extras
+      run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama
