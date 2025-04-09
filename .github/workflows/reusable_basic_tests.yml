@@ -55,11 +55,9 @@ jobs:
 
       # Debug steps to verify .venv is created
       - name:
-          Debug: List current directory
         run: ls -la
 
       - name:
-          Debug: List .venv directory if exists
         run: ls -la .venv || echo ".venv not found"
 
       - name: Upload virtual environment artifact
