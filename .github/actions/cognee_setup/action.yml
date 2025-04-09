@@ -32,4 +32,5 @@ runs:
         key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
 
     - name: Install dependencies
+      shell: bash
       run: poetry install --no-interaction --all-extras
