@@ -242,8 +242,9 @@ class NetworkXAdapter(GraphDBInterface):
     async def create_empty_graph(self, file_path: str) -> None:
         self.graph = nx.MultiDiGraph()
 
+        # Only create directory if file_path contains a directory
         file_dir = os.path.dirname(file_path)
-        if not os.path.exists(file_dir):
+        if file_dir and not os.path.exists(file_dir):
             os.makedirs(file_dir, exist_ok=True)
 
         await self.save_graph_to_file(file_path)
@@ -456,91 +457,161 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def get_document_subgraph(self, content_hash: str):
         """Get all nodes that should be deleted when removing a document."""
-        # Find the document node
+        # Ensure graph is loaded
+        if self.graph is None:
+            await self.load_graph_from_file()
+
+        # Find the document node by looking for content_hash in the name field
         document = None
-        for node, attrs in self.graph.nodes(data=True):
-            if attrs.get("type") == "TextDocument" and attrs.get("content_hash") == content_hash:
-                document = {"id": node, **attrs}
+        document_node_id = None
+        for node_id, attrs in self.graph.nodes(data=True):
+            if attrs.get("type") == "TextDocument" and attrs.get("name") == f"text_{content_hash}":
+                document = {"id": str(node_id), **attrs}  # Convert UUID to string for consistency
+                document_node_id = node_id  # Keep the original UUID
                 break
 
         if not document:
             return None
 
-        # Find chunks connected via is_part_of
+        print(f"Found document node: {document_node_id}")
+
+        # Find chunks connected via is_part_of (chunks point TO document)
         chunks = []
-        for node, attrs in self.graph.nodes(data=True):
-            edges = self.graph.out_edges(node, data=True)
-            for _, target, edge_data in edges:
-                if edge_data.get("relationship_name") == "is_part_of" and target == document["id"]:
-                    chunks.append({"id": node, **attrs})
+        for source, target, edge_data in self.graph.in_edges(document_node_id, data=True):
+            print(
+                f"Checking chunk edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
+            )
+            if edge_data.get("relationship_name") == "is_part_of":
+                print(f"Found chunk: {source}")
+                chunks.append({"id": source, **self.graph.nodes[source]})  # Keep as UUID object
 
-        # Find orphaned entities (connected only to these chunks)
+        print(f"Found {len(chunks)} chunks")
+
+        # Find entities connected to chunks (chunks point TO entities via contains)
+        entities = []
+        for chunk in chunks:
+            chunk_id = chunk["id"]  # Already a UUID object
+            for source, target, edge_data in self.graph.out_edges(chunk_id, data=True):
+                print(
+                    f"Checking entity edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
+                )
+                if edge_data.get("relationship_name") == "contains":
+                    print(f"Found entity: {target}")
+                    entities.append(
+                        {"id": target, **self.graph.nodes[target]}
+                    )  # Keep as UUID object
+
+        print(f"Found {len(entities)} entities")
+
+        # Find orphaned entities (entities only connected to chunks we're deleting)
         orphan_entities = []
-        for node, attrs in self.graph.nodes(data=True):
-            if attrs.get("type") != "Entity":
-                continue
-
+        for entity in entities:
+            entity_id = entity["id"]  # Already a UUID object
             # Get all chunks that contain this entity
             containing_chunks = []
-            for source, target, edge_data in self.graph.in_edges(node, data=True):
+            for source, target, edge_data in self.graph.in_edges(entity_id, data=True):
                 if edge_data.get("relationship_name") == "contains":
-                    containing_chunks.append(source)
+                    containing_chunks.append(source)  # Keep as UUID object
 
             # Check if all containing chunks are in our chunks list
             chunk_ids = [chunk["id"] for chunk in chunks]
             if containing_chunks and all(c in chunk_ids for c in containing_chunks):
-                orphan_entities.append({"id": node, **attrs})
+                print(f"Found orphaned entity: {entity_id}")
+                orphan_entities.append(entity)
 
-        # Find nodes connected via made_from
-        made_from_nodes = []
-        for source, target, edge_data in self.graph.in_edges(document["id"], data=True):
-            if edge_data.get("relationship_name") == "made_from":
-                made_from_nodes.append({"id": source, **self.graph.nodes[source]})
+        print(f"Found {len(orphan_entities)} orphaned entities")
 
         # Find orphaned entity types
         orphan_types = []
+        seen_types = set()  # Track seen types to avoid duplicates
         for entity in orphan_entities:
-            for _, target, edge_data in self.graph.out_edges(entity["id"], data=True):
-                if edge_data.get("relationship_name") == "instance_of":
+            entity_id = entity["id"]  # Already a UUID object
+            for _, target, edge_data in self.graph.out_edges(entity_id, data=True):
+                print(
+                    f"Checking entity type edge: {entity_id} -> {target} with relationship: {edge_data.get('relationship_name')}"
+                )
+                if edge_data.get("relationship_name") in ["is_a", "instance_of"]:
                     # Check if this type is only connected to entities we're deleting
                     type_node = self.graph.nodes[target]
-                    if type_node.get("type") == "EntityType":
+                    if type_node.get("type") == "EntityType" and target not in seen_types:
                         is_orphaned = True
                         for source, _, edge_data in self.graph.in_edges(target, data=True):
-                            if edge_data.get(
-                                "relationship_name"
-                            ) == "instance_of" and source not in [e["id"] for e in orphan_entities]:
+                            if edge_data.get("relationship_name") in [
+                                "is_a",
+                                "instance_of",
+                            ] and source not in [e["id"] for e in orphan_entities]:
                                 is_orphaned = False
                                 break
                         if is_orphaned:
-                            orphan_types.append({"id": target, **type_node})
+                            print(f"Found orphaned type: {target}")
+                            orphan_types.append({"id": target, **type_node})  # Keep as UUID object
+                            seen_types.add(target)  # Mark as seen
 
+        print(f"Found {len(orphan_types)} orphaned types")
+
+        # Find nodes connected via made_from (document points TO source)
+        made_from_nodes = []
+        for source, target, edge_data in self.graph.out_edges(document_node_id, data=True):
+            print(
+                f"Checking made_from edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
+            )
+            if edge_data.get("relationship_name") == "made_from":
+                print(f"Found made_from node: {target}")
+                made_from_nodes.append(
+                    {"id": target, **self.graph.nodes[target]}
+                )  # Keep as UUID object
+
+        print(f"Found {len(made_from_nodes)} made_from nodes")
+
+        # Convert all UUIDs to strings in the final return value
         return {
-            "document": [document] if document else [],
-            "chunks": chunks,
-            "orphan_entities": orphan_entities,
-            "made_from_nodes": made_from_nodes,
-            "orphan_types": orphan_types,
+            "document": [
+                {"id": str(document["id"]), **{k: v for k, v in document.items() if k != "id"}}
+            ]
+            if document
+            else [],
+            "chunks": [
+                {"id": str(chunk["id"]), **{k: v for k, v in chunk.items() if k != "id"}}
+                for chunk in chunks
+            ],
+            "orphan_entities": [
+                {"id": str(entity["id"]), **{k: v for k, v in entity.items() if k != "id"}}
+                for entity in orphan_entities
+            ],
+            "made_from_nodes": [
+                {"id": str(node["id"]), **{k: v for k, v in node.items() if k != "id"}}
+                for node in made_from_nodes
+            ],
+            "orphan_types": [
+                {"id": str(type_node["id"]), **{k: v for k, v in type_node.items() if k != "id"}}
+                for type_node in orphan_types
+            ],
         }
 
     async def get_degree_one_entity_nodes(self):
         """Get all entity nodes that have only one connection."""
         degree_one_entities = []
-        for node, attrs in self.graph.nodes(data=True):
+        for node_id, attrs in self.graph.nodes(data=True):
             if attrs.get("type") == "Entity":
-                # Count all edges (both incoming and outgoing)
-                degree = len(list(self.graph.edges(node))) + len(list(self.graph.in_edges(node)))
-                if degree == 1:
-                    degree_one_entities.append({"id": node, **attrs})
+                # Count all edges (both incoming and outgoing) with keys=True
+                in_edges = list(self.graph.in_edges(node_id, data=True, keys=True))
+                out_edges = list(self.graph.out_edges(node_id, data=True, keys=True))
+                total_edges = in_edges + out_edges
+                if len(total_edges) == 1:
+                    degree_one_entities.append(
+                        {"id": str(node_id), **attrs}
+                    )  # Convert UUID to string
         return degree_one_entities
 
     async def get_degree_one_entity_types(self):
         """Get all entity type nodes that have only one connection."""
         degree_one_types = []
-        for node, attrs in self.graph.nodes(data=True):
+        for node_id, attrs in self.graph.nodes(data=True):
             if attrs.get("type") == "EntityType":
-                # Count all edges (both incoming and outgoing)
-                degree = len(list(self.graph.edges(node))) + len(list(self.graph.in_edges(node)))
-                if degree == 1:
-                    degree_one_types.append({"id": node, **attrs})
+                # Count all edges (both incoming and outgoing) with keys=True
+                in_edges = list(self.graph.in_edges(node_id, data=True, keys=True))
+                out_edges = list(self.graph.out_edges(node_id, data=True, keys=True))
+                total_edges = in_edges + out_edges
+                if len(total_edges) == 1:
+                    degree_one_types.append({"id": str(node_id), **attrs})  # Convert UUID to string
         return degree_one_types

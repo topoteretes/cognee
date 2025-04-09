@@ -4,7 +4,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from sqlalchemy import select
 from sqlalchemy.sql import delete as sql_delete
 from cognee.modules.data.models import Data, DatasetData, Dataset
-from cognee.infrastructure.config import get_graph_db
+from cognee.infrastructure.databases.graph import get_graph_engine
 from io import StringIO, BytesIO
 import hashlib
 import asyncio
@@ -33,7 +33,7 @@ async def delete(
     """
 
     if graph_db is None:
-        graph_db = get_graph_db()
+        graph_db = await get_graph_engine()
 
     # Handle different input types
     if isinstance(data, str):
@@ -80,9 +80,19 @@ async def delete_single_document(
     print(f"Deletion result: {deletion_result}")
 
     # Get the deleted node IDs and convert to UUID
-    deleted_node_ids = [
-        UUID(node_id.replace("-", "")) for node_id in deletion_result["deleted_node_ids"]
-    ]
+    deleted_node_ids = []
+    for node_id in deletion_result["deleted_node_ids"]:
+        try:
+            # Handle both string and UUID formats
+            if isinstance(node_id, str):
+                # Remove any hyphens if present
+                node_id = node_id.replace("-", "")
+                deleted_node_ids.append(UUID(node_id))
+            else:
+                deleted_node_ids.append(node_id)
+        except Exception as e:
+            print(f"Error converting node ID {node_id} to UUID: {e}")
+            continue
 
     # Delete from vector database
     vector_engine = get_vector_engine()
@@ -208,6 +218,7 @@ async def delete_document_subgraph(graph_db, content_hash: str, mode: str = "sof
     if mode == "hard":
         # Get and delete degree one entity nodes
         degree_one_entity_nodes = await graph_db.get_degree_one_entity_nodes()
+        print(f"Degree one entity nodes: {degree_one_entity_nodes}")
         for node in degree_one_entity_nodes:
             await graph_db.delete_node(node["id"])
             print(f"Deleted degree one entity node: {node['id']}")
@@ -216,6 +227,7 @@ async def delete_document_subgraph(graph_db, content_hash: str, mode: str = "sof
 
         # Get and delete degree one entity types
         degree_one_entity_types = await graph_db.get_degree_one_entity_types()
+        print(f"Degree one entity types: {degree_one_entity_types}")
         for node in degree_one_entity_types:
             await graph_db.delete_node(node["id"])
             print(f"Deleted degree one entity type node: {node['id']}")

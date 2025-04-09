@@ -23,7 +23,7 @@ def get_graph_db():
         elif db_type == "kuzu":
             _graph_db = KuzuAdapter(db_path=os.getenv("KUZU_DB_PATH"))
         elif db_type == "networkx":
-            _graph_db = NetworkXAdapter()
+            _graph_db = NetworkXAdapter(filename=os.getenv("NETWORKX_DB_PATH", "graph.db"))
         else:
             raise ValueError(f"Unsupported graph database type: {db_type}")
 
