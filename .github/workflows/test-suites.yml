@@ -22,47 +22,47 @@ jobs:
     uses: ./.github/workflows/reusable_basic_tests.yml
     secrets: inherit
 
-  integration-tests:
-    name: Integration Tests
-    uses: ./.github/workflows/reusable_integration_tests.yml
+  server-tests:
+    name: server Tests
+    uses: ./.github/workflows/reusable_server_tests.yml
     secrets: inherit
 
   graph-db-tests:
     name: Graph Database Tests
-    needs: [basic-tests, integration-tests]
+    needs: [basic-tests, server-tests]
     uses: ./.github/workflows/reusable_graph_db_tests.yml
     secrets: inherit
 
   notebook-tests:
     name: Notebook Tests
-    needs: [basic-tests, integration-tests]
+    needs: [basic-tests, server-tests]
     uses: ./.github/workflows/reusable_notebooks_tests.yml
     secrets: inherit
 
   python-version-tests:
     name: Python Version Tests
-    needs: [basic-tests, integration-tests]
+    needs: [basic-tests, server-tests]
     uses: ./.github/workflows/reusable_python_version_tests.yml
     secrets: inherit
 
   # Matrix-based vector database tests
   vector-db-tests:
     name: Vector DB Tests
-    needs: [basic-tests, integration-tests]
+    needs: [basic-tests, server-tests]
     uses: ./.github/workflows/reusable_vector_db_tests.yml
     secrets: inherit
 
   # Matrix-based example tests
   example-tests:
     name: Example Tests
-    needs: [basic-tests, integration-tests]
+    needs: [basic-tests, server-tests]
     uses: ./.github/workflows/reusable_examples_tests.yml
     secrets: inherit
 
   # Additional LLM tests
   gemini-tests:
     name: Gemini Tests
-    needs: [basic-tests, integration-tests]
+    needs: [basic-tests, server-tests]
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
@@ -71,7 +71,7 @@ jobs:
     name: Ollama Tests
     needs: [
       basic-tests,
-      integration-tests,
+      server-tests,
       graph-db-tests,
       notebook-tests,
       python-version-tests,
@@ -86,7 +86,7 @@ jobs:
     name: Test Completion Status
     needs: [
       basic-tests,
-      integration-tests,
+      server-tests,
       graph-db-tests,
       notebook-tests,
       python-version-tests,
@@ -101,7 +101,7 @@ jobs:
       - name: Check Status
         run: |
           if [[ "${{ needs.basic-tests.result }}" == "success" &&
-                "${{ needs.integration-tests.result }}" == "success" &&
+                "${{ needs.server-tests.result }}" == "success" &&
                 "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
                 "${{ needs.python-version-tests.result }}" == "success" &&
