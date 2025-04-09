@@ -35,16 +35,6 @@ jobs:
   run-integration-tests:
     name: Integration Tests
     runs-on: ubuntu-22.04
-    services:
-      chromadb:
-        image: chromadb/chroma:0.6.3
-        env:
-          CHROMA_SERVER_AUTH_CREDENTIALS: "test-token"
-          CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: "chromadb.auth.token.TokenAuthCredentialsProvider"
-          CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
-        ports:
-          - 3002:8000
-
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -71,13 +61,10 @@ jobs:
           key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install --extras chromadb --no-interaction
+        run: poetry install --extras api --no-interaction
 
       - name: Run Server Tests
         env:
-          VECTOR_DB_PROVIDER: chromadb
-          VECTOR_DB_URL: http://localhost:3002
-          VECTOR_DB_KEY: test-token
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
