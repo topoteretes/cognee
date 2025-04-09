@@ -112,10 +112,29 @@ class NetworkXAdapter(GraphDBInterface):
         )
 
     async def delete_node(self, node_id: str) -> None:
-        """Asynchronously delete a node from the graph if it exists."""
+        """Asynchronously delete a node and all its relationships from the graph if it exists."""
+        # Ensure graph is loaded
+        if self.graph is None:
+            await self.load_graph_from_file()
+
+        print(f"Deleting node: {node_id}")
         if self.graph.has_node(node_id):
+            # First remove all edges connected to the node
+            for edge in list(self.graph.edges(node_id, data=True)):
+                source, target, data = edge
+                self.graph.remove_edge(source, target, key=data.get("relationship_name"))
+                print(
+                    f"Removed edge: {source} -> {target} with relationship: {data.get('relationship_name')}"
+                )
+
+            # Then remove the node itself
             self.graph.remove_node(node_id)
+            print(f"Node {node_id} deleted")
+
+            # Save the updated graph state
             await self.save_graph_to_file(self.filename)
+        else:
+            print(f"Node {node_id} not found in graph")
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
         self.graph.remove_nodes_from(node_ids)
@@ -549,17 +568,19 @@ class NetworkXAdapter(GraphDBInterface):
 
         print(f"Found {len(orphan_types)} orphaned types")
 
-        # Find nodes connected via made_from (document points TO source)
+        # Find nodes connected via made_from (chunks point TO summaries)
         made_from_nodes = []
-        for source, target, edge_data in self.graph.out_edges(document_node_id, data=True):
-            print(
-                f"Checking made_from edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
-            )
-            if edge_data.get("relationship_name") == "made_from":
-                print(f"Found made_from node: {target}")
-                made_from_nodes.append(
-                    {"id": target, **self.graph.nodes[target]}
-                )  # Keep as UUID object
+        for chunk in chunks:
+            chunk_id = chunk["id"]  # Already a UUID object
+            for source, target, edge_data in self.graph.in_edges(chunk_id, data=True):
+                print(
+                    f"Checking made_from edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
+                )
+                if edge_data.get("relationship_name") == "made_from":
+                    print(f"Found made_from node: {source}")
+                    made_from_nodes.append(
+                        {"id": source, **self.graph.nodes[source]}
+                    )  # Keep as UUID object
 
         print(f"Found {len(made_from_nodes)} made_from nodes")
 

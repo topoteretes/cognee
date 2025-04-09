@@ -20,7 +20,6 @@ def get_text_content_hash(text: str) -> str:
 async def delete(
     data: Union[BinaryIO, List[BinaryIO], str, List[str]],
     dataset_name: str = "main_dataset",
-    graph_db=None,
     mode: str = "soft",
 ):
     """Delete a document and all its related nodes from both relational and graph databases.
@@ -28,12 +27,8 @@ async def delete(
     Args:
         data: The data to delete (file, URL, or text)
         dataset_name: Name of the dataset to delete from
-        graph_db: Optional graph database connection
         mode: "soft" (default) or "hard" - hard mode also deletes degree-one entity nodes
     """
-
-    if graph_db is None:
-        graph_db = await get_graph_engine()
 
     # Handle different input types
     if isinstance(data, str):
@@ -41,7 +36,7 @@ async def delete(
             with open(data.replace("file://", ""), mode="rb") as file:
                 classified_data = classify(file)
                 content_hash = classified_data.get_metadata()["content_hash"]
-                return await delete_single_document(content_hash, dataset_name, graph_db, mode)
+                return await delete_single_document(content_hash, dataset_name, mode)
         elif data.startswith("http"):  # It's a URL
             import requests
 
@@ -50,32 +45,28 @@ async def delete(
             file_data = BytesIO(response.content)
             classified_data = classify(file_data)
             content_hash = classified_data.get_metadata()["content_hash"]
-            return await delete_single_document(content_hash, dataset_name, graph_db, mode)
+            return await delete_single_document(content_hash, dataset_name, mode)
         else:  # It's a text string
             content_hash = get_text_content_hash(data)
             classified_data = classify(data)
-            return await delete_single_document(content_hash, dataset_name, graph_db, mode)
+            return await delete_single_document(content_hash, dataset_name, mode)
     elif isinstance(data, list):
         # Handle list of inputs
-        results = await asyncio.gather(
-            *[delete(item, dataset_name, graph_db, mode) for item in data]
-        )
+        results = await asyncio.gather(*[delete(item, dataset_name, mode) for item in data])
         return {"status": "success", "message": "Multiple documents deleted", "results": results}
     else:  # It's already a BinaryIO
         data.seek(0)  # Ensure we're at the start of the file
         classified_data = classify(data)
         content_hash = classified_data.get_metadata()["content_hash"]
-        return await delete_single_document(content_hash, dataset_name, graph_db, mode)
+        return await delete_single_document(content_hash, dataset_name, mode)
 
 
-async def delete_single_document(
-    content_hash: str, dataset_name: str, graph_db, mode: str = "soft"
-):
+async def delete_single_document(content_hash: str, dataset_name: str, mode: str = "soft"):
     """Delete a single document by its content hash."""
     print(f"Content hash: {content_hash}")
 
     # Delete from graph database
-    deletion_result = await delete_document_subgraph(graph_db, content_hash, mode)
+    deletion_result = await delete_document_subgraph(content_hash, mode)
 
     print(f"Deletion result: {deletion_result}")
 
@@ -183,8 +174,9 @@ async def delete_single_document(
     }
 
 
-async def delete_document_subgraph(graph_db, content_hash: str, mode: str = "soft"):
+async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
     """Delete a document and all its related nodes in the correct order."""
+    graph_db = await get_graph_engine()
     subgraph = await graph_db.get_document_subgraph(content_hash)
     print(f"Subgraph: {subgraph}")
     if not subgraph:
