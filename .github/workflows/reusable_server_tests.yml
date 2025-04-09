@@ -32,8 +32,8 @@ on:
         required: true
 
 jobs:
-  run-integration-tests:
-    name: Integration Tests
+  run-server-start-test:
+    name: Server Start Test
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
@@ -41,27 +41,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install --extras api --no-interaction
+          python-version: '3.11.x'
 
       - name: Run Server Tests
         env:
@@ -76,6 +59,18 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: poetry run python ./cognee/tests/test_cognee_server_start.py
 
+  run-telemetry-test:
+    name: Run Telemetry Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
       - name: Run Telemetry Tests
         env:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -87,6 +82,18 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: poetry run python ./cognee/tests/test_telemetry.py
+
+  run-telemetry-pipeline-test:
+    name: Run Telemetry Pipeline Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
 
       - name: Add telemetry identifier
         run: |
