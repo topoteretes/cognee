@@ -5,7 +5,7 @@ on:
 
 jobs:
 
-  run_simple_example_test:
+  run_ollama_test:
 
     # needs 16 Gb RAM for phi4
     runs-on: buildjet-4vcpu-ubuntu-2204
