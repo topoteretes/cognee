@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Cognee Setup
-        uses: ./.github/actions/cognee-setup
+        uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
 
