@@ -23,14 +23,6 @@ runs:
         virtualenvs-in-project: true
         installer-parallel: true
 
-    - name: Load cached venv
-      id: cache-venv
-      uses: actions/cache@v4
-      with:
-        path: .venv
-        # Combine OS + Python version + lockfile hash
-        key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
     - name: Install dependencies
       shell: bash
       run: poetry install --no-interaction --all-extras
