@@ -79,7 +79,7 @@ jobs:
       example-tests,
       gemini-tests
     ]
-    uses: ./.github/workflows/reusable_ollama_tests.yml
+    uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
 
   notify:
