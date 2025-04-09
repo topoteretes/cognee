@@ -25,32 +25,10 @@ jobs:
     name: Run Linting
     runs-on: ubuntu-22.04
     steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee-setup
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cache-venv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install --no-interaction --all-extras
 
       - name: Run Linting
         uses: astral-sh/ruff-action@v2
