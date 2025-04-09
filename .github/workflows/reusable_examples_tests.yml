@@ -33,6 +33,10 @@ jobs:
         with:
           python-version: '3.11.x'
 
+      - name: Install specific db dependency
+        run: |
+          poetry install -E postgres
+
       - name: Run Deduplication Example
         env:
           ENV: 'dev'
