@@ -90,6 +90,8 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
+      docker-compose-test,
+      docker-ci-test,
     ]
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
