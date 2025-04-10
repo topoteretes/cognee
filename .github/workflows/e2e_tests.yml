@@ -161,6 +161,23 @@ jobs:
   run-relational-db-migration-test:
     name: Run Relational DB Migration Test
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: test_migration_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -169,6 +186,19 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+
+      - name: Run PostgreSQL Script (test.sql)
+        env:
+          PGPASSWORD: cognee
+        run: |
+          # Wait until the PostgreSQL service is available
+          until pg_isready -h localhost -p 5432; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+
+          # Execute the SQL script against the test_migration_db database
+          psql -h localhost -U cognee -d test_migration_db -f ./cognee/tests/test_data/Chinook_PostgreSql.sql
 
       - name: Run relational db test
         env:

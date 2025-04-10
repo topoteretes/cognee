@@ -222,7 +222,7 @@ async def test_migration_postgres():
     # To run test manually you first need to run the Chinook_PostgreSql.sql script in the test_data directory
     cognee.config.set_migration_db_config(
         {
-            "migration_db_name": "migration_db",
+            "migration_db_name": "test_migration_db",
             "migration_db_host": "127.0.0.1",
             "migration_db_port": "5432",
             "migration_db_username": "cognee",
