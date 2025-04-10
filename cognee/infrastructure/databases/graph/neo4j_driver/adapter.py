@@ -1,6 +1,7 @@
 """Neo4j Adapter for Graph Database"""
 
 import json
+import random
 from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
@@ -36,7 +37,7 @@ class Neo4jAdapter(GraphDBInterface):
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth=(graph_database_username, graph_database_password),
-            max_connection_lifetime=120,
+            max_connection_lifetime=2400,
         )
 
     @asynccontextmanager
@@ -49,14 +50,32 @@ class Neo4jAdapter(GraphDBInterface):
         query: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        try:
-            async with self.get_session() as session:
-                result = await session.run(query, parameters=params)
-                data = await result.data()
-                return data
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        max_retries = 50
+        backoff = 0.5
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with self.get_session() as session:
+                    result = await session.run(query, parameters=params)
+                    data = await result.data()
+                    return data
+            except Neo4jError as error:
+                error_str = str(error)
+                if "DeadlockDetected" in error_str or "Neo.TransientError" in error_str:
+                    logger.error(
+                        "Deadlock or transient error on attempt %d/%d: %s",
+                        attempt,
+                        max_retries,
+                        error_str,
+                        exc_info=True,
+                    )
+                    if attempt == max_retries:
+                        raise error
+                    await asyncio.sleep(backoff)
+                    backoff = random.uniform(0.5, 20)
+                else:
+                    logger.error("Neo4j query error: %s", error, exc_info=True)
+                    raise error
 
     async def has_node(self, node_id: str) -> bool:
         results = self.query(
