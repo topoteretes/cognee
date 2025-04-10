@@ -45,6 +45,12 @@ jobs:
     uses: ./.github/workflows/graph_db_tests.yml
     secrets: inherit
 
+  relational-db-migration-tests:
+    name: Graph Database Tests
+    needs: [ basic-tests, e2e-tests ]
+    uses: ./.github/workflows/relational_db_migration_tests.yml
+    secrets: inherit
+
   notebook-tests:
     name: Notebook Tests
     needs: [basic-tests, e2e-tests]
@@ -90,6 +96,7 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
+      relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,
     ]
@@ -108,6 +115,7 @@ jobs:
       example-tests,
       gemini-tests,
       ollama-tests,
+      relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,
     ]
@@ -123,6 +131,7 @@ jobs:
                 "${{ needs.python-version-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
                 "${{ needs.example-tests.result }}" == "success" &&
+                "${{ needs.relational-db-migration-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
