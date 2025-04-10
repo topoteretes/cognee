@@ -187,7 +187,11 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Run PostgreSQL Script (test.sql)
+      - name: Install specific db dependency
+        run: |
+          poetry install -E postgres
+
+      - name: Run PostgreSQL Script to create test data (Chinook_PostgreSql.sql)
         env:
           PGPASSWORD: cognee
         run: |
