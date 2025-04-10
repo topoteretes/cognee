@@ -46,7 +46,7 @@ jobs:
     secrets: inherit
 
   relational-db-migration-tests:
-    name: Graph Database Tests
+    name: Relational DB Migration Tests
     needs: [ basic-tests, e2e-tests ]
     uses: ./.github/workflows/relational_db_migration_tests.yml
     secrets: inherit
