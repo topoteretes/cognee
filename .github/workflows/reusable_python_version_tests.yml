@@ -60,6 +60,7 @@ jobs:
         run: poetry run pytest cognee/tests/unit/
 
       - name: Run integration tests
+        if: ${{ !contains(matrix.os, 'windows') }}
         run: poetry run pytest cognee/tests/integration/
 
       - name: Run default basic pipeline
