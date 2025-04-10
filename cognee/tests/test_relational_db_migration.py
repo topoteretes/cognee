@@ -1,6 +1,6 @@
 import json
+import pathlib
 import pytest
-import pytest_asyncio
 import os
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import (
@@ -27,7 +27,6 @@ def normalize_node_name(node_name: str) -> str:
     return node_name
 
 
-@pytest_asyncio.fixture()
 async def setup_test_db():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -39,9 +38,8 @@ async def setup_test_db():
     return relational_engine
 
 
-@pytest.mark.asyncio
-async def test_relational_db_migration(setup_test_db):
-    relational_engine = setup_test_db
+async def relational_db_migration():
+    relational_engine = await setup_test_db()
     schema = await relational_engine.extract_schema()
 
     graph_engine = await get_graph_engine()
@@ -119,7 +117,7 @@ async def test_relational_db_migration(setup_test_db):
                     found_edges.add((src_name, tgt_name))
                     distinct_node_names.update([src_name, tgt_name])
     else:
-        pytest.fail(f"Unsupported graph database provider: {graph_db_provider}")
+        raise ValueError(f"Unsupported graph database provider: {graph_db_provider}")
 
     assert len(distinct_node_names) == 8, (
         f"Expected 8 distinct node references, found {len(distinct_node_names)}"
@@ -204,3 +202,43 @@ async def test_relational_db_migration(setup_test_db):
     print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
 
     print(f"All checks passed for {graph_db_provider} provider with '{relationship_label}' edges!")
+
+
+async def test_migration_sqlite():
+    database_to_migrate_path = os.path.join(pathlib.Path(__file__).parent, "test_data/")
+
+    cognee.config.set_migration_db_config(
+        {
+            "migration_db_path": database_to_migrate_path,
+            "migration_db_name": "migration_database.sqlite",
+            "migration_db_provider": "sqlite",
+        }
+    )
+
+    await relational_db_migration()
+
+
+async def test_migration_postgres():
+    # To run test manually you first need to run the Chinook_PostgreSql.sql script in the test_data directory
+    cognee.config.set_migration_db_config(
+        {
+            "migration_db_name": "migration_db",
+            "migration_db_host": "127.0.0.1",
+            "migration_db_port": "5432",
+            "migration_db_username": "cognee",
+            "migration_db_password": "cognee",
+            "migration_db_provider": "postgres",
+        }
+    )
+    await relational_db_migration()
+
+
+async def main():
+    await test_migration_sqlite()
+    await test_migration_postgres()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())
