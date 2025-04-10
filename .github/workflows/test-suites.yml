@@ -23,7 +23,7 @@ jobs:
     secrets: inherit
 
   e2e-tests:
-    name: server Tests
+    name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
     secrets: inherit
 
