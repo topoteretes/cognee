@@ -152,11 +152,11 @@ async def relational_db_migration():
         elif graph_db_provider == "kuzu":
             query_nodes = "MATCH (n:Node) RETURN count(n) as c"
             rows_n = await graph_engine.query(query_nodes)
-            node_count = rows_n[0]["c"]
+            node_count = rows_n[0][0]
 
             query_edges = "MATCH (n:Node)-[r:EDGE]->(m:Node) RETURN count(r) as c"
             rows_e = await graph_engine.query(query_edges)
-            edge_count = rows_e[0]["c"]
+            edge_count = rows_e[0][0]
 
         elif graph_db_provider == "networkx":
             nodes, edges = await graph_engine.get_graph_data()
@@ -183,11 +183,11 @@ async def relational_db_migration():
         elif graph_db_provider == "kuzu":
             query_nodes = "MATCH (n:Node) RETURN count(n) as c"
             rows_n = await graph_engine.query(query_nodes)
-            node_count = rows_n[0]["c"]
+            node_count = rows_n[0][0]
 
             query_edges = "MATCH (n:Node)-[r:EDGE]->(m:Node) RETURN count(r) as c"
             rows_e = await graph_engine.query(query_edges)
-            edge_count = rows_e[0]["c"]
+            edge_count = rows_e[0][0]
 
         elif graph_db_provider == "networkx":
             nodes, edges = await graph_engine.get_graph_data()
