@@ -41,5 +41,4 @@ async def resolve_data_directories(
                 resolved_data.append(item)
         else:  # If it's not a string add it directly
             resolved_data.append(item)
-
     return resolved_data
