@@ -34,13 +34,13 @@ async def setup_test_db():
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
 
-    relational_engine = get_migration_relational_engine()
-    return relational_engine
+    migration_engine = get_migration_relational_engine()
+    return migration_engine
 
 
 async def relational_db_migration():
-    relational_engine = await setup_test_db()
-    schema = await relational_engine.extract_schema()
+    migration_engine = await setup_test_db()
+    schema = await migration_engine.extract_schema()
 
     graph_engine = await get_graph_engine()
     await migrate_relational_database(graph_engine, schema=schema)
@@ -54,8 +54,8 @@ async def relational_db_migration():
     # 2. Assert that the search results contain "AC/DC"
     assert any("AC/DC" in r for r in search_results), "AC/DC not found in search results!"
 
-    relational_db_provider = os.getenv("MIGRATION_DB_PROVIDER", "sqlite").lower()
-    if relational_db_provider == "postgres":
+    migration_db_provider = migration_engine.engine.dialect.name
+    if migration_db_provider == "postgresql":
         relationship_label = "reports_to"
     else:
         relationship_label = "ReportsTo"
@@ -137,7 +137,7 @@ async def relational_db_migration():
         assert e in found_edges, f"Edge {e} not found in the actual '{relationship_label}' edges!"
 
     # 4. Verify the total number of nodes and edges in the graph
-    if relational_db_provider == "sqlite":
+    if migration_db_provider == "sqlite":
         if graph_db_provider == "neo4j":
             query_str = """
             MATCH (n)
@@ -168,7 +168,7 @@ async def relational_db_migration():
         assert node_count == 227, f"Expected 227 nodes, got {node_count}"
         assert edge_count == 580, f"Expected 580 edges, got {edge_count}"
 
-    elif relational_db_provider == "postgres":
+    elif migration_db_provider == "postgresql":
         if graph_db_provider == "neo4j":
             query_str = """
             MATCH (n)
