@@ -1,4 +1,4 @@
-from typing import Type, Optional
+from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt

@@ -1,7 +1,7 @@
 from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import model_validator, Field
+from pydantic import model_validator
 import os
 
 
@@ -9,8 +9,8 @@ class LLMConfig(BaseSettings):
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
     llm_endpoint: str = ""
-    llm_api_key: Optional[str] = None
-    llm_api_version: Optional[str] = None
+    llm_api_key: Optional[str] = ""
+    llm_api_version: Optional[str] = ""
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_tokens: int = 16384

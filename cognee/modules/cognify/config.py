@@ -1,8 +1,6 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.shared.data_models import DefaultContentPrediction, SummarizedContent
-from typing import Optional
-import os
 
 
 class CognifyConfig(BaseSettings):
