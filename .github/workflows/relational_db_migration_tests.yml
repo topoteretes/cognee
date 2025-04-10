@@ -33,7 +33,7 @@ on:
 
 jobs:
   run-relational-db-migration-test-networkx:
-    name: Run Relational DB Migration Test NetworkX
+    name: NetworkX Relational DB Migration Test
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -92,7 +92,7 @@ jobs:
         run: poetry run python ./cognee/tests/test_relational_db_migration.py
 
   run-relational-db-migration-test-kuzu:
-    name: Run Relational DB Migration Test Kuzu
+    name: Kuzu Relational DB Migration Test
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -152,7 +152,7 @@ jobs:
         run: poetry run python ./cognee/tests/test_relational_db_migration.py
 
   run-relational-db-migration-test-neo4j:
-    name: Run Relational DB Migration Test Kuzu
+    name: Neo4j Relational DB Migration Test
     runs-on: ubuntu-22.04
     defaults:
       run:
