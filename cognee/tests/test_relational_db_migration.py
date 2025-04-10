@@ -234,7 +234,9 @@ async def test_migration_postgres():
 
 
 async def main():
+    print("Starting SQLite database migration test...")
     await test_migration_sqlite()
+    print("Starting PostgreSQL database migration test...")
     await test_migration_postgres()
 
 
