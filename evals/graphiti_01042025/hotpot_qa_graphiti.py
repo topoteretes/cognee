@@ -37,12 +37,12 @@ async def load_corpus_to_graphiti(
             source=EpisodeType.text,
             source_description="corpus",
             reference_time=datetime.now(timezone.utc),
-            group_id=corpus_file,
         )
 
     print("All documents added to graphiti")
     return graphiti
 
+  
 async def search_graphiti(query: str, graphiti_client: Graphiti) -> str:
     """Search the graphiti graph for information related to the query"""
     results = await graphiti_client.search_(query=query)
@@ -173,7 +173,7 @@ if __name__ == "__main__":
         # QA parameters
         qa_pairs_file: str = "hotpot_50_qa_pairs.json"
         qa_limit: int = None  # Limit number of questions to process
-        results_file: str = "../graphiti_10042025/hotpot_qa_graphiti_results.json"
+        results_file: str = "hotpot_qa_graphiti_results.json"
         print_results: bool = True
 
     # Create configuration with default values

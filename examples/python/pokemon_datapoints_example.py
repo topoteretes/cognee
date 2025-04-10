@@ -175,7 +175,9 @@ async def pokemon_cognify(pokemons):
     await cognee.prune.prune_system(metadata=True)
     await cognee_setup()
 
-    tasks = [Task(add_data_points, task_config={"batch_size": 50})]
+    # tasks = [Task(add_data_points, task_config={"batch_size": 50})]
+    tasks = [Task(add_data_points)]
+
     results = run_tasks(
         tasks=tasks,
         data=pokemons,
