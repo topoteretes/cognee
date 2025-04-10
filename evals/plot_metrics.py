@@ -390,7 +390,7 @@ def plot_metrics(all_systems_metrics, output_file="metrics_comparison.png"):
 
 def main():
     """Main function to process metrics and generate plot."""
-    eval_dir = Path("")
+    eval_dir = Path(".")
     all_systems_metrics = {}
 
     # Process each system directory
