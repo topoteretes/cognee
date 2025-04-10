@@ -42,7 +42,7 @@ async def load_corpus_to_graphiti(
     print("All documents added to graphiti")
     return graphiti
 
-  
+
 async def search_graphiti(query: str, graphiti_client: Graphiti) -> str:
     """Search the graphiti graph for information related to the query"""
     results = await graphiti_client.search_(query=query)
