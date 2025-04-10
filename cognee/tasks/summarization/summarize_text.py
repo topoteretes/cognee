@@ -2,12 +2,12 @@ import asyncio
 from typing import Type
 from uuid import uuid5
 from pydantic import BaseModel
-from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.extraction.extract_summary import extract_summary
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from .models import TextSummary
 
 
-async def summarize_text(data_chunks: list[DataPoint], summarization_model: Type[BaseModel]):
+async def summarize_text(data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel]):
     if len(data_chunks) == 0:
         return data_chunks
 
