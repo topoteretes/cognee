@@ -113,11 +113,12 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
             "TextSummary_text",
         ]
 
-    # Delete records from each vector collection
+    # Delete records from each vector collection that exists
     for collection in vector_collections:
-        await vector_engine.delete_data_points(
-            collection, [str(node_id) for node_id in deleted_node_ids]
-        )
+        if await vector_engine.has_collection(collection):
+            await vector_engine.delete_data_points(
+                collection, [str(node_id) for node_id in deleted_node_ids]
+            )
 
     # Delete from relational database
     db_engine = get_relational_engine()
