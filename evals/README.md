@@ -45,7 +45,7 @@ Results are available in:
 
 ### 2. Graphiti
 
-A knowledge graph-based QA system using LangChain and Neo4j.
+A knowledge graph-based QA system using Neo4j.
 
 #### Setup and Running
 1. Clone the repository: `git clone https://github.com/getzep/graphiti.git`

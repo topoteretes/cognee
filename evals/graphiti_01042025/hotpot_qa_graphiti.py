@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
+from graphiti_core.search.search_helpers import search_results_to_context_string
 
 load_dotenv()
 
@@ -20,7 +21,7 @@ async def load_corpus_to_graphiti(
 ):
     """Loads corpus data into graphiti."""
     print(f"Loading corpus from {corpus_file}...")
-    with open(corpus_file) as file:
+    with open("../" + corpus_file) as file:
         corpus = json.load(file)
 
     # Apply limit if specified
@@ -32,7 +33,7 @@ async def load_corpus_to_graphiti(
     for i, document in enumerate(tqdm(corpus, desc="Adding documents")):
         await graphiti.add_episode(
             name=f"Document {i + 1}",
-            episode_body=document,
+            episode_body=str(document),
             source=EpisodeType.text,
             source_description="corpus",
             reference_time=datetime.now(timezone.utc),
@@ -42,10 +43,10 @@ async def load_corpus_to_graphiti(
     return graphiti
 
 
-async def search_graphiti(query: str, graphiti_client: Graphiti, num_results: int = 10) -> str:
+async def search_graphiti(query: str, graphiti_client: Graphiti) -> str:
     """Search the graphiti graph for information related to the query"""
-    results = await graphiti_client.search(query=query, num_results=num_results)
-    return "\n".join(f"- {entry.fact}" for entry in results)
+    results = await graphiti_client.search_(query=query)
+    return search_results_to_context_string(results)
 
 
 async def answer_questions(
@@ -58,7 +59,7 @@ async def answer_questions(
 ):
     """Answer questions using graphiti retrieval with direct LLM calls."""
     print(f"Loading QA pairs from {qa_pairs_file}...")
-    with open(qa_pairs_file) as file:
+    with open("../" + qa_pairs_file) as file:
         qa_pairs = json.load(file)
 
     # Apply limit if specified
@@ -85,24 +86,18 @@ async def answer_questions(
         messages = [
             {
                 "role": "system",
-                "content": "Answer minimally using provided facts. Respond with one word or phrase.",
+                "content": "Use only the provided context and your reasoning to answer the question. "
+                           "Reason through your answer before giving a final ANSWER",
             },
-            {"role": "user", "content": f"Facts:\n{context}\n\nQuestion: {question}"},
+            {"role": "user", "content": f"\n{context}\n\nQuestion: {question}"
+                                        "Respond with a JSON in the following format: {\"reasoning\": \"reasoning required to reach an answer\", \"answer\": \"The final answer to the question as a result of the provided reasoning.\"}"},
         ]
 
         # Get answer from LLM
         response = await llm.ainvoke(messages)
-        answer = response.content
+        answer = json.loads(response.content)["answer"]
 
-        # Store the question and answer in graphiti
-        qa_memory = f"Question: {question}\nAnswer: {answer}"
-        await graphiti.add_episode(
-            name=f"QA Pair {i + 1}",
-            episode_body=qa_memory,
-            source=EpisodeType.text,
-            source_description="qa_interaction",
-            reference_time=datetime.now(timezone.utc),
-        )
+        # No need to store the question and answer in Graphiti, not storing the pair will make rerunning the eval easier.
 
         result = {"question": question, "answer": answer, "golden_answer": expected_answer}
 
