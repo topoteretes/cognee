@@ -96,7 +96,6 @@ class Neo4jAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
-        print(f"DEBUG: Raw nodes data: {nodes[:2]}")
         query = """
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})
@@ -687,33 +686,12 @@ class Neo4jAdapter(GraphDBInterface):
         return result[0] if result else None
 
     async def get_degree_one_nodes(self, node_type: str):
-        """
-        Get nodes of specified type that have only one connection.
-
-        Args:
-            node_type (str): The type of node to query (must be "Entity" or "EntityType")
-
-        Returns:
-            list: List of nodes with degree one
-
-        Raises:
-            ValueError: If node_type is not provided or is not "Entity" or "EntityType"
-        """
         if not node_type or node_type not in ["Entity", "EntityType"]:
             raise ValueError("node_type must be either 'Entity' or 'EntityType'")
 
         query = f"""
         MATCH (n:{node_type})
         WHERE COUNT {{ MATCH (n)--() }} = 1
-        RETURN n
-        """
-        result = await self.query(query)
-        return [record["n"] for record in result] if result else []
-
-    async def get_degree_one_entity_types(self):
-        query = """
-        MATCH (n:EntityType)
-        WHERE COUNT { MATCH (n)--() } = 1
         RETURN n
         """
         result = await self.query(query)

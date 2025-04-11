@@ -120,18 +120,14 @@ class NetworkXAdapter(GraphDBInterface):
             for edge in list(self.graph.edges(node_id, data=True)):
                 source, target, data = edge
                 self.graph.remove_edge(source, target, key=data.get("relationship_name"))
-                print(
-                    f"Removed edge: {source} -> {target} with relationship: {data.get('relationship_name')}"
-                )
 
             # Then remove the node itself
             self.graph.remove_node(node_id)
-            print(f"Node {node_id} deleted")
 
             # Save the updated graph state
             await self.save_graph_to_file(self.filename)
         else:
-            print(f"Node {node_id} not found in graph")
+            logger.error(f"Node {node_id} not found in graph")
 
     async def delete_nodes(self, node_ids: List[UUID]) -> None:
         self.graph.remove_nodes_from(node_ids)
@@ -496,35 +492,21 @@ class NetworkXAdapter(GraphDBInterface):
         if not document:
             return None
 
-        print(f"Found document node: {document_node_id}")
-
         # Find chunks connected via is_part_of (chunks point TO document)
         chunks = []
         for source, target, edge_data in self.graph.in_edges(document_node_id, data=True):
-            print(
-                f"Checking chunk edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
-            )
             if edge_data.get("relationship_name") == "is_part_of":
-                print(f"Found chunk: {source}")
                 chunks.append({"id": source, **self.graph.nodes[source]})  # Keep as UUID object
-
-        print(f"Found {len(chunks)} chunks")
 
         # Find entities connected to chunks (chunks point TO entities via contains)
         entities = []
         for chunk in chunks:
             chunk_id = chunk["id"]  # Already a UUID object
             for source, target, edge_data in self.graph.out_edges(chunk_id, data=True):
-                print(
-                    f"Checking entity edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
-                )
                 if edge_data.get("relationship_name") == "contains":
-                    print(f"Found entity: {target}")
                     entities.append(
                         {"id": target, **self.graph.nodes[target]}
                     )  # Keep as UUID object
-
-        print(f"Found {len(entities)} entities")
 
         # Find orphaned entities (entities only connected to chunks we're deleting)
         orphan_entities = []
@@ -539,10 +521,7 @@ class NetworkXAdapter(GraphDBInterface):
             # Check if all containing chunks are in our chunks list
             chunk_ids = [chunk["id"] for chunk in chunks]
             if containing_chunks and all(c in chunk_ids for c in containing_chunks):
-                print(f"Found orphaned entity: {entity_id}")
                 orphan_entities.append(entity)
-
-        print(f"Found {len(orphan_entities)} orphaned entities")
 
         # Find orphaned entity types
         orphan_types = []
@@ -566,23 +545,15 @@ class NetworkXAdapter(GraphDBInterface):
                             orphan_types.append({"id": target, **type_node})  # Keep as UUID object
                             seen_types.add(target)  # Mark as seen
 
-        print(f"Found {len(orphan_types)} orphaned types")
-
         # Find nodes connected via made_from (chunks point TO summaries)
         made_from_nodes = []
         for chunk in chunks:
             chunk_id = chunk["id"]  # Already a UUID object
             for source, target, edge_data in self.graph.in_edges(chunk_id, data=True):
-                print(
-                    f"Checking made_from edge: {source} -> {target} with relationship: {edge_data.get('relationship_name')}"
-                )
                 if edge_data.get("relationship_name") == "made_from":
-                    print(f"Found made_from node: {source}")
                     made_from_nodes.append(
                         {"id": source, **self.graph.nodes[source]}
                     )  # Keep as UUID object
-
-        print(f"Found {len(made_from_nodes)} made_from nodes")
 
         # Return UUIDs directly without string conversion
         return {
@@ -606,44 +577,6 @@ class NetworkXAdapter(GraphDBInterface):
                 for type_node in orphan_types
             ],
         }
-
-    async def get_degree_one_entity_nodes(self):
-        """Get all entity nodes that have only one connection."""
-        degree_one_entities = []
-        # First collect all entity nodes
-        entity_nodes = [
-            (node_id, attrs)
-            for node_id, attrs in self.graph.nodes(data=True)
-            if attrs.get("type") == "Entity"
-        ]
-
-        # Then process them
-        for node_id, attrs in entity_nodes:
-            # Get all connections for this node
-            connections = await self.get_connections(node_id)
-            # If there's only one connection, it's a degree-one node
-            if len(connections) == 1:
-                degree_one_entities.append({"id": node_id, **attrs})
-        return degree_one_entities
-
-    async def get_degree_one_entity_types(self):
-        """Get all entity type nodes that have only one connection."""
-        degree_one_types = []
-        # First collect all entity type nodes
-        entity_type_nodes = [
-            (node_id, attrs)
-            for node_id, attrs in self.graph.nodes(data=True)
-            if attrs.get("type") == "EntityType"
-        ]
-
-        # Then process them
-        for node_id, attrs in entity_type_nodes:
-            # Get all connections for this node
-            connections = await self.get_connections(node_id)
-            # If there's only one connection, it's a degree-one node
-            if len(connections) == 1:
-                degree_one_types.append({"id": node_id, **attrs})
-        return degree_one_types
 
     async def get_degree_one_nodes(self, node_type: str):
         """Get all nodes that have only one connection."""

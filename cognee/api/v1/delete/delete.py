@@ -13,6 +13,9 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from .exceptions import DocumentNotFoundError, DatasetNotFoundError, DocumentSubgraphNotFoundError
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 def get_text_content_hash(text: str) -> str:
@@ -66,12 +69,11 @@ async def delete(
 
 async def delete_single_document(content_hash: str, dataset_name: str, mode: str = "soft"):
     """Delete a single document by its content hash."""
-    print(f"Content hash: {content_hash}")
 
     # Delete from graph database
     deletion_result = await delete_document_subgraph(content_hash, mode)
 
-    print(f"Deletion result: {deletion_result}")
+    logger.info(f"Deletion result: {deletion_result}")
 
     # Get the deleted node IDs and convert to UUID
     deleted_node_ids = []
@@ -85,7 +87,7 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
             else:
                 deleted_node_ids.append(node_id)
         except Exception as e:
-            print(f"Error converting node ID {node_id} to UUID: {e}")
+            logger.error(f"Error converting node ID {node_id} to UUID: {e}")
             continue
 
     # Delete from vector database
@@ -191,7 +193,6 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
     """Delete a document and all its related nodes in the correct order."""
     graph_db = await get_graph_engine()
     subgraph = await graph_db.get_document_subgraph(content_hash)
-    print(f"Subgraph: {subgraph}")
     if not subgraph:
         raise DocumentSubgraphNotFoundError(f"Document not found with content hash: {content_hash}")
 
@@ -215,7 +216,6 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
             for node in nodes:
                 node_id = node["id"]
                 await graph_db.delete_node(node_id)
-                print(f"Deleted {description}: {node_id}")
                 deleted_node_ids.append(node_id)
             deleted_counts[description] = len(nodes)
 
@@ -223,19 +223,15 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
     if mode == "hard":
         # Get and delete degree one entity nodes
         degree_one_entity_nodes = await graph_db.get_degree_one_nodes("Entity")
-        print(f"Degree one entity nodes: {degree_one_entity_nodes}")
         for node in degree_one_entity_nodes:
             await graph_db.delete_node(node["id"])
-            print(f"Deleted degree one entity node: {node['id']}")
             deleted_node_ids.append(node["id"])
             deleted_counts["degree_one_entities"] = deleted_counts.get("degree_one_entities", 0) + 1
 
         # Get and delete degree one entity types
         degree_one_entity_types = await graph_db.get_degree_one_nodes("EntityType")
-        print(f"Degree one entity types: {degree_one_entity_types}")
         for node in degree_one_entity_types:
             await graph_db.delete_node(node["id"])
-            print(f"Deleted degree one entity type node: {node['id']}")
             deleted_node_ids.append(node["id"])
             deleted_counts["degree_one_types"] = deleted_counts.get("degree_one_types", 0) + 1
 
