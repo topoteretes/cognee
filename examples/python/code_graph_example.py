@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import cognee
+from cognee import SearchType
 from cognee.shared.logging_utils import get_logger, ERROR
 
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
@@ -9,6 +11,13 @@ async def main(repo_path, include_docs):
     run_status = False
     async for run_status in run_code_graph_pipeline(repo_path, include_docs=include_docs):
         run_status = run_status
+
+    # Test CODE search
+    search_results = await cognee.search(query_type=SearchType.CODE, query_text="test")
+    assert len(search_results) != 0, "The search results list is empty."
+    print("\n\nSearch results are:\n")
+    for result in search_results:
+        print(f"{result}\n")
 
     return run_status
 

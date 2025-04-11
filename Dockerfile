@@ -5,11 +5,11 @@ ARG POETRY_EXTRAS="\
 # API \
 api \
 # Storage & Databases \
-filesystem postgres weaviate qdrant neo4j falkordb milvus kuzu \
+filesystem postgres weaviate qdrant neo4j falkordb milvus kuzu chromadb \
 # Notebooks & Interactive Environments \
 notebook \
 # LLM & AI Frameworks \
-langchain llama-index gemini huggingface ollama mistral groq \
+langchain llama-index gemini huggingface ollama mistral groq anthropic \
 # Evaluation & Monitoring \
 deepeval evals posthog \
 # Graph Processing & Code Analysis \
