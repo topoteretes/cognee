@@ -1,6 +1,5 @@
 import json
 import pathlib
-import pytest
 import os
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import (
