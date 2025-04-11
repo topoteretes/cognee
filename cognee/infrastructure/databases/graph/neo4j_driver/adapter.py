@@ -26,7 +26,6 @@ from .neo4j_metrics_utils import (
     get_size_of_connected_components,
     count_self_loops,
 )
-from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
 
 logger = get_logger("Neo4jAdapter", level=ERROR)
 
@@ -687,10 +686,25 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query, {"content_hash": content_hash})
         return result[0] if result else None
 
-    async def get_degree_one_entity_nodes(self):
-        query = """
-        MATCH (n:Entity)
-        WHERE COUNT { MATCH (n)--() } = 1
+    async def get_degree_one_nodes(self, node_type: str):
+        """
+        Get nodes of specified type that have only one connection.
+
+        Args:
+            node_type (str): The type of node to query (must be "Entity" or "EntityType")
+
+        Returns:
+            list: List of nodes with degree one
+
+        Raises:
+            ValueError: If node_type is not provided or is not "Entity" or "EntityType"
+        """
+        if not node_type or node_type not in ["Entity", "EntityType"]:
+            raise ValueError("node_type must be either 'Entity' or 'EntityType'")
+
+        query = f"""
+        MATCH (n:{node_type})
+        WHERE COUNT {{ MATCH (n)--() }} = 1
         RETURN n
         """
         result = await self.query(query)

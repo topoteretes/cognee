@@ -6,6 +6,9 @@ from functools import wraps
 import inspect
 from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
 from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 def record_graph_changes(func):
@@ -31,11 +34,6 @@ def record_graph_changes(func):
         )
         creator = f"{caller_class}.{caller_name}" if caller_class else caller_name
 
-        print(f"DEBUG: Recording changes for {func.__name__}")
-        print(f"DEBUG: First arg type: {type(args[0])}")
-        if isinstance(args[0], list) and args[0]:
-            print(f"DEBUG: First item in list: {args[0][0]}")
-
         # Execute original function
         result = await func(self, *args, **kwargs)
 
@@ -43,7 +41,6 @@ def record_graph_changes(func):
             # For add_nodes
             if func.__name__ == "add_nodes":
                 nodes = args[0]
-                print(f"DEBUG: Processing nodes: {nodes[:2]}")  # Debug print
                 if isinstance(nodes, list):
                     for node in nodes:
                         try:
@@ -51,12 +48,10 @@ def record_graph_changes(func):
                             if hasattr(node, "id"):
                                 node_id = node.id  # Already a UUID object
                                 node_label = type(node).__name__
-                                print(f"DEBUG: DataPoint node label: {node_label}")
                             # Handle Neo4j dictionary format
                             elif isinstance(node, dict) and "node_id" in node:
                                 node_id = UUID(str(node["node_id"]))
                                 node_label = node.get("label")
-                                print(f"DEBUG: Neo4j node label: {node_label}")
                             # Handle tuple format
                             elif isinstance(node, tuple) and len(node) >= 1:
                                 node_id = UUID(str(node[0]))
@@ -64,9 +59,8 @@ def record_graph_changes(func):
                                     node_label = node[1].get("type") or node[1].get("label")
                                 else:
                                     node_label = "Unknown"
-                                print(f"DEBUG: Tuple node label: {node_label}")
                             else:
-                                print(f"DEBUG: Unhandled node format: {type(node)}")  # Debug print
+                                logger.error(f"DEBUG: Unhandled node format: {type(node)}")
                                 continue
 
                             relationship = GraphRelationshipLedger(
@@ -78,18 +72,14 @@ def record_graph_changes(func):
                             )
                             session.add(relationship)
                             await session.flush()
-                            print(
-                                f"DEBUG: Added relationship for node: {node_id} with label: {node_label}"
-                            )  # Debug print
                         except Exception as e:
-                            print(f"DEBUG: Error adding relationship: {e}")
+                            logger.error(f"DEBUG: Error adding relationship: {e}")
                             await session.rollback()  # Explicitly rollback on error
                             continue  # Continue with next node
 
             # For add_edges
             elif func.__name__ == "add_edges":
                 edges = args[0]
-                print(f"DEBUG: Processing edges: {edges[:2]}")  # Debug print
                 if isinstance(edges, list):
                     for edge in edges:
                         try:
@@ -104,7 +94,7 @@ def record_graph_changes(func):
                                 target_id = UUID(str(edge[1]))
                                 rel_type = str(edge[2]) if len(edge) > 2 else "UNKNOWN"
                             else:
-                                print(f"DEBUG: Unhandled edge format: {type(edge)}")  # Debug print
+                                logger.error(f"DEBUG: Unhandled edge format: {type(edge)}")
                                 continue
 
                             relationship = GraphRelationshipLedger(
@@ -115,17 +105,13 @@ def record_graph_changes(func):
                             )
                             session.add(relationship)
                             await session.flush()
-                            print(
-                                f"DEBUG: Added relationship for edge: {source_id}->{target_id}"
-                            )  # Debug print
                         except Exception as e:
-                            print(f"DEBUG: Error adding relationship: {e}")  # Debug print
+                            logger.error(f"DEBUG: Error adding relationship: {e}")
 
             try:
                 await session.commit()
-                print("DEBUG: Successfully committed session")  # Debug print
             except Exception as e:
-                print(f"DEBUG: Error committing session: {e}")  # Debug print
+                logger.error(f"DEBUG: Error committing session: {e}")
 
         return result
 

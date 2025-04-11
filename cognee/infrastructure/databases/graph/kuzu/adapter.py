@@ -985,24 +985,15 @@ class KuzuAdapter(GraphDBInterface):
             "orphan_types": result[0][4],
         }
 
-    async def get_degree_one_entity_nodes(self):
-        """Get all entity nodes that have only one connection."""
-        query = """
-        MATCH (n:Node)
-        WHERE n.type = 'Entity'
-        WITH n, COUNT { MATCH (n)--() } as degree
-        WHERE degree = 1
-        RETURN n
-        """
-        result = await self.query(query)
-        return [record[0] for record in result] if result else []
+    async def get_degree_one_nodes(self, node_type: str):
+        """Get all nodes that have only one connection."""
+        if not node_type or node_type not in ["Entity", "EntityType"]:
+            raise ValueError("node_type must be either 'Entity' or 'EntityType'")
 
-    async def get_degree_one_entity_types(self):
-        """Get all entity type nodes that have only one connection."""
-        query = """
+        query = f"""
         MATCH (n:Node)
-        WHERE n.type = 'EntityType'
-        WITH n, COUNT { MATCH (n)--() } as degree
+        WHERE n.type = '{node_type}'
+        WITH n, COUNT {{ MATCH (n)--() }} as degree
         WHERE degree = 1
         RETURN n
         """

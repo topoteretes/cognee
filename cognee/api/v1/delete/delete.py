@@ -10,6 +10,9 @@ import hashlib
 import asyncio
 from uuid import UUID
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from .exceptions import DocumentNotFoundError, DatasetNotFoundError, DocumentSubgraphNotFoundError
 
 
 def get_text_content_hash(text: str) -> str:
@@ -88,15 +91,25 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
     # Delete from vector database
     vector_engine = get_vector_engine()
 
-    # List of vector collections to clean up
-    vector_collections = [
-        "DocumentChunk_text",
-        "EdgeType_relationship_name",
-        "EntityType_name",
-        "Entity_name",
-        "TextDocument_name",
-        "TextSummary_text",
-    ]
+    # Determine vector collections dynamically
+    subclasses = get_all_subclasses(DataPoint)
+    vector_collections = []
+
+    for subclass in subclasses:
+        index_fields = subclass.model_fields["metadata"].default.get("index_fields", [])
+        for field_name in index_fields:
+            vector_collections.append(f"{subclass.__name__}_{field_name}")
+
+    # If no collections found, use default collections
+    if not vector_collections:
+        vector_collections = [
+            "DocumentChunk_text",
+            "EdgeType_relationship_name",
+            "EntityType_name",
+            "Entity_name",
+            "TextDocument_name",
+            "TextSummary_text",
+        ]
 
     # Delete records from each vector collection
     for collection in vector_collections:
@@ -130,7 +143,7 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
         ).scalar_one_or_none()
 
         if data_point is None:
-            raise ValueError(
+            raise DocumentNotFoundError(
                 f"Document not found in relational DB with content hash: {content_hash}"
             )
 
@@ -142,7 +155,7 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
         ).scalar_one_or_none()
 
         if dataset is None:
-            raise ValueError(f"Dataset not found: {dataset_name}")
+            raise DatasetNotFoundError(f"Dataset not found: {dataset_name}")
 
         # Delete from dataset_data table
         dataset_delete_stmt = sql_delete(DatasetData).where(
@@ -180,7 +193,7 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
     subgraph = await graph_db.get_document_subgraph(content_hash)
     print(f"Subgraph: {subgraph}")
     if not subgraph:
-        raise ValueError(f"Document not found with content hash: {content_hash}")
+        raise DocumentSubgraphNotFoundError(f"Document not found with content hash: {content_hash}")
 
     # Delete in the correct order to maintain graph integrity
     deletion_order = [
@@ -209,7 +222,7 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
     # If hard mode, also delete degree-one nodes
     if mode == "hard":
         # Get and delete degree one entity nodes
-        degree_one_entity_nodes = await graph_db.get_degree_one_entity_nodes()
+        degree_one_entity_nodes = await graph_db.get_degree_one_nodes("Entity")
         print(f"Degree one entity nodes: {degree_one_entity_nodes}")
         for node in degree_one_entity_nodes:
             await graph_db.delete_node(node["id"])
@@ -218,7 +231,7 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
             deleted_counts["degree_one_entities"] = deleted_counts.get("degree_one_entities", 0) + 1
 
         # Get and delete degree one entity types
-        degree_one_entity_types = await graph_db.get_degree_one_entity_types()
+        degree_one_entity_types = await graph_db.get_degree_one_nodes("EntityType")
         print(f"Degree one entity types: {degree_one_entity_types}")
         for node in degree_one_entity_types:
             await graph_db.delete_node(node["id"])

@@ -43,7 +43,7 @@ def get_add_router() -> APIRouter:
 
                     return await cognee_add(file_data)
             else:
-                await cognee_add(data, datasetId)
+                await cognee_add(data, datasetId, user=user)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

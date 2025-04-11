@@ -641,3 +641,17 @@ class NetworkXAdapter(GraphDBInterface):
             if len(connections) == 1:
                 degree_one_types.append({"id": node_id, **attrs})
         return degree_one_types
+
+    async def get_degree_one_nodes(self, node_type: str):
+        """Get all nodes that have only one connection."""
+        if not node_type or node_type not in ["Entity", "EntityType"]:
+            raise ValueError("node_type must be either 'Entity' or 'EntityType'")
+
+        nodes = []
+        for node_id, node_data in self.graph.nodes(data=True):
+            if node_data.get("type") == node_type:
+                # Count both incoming and outgoing edges
+                degree = self.graph.degree(node_id)
+                if degree == 1:
+                    nodes.append(node_data)
+        return nodes
