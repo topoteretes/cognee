@@ -8,14 +8,6 @@ from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
 
 
-async def with_timeout(coro, timeout_seconds=30):
-    try:
-        return await asyncio.wait_for(coro, timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        logger.error(f"Operation timed out after {timeout_seconds} seconds")
-        raise
-
-
 text_1 = """
 1. Audi
 Audi is known for its modern designs and advanced technology. Founded in the early 1900s, the brand has earned a reputation for precision engineering and innovation. With features like the Quattro all-wheel-drive system, Audi offers a range of vehicles from stylish sedans to high-performance sports cars.
@@ -57,12 +49,12 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 async def main():
     # Step 1: Reset data and system state
-    await with_timeout(cognee.prune.prune_data())
-    await with_timeout(cognee.prune.prune_system(metadata=True))
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
     # Step 2: Add text
     text_list = [text_1, text_2]
-    await with_timeout(cognee.add(text_list))
+    await cognee.add(text_list)
 
     # Step 3: Create knowledge graph
 
@@ -70,7 +62,7 @@ async def main():
         os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
     )
 
-    pipeline_run = await with_timeout(cognee.cognify(ontology_file_path=ontology_path))
+    pipeline_run = await cognee.cognify(ontology_file_path=ontology_path)
     print("Knowledge with ontology created.")
 
     # Step 4: Calculate descriptive metrics
@@ -78,15 +70,13 @@ async def main():
     print("Descriptive graph metrics saved to database.")
 
     # Step 5: Query insights
-    search_results = await with_timeout(
-        cognee.search(
-            query_type=SearchType.GRAPH_COMPLETION,
-            query_text="What are the exact cars and their types produced by Audi?",
-        )
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What are the exact cars and their types produced by Audi?",
     )
     print(search_results)
 
-    await with_timeout(visualize_graph())
+    await visualize_graph()
 
 
 if __name__ == "__main__":
