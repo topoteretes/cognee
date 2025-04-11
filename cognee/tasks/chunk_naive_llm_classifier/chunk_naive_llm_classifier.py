@@ -1,3 +1,5 @@
+# PROPOSED TO BE DEPRECATED
+
 import asyncio
 from uuid import uuid5, NAMESPACE_OID
 from typing import Type

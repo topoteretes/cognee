@@ -1,3 +1,5 @@
+#
+
 """Neo4j Adapter for Graph Database"""
 
 import json
@@ -11,7 +13,10 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    record_graph_changes,
+)
 from cognee.modules.storage.utils import JSONEncoder
 from .neo4j_metrics_utils import (
     get_avg_clustering,
@@ -89,6 +94,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
+    @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         query = """
         UNWIND $nodes AS node
@@ -130,9 +136,7 @@ class Neo4jAdapter(GraphDBInterface):
         return [result["node"] for result in results]
 
     async def delete_node(self, node_id: str):
-        node_id = id.replace(":", "_")
-
-        query = f"MATCH (node:`{node_id}` {{id: $node_id}}) DETACH DELETE n"
+        query = "MATCH (node {id: $node_id}) DETACH DELETE node"
         params = {"node_id": node_id}
 
         return await self.query(query, params)
@@ -218,6 +222,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
+    @record_graph_changes
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         query = """
             UNWIND $edges AS edge
@@ -651,3 +656,43 @@ class Neo4jAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
+
+    async def get_document_subgraph(self, content_hash: str):
+        query = """
+        MATCH (doc:TextDocument)
+        WHERE doc.name = 'text_' + $content_hash
+
+        OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
+        OPTIONAL MATCH (chunk)-[:contains]->(entity:Entity)
+        WHERE NOT EXISTS {
+            MATCH (entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc:TextDocument)
+            WHERE otherDoc.id <> doc.id
+        }
+        OPTIONAL MATCH (chunk)<-[:made_from]-(made_node:TextSummary)
+        OPTIONAL MATCH (entity)-[:is_a]->(type:EntityType)
+        WHERE NOT EXISTS {
+            MATCH (type)<-[:is_a]-(otherEntity:Entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc:TextDocument)
+            WHERE otherDoc.id <> doc.id
+        }
+
+        RETURN
+            collect(DISTINCT doc) as document,
+            collect(DISTINCT chunk) as chunks,
+            collect(DISTINCT entity) as orphan_entities,
+            collect(DISTINCT made_node) as made_from_nodes,
+            collect(DISTINCT type) as orphan_types
+        """
+        result = await self.query(query, {"content_hash": content_hash})
+        return result[0] if result else None
+
+    async def get_degree_one_nodes(self, node_type: str):
+        if not node_type or node_type not in ["Entity", "EntityType"]:
+            raise ValueError("node_type must be either 'Entity' or 'EntityType'")
+
+        query = f"""
+        MATCH (n:{node_type})
+        WHERE COUNT {{ MATCH (n)--() }} = 1
+        RETURN n
+        """
+        result = await self.query(query)
+        return [record["n"] for record in result] if result else []

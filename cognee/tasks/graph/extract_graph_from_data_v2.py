@@ -3,6 +3,7 @@ from typing import List
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
 from cognee.tasks.graph.cascade_extract.utils.extract_content_nodes_and_relationship_names import (
     extract_content_nodes_and_relationship_names,
@@ -14,7 +15,9 @@ from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 
 async def extract_graph_from_data(
-    data_chunks: List[DocumentChunk], n_rounds: int = 2
+    data_chunks: List[DocumentChunk],
+    n_rounds: int = 2,
+    ontology_adapter: OntologyResolver = None,
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks in multiple steps."""
     chunk_nodes = await asyncio.gather(
@@ -37,4 +40,9 @@ async def extract_graph_from_data(
         ]
     )
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, KnowledgeGraph)
+    return await integrate_chunk_graphs(
+        data_chunks=data_chunks,
+        chunk_graphs=chunk_graphs,
+        graph_model=KnowledgeGraph,
+        ontology_adapter=ontology_adapter or OntologyResolver(),
+    )

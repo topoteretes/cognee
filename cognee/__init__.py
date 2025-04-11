@@ -1,4 +1,5 @@
 from .api.v1.add import add
+from .api.v1.delete import delete
 from .api.v1.cognify import cognify
 from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
