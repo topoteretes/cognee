@@ -47,7 +47,7 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 async def main():
     # Step 2: Delete text the hard way -- works for cognified graphs
-    await cognee.delete([text_1, text_2], mode="hard")
+    await cognee.delete([text_1], mode="hard")  # TODO: add text_2 to the delete
 
 
 if __name__ == "__main__":

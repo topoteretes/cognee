@@ -673,10 +673,8 @@ class Neo4jAdapter(GraphDBInterface):
         OPTIONAL MATCH (chunk)<-[:made_from]-(made_node:TextSummary)
         OPTIONAL MATCH (entity)-[:is_a]->(type:EntityType)
         WHERE NOT EXISTS {
-            MATCH (type)<-[:is_a]-(otherEntity:Entity)
-            WHERE NOT EXISTS {
-                MATCH (otherEntity)<-[:contains]-(:DocumentChunk)
-            }
+            MATCH (type)<-[:is_a]-(otherEntity:Entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc:TextDocument)
+            WHERE otherDoc.id <> doc.id
         }
 
         RETURN

@@ -218,17 +218,22 @@ class NetworkXAdapter(GraphDBInterface):
 
         connections = []
 
-        for neighbor in predecessors:
-            if "id" in neighbor:
-                edge_data = self.graph.get_edge_data(neighbor["id"], node["id"])
-                for edge_properties in edge_data.values():
-                    connections.append((neighbor, edge_properties, node))
+        # Handle None values for predecessors and successors
+        if predecessors is not None:
+            for neighbor in predecessors:
+                if "id" in neighbor:
+                    edge_data = self.graph.get_edge_data(neighbor["id"], node["id"])
+                    if edge_data is not None:
+                        for edge_properties in edge_data.values():
+                            connections.append((neighbor, edge_properties, node))
 
-        for neighbor in successors:
-            if "id" in neighbor:
-                edge_data = self.graph.get_edge_data(node["id"], neighbor["id"])
-                for edge_properties in edge_data.values():
-                    connections.append((node, edge_properties, neighbor))
+        if successors is not None:
+            for neighbor in successors:
+                if "id" in neighbor:
+                    edge_data = self.graph.get_edge_data(node["id"], neighbor["id"])
+                    if edge_data is not None:
+                        for edge_properties in edge_data.values():
+                            connections.append((node, edge_properties, neighbor))
 
         return connections
 
@@ -542,23 +547,19 @@ class NetworkXAdapter(GraphDBInterface):
         for entity in orphan_entities:
             entity_id = entity["id"]  # Already a UUID object
             for _, target, edge_data in self.graph.out_edges(entity_id, data=True):
-                print(
-                    f"Checking entity type edge: {entity_id} -> {target} with relationship: {edge_data.get('relationship_name')}"
-                )
                 if edge_data.get("relationship_name") in ["is_a", "instance_of"]:
                     # Check if this type is only connected to entities we're deleting
                     type_node = self.graph.nodes[target]
                     if type_node.get("type") == "EntityType" and target not in seen_types:
                         is_orphaned = True
+                        # Get all incoming edges to this type node
                         for source, _, edge_data in self.graph.in_edges(target, data=True):
-                            if edge_data.get("relationship_name") in [
-                                "is_a",
-                                "instance_of",
-                            ] and source not in [e["id"] for e in orphan_entities]:
-                                is_orphaned = False
-                                break
+                            if edge_data.get("relationship_name") in ["is_a", "instance_of"]:
+                                # Check if the source entity is not in our orphan_entities list
+                                if source not in [e["id"] for e in orphan_entities]:
+                                    is_orphaned = False
+                                    break
                         if is_orphaned:
-                            print(f"Found orphaned type: {target}")
                             orphan_types.append({"id": target, **type_node})  # Keep as UUID object
                             seen_types.add(target)  # Mark as seen
 
@@ -606,23 +607,37 @@ class NetworkXAdapter(GraphDBInterface):
     async def get_degree_one_entity_nodes(self):
         """Get all entity nodes that have only one connection."""
         degree_one_entities = []
-        for node_id, attrs in self.graph.nodes(data=True):
-            if attrs.get("type") == "Entity":
-                # Get all connections for this node
-                connections = await self.get_connections(node_id)
-                # If there's only one connection, it's a degree-one node
-                if len(connections) == 1:
-                    degree_one_entities.append({"id": node_id, **attrs})  # Keep as UUID
+        # First collect all entity nodes
+        entity_nodes = [
+            (node_id, attrs)
+            for node_id, attrs in self.graph.nodes(data=True)
+            if attrs.get("type") == "Entity"
+        ]
+
+        # Then process them
+        for node_id, attrs in entity_nodes:
+            # Get all connections for this node
+            connections = await self.get_connections(node_id)
+            # If there's only one connection, it's a degree-one node
+            if len(connections) == 1:
+                degree_one_entities.append({"id": node_id, **attrs})
         return degree_one_entities
 
     async def get_degree_one_entity_types(self):
         """Get all entity type nodes that have only one connection."""
         degree_one_types = []
-        for node_id, attrs in self.graph.nodes(data=True):
-            if attrs.get("type") == "EntityType":
-                # Get all connections for this node
-                connections = await self.get_connections(node_id)
-                # If there's only one connection, it's a degree-one node
-                if len(connections) == 1:
-                    degree_one_types.append({"id": node_id, **attrs})  # Keep as UUID
+        # First collect all entity type nodes
+        entity_type_nodes = [
+            (node_id, attrs)
+            for node_id, attrs in self.graph.nodes(data=True)
+            if attrs.get("type") == "EntityType"
+        ]
+
+        # Then process them
+        for node_id, attrs in entity_type_nodes:
+            # Get all connections for this node
+            connections = await self.get_connections(node_id)
+            # If there's only one connection, it's a degree-one node
+            if len(connections) == 1:
+                degree_one_types.append({"id": node_id, **attrs})
         return degree_one_types
