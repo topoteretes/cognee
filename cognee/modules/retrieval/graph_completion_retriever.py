@@ -60,9 +60,13 @@ class GraphCompletionRetriever(BaseRetriever):
         vector_index_collections = []
 
         for subclass in subclasses:
-            index_fields = subclass.model_fields["metadata"].default.get("index_fields", [])
-            for field_name in index_fields:
-                vector_index_collections.append(f"{subclass.__name__}_{field_name}")
+            if "metadata" in subclass.model_fields:
+                metadata_field = subclass.model_fields["metadata"]
+                if hasattr(metadata_field, "default") and metadata_field.default is not None:
+                    if isinstance(metadata_field.default, dict):
+                        index_fields = metadata_field.default.get("index_fields", [])
+                        for field_name in index_fields:
+                            vector_index_collections.append(f"{subclass.__name__}_{field_name}")
 
         found_triplets = await brute_force_triplet_search(
             query, top_k=self.top_k, collections=vector_index_collections or None

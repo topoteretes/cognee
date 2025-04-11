@@ -5,7 +5,8 @@ from uuid import uuid5, NAMESPACE_OID
 from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine, DataPoint
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.engine.models import DataPoint
 from cognee.modules.data.extraction.extract_categories import extract_categories
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
