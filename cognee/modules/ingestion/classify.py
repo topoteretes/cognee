@@ -11,7 +11,7 @@ def classify(data: Union[str, BinaryIO], filename: str = None):
         return TextData(data)
 
     if isinstance(data, BufferedReader) or isinstance(data, SpooledTemporaryFile):
-        return BinaryData(data, data.name.split("/")[-1] if data.name else filename)
+        return BinaryData(data, str(data.name).split("/")[-1] if data.name else filename)
 
     raise IngestionError(
         message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported: {type(data)}"
