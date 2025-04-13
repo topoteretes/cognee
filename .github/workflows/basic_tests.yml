@@ -62,6 +62,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
