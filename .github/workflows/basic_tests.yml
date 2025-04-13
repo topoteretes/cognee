@@ -60,6 +60,11 @@ jobs:
   unit-tests:
     name: Run Unit Tests
     runs-on: ubuntu-22.04
+    env:
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -96,7 +101,10 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
     steps:
@@ -118,7 +126,10 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
     steps:
