@@ -30,7 +30,7 @@
 
 Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
-More on [use-cases](https://docs.cognee.ai/use_cases).
+More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github.com/topoteretes/cognee/tree/main/evals) 
 
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
