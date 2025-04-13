@@ -1,9 +1,11 @@
 from typing import Any, Optional
 
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.tasks.completion.exceptions import NoRelevantDataFound
+from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.tasks.completion.exceptions import NoRelevantDataError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 
 class CompletionRetriever(BaseRetriever):
@@ -23,10 +25,15 @@ class CompletionRetriever(BaseRetriever):
     async def get_context(self, query: str) -> Any:
         """Retrieves relevant document chunks as context."""
         vector_engine = get_vector_engine()
-        found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
-        if len(found_chunks) == 0:
-            raise NoRelevantDataFound
-        return found_chunks[0].payload["text"]
+
+        try:
+            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+
+            if len(found_chunks) == 0:
+                raise NoRelevantDataError
+            return found_chunks[0].payload["text"]
+        except CollectionNotFoundError as error:
+            raise NoDataError("No data found in the system, please add data first.") from error
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """Generates an LLM completion using the context."""

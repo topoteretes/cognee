@@ -4,6 +4,9 @@ from typing import Any, Optional
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.tasks.completion.exceptions.exceptions import NoRelevantDataError
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 
 class InsightsRetriever(BaseRetriever):
@@ -27,15 +30,20 @@ class InsightsRetriever(BaseRetriever):
             node_connections = await graph_engine.get_connections(str(exact_node["id"]))
         else:
             vector_engine = get_vector_engine()
-            results = await asyncio.gather(
-                vector_engine.search("Entity_name", query_text=query, limit=self.top_k),
-                vector_engine.search("EntityType_name", query_text=query, limit=self.top_k),
-            )
+
+            try:
+                results = await asyncio.gather(
+                    vector_engine.search("Entity_name", query_text=query, limit=self.top_k),
+                    vector_engine.search("EntityType_name", query_text=query, limit=self.top_k),
+                )
+            except CollectionNotFoundError as error:
+                raise NoDataError("No data found in the system, please add data first.")
+
             results = [*results[0], *results[1]]
             relevant_results = [result for result in results if result.score < 0.5][: self.top_k]
 
             if len(relevant_results) == 0:
-                return []
+                raise NoRelevantDataError()
 
             node_connections_results = await asyncio.gather(
                 *[graph_engine.get_connections(result.id) for result in relevant_results]
