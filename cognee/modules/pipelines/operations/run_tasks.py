@@ -53,6 +53,7 @@ async def run_tasks_base(tasks: list[Task], data=None, user: User = None):
                     async for result in run_tasks_base(
                         leftover_tasks,
                         results[0] if next_task_batch_size == 1 else results,
+                        user=user,
                     ):
                         yield result
 

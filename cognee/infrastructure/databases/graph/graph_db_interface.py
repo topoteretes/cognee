@@ -1,6 +1,6 @@
 from typing import Protocol, Optional, Dict, Any, List
 from abc import abstractmethod, ABC
-from uuid import UUID, uuid4
+from uuid import UUID, uuid5
 from cognee.modules.graph.relationship_manager import create_relationship
 from functools import wraps
 import inspect
@@ -64,7 +64,7 @@ def record_graph_changes(func):
                                 continue
 
                             relationship = GraphRelationshipLedger(
-                                id=uuid4(),
+                                id=uuid5(),
                                 source_node_id=node_id,  # Now a UUID object
                                 destination_node_id=node_id,  # Now a UUID object
                                 creator_function=f"{creator}.node",
@@ -98,7 +98,7 @@ def record_graph_changes(func):
                                 continue
 
                             relationship = GraphRelationshipLedger(
-                                id=uuid4(),
+                                id=uuid5(),
                                 source_node_id=source_id,
                                 destination_node_id=target_id,
                                 creator_function=f"{creator}.{rel_type}",
