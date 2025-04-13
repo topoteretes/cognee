@@ -289,7 +289,7 @@ class LanceDBAdapter(VectorDBInterface):
 
             elif (
                 get_origin(field_config.annotation) == Union
-                or get_origin(field_config.annotation) == list
+                or get_origin(field_config.annotation) is list
             ):
                 models_list = get_args(field_config.annotation)
                 if any(hasattr(model, "model_fields") for model in models_list):

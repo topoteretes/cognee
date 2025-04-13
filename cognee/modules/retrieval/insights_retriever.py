@@ -37,7 +37,7 @@ class InsightsRetriever(BaseRetriever):
                     vector_engine.search("EntityType_name", query_text=query, limit=self.top_k),
                 )
             except CollectionNotFoundError as error:
-                raise NoDataError("No data found in the system, please add data first.")
+                raise NoDataError("No data found in the system, please add data first.") from error
 
             results = [*results[0], *results[1]]
             relevant_results = [result for result in results if result.score < 0.5][: self.top_k]
