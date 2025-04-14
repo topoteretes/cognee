@@ -8,8 +8,6 @@ on:
         type: string
         default: '3.11.x'
     secrets:
-      OPENAI_API_KEY:
-        required: true
       GRAPHISTRY_USERNAME:
         required: true
       GRAPHISTRY_PASSWORD:
@@ -127,10 +125,20 @@ jobs:
     name: Run Simple Examples
     runs-on: ubuntu-22.04
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -149,10 +157,20 @@ jobs:
     name: Run Basic Graph Tests
     runs-on: ubuntu-22.04
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
       GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
