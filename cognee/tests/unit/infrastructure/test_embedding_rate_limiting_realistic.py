@@ -108,6 +108,7 @@ async def test_embedding_rate_limiting_realistic():
     total_successes += batch_successes
     total_rate_limited += batch_rate_limited
 
+
     # Wait 5 seconds (should recover full capacity)
     wait_time = 5
     logger.info(f"\nWaiting {wait_time} seconds to allow full capacity recovery...")
