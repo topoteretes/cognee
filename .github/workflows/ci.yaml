@@ -1,6 +1,7 @@
 name: build test | Docker image
 
-on: pull_request
+on:
+  workflow_call:
 
 env:
   AWS_ACCOUNT_ID_DEV: "463722570299"

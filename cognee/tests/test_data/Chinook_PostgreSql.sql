@@ -16,16 +16,16 @@
 /*******************************************************************************
    Drop database if it exists
 ********************************************************************************/
-DROP DATABASE IF EXISTS chinook;
+DROP DATABASE IF EXISTS test_migration_db;
 
 
 /*******************************************************************************
    Create database
 ********************************************************************************/
-CREATE DATABASE chinook;
+CREATE DATABASE test_migration_db;
 
 
-\c chinook;
+\c test_migration_db;
 
 
 /*******************************************************************************
@@ -15967,4 +15967,3 @@ COMMIT;
 /* Optionally reclaim space if large # of rows removed:
 VACUUM FULL;
 */
-

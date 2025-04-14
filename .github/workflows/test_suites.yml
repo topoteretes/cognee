@@ -1,0 +1,143 @@
+name: Test Suites
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  basic-tests:
+    name: Basic Tests
+    uses: ./.github/workflows/basic_tests.yml
+    secrets: inherit
+
+  e2e-tests:
+    name: End-to-End Tests
+    uses: ./.github/workflows/e2e_tests.yml
+    secrets: inherit
+
+  docker-compose-test:
+    name: Docker Compose Test
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/docker_compose.yml
+    secrets: inherit
+
+  docker-ci-test:
+    name: Docker CI test
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/ci.yaml
+    secrets: inherit
+
+  graph-db-tests:
+    name: Graph Database Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/graph_db_tests.yml
+    secrets: inherit
+
+  relational-db-migration-tests:
+    name: Relational DB Migration Tests
+    needs: [ basic-tests, e2e-tests ]
+    uses: ./.github/workflows/relational_db_migration_tests.yml
+    secrets: inherit
+
+  notebook-tests:
+    name: Notebook Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/notebooks_tests.yml
+    secrets: inherit
+
+  python-version-tests:
+    name: Python Version Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/python_version_tests.yml
+    secrets: inherit
+
+  # Matrix-based vector database tests
+  vector-db-tests:
+    name: Vector DB Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/vector_db_tests.yml
+    secrets: inherit
+
+  # Matrix-based example tests
+  example-tests:
+    name: Example Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/examples_tests.yml
+    secrets: inherit
+
+  # Additional LLM tests
+  gemini-tests:
+    name: Gemini Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/test_gemini.yml
+    secrets: inherit
+
+  # Ollama tests moved to the end
+  ollama-tests:
+    name: Ollama Tests
+    needs: [
+      basic-tests,
+      e2e-tests,
+      graph-db-tests,
+      notebook-tests,
+      python-version-tests,
+      vector-db-tests,
+      example-tests,
+      gemini-tests,
+      relational-db-migration-tests,
+      docker-compose-test,
+      docker-ci-test,
+    ]
+    uses: ./.github/workflows/test_ollama.yml
+    secrets: inherit
+
+  notify:
+    name: Test Completion Status
+    needs: [
+      basic-tests,
+      e2e-tests,
+      graph-db-tests,
+      notebook-tests,
+      python-version-tests,
+      vector-db-tests,
+      example-tests,
+      gemini-tests,
+      ollama-tests,
+      relational-db-migration-tests,
+      docker-compose-test,
+      docker-ci-test,
+    ]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check Status
+        run: |
+          if [[ "${{ needs.basic-tests.result }}" == "success" &&
+                "${{ needs.e2e-tests.result }}" == "success" &&
+                "${{ needs.graph-db-tests.result }}" == "success" &&
+                "${{ needs.notebook-tests.result }}" == "success" &&
+                "${{ needs.python-version-tests.result }}" == "success" &&
+                "${{ needs.vector-db-tests.result }}" == "success" &&
+                "${{ needs.example-tests.result }}" == "success" &&
+                "${{ needs.relational-db-migration-tests.result }}" == "success" &&
+                "${{ needs.gemini-tests.result }}" == "success" &&
+                "${{ needs.docker-compose-test.result }}" == "success" &&
+                "${{ needs.docker-ci-test.result }}" == "success" &&
+                "${{ needs.ollama-tests.result }}" == "success" ]]; then
+            echo "All test suites completed successfully!"
+          else
+            echo "One or more test suites failed."
+            exit 1
+          fi
