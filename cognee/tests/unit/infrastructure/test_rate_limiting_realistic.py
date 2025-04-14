@@ -4,7 +4,7 @@ import os
 from functools import lru_cache
 from unittest.mock import patch
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.rate_limiter import LLMRateLimiter
+from cognee.infrastructure.llm.rate_limiter import llm_rate_limiter
 from cognee.infrastructure.llm.config import get_llm_config
 
 
@@ -22,7 +22,7 @@ async def test_rate_limiting_realistic():
 
     # Clear the cached config and limiter
     get_llm_config.cache_clear()
-    LLMRateLimiter._instance = None
+    llm_rate_limiter._instance = None
 
     # Create fresh instances
     config = get_llm_config()
@@ -31,7 +31,7 @@ async def test_rate_limiting_realistic():
     )
 
     # We'll use monkey patching to guarantee rate limiting for test purposes
-    with patch.object(LLMRateLimiter, "hit_limit") as mock_hit_limit:
+    with patch.object(llm_rate_limiter, "hit_limit") as mock_hit_limit:
         # Setup mock behavior: first 5 calls succeed, then one fails, then all succeed
         # This simulates the window moving after waiting
         mock_hit_limit.side_effect = [
@@ -60,7 +60,7 @@ async def test_rate_limiting_realistic():
             True,
         ]
 
-        limiter = LLMRateLimiter()
+        limiter = llm_rate_limiter()
         print(f"Rate limiter initialized with {limiter._rate_per_minute} requests per minute")
 
         # First batch - should allow 5 and limit the rest
