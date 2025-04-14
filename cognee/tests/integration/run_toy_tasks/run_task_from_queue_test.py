@@ -19,11 +19,11 @@ async def pipeline(data_queue):
             else:
                 await asyncio.sleep(0.3)
 
-    async def add_one(num):
-        yield num + 1
+    async def add_one(num_list):
+        yield num_list[0] + 1
 
-    async def multiply_by_two(num):
-        yield num * 2
+    async def multiply_by_two(num_list):
+        yield num_list[0] * 2
 
     await create_db_and_tables()
     user = await get_default_user()
