@@ -5,7 +5,7 @@ from functools import lru_cache
 import logging
 
 from cognee.infrastructure.llm.config import LLMConfig, get_llm_config
-from cognee.infrastructure.llm.embedding_rate_limiter  import EmbeddingRateLimiter
+from cognee.infrastructure.llm.embedding_rate_limiter import EmbeddingRateLimiter
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -68,14 +68,14 @@ async def test_embedding_rate_limiting_realistic():
     # Batch 1: Send 10 concurrent requests (expect 3 to succeed, 7 to be rate limited)
     batch_size = 10
     logger.info(f"\n--- Batch 1: Sending {batch_size} concurrent requests ---")
-    
+
     batch_start = time.time()
     tasks = [make_request(i) for i in range(batch_size)]
     results = await asyncio.gather(*tasks, return_exceptions=False)
-    
+
     batch_successes = results.count(True)
     batch_rate_limited = results.count(False)
-    
+
     batch_end = time.time()
     logger.info(f"Batch 1 completed in {batch_end - batch_start:.2f} seconds")
     logger.info(f"Successes: {batch_successes}, Rate limited: {batch_rate_limited}")
@@ -92,14 +92,14 @@ async def test_embedding_rate_limiting_realistic():
     # Batch 2: Send 5 more requests (expect some to succeed, some to be rate limited)
     batch_size = 5
     logger.info(f"\n--- Batch 2: Sending {batch_size} concurrent requests ---")
-    
+
     batch_start = time.time()
     tasks = [make_request(i) for i in range(batch_size)]
     results = await asyncio.gather(*tasks, return_exceptions=False)
-    
+
     batch_successes = results.count(True)
     batch_rate_limited = results.count(False)
-    
+
     batch_end = time.time()
     logger.info(f"Batch 2 completed in {batch_end - batch_start:.2f} seconds")
     logger.info(f"Successes: {batch_successes}, Rate limited: {batch_rate_limited}")
@@ -116,11 +116,11 @@ async def test_embedding_rate_limiting_realistic():
     # Batch 3: Send 3 more requests sequentially (all should succeed)
     batch_size = 3
     logger.info(f"\n--- Batch 3: Sending {batch_size} sequential requests ---")
-    
+
     batch_start = time.time()
     batch_successes = 0
     batch_rate_limited = 0
-    
+
     for i in range(batch_size):
         try:
             logger.info(f"Making request #{i + 1}")
@@ -166,18 +166,18 @@ async def test_with_mock_failures():
     os.environ["EMBEDDING_RATE_LIMIT_ENABLED"] = "true"
     os.environ["EMBEDDING_RATE_LIMIT_REQUESTS"] = "10"
     os.environ["EMBEDDING_RATE_LIMIT_INTERVAL"] = "5"
-    os.environ["DISABLE_RETRIES"] = "true"  
-    
+    os.environ["DISABLE_RETRIES"] = "true"
+
     # Clear caches
     get_llm_config.cache_clear()
     EmbeddingRateLimiter.reset_instance()
-    
+
     # Create a mock engine configured to fail every 3rd request
     engine = MockEmbeddingEngine()
     engine.configure_mock(fail_every_n_requests=3, add_delay=0.1)
-    
+
     logger.info("\n--- Testing controlled failures with mock ---")
-    
+
     # Send 10 requests, expecting every 3rd to fail
     for i in range(10):
         try:
@@ -187,7 +187,7 @@ async def test_with_mock_failures():
             logger.info(f"Request #{i + 1} succeeded")
         except Exception as e:
             logger.info(f"Request #{i + 1} failed as expected: {e}")
-    
+
     # Reset environment variables
     os.environ.pop("EMBEDDING_RATE_LIMIT_ENABLED", None)
     os.environ.pop("EMBEDDING_RATE_LIMIT_REQUESTS", None)
