@@ -1,6 +1,7 @@
 from typing import Any, List
 
 import dlt
+import s3fs
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset, get_dataset_data, get_datasets_by_name
@@ -13,6 +14,8 @@ from .save_data_item_to_storage import save_data_item_to_storage
 from typing import Union, BinaryIO
 import inspect
 
+from cognee.api.v1.add.config import get_s3_config
+
 
 async def ingest_data(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
@@ -21,6 +24,17 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
         pipeline_name="metadata_extraction_pipeline",
         destination=destination,
     )
+
+    s3_config = get_s3_config()
+
+    fs = None
+    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+        fs = s3fs.S3FileSystem(
+            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
+        )
+
+    # :TODO: continue here
+    print(fs)
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
