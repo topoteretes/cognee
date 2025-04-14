@@ -184,7 +184,8 @@ async def test_with_mock_failures():
             logger.info(f"Making request #{i + 1}")
             text = f"Test text {i}"
             embedding = await engine.embed_text([text])
-            logger.info(f"Request #{i + 1} succeeded")
+
+            logger.info(f"Request #{i + 1} succeeded for {str(embedding)}")
         except Exception as e:
             logger.info(f"Request #{i + 1} failed as expected: {e}")
 
