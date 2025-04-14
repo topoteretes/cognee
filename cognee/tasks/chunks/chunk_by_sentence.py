@@ -4,10 +4,13 @@ from .chunk_by_word import chunk_by_word
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 
 
+# Initialize embedding engine once
+_embedding_engine = get_embedding_engine()
+
+
 def get_word_size(word: str) -> int:
-    embedding_engine = get_embedding_engine()
-    if embedding_engine.tokenizer:
-        return embedding_engine.tokenizer.count_tokens(word)
+    if _embedding_engine.tokenizer:
+        return _embedding_engine.tokenizer.count_tokens(word)
     else:
         return 1
 
@@ -63,7 +66,9 @@ def chunk_by_sentence(
 
     if len(sentence) > 0:
         if maximum_size and sentence_size > maximum_size:
-            raise ValueError(f"Input word {word} longer than chunking size {maximum_size}.")
+            raise ValueError(
+                f"Input word {word} longer than chunking size {maximum_size}."
+            )
 
         section_end = "sentence_cut" if word_type_state == "word" else word_type_state
         yield (
