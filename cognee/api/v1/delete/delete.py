@@ -57,8 +57,11 @@ async def delete(
             classified_data = classify(data)
             return await delete_single_document(content_hash, dataset_name, mode)
     elif isinstance(data, list):
-        # Handle list of inputs
-        results = await asyncio.gather(*[delete(item, dataset_name, mode) for item in data])
+        # Handle list of inputs sequentially
+        results = []
+        for item in data:
+            result = await delete(item, dataset_name, mode)
+            results.append(result)
         return {"status": "success", "message": "Multiple documents deleted", "results": results}
     else:  # It's already a BinaryIO
         data.seek(0)  # Ensure we're at the start of the file
