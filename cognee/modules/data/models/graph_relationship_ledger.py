@@ -1,5 +1,3 @@
-#
-
 from datetime import datetime, timezone
 from uuid import uuid5, NAMESPACE_DNS
 from sqlalchemy import UUID, Column, DateTime, String, Index
@@ -8,7 +6,6 @@ from sqlalchemy.orm import relationship
 from cognee.infrastructure.databases.relational import Base
 
 
-# not the best name for this model
 class GraphRelationshipLedger(Base):
     __tablename__ = "graph_relationship_ledger"
 

@@ -258,6 +258,11 @@ class KuzuAdapter(GraphDBInterface):
                     n.properties = node.properties,
                     n.created_at = timestamp(node.created_at),
                     n.updated_at = timestamp(node.updated_at)
+                ON MATCH SET
+                    n.name = node.name,
+                    n.type = node.type,
+                    n.properties = node.properties,
+                    n.updated_at = timestamp(node.updated_at)
                 """
                 await self.query(merge_query, {"nodes": node_params})
                 logger.debug(f"Processed {len(node_params)} nodes in batch")
@@ -933,7 +938,7 @@ class KuzuAdapter(GraphDBInterface):
         """Get all nodes that should be deleted when removing a document."""
         query = """
         MATCH (doc:Node)
-        WHERE doc.type = 'TextDocument' AND doc.name = $content_hash
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.name = $content_hash
 
         OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
         WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
@@ -944,7 +949,7 @@ class KuzuAdapter(GraphDBInterface):
             MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
             WHERE e3.relationship_name = 'contains'
             AND e4.relationship_name = 'is_part_of'
-            AND otherDoc.type = 'TextDocument'
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -960,7 +965,7 @@ class KuzuAdapter(GraphDBInterface):
             AND e9.relationship_name = 'is_part_of'
             AND otherEntity.type = 'Entity'
             AND otherChunk.type = 'DocumentChunk'
-            AND otherDoc.type = 'TextDocument'
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
             AND otherDoc.id <> doc.id
         }
 

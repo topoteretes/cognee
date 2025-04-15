@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, Dict, Any, List
+from typing import Protocol, Optional, Dict, Any, List, Tuple
 from abc import abstractmethod, ABC
 from uuid import UUID, uuid5, NAMESPACE_DNS
 from cognee.modules.graph.relationship_manager import create_relationship
@@ -11,15 +11,20 @@ from datetime import datetime, timezone
 
 logger = get_logger()
 
+# Type aliases for better readability
+NodeData = Dict[str, Any]
+EdgeData = Tuple[
+    str, str, str, Dict[str, Any]
+]  # (source_id, target_id, relationship_name, properties)
+Node = Tuple[str, NodeData]  # (node_id, properties)
+
 
 def record_graph_changes(func):
     """Decorator to record graph changes in the relationship database."""
-    # Get the engine once when the decorator is defined
     db_engine = get_relational_engine()
 
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
-        # Get caller information for logging
         frame = inspect.currentframe()
         while frame:
             if frame.f_back and frame.f_back.f_code.co_name != "wrapper":
@@ -35,88 +40,56 @@ def record_graph_changes(func):
         )
         creator = f"{caller_class}.{caller_name}" if caller_class else caller_name
 
-        # Execute original function
         result = await func(self, *args, **kwargs)
 
         async with db_engine.get_async_session() as session:
-            # For add_nodes
             if func.__name__ == "add_nodes":
                 nodes = args[0]
-                if isinstance(nodes, list):
-                    for node in nodes:
-                        try:
-                            # Handle DataPoint objects (original input)
-                            if hasattr(node, "id"):
-                                node_id = node.id  # Already a UUID object
-                                node_label = type(node).__name__
-                            # Handle Neo4j dictionary format
-                            elif isinstance(node, dict) and "node_id" in node:
-                                node_id = UUID(str(node["node_id"]))
-                                node_label = node.get("label")
-                            # Handle tuple format
-                            elif isinstance(node, tuple) and len(node) >= 1:
-                                node_id = UUID(str(node[0]))
-                                if len(node) > 1 and isinstance(node[1], dict):
-                                    node_label = node[1].get("type") or node[1].get("label")
-                                else:
-                                    node_label = "Unknown"
-                            else:
-                                logger.error(f"DEBUG: Unhandled node format: {type(node)}")
-                                continue
+                for node in nodes:
+                    try:
+                        node_id = (
+                            UUID(str(node[0])) if isinstance(node, tuple) else UUID(str(node.id))
+                        )
+                        relationship = GraphRelationshipLedger(
+                            id=uuid5(NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"),
+                            source_node_id=node_id,
+                            destination_node_id=node_id,
+                            creator_function=f"{creator}.node",
+                            node_label=node[1].get("type")
+                            if isinstance(node, tuple)
+                            else type(node).__name__,
+                        )
+                        session.add(relationship)
+                        await session.flush()
+                    except Exception as e:
+                        logger.error(f"Error adding relationship: {e}")
+                        await session.rollback()
+                        continue
 
-                            relationship = GraphRelationshipLedger(
-                                id=uuid5(
-                                    NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"
-                                ),
-                                source_node_id=node_id,  # Now a UUID object
-                                destination_node_id=node_id,  # Now a UUID object
-                                creator_function=f"{creator}.node",
-                                node_label=node_label,
-                            )
-                            session.add(relationship)
-                            await session.flush()
-                        except Exception as e:
-                            logger.error(f"DEBUG: Error adding relationship: {e}")
-                            await session.rollback()  # Explicitly rollback on error
-                            continue  # Continue with next node
-
-            # For add_edges
             elif func.__name__ == "add_edges":
                 edges = args[0]
-                if isinstance(edges, list):
-                    for edge in edges:
-                        try:
-                            # Handle Neo4j format
-                            if isinstance(edge, dict):
-                                source_id = UUID(str(edge.get("from_node")))
-                                target_id = UUID(str(edge.get("to_node")))
-                                rel_type = str(edge.get("relationship_name"))
-                            # Handle tuple format
-                            elif isinstance(edge, tuple):
-                                source_id = UUID(str(edge[0]))
-                                target_id = UUID(str(edge[1]))
-                                rel_type = str(edge[2]) if len(edge) > 2 else "UNKNOWN"
-                            else:
-                                logger.error(f"DEBUG: Unhandled edge format: {type(edge)}")
-                                continue
-
-                            relationship = GraphRelationshipLedger(
-                                id=uuid5(
-                                    NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"
-                                ),
-                                source_node_id=source_id,
-                                destination_node_id=target_id,
-                                creator_function=f"{creator}.{rel_type}",
-                            )
-                            session.add(relationship)
-                            await session.flush()
-                        except Exception as e:
-                            logger.error(f"DEBUG: Error adding relationship: {e}")
+                for edge in edges:
+                    try:
+                        source_id = UUID(str(edge[0]))
+                        target_id = UUID(str(edge[1]))
+                        rel_type = str(edge[2])
+                        relationship = GraphRelationshipLedger(
+                            id=uuid5(NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"),
+                            source_node_id=source_id,
+                            destination_node_id=target_id,
+                            creator_function=f"{creator}.{rel_type}",
+                        )
+                        session.add(relationship)
+                        await session.flush()
+                    except Exception as e:
+                        logger.error(f"Error adding relationship: {e}")
+                        await session.rollback()
+                        continue
 
             try:
                 await session.commit()
             except Exception as e:
-                logger.error(f"DEBUG: Error committing session: {e}")
+                logger.error(f"Error committing session: {e}")
 
         return result
 
@@ -127,78 +100,96 @@ class GraphDBInterface(ABC):
     """Interface for graph database operations."""
 
     @abstractmethod
-    async def query(self, query: str, params: dict):
+    async def query(self, query: str, params: dict) -> List[Any]:
+        """Execute a raw query against the database."""
         raise NotImplementedError
 
     @abstractmethod
-    async def add_node(self, node_id: str, node_properties: dict):
+    async def add_node(self, node_id: str, properties: Dict[str, Any]) -> None:
+        """Add a single node to the graph."""
         raise NotImplementedError
 
     @abstractmethod
     @record_graph_changes
-    async def add_nodes(self, nodes: list) -> None:
-        """Add nodes to the graph database."""
-        pass
-
-    @abstractmethod
-    async def delete_node(self, node_id: str):
+    async def add_nodes(self, nodes: List[Node]) -> None:
+        """Add multiple nodes to the graph."""
         raise NotImplementedError
 
     @abstractmethod
-    async def delete_nodes(self, node_ids: list[str]):
+    async def delete_node(self, node_id: str) -> None:
+        """Delete a node from the graph."""
         raise NotImplementedError
 
     @abstractmethod
-    async def extract_node(self, node_id: str) -> Optional[dict]:
-        """Extract a node from the graph database."""
-        pass
+    async def delete_nodes(self, node_ids: List[str]) -> None:
+        """Delete multiple nodes from the graph."""
+        raise NotImplementedError
 
     @abstractmethod
-    async def extract_nodes(self, node_ids: list[str]):
+    async def get_node(self, node_id: str) -> Optional[NodeData]:
+        """Get a single node by ID."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_nodes(self, node_ids: List[str]) -> List[NodeData]:
+        """Get multiple nodes by their IDs."""
         raise NotImplementedError
 
     @abstractmethod
     async def add_edge(
         self,
-        from_node: str,
-        to_node: str,
+        source_id: str,
+        target_id: str,
         relationship_name: str,
-        edge_properties: Optional[Dict[str, Any]] = None,
-    ):
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Add a single edge to the graph."""
         raise NotImplementedError
 
     @abstractmethod
     @record_graph_changes
-    async def add_edges(self, edges: list) -> None:
-        """Add edges to the graph database."""
-        pass
-
-    @abstractmethod
-    async def delete_graph(
-        self,
-    ):
+    async def add_edges(self, edges: List[EdgeData]) -> None:
+        """Add multiple edges to the graph."""
         raise NotImplementedError
 
     @abstractmethod
-    async def get_graph_data(self):
+    async def delete_graph(self) -> None:
+        """Delete the entire graph."""
         raise NotImplementedError
 
     @abstractmethod
-    async def get_graph_metrics(self, include_optional):
-        """ "https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+    async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
+        """Get all nodes and edges in the graph."""
         raise NotImplementedError
 
     @abstractmethod
-    async def has_edges(self, edges: list) -> list:
-        """Check if edges exist in the graph database."""
-        pass
+    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+        """Get graph metrics and statistics."""
+        raise NotImplementedError
 
     @abstractmethod
-    async def get_document_subgraph(self, content_hash: str) -> Dict[str, list]:
-        """Get all nodes connected to a document that should be deleted with it.
+    async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
+        """Check if an edge exists."""
+        raise NotImplementedError
 
-        Returns:
-            Dict with keys: 'document', 'chunks', 'orphan_entities',
-            'made_from_nodes', 'orphan_types'
-        """
-        pass
+    @abstractmethod
+    async def has_edges(self, edges: List[EdgeData]) -> List[EdgeData]:
+        """Check if multiple edges exist."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_edges(self, node_id: str) -> List[EdgeData]:
+        """Get all edges connected to a node."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_neighbors(self, node_id: str) -> List[NodeData]:
+        """Get all neighboring nodes."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_connections(
+        self, node_id: str
+    ) -> List[Tuple[NodeData, Dict[str, Any], NodeData]]:
+        """Get all nodes connected to a given node with their relationships."""
+        raise NotImplementedError

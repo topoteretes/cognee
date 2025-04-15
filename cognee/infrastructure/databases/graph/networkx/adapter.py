@@ -90,22 +90,44 @@ class NetworkXAdapter(GraphDBInterface):
         await self.save_graph_to_file(self.filename)
 
     @record_graph_changes
-    async def add_edges(self, edges: tuple[str, str, str, dict]) -> None:
-        edges = [
-            (
-                edge[0],
-                edge[1],
-                edge[2],
-                {
-                    **(edge[3] if len(edge) == 4 else {}),
-                    "updated_at": datetime.now(timezone.utc),
-                },
-            )
-            for edge in edges
-        ]
+    async def add_edges(self, edges: list[tuple[str, str, str, dict]]) -> None:
+        if not edges:
+            logger.debug("No edges to add")
+            return
 
-        self.graph.add_edges_from(edges)
-        await self.save_graph_to_file(self.filename)
+        try:
+            # Validate edge format
+            for edge in edges:
+                if len(edge) < 3 or len(edge) > 4:
+                    raise ValueError(
+                        f"Invalid edge format: {edge}. Expected (from_node, to_node, relationship_name[, properties])"
+                    )
+                if not all(isinstance(x, str) for x in edge[:3]):
+                    raise ValueError(f"First three elements of edge must be strings: {edge}")
+
+            # Process edges with updated_at timestamp
+            processed_edges = [
+                (
+                    edge[0],
+                    edge[1],
+                    edge[2],
+                    {
+                        **(edge[3] if len(edge) == 4 else {}),
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                )
+                for edge in edges
+            ]
+
+            # Add edges to graph
+            self.graph.add_edges_from(processed_edges)
+            logger.debug(f"Added {len(processed_edges)} edges to graph")
+
+            # Save changes
+            await self.save_graph_to_file(self.filename)
+        except Exception as e:
+            logger.error(f"Failed to add edges: {e}")
+            raise
 
     async def get_edges(self, node_id: str):
         return list(self.graph.in_edges(node_id, data=True)) + list(
@@ -484,7 +506,10 @@ class NetworkXAdapter(GraphDBInterface):
         document = None
         document_node_id = None
         for node_id, attrs in self.graph.nodes(data=True):
-            if attrs.get("type") == "TextDocument" and attrs.get("name") == f"text_{content_hash}":
+            if (
+                attrs.get("type") in ["TextDocument", "PdfDocument"]
+                and attrs.get("name") == f"text_{content_hash}"
+            ):
                 document = {"id": str(node_id), **attrs}  # Convert UUID to string for consistency
                 document_node_id = node_id  # Keep the original UUID
                 break

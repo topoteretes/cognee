@@ -659,20 +659,23 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def get_document_subgraph(self, content_hash: str):
         query = """
-        MATCH (doc:TextDocument)
-        WHERE doc.name = 'text_' + $content_hash
+        MATCH (doc)
+        WHERE (doc:TextDocument OR doc:PdfDocument)
+        AND doc.name = 'text_' + $content_hash
 
         OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
         OPTIONAL MATCH (chunk)-[:contains]->(entity:Entity)
         WHERE NOT EXISTS {
-            MATCH (entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc:TextDocument)
-            WHERE otherDoc.id <> doc.id
+            MATCH (entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc)
+            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument)
+            AND otherDoc.id <> doc.id
         }
         OPTIONAL MATCH (chunk)<-[:made_from]-(made_node:TextSummary)
         OPTIONAL MATCH (entity)-[:is_a]->(type:EntityType)
         WHERE NOT EXISTS {
-            MATCH (type)<-[:is_a]-(otherEntity:Entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc:TextDocument)
-            WHERE otherDoc.id <> doc.id
+            MATCH (type)<-[:is_a]-(otherEntity:Entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc)
+            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument)
+            AND otherDoc.id <> doc.id
         }
 
         RETURN
