@@ -208,7 +208,7 @@ class NetworkXAdapter(GraphDBInterface):
 
             return nodes
 
-    async def get_neighbours(self, node_id: str) -> list:
+    async def get_neighbors(self, node_id: str) -> list:
         if not self.graph.has_node(node_id):
             return []
 
@@ -217,9 +217,9 @@ class NetworkXAdapter(GraphDBInterface):
             self.get_successors(node_id),
         )
 
-        neighbours = predecessors + successors
+        neighbors = predecessors + successors
 
-        return neighbours
+        return neighbors
 
     async def get_connections(self, node_id: UUID) -> list:
         if not self.graph.has_node(node_id):
@@ -616,3 +616,13 @@ class NetworkXAdapter(GraphDBInterface):
                 if degree == 1:
                     nodes.append(node_data)
         return nodes
+
+    async def get_node(self, node_id: str) -> dict:
+        if self.graph.has_node(node_id):
+            return self.graph.nodes[node_id]
+        return None
+
+    async def get_nodes(self, node_ids: List[str] = None) -> List[dict]:
+        if node_ids is None:
+            return [{"id": node_id, **data} for node_id, data in self.graph.nodes(data=True)]
+        return [{"id": node_id, **self.graph.nodes[node_id]} for node_id in node_ids if self.graph.has_node(node_id)]
