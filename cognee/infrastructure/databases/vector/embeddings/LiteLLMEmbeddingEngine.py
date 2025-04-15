@@ -90,6 +90,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 # If caller passed ONE oversize string split the string itself into
                 # half so we can process it
             if isinstance(text, list) and len(text) == 1:
+                logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
                 s = text[0]
                 third = len(s) // 3
                 # We are using thirds to intentionally have overlap between split parts
