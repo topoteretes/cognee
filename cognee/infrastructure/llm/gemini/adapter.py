@@ -9,7 +9,6 @@ from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.rate_limiter import (
     rate_limit_async,
-    rate_limit_sync,
     sleep_and_retry_async,
 )
 from cognee.base_config import get_base_config
