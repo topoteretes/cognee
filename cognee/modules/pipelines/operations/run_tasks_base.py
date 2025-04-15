@@ -3,7 +3,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
-from ..tasks.Task import Task
+from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
 

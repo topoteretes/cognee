@@ -15,7 +15,7 @@ from cognee.shared.utils import send_telemetry
 from uuid import uuid5, NAMESPACE_OID
 
 from .run_tasks_base import run_tasks_base
-from ..tasks.Task import Task
+from ..tasks.task import Task
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
