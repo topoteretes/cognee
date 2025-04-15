@@ -1,7 +1,8 @@
 import asyncio
 from cognee.shared.logging_utils import get_logger
-import math
 from typing import List, Optional
+import numpy as np
+import math
 import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
@@ -77,20 +78,33 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [data["embedding"] for data in response.data]
 
         except litellm.exceptions.ContextWindowExceededError as error:
-            if isinstance(text, list):
-                if len(text) == 1:
-                    parts = [text]
-                else:
-                    parts = [text[0 : math.ceil(len(text) / 2)], text[math.ceil(len(text) / 2) :]]
+            if isinstance(text, list) and len(text) > 1:
+                mid = math.ceil(len(text) / 2)
+                left, right = text[:mid], text[mid:]
+                left_vecs, right_vecs = await asyncio.gather(
+                    self.embed_text(left),
+                    self.embed_text(right),
+                )
+                return left_vecs + right_vecs
 
-                parts_futures = [self.embed_text(part) for part in parts]
-                embeddings = await asyncio.gather(*parts_futures)
+                # If caller passed ONE oversize string split the string itself into
+                # half so we can process it
+            if isinstance(text, list) and len(text) == 1:
+                s = text[0]
+                third = len(s) // 3
+                # We are using thirds to intentionally have overlap between split parts
+                # for better embedding calculation
+                left_part, right_part = s[: third * 2], s[third:]
 
-                all_embeddings = []
-                for embeddings_part in embeddings:
-                    all_embeddings.extend(embeddings_part)
+                # Recursively embed the split parts in parallel
+                (left_vec,), (right_vec,) = await asyncio.gather(
+                    self.embed_text([left_part]),
+                    self.embed_text([right_part]),
+                )
 
-                return all_embeddings
+                # POOL the two embeddings into one
+                pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                return [pooled.tolist()]
 
             logger.error("Context window exceeded for embedding text: %s", str(error))
             raise error
