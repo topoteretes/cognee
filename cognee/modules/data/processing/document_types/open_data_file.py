@@ -16,7 +16,10 @@ def open_data_file(
             raise ValueError("S3 credentials are not set in the configuration.")
 
         if "b" in mode:
-            return fs.open(file_path, mode=mode, **kwargs)
+            f = fs.open(file_path, mode=mode, **kwargs)
+            if not hasattr(f, "name") or not f.name:
+                f.name = file_path.split("/")[-1]
+            return f
         else:
             return fs.open(file_path, mode=mode, encoding=encoding, **kwargs)
     else:
