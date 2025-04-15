@@ -14,6 +14,8 @@ class Task:
     }
     default_params: dict[str, Any] = {}
     task_type: str = None
+    _execute_method: Callable = None
+    _next_batch_size: int = 1
 
     def __init__(self, executable, *args, task_config=None, **kwargs):
         self.executable = executable
@@ -21,12 +23,16 @@ class Task:
 
         if inspect.isasyncgenfunction(executable):
             self.task_type = "Async Generator"
+            self._execute_method = self.execute_async_generator
         elif inspect.isgeneratorfunction(executable):
             self.task_type = "Generator"
+            self._execute_method = self.execute_generator
         elif inspect.iscoroutinefunction(executable):
             self.task_type = "Coroutine"
+            self._execute_method = self.execute_coroutine
         elif inspect.isfunction(executable):
             self.task_type = "Function"
+            self._execute_method = self.execute_function
         else:
             raise ValueError(f"Unsupported task type: {executable}")
 
@@ -43,7 +49,7 @@ class Task:
 
         return self.executable(*combined_args, **combined_kwargs)
 
-    async def execute_async_generator(self, args, batch_size):
+    async def execute_async_generator(self, args):
         """Execute async generator task and collect results in batches."""
         results = []
         async_iterator = self.run(*args)
@@ -51,21 +57,21 @@ class Task:
         async for partial_result in async_iterator:
             results.append(partial_result)
 
-            if len(results) == batch_size:
+            if len(results) == self._next_batch_size:
                 yield results
                 results = []
 
         if results:
             yield results
 
-    async def execute_generator(self, args, batch_size):
+    async def execute_generator(self, args):
         """Execute generator task and collect results in batches."""
         results = []
 
         for partial_result in self.run(*args):
             results.append(partial_result)
 
-            if len(results) == batch_size:
+            if len(results) == self._next_batch_size:
                 yield results
                 results = []
 
@@ -84,20 +90,8 @@ class Task:
 
     async def execute(self, args, next_batch_size=None):
         """Execute the task based on its type and yield results with the next task's batch size."""
-        if next_batch_size is None:
-            next_batch_size = 1
+        if next_batch_size is not None:
+            self._next_batch_size = next_batch_size
 
-        if self.task_type == "Async Generator":
-            async for batch_results in self.execute_async_generator(args, next_batch_size):
-                yield batch_results
-        elif self.task_type == "Generator":
-            async for batch_results in self.execute_generator(args, next_batch_size):
-                yield batch_results
-        elif self.task_type == "Coroutine":
-            async for result in self.execute_coroutine(args):
-                yield result
-        elif self.task_type == "Function":
-            async for result in self.execute_function(args):
-                yield result
-        else:
-            raise ValueError(f"Unsupported task type: {self.task_type}")
+        async for result in self._execute_method(args):
+            yield result
