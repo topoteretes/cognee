@@ -11,99 +11,16 @@ services:
       - /app/cognee-frontend/ # Ignore frontend code
     environment:
       - HOST=0.0.0.0
-      - ENVIRONMENT=local
+      - ENVIRONMENT=staging
       - PYTHONPATH=.
     ports:
       - 8000:8000
-      # - 5678:5678 # Debugging
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: '2.0'
           memory: 8GB
-
-# NOTE: Frontend is a work in progress and is not intended to be used by users yet.
-#       If you want to use Cognee with a UI environment you can run the cognee-gui.py script or
-#       integrate the Cognee MCP Server to Cursor / Claude Desktop / Visual Studio Code ( through Cline/Roo )
-
-#  frontend:
-#    container_name: frontend
-#    build:
-#      context: ./cognee-frontend
-#      dockerfile: Dockerfile
-#    volumes:
-#      - ./cognee-frontend/src:/app/src
-#      - ./cognee-frontend/public:/app/public
-#    ports:
-#      - 3000:3000
-#      # - 9229:9229 # Debugging
-#    networks:
-#      - cognee-network
-
-  neo4j:
-    image: neo4j:latest
-    container_name: neo4j
-    profiles:
-      - neo4j
-    ports:
-      - 7474:7474
-      - 7687:7687
-    environment:
-      - NEO4J_AUTH=neo4j/pleaseletmein
-      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
-    networks:
-      - cognee-network
-
-  falkordb:
-    image: falkordb/falkordb:edge
-    container_name: falkordb
-    profiles:
-      - falkordb
-    ports:
-      - 6379:6379
-      - 3001:3000
-    networks:
-      - cognee-network
-
-  chromadb:
-    image: chromadb/chroma:0.6.3
-    container_name: chromadb
-    profiles:
-      - chromadb
-    environment:
-      - IS_PERSISTENT=TRUE
-      - CHROMA_SERVER_AUTH_CREDENTIALS=${VECTOR_DB_KEY}
-      - CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.token.TokenConfigServerAuthCredentialsProvider
-      - CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=AUTHORIZATION
-      - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider
-    volumes:
-      - .chromadb_data/:/chroma/chroma/
-    networks:
-      - cognee-network
-    ports:
-      - "3002:8000"
-
-  # UNCOMMENT IF USING POSTGRES
-  # postgres:
-  #   image: pgvector/pgvector:pg17
-  #   container_name: postgres
-  #   environment:
-  #     POSTGRES_USER: cognee
-  #     POSTGRES_PASSWORD: cognee
-  #     POSTGRES_DB: cognee_db
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - 5432:5432
-  #   networks:
-  #     - cognee-network
-  # UNCOMMENT THE VOLUES SECTION BELOW AS WELL TO USE POSTGRES
 
 networks:
   cognee-network:
     name: cognee-network
-
-volumes:
-  chromadb_data:
-# UNCOMMENT IF USING POSTGRES
-#   postgres_data:

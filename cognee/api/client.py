@@ -149,7 +149,7 @@ def health_check():
     """
     Health check endpoint that returns the server status.
     """
-    return Response(status_code=200)
+    return JSONResponse(content={"status": "healthy"}, status_code=200)
 
 
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
