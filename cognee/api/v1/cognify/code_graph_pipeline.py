@@ -9,7 +9,7 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines import run_tasks
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, MonitoringTool
 from cognee.shared.utils import render_graph

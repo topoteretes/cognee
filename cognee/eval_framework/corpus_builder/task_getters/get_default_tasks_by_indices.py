@@ -1,6 +1,6 @@
 from typing import List
 from cognee.api.v1.cognify.cognify import get_default_tasks
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
@@ -39,9 +39,10 @@ async def get_no_summary_tasks(
         extract_graph_from_data,
         graph_model=graph_model,
         ontology_adapter=ontology_adapter,
+        task_config={"batch_size": 10},
     )
 
-    add_data_points_task = Task(add_data_points)
+    add_data_points_task = Task(add_data_points, task_config={"batch_size": 10})
 
     return base_tasks + [graph_task, add_data_points_task]
 
@@ -53,6 +54,6 @@ async def get_just_chunks_tasks(
     # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
     base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
 
-    add_data_points_task = Task(add_data_points)
+    add_data_points_task = Task(add_data_points, task_config={"batch_size": 10})
 
     return base_tasks + [add_data_points_task]
