@@ -13,7 +13,7 @@ import cognee
 from cognee.low_level import DataPoint, setup as cognee_setup
 from cognee.api.v1.search import SearchType
 from cognee.tasks.storage import add_data_points
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
 
 
