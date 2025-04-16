@@ -1,11 +1,8 @@
 import asyncio
 from cognee.shared.logging_utils import get_logger
-from typing import Union, Optional
+from typing import Union
 from uuid import uuid5, NAMESPACE_OID
-from pydantic import BaseModel
 
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
@@ -15,23 +12,13 @@ from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.utils import send_telemetry
-from cognee.tasks.documents import (
-    check_permissions_on_documents,
-    classify_documents,
-    extract_chunks_from_documents,
-)
+
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
 )
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
-from cognee.tasks.graph import extract_graph_from_data
-from cognee.tasks.storage import add_data_points
-from cognee.tasks.summarization import summarize_text
-from cognee.modules.chunking.TextChunker import TextChunker
 
 logger = get_logger("cognee.pipeline")
 
@@ -43,8 +30,6 @@ async def cognee_pipeline(
     data=None,
     datasets: Union[str, list[str]] = None,
     user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
-    ontology_file_path: Optional[str] = None,
     pipeline_name: str = "custom_pipeline",
 ):
     # Create tables for databases
@@ -107,6 +92,7 @@ async def run_pipeline(
         dataset_id = dataset.id
     elif isinstance(dataset, str):
         check_dataset_name(dataset)
+        # Generate id based on unique dataset_id formula
         dataset_id = uuid5(NAMESPACE_OID, f"{dataset}{str(user.id)}")
 
     if not data:
