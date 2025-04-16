@@ -10,6 +10,10 @@ from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.embedding_rate_limiter import (
+    embedding_rate_limit_async,
+    embedding_sleep_and_retry_async,
+)
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
@@ -51,17 +55,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
+    @embedding_sleep_and_retry_async()
+    @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
-        async def exponential_backoff(attempt):
-            wait_time = min(10 * (2**attempt), 60)  # Max 60 seconds
-            await asyncio.sleep(wait_time)
-
         try:
             if self.mock:
                 response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
-
-                self.retry_count = 0
-
                 return [data["embedding"] for data in response["data"]]
             else:
                 response = await litellm.aembedding(
@@ -71,8 +70,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     api_base=self.endpoint,
                     api_version=self.api_version,
                 )
-
-                self.retry_count = 0  # Reset retry count on successful call
 
                 return [data["embedding"] for data in response.data]
 
@@ -94,15 +91,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             logger.error("Context window exceeded for embedding text: %s", str(error))
             raise error
-
-        except litellm.exceptions.RateLimitError:
-            if self.retry_count >= self.MAX_RETRIES:
-                raise Exception("Rate limit exceeded and no more retries left.")
-
-            await exponential_backoff(self.retry_count)
-            self.retry_count += 1
-
-            return await self.embed_text(text)
 
         except (
             litellm.exceptions.BadRequestError,
