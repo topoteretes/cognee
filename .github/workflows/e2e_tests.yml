@@ -187,4 +187,4 @@ jobs:
             EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          run: poetry run python -c "assert True"
+          run: poetry run python ./cognee/tests/test_s3.py
