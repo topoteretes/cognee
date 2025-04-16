@@ -151,7 +151,10 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
         )
 
     datasets = await get_datasets_by_name(dataset_name, user.id)
-    dataset = datasets[0]
-    data_documents = await get_dataset_data(dataset_id=dataset.id)
 
-    return data_documents
+    # In case no files were processed no dataset will be created
+    if datasets:
+        dataset = datasets[0]
+        data_documents = await get_dataset_data(dataset_id=dataset.id)
+        return data_documents
+    return []

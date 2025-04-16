@@ -76,7 +76,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
         async for run_status in non_code_pipeline_run:
             yield run_status
 
-    async for run_status in run_tasks(tasks, dataset_id, repo_path, "cognify_code_pipeline"):
+    async for run_status in run_tasks(tasks, dataset_id, repo_path, user, "cognify_code_pipeline"):
         yield run_status
 
 
