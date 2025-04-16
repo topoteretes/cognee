@@ -7,7 +7,7 @@ from ..tokenizer_interface import TokenizerInterface
 class TikTokenTokenizer(TokenizerInterface):
     """
     Tokenizer adapter for OpenAI.
-    Inteded to be used as part of LLM Embedding and LLM Adapters classes
+    Intended to be used as part of LLM Embedding and LLM Adapters classes
     """
 
     def __init__(
