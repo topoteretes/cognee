@@ -25,6 +25,8 @@ async def main():
         node_data["type"] for _, node_data in graph.nodes(data=True) if "type" in node_data
     )
 
+    edge_type_counts = Counter(edge_type for _, _, edge_type in graph.edges(keys=True))
+
     logging.info(type_counts)
 
     # Assert there is exactly one PdfDocument.
@@ -55,6 +57,26 @@ async def main():
     # Assert there is at least one EntityType.
     assert type_counts.get("EntityType", 0) > 0, (
         f"Expected more than zero EntityType nodes, but found {type_counts.get('EntityType', 0)}"
+    )
+
+    # Assert that there are at least two 'is_part_of' edges.
+    assert edge_type_counts.get("is_part_of", 0) >= 2, (
+        f"Expected at least two 'is_part_of' edges, but found {edge_type_counts.get('is_part_of', 0)}"
+    )
+
+    # Assert that there are at least two 'made_from' edges.
+    assert edge_type_counts.get("made_from", 0) >= 2, (
+        f"Expected at least two 'made_from' edges, but found {edge_type_counts.get('made_from', 0)}"
+    )
+
+    # Assert that there is at least one 'is_a' edge.
+    assert edge_type_counts.get("is_a", 0) >= 1, (
+        f"Expected at least one 'is_a' edge, but found {edge_type_counts.get('is_a', 0)}"
+    )
+
+    # Assert that there is at least one 'contains' edge.
+    assert edge_type_counts.get("contains", 0) >= 1, (
+        f"Expected at least one 'contains' edge, but found {edge_type_counts.get('contains', 0)}"
     )
 
 
