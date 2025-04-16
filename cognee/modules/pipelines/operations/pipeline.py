@@ -6,7 +6,7 @@ from uuid import uuid5, NAMESPACE_OID
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
-from cognee.modules.pipelines import run_tasks
+from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.tasks.task import Task
