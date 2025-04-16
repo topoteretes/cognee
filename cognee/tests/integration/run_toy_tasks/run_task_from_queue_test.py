@@ -3,7 +3,7 @@ from queue import Queue
 
 import cognee
 from cognee.modules.pipelines.operations.run_tasks import run_tasks_base
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.infrastructure.databases.relational import create_db_and_tables
 
@@ -19,11 +19,11 @@ async def pipeline(data_queue):
             else:
                 await asyncio.sleep(0.3)
 
-    async def add_one(num):
-        yield num + 1
+    async def add_one(num_list):
+        yield num_list[0] + 1
 
-    async def multiply_by_two(num):
-        yield num * 2
+    async def multiply_by_two(num_list):
+        yield num_list[0] * 2
 
     await create_db_and_tables()
     user = await get_default_user()
@@ -41,7 +41,7 @@ async def pipeline(data_queue):
     results = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
     index = 0
     async for result in tasks_run:
-        assert result == results[index], f"at {index = }: {result = } != {results[index] = }"
+        assert result[0] == results[index], f"at {index = }: {result = } != {results[index] = }"
         index += 1
 
 

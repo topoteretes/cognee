@@ -307,7 +307,7 @@ class SQLAlchemyAdapter:
                 raise e
 
     async def create_database(self):
-        if self.engine.dialect.name == "sqlite":
+        if self.engine.dialect.name == "sqlite" and not os.path.exists(self.db_path):
             from cognee.infrastructure.files.storage import LocalStorage
 
             db_directory = path.dirname(self.db_path)
@@ -322,7 +322,9 @@ class SQLAlchemyAdapter:
             if self.engine.dialect.name == "sqlite":
                 from cognee.infrastructure.files.storage import LocalStorage
 
-                LocalStorage.remove(self.db_path)
+                await self.engine.dispose(close=True)
+                with open(self.db_path, "w") as file:
+                    file.write("")
             else:
                 async with self.engine.begin() as connection:
                     schema_list = await self.get_schema_list()

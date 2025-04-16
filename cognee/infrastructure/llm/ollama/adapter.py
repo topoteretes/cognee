@@ -3,6 +3,11 @@ from pydantic import BaseModel
 import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.rate_limiter import (
+    rate_limit_async,
+    rate_limit_sync,
+    sleep_and_retry_async,
+)
 from openai import OpenAI
 import base64
 import os
@@ -22,6 +27,8 @@ class OllamaAPIAdapter(LLMInterface):
             OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
         )
 
+    @sleep_and_retry_async()
+    @rate_limit_async
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
@@ -45,6 +52,7 @@ class OllamaAPIAdapter(LLMInterface):
 
         return response
 
+    @rate_limit_sync
     def create_transcript(self, input_file: str) -> str:
         """Generate an audio transcript from a user query."""
 
@@ -64,6 +72,7 @@ class OllamaAPIAdapter(LLMInterface):
 
         return transcription.text
 
+    @rate_limit_sync
     def transcribe_image(self, input_file: str) -> str:
         """Transcribe content from an image using base64 encoding."""
 
@@ -79,7 +88,7 @@ class OllamaAPIAdapter(LLMInterface):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "What’s in this image?"},
+                        {"type": "text", "text": "What's in this image?"},
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},

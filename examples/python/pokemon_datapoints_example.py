@@ -13,7 +13,7 @@ import cognee
 from cognee.low_level import DataPoint, setup as cognee_setup
 from cognee.api.v1.search import SearchType
 from cognee.tasks.storage import add_data_points
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
 
 
@@ -175,7 +175,9 @@ async def pokemon_cognify(pokemons):
     await cognee.prune.prune_system(metadata=True)
     await cognee_setup()
 
-    tasks = [Task(add_data_points, task_config={"batch_size": 50})]
+    # tasks = [Task(add_data_points, task_config={"batch_size": 50})]
+    tasks = [Task(add_data_points)]
+
     results = run_tasks(
         tasks=tasks,
         data=pokemons,

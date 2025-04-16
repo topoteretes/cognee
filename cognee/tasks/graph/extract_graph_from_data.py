@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, List
+from typing import Type, List, Optional
 
 from pydantic import BaseModel
 

@@ -12,7 +12,7 @@ from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -112,8 +112,6 @@ async def run_pipeline(
     if not data:
         data: list[Data] = await get_dataset_data(dataset_id=dataset_id)
 
-    send_telemetry(f"{pipeline_name} EXECUTION STARTED", user.id)
-
     # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
     if isinstance(dataset, Dataset):
         task_status = await get_pipeline_status([dataset_id])
@@ -129,26 +127,20 @@ async def run_pipeline(
         logger.info("Dataset %s is already being processed.", dataset_id)
         return
 
-    try:
-        if not isinstance(tasks, list):
-            raise ValueError("Tasks must be a list")
+    if not isinstance(tasks, list):
+        raise ValueError("Tasks must be a list")
 
-        for task in tasks:
-            if not isinstance(task, Task):
-                raise ValueError(f"Task {task} is not an instance of Task")
+    for task in tasks:
+        if not isinstance(task, Task):
+            raise ValueError(f"Task {task} is not an instance of Task")
 
-        pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name)
-        pipeline_run_status = None
+    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name)
+    pipeline_run_status = None
 
-        async for run_status in pipeline_run:
-            pipeline_run_status = run_status
+    async for run_status in pipeline_run:
+        pipeline_run_status = run_status
 
-        send_telemetry(f"{pipeline_name} EXECUTION COMPLETED", user.id)
-        return pipeline_run_status
-
-    except Exception as error:
-        send_telemetry(f"{pipeline_name} EXECUTION ERRORED", user.id)
-        raise error
+    return pipeline_run_status
 
 
 def check_dataset_name(dataset_name: str) -> str:

@@ -1,7 +1,9 @@
 import os
-from cognee.shared.logging_utils import get_logger
 import pathlib
 import cognee
+from cognee.modules.search.operations import get_history
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 
 logger = get_logger()
@@ -69,7 +71,8 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    history = await cognee.get_search_history()
+    user = await get_default_user()
+    history = await get_history(user.id)
 
     assert len(history) == 6, "Search history is not correct."
 
@@ -86,9 +89,9 @@ async def main():
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    assert not os.path.exists(get_relational_engine().db_path), (
-        "SQLite relational database is not empty"
-    )
+    with open(get_relational_engine().db_path, "r") as file:
+        content = file.read()
+        assert content == "", "SQLite relational database is not empty"
 
     from cognee.infrastructure.databases.graph import get_graph_config
 
