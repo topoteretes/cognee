@@ -96,28 +96,35 @@ class NetworkXAdapter(GraphDBInterface):
             return
 
         try:
-            # Validate edge format
+            # Validate edge format and convert UUIDs to strings
+            processed_edges = []
             for edge in edges:
                 if len(edge) < 3 or len(edge) > 4:
                     raise ValueError(
                         f"Invalid edge format: {edge}. Expected (from_node, to_node, relationship_name[, properties])"
                     )
-                if not all(isinstance(x, str) for x in edge[:3]):
-                    raise ValueError(f"First three elements of edge must be strings: {edge}")
 
-            # Process edges with updated_at timestamp
-            processed_edges = [
-                (
-                    edge[0],
-                    edge[1],
-                    edge[2],
+                # Convert UUIDs to strings if needed
+                from_node = str(edge[0]) if isinstance(edge[0], UUID) else edge[0]
+                to_node = str(edge[1]) if isinstance(edge[1], UUID) else edge[1]
+                relationship_name = edge[2]
+
+                if not all(isinstance(x, str) for x in [from_node, to_node, relationship_name]):
+                    raise ValueError(
+                        f"First three elements of edge must be strings or UUIDs: {edge}"
+                    )
+
+                # Process edge with updated_at timestamp
+                processed_edge = (
+                    from_node,
+                    to_node,
+                    relationship_name,
                     {
                         **(edge[3] if len(edge) == 4 else {}),
                         "updated_at": datetime.now(timezone.utc),
                     },
                 )
-                for edge in edges
-            ]
+                processed_edges.append(processed_edge)
 
             # Add edges to graph
             self.graph.add_edges_from(processed_edges)
@@ -301,9 +308,6 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""
-        if file_path == self.filename:
-            return
-
         if not file_path:
             file_path = self.filename
         try:
@@ -625,4 +629,8 @@ class NetworkXAdapter(GraphDBInterface):
     async def get_nodes(self, node_ids: List[str] = None) -> List[dict]:
         if node_ids is None:
             return [{"id": node_id, **data} for node_id, data in self.graph.nodes(data=True)]
-        return [{"id": node_id, **self.graph.nodes[node_id]} for node_id in node_ids if self.graph.has_node(node_id)]
+        return [
+            {"id": node_id, **self.graph.nodes[node_id]}
+            for node_id in node_ids
+            if self.graph.has_node(node_id)
+        ]

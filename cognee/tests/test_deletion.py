@@ -61,6 +61,7 @@ async def main():
 
     await cognee.delete([text_1, text_2], mode="hard")
     nodes, edges = await graph_engine.get_graph_data()
+    #    print(nodes, edges)
     assert len(nodes) == 0 and len(edges) == 0, "Document is not deleted."
 
 
