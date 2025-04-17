@@ -476,6 +476,50 @@ class KuzuAdapter(GraphDBInterface):
 
     # Neighbor Operations
 
+    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+        """Get all neighboring nodes."""
+        return await self.get_neighbours(node_id)
+
+    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single node by ID."""
+        query_str = """
+        MATCH (n:Node)
+        WHERE n.id = $id
+        RETURN {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            properties: n.properties
+        }
+        """
+        try:
+            result = await self.query(query_str, {"id": node_id})
+            if result and result[0]:
+                return self._parse_node(result[0][0])
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get node {node_id}: {e}")
+            return None
+
+    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get multiple nodes by their IDs."""
+        query_str = """
+        MATCH (n:Node)
+        WHERE n.id IN $node_ids
+        RETURN {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            properties: n.properties
+        }
+        """
+        try:
+            results = await self.query(query_str, {"node_ids": node_ids})
+            return [self._parse_node(row[0]) for row in results if row[0]]
+        except Exception as e:
+            logger.error(f"Failed to get nodes: {e}")
+            return []
+
     async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
         """Get all neighbouring nodes."""
         query_str = """
