@@ -16,11 +16,11 @@ class TestInsightsRetriever:
     @pytest.mark.asyncio
     async def test_insights_context_simple(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_simple"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_insights_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_insights_context_simple"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -87,11 +87,11 @@ class TestInsightsRetriever:
     @pytest.mark.asyncio
     async def test_insights_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_complex"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_insights_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_insights_context_complex"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -165,11 +165,11 @@ class TestInsightsRetriever:
 
         await graph_engine.add_edges(
             [
-                (person1.id, "works_for", company1.id),
-                (person2.id, "works_for", company2.id),
-                (person3.id, "works_for", company3.id),
-                (person4.id, "works_for", company1.id),
-                (person5.id, "works_for", company1.id),
+                (person1.id, company1.id, "works_for"),
+                (person2.id, company2.id, "works_for"),
+                (person3.id, company3.id, "works_for"),
+                (person4.id, company1.id, "works_for"),
+                (person5.id, company1.id, "works_for"),
             ]
         )
 
@@ -182,11 +182,11 @@ class TestInsightsRetriever:
     @pytest.mark.asyncio
     async def test_insights_context_on_empty_graph(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_empty"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_empty"
         )
         cognee.config.data_root_directory(data_directory_path)
 
