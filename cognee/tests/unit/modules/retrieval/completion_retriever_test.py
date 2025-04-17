@@ -24,6 +24,7 @@ class TestCompletionRetriever:
         mock_render_prompt.return_value = "Rendered prompt with context"
 
         mock_search_results = [MagicMock()]
+        mock_search_results[0].payload = {"text": "This is a sample document chunk."}
         mock_vector_engine = AsyncMock()
         mock_vector_engine.search.return_value = mock_search_results
         mock_get_vector_engine.return_value = mock_vector_engine
@@ -59,6 +60,7 @@ class TestCompletionRetriever:
         query = "test query with custom prompt"
 
         mock_search_results = [MagicMock()]
+        mock_search_results[0].payload = {"text": "This is a sample document chunk."}
         mock_vector_engine = AsyncMock()
         mock_vector_engine.search.return_value = mock_search_results
         mock_get_vector_engine.return_value = mock_vector_engine
