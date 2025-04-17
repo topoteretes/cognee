@@ -1,7 +1,8 @@
 import asyncio
 from cognee.shared.logging_utils import get_logger
-import math
 from typing import List, Optional
+import numpy as np
+import math
 import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
@@ -10,6 +11,10 @@ from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.embedding_rate_limiter import (
+    embedding_rate_limit_async,
+    embedding_sleep_and_retry_async,
+)
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
@@ -51,17 +56,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
+    @embedding_sleep_and_retry_async()
+    @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
-        async def exponential_backoff(attempt):
-            wait_time = min(10 * (2**attempt), 60)  # Max 60 seconds
-            await asyncio.sleep(wait_time)
-
         try:
             if self.mock:
                 response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
-
-                self.retry_count = 0
-
                 return [data["embedding"] for data in response["data"]]
             else:
                 response = await litellm.aembedding(
@@ -72,37 +72,40 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     api_version=self.api_version,
                 )
 
-                self.retry_count = 0  # Reset retry count on successful call
-
                 return [data["embedding"] for data in response.data]
 
         except litellm.exceptions.ContextWindowExceededError as error:
-            if isinstance(text, list):
-                if len(text) == 1:
-                    parts = [text]
-                else:
-                    parts = [text[0 : math.ceil(len(text) / 2)], text[math.ceil(len(text) / 2) :]]
+            if isinstance(text, list) and len(text) > 1:
+                mid = math.ceil(len(text) / 2)
+                left, right = text[:mid], text[mid:]
+                left_vecs, right_vecs = await asyncio.gather(
+                    self.embed_text(left),
+                    self.embed_text(right),
+                )
+                return left_vecs + right_vecs
 
-                parts_futures = [self.embed_text(part) for part in parts]
-                embeddings = await asyncio.gather(*parts_futures)
+                # If caller passed ONE oversize string split the string itself into
+                # half so we can process it
+            if isinstance(text, list) and len(text) == 1:
+                logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
+                s = text[0]
+                third = len(s) // 3
+                # We are using thirds to intentionally have overlap between split parts
+                # for better embedding calculation
+                left_part, right_part = s[: third * 2], s[third:]
 
-                all_embeddings = []
-                for embeddings_part in embeddings:
-                    all_embeddings.extend(embeddings_part)
+                # Recursively embed the split parts in parallel
+                (left_vec,), (right_vec,) = await asyncio.gather(
+                    self.embed_text([left_part]),
+                    self.embed_text([right_part]),
+                )
 
-                return all_embeddings
+                # POOL the two embeddings into one
+                pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                return [pooled.tolist()]
 
             logger.error("Context window exceeded for embedding text: %s", str(error))
             raise error
-
-        except litellm.exceptions.RateLimitError:
-            if self.retry_count >= self.MAX_RETRIES:
-                raise Exception("Rate limit exceeded and no more retries left.")
-
-            await exponential_backoff(self.retry_count)
-            self.retry_count += 1
-
-            return await self.embed_text(text)
 
         except (
             litellm.exceptions.BadRequestError,
