@@ -13,7 +13,7 @@ from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -25,7 +25,6 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.tasks.node_set import apply_node_set
 from cognee.modules.chunking.TextChunker import TextChunker
 
 logger = get_logger("cognify")
@@ -140,7 +139,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": 10},
         ),
         Task(add_data_points, task_config={"batch_size": 10}),
-        Task(apply_node_set, task_config={"batch_size": 10}),  # Apply NodeSet values and create set nodes
     ]
 
     return default_tasks
