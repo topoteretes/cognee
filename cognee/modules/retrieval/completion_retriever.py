@@ -26,7 +26,9 @@ class CompletionRetriever(BaseRetriever):
         found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
         if len(found_chunks) == 0:
             raise NoRelevantDataFound
-        return found_chunks[0].payload["text"]
+        # Combine all chunks text returned from vector search (number of chunks is determined by top_k
+        chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
+        return "\n".join(chunks_payload)
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """Generates an LLM completion using the context."""

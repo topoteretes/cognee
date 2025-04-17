@@ -22,20 +22,12 @@ jobs:
 
       - name: Run Gemini Simple Example
         env:
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LLM_PROVIDER: "gemini"
           LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LLM_MODEL: "gemini/gemini-1.5-flash"
-          LLM_ENDPOINT: "https://generativelanguage.googleapis.com/"
-          LLM_API_VERSION: "v1beta"
           EMBEDDING_PROVIDER: "gemini"
           EMBEDDING_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMBEDDING_MODEL: "gemini/text-embedding-004"
-          EMBEDDING_ENDPOINT: "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004"
-          EMBEDDING_API_VERSION: "v1beta"
           EMBEDDING_DIMENSIONS: "768"
           EMBEDDING_MAX_TOKENS: "8076"
         run: poetry run python ./examples/python/simple_example.py

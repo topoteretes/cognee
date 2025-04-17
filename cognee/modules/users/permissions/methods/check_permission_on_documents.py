@@ -1,4 +1,5 @@
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.users.methods import get_default_user
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -13,6 +14,9 @@ logger = get_logger()
 
 
 async def check_permission_on_documents(user: User, permission_type: str, document_ids: list[UUID]):
+    if user is None:
+        user = await get_default_user()
+
     # TODO: Enable user role permissions again. Temporarily disabled during rework.
     # user_roles_ids = [role.id for role in user.roles]
     user_roles_ids = []
