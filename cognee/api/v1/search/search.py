@@ -1,5 +1,6 @@
-from typing import Union
+from typing import Union, Optional, Type, List
 
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import UserNotFoundError
 from cognee.modules.users.models import User
@@ -14,6 +15,8 @@ async def search(
     datasets: Union[list[str], str, None] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ) -> list:
     # We use lists from now on for datasets
     if isinstance(datasets, str):
@@ -32,6 +35,8 @@ async def search(
         user,
         system_prompt_path=system_prompt_path,
         top_k=top_k,
+        node_type=node_type,
+        node_name=node_name,
     )
 
     return filtered_search_results
