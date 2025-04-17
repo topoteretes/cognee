@@ -2,7 +2,7 @@ from typing import List
 from pydantic import BaseModel
 
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph

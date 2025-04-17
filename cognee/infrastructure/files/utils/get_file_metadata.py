@@ -20,7 +20,7 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
 
     file_type = guess_file_type(file)
 
-    file_path = file.name
+    file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
     file_name = str(file_path).split("/")[-1].split(".")[0] if file_path else None
 
     return FileMetadata(
