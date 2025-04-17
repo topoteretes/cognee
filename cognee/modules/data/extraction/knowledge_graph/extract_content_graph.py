@@ -2,17 +2,14 @@ from typing import Type
 from pydantic import BaseModel
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
+from cognee.infrastructure.llm.config import get_llm_config
 
 async def extract_content_graph(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
-    graph_prompt_path = os.getenv("GRAPH_PROMPT_PATH")
+    env_dict = get_llm_config().model_config
 
-    if graph_prompt_path is not None:
-        path = graph_prompt_path
+    if "GRAPH_PROMPT_PATH" in env_dict:
+        path = env_dict["GRAPH_PROMPT_PATH"]
     else:
         path = "generate_graph_prompt.txt"
 
