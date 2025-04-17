@@ -13,7 +13,7 @@ from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.pipelines.tasks.Task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
