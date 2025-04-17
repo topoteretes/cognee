@@ -10,7 +10,6 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.tasks.summarization.models import TextSummary
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.tasks.completion.exceptions.exceptions import NoRelevantDataError
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 
 
@@ -156,12 +155,8 @@ class TextSummariesRetriever:
         vector_engine = get_vector_engine()
         await vector_engine.create_collection("TextSummary_text", payload_schema=TextSummary)
 
-        with pytest.raises(NoRelevantDataError) as exc_info:
-            await retriever.get_context("Christina Mayer")
-
-        assert exc_info.value.message == "Search did not find any data.", (
-            "Failed to raise NoRelevantDataError"
-        )
+        context = await retriever.get_context("Christina Mayer")
+        assert context == [], "Returned context should be empty on an empty graph"
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ from typing import Optional, Union
 import cognee
 from cognee.low_level import setup, DataPoint
 from cognee.tasks.storage import add_data_points
-from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
@@ -146,12 +145,8 @@ class TestGraphCompletionRetriever:
 
         await setup()
 
-        with pytest.raises(EntityNotFoundError) as exc_info:
-            await retriever.get_context("Who works at Figma?")
-
-        assert exc_info.value.message == "No node data retrieved from the database.", (
-            "Failed to raise EntityNotFoundError"
-        )
+        context = await retriever.get_context("Who works at Figma?")
+        assert context == "", "Context should be empty on an empty graph"
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.tasks.completion.exceptions.exceptions import NoRelevantDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 
@@ -17,7 +16,7 @@ class InsightsRetriever(BaseRetriever):
         self.exploration_levels = exploration_levels
         self.top_k = top_k
 
-    async def get_context(self, query: str) -> Any:
+    async def get_context(self, query: str) -> list:
         """Find the neighbours of a given node in the graph."""
         if query is None:
             return []
@@ -43,7 +42,7 @@ class InsightsRetriever(BaseRetriever):
             relevant_results = [result for result in results if result.score < 0.5][: self.top_k]
 
             if len(relevant_results) == 0:
-                raise NoRelevantDataError()
+                return []
 
             node_connections_results = await asyncio.gather(
                 *[graph_engine.get_connections(result.id) for result in relevant_results]

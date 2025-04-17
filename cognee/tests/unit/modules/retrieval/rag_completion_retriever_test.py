@@ -9,7 +9,6 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.tasks.completion.exceptions.exceptions import NoRelevantDataError
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 
 
@@ -183,12 +182,8 @@ class TestRAGCompletionRetriever:
         vector_engine = get_vector_engine()
         await vector_engine.create_collection("DocumentChunk_text", payload_schema=DocumentChunk)
 
-        with pytest.raises(NoRelevantDataError) as exc_info:
-            await retriever.get_context("Christina Mayer")
-
-        assert exc_info.value.message == "Search did not find any data.", (
-            "Failed to raise NoRelevantDataError"
-        )
+        context = await retriever.get_context("Christina Mayer")
+        assert context == "", "Returned context should be empty on an empty graph"
 
 
 if __name__ == "__main__":

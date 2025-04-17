@@ -3,7 +3,6 @@ from typing import Any, Optional
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.tasks.completion.exceptions import NoRelevantDataError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
@@ -22,7 +21,7 @@ class CompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
 
-    async def get_context(self, query: str) -> Any:
+    async def get_context(self, query: str) -> str:
         """Retrieves relevant document chunks as context."""
         vector_engine = get_vector_engine()
 
@@ -30,7 +29,7 @@ class CompletionRetriever(BaseRetriever):
             found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
 
             if len(found_chunks) == 0:
-                raise NoRelevantDataError
+                return ""
 
             # Combine all chunks text returned from vector search (number of chunks is determined by top_k
             chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]

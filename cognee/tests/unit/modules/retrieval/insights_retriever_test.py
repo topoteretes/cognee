@@ -9,7 +9,6 @@ from cognee.modules.engine.models import Entity, EntityType
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.tasks.completion.exceptions.exceptions import NoRelevantDataError
 from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 
 
@@ -203,12 +202,8 @@ class TestInsightsRetriever:
         await vector_engine.create_collection("Entity_name", payload_schema=Entity)
         await vector_engine.create_collection("EntityType_name", payload_schema=EntityType)
 
-        with pytest.raises(NoRelevantDataError) as exc_info:
-            await retriever.get_context("Christina Mayer")
-
-        assert exc_info.value.message == "Search did not find any data.", (
-            "Failed to raise NoRelevantDataError"
-        )
+        context = await retriever.get_context("Christina Mayer")
+        assert context == [], "Returned context should be empty on an empty graph"
 
 
 if __name__ == "__main__":
