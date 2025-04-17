@@ -78,7 +78,7 @@ class GraphCompletionRetriever(BaseRetriever):
         """Retrieves and resolves graph triplets into context."""
         try:
             triplets = await self.get_triplets(query)
-        except EntityNotFoundError as error:
+        except EntityNotFoundError:
             return ""
 
         if len(triplets) == 0:
