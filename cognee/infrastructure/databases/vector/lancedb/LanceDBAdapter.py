@@ -17,6 +17,8 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
+from tenacity import retry, stop_after_attempt, wait_exponential
+
 
 class IndexSchema(DataPoint):
     id: str
@@ -237,14 +239,30 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
-        if len(data_point_ids) == 1:
-            results = await collection.delete(f"id = '{data_point_ids[0]}'")
+    def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+        async def _delete_data_points():
+            connection = await self.get_connection()
+            collection = await connection.open_table(collection_name)
+
+            # Delete one at a time to avoid commit conflicts
+            for data_point_id in data_point_ids:
+                await collection.delete(f"id = '{data_point_id}'")
+
+            return True
+
+        # Check if we're in an event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # If we're in a running event loop, create a new task
+            return loop.create_task(_delete_data_points())
         else:
-            results = await collection.delete(f"id IN {tuple(data_point_ids)}")
-        return results
+            # If we're not in an event loop, run it synchronously
+            return asyncio.run(_delete_data_points())
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
