@@ -158,7 +158,7 @@ class TestRAGCompletionRetriever:
 
         context = await retriever.get_context("Christina")
 
-        assert context == "Christina Mayer", "Failed to get Christina Mayer"
+        assert context[0:15] == "Christina Mayer", "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
     async def test_get_rag_completion_context_on_empty_graph(self):

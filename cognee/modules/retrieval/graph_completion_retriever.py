@@ -3,6 +3,7 @@ from collections import Counter
 import string
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
@@ -75,10 +76,13 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_context(self, query: str) -> str:
         """Retrieves and resolves graph triplets into context."""
-        triplets = await self.get_triplets(query)
+        try:
+            triplets = await self.get_triplets(query)
+        except EntityNotFoundError as error:
+            return ""
 
         if len(triplets) == 0:
-            raise ""
+            return ""
 
         return await self.resolve_edges_to_text(triplets)
 
