@@ -16,8 +16,10 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], datase
         file_path = save_data_to_file(data_item.file, filename=data_item.filename)
 
     elif isinstance(data_item, str):
+        if data_item.startswith("s3://"):
+            file_path = data_item
         # data is a file path
-        if data_item.startswith("file://") or data_item.startswith("/"):
+        elif data_item.startswith("file://") or data_item.startswith("/"):
             file_path = data_item.replace("file://", "")
         # data is text
         else:
