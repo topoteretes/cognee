@@ -17,7 +17,7 @@ def get_add_router() -> APIRouter:
 
     @router.post("/", response_model=None)
     async def add(
-        file: UploadFile = File(None),
+        file: UploadFile = UploadFile(None),
         url: str = Form(None),
         datasetId: str = Form(...),
         user: User = Depends(get_authenticated_user),
