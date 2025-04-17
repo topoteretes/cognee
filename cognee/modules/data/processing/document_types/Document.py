@@ -8,7 +8,6 @@ class Document(DataPoint):
     raw_data_location: str
     external_metadata: Optional[str]
     mime_type: str
-    node_set: Optional[List[DataPoint]] = None
     metadata: dict = {"index_fields": ["name"]}
 
     def read(self, chunker_cls: Chunker, max_chunk_size: int) -> str:

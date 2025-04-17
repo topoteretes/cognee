@@ -27,7 +27,9 @@ class DataPoint(BaseModel):
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
-    NodeSet: Optional[List[str]] = None  # List of nodes this data point is associated with
+    belongs_to_set: Optional[List["DataPoint"]] = (
+        None  # List of nodesets this data point belongs to
+    )
 
     def __init__(self, **data):
         super().__init__(**data)

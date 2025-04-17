@@ -9,11 +9,10 @@ from cognee.modules.data.processing.document_types import (
     UnstructuredDocument,
 )
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from typing import List, Optional
 import uuid
-
-# UUID namespace for consistent ID generation
-NAMESPACE_UUID = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # UUID for DNS namespace
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -55,15 +54,6 @@ EXTENSION_TO_DOCUMENT_CLASS = {
 }
 
 
-class NodeSet(DataPoint):
-    """NodeSet data point."""
-
-    name: str
-    type: str = "NodeSet"
-
-    metadata: dict = {"index_fields": ["name"]}
-
-
 def update_node_set(document):
     """Extracts node_set from document's external_metadata."""
     try:
@@ -81,8 +71,8 @@ def update_node_set(document):
     if not isinstance(node_set, list):
         return
 
-    document.node_set = [
-        NodeSet(id=uuid.uuid5(NAMESPACE_UUID, f"NodeSet:{node_set_name}"), name=node_set_name)
+    document.belongs_to_set = [
+        NodeSet(id=generate_node_id(f"NodeSet:{node_set_name}"), name=node_set_name)
         for node_set_name in node_set
     ]
 
