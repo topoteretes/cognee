@@ -9,8 +9,13 @@ import os
 async def extract_content_graph(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
     
-    load_dotenv()
+# At the top of the file, after imports
+load_dotenv()
+
+async def extract_content_graph(content: str, response_model: Type[BaseModel]):
+    llm_client = get_llm_client()
     graph_prompt_path = os.getenv("GRAPH_PROMPT_PATH")
+    # … rest of function …
 
     if graph_prompt_path is not None:
         path = graph_prompt_path
