@@ -68,6 +68,11 @@ async def index_graph_edges():
 
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
-        await vector_engine.index_data_points(index_name, field_name, indexable_points)
+
+        # We save the data in batches of 1000 to not put a lot of pressure on the database
+        for start in range(0, len(indexable_points), 1000):
+            batch = indexable_points[start : start + 1000]
+
+            await vector_engine.index_data_points(index_name, field_name, batch)
 
     return None

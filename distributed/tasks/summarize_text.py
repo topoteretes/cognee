@@ -1,0 +1,27 @@
+import asyncio
+from typing import Type
+from uuid import uuid5
+from pydantic import BaseModel
+from cognee.tasks.summarization.models import TextSummary
+from cognee.modules.data.extraction.extract_summary import extract_summary
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+
+
+async def summarize_text(data_chunks: list[DocumentChunk], edges: list, summarization_model: Type[BaseModel]):
+    if len(data_chunks) == 0:
+        return data_chunks
+
+    chunk_summaries = await asyncio.gather(
+        *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+    )
+
+    summaries = [
+        TextSummary(
+            id=uuid5(chunk.id, "TextSummary"),
+            made_from=chunk,
+            text=chunk_summaries[chunk_index].summary,
+        )
+        for (chunk_index, chunk) in enumerate(data_chunks)
+    ]
+
+    return summaries, edges

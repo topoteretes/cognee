@@ -12,15 +12,15 @@ app = modal.App("cognee-runner")
 
 image = (
     modal.Image.from_dockerfile(path="Dockerfile_modal", force_build=False)
-    .copy_local_file("pyproject.toml", "pyproject.toml")
-    .copy_local_file("poetry.lock", "poetry.lock")
+    .add_local_file("pyproject.toml", remote_path="/root/pyproject.toml", copy=True)
+    .add_local_file("poetry.lock", remote_path="/root/poetry.lock", copy=True)
     .env({"ENV": os.getenv("ENV"), "LLM_API_KEY": os.getenv("LLM_API_KEY")})
     .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
     .pip_install("protobuf", "h2")
 )
 
 
-@app.function(image=image, concurrency_limit=10)
+@app.function(image=image, max_containers=4)
 async def entry(text: str, query: str):
     logger = get_logger()
     logger.info("Initializing Cognee")
