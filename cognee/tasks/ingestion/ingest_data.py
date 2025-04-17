@@ -5,6 +5,7 @@ import s3fs
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset, get_dataset_data, get_datasets_by_name
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_document
@@ -19,6 +20,9 @@ from cognee.api.v1.add.config import get_s3_config
 
 async def ingest_data(data: Any, dataset_name: str, user: User):
     destination = get_dlt_destination()
+
+    if not user:
+        user = await get_default_user()
 
     pipeline = dlt.pipeline(
         pipeline_name="metadata_extraction_pipeline",
@@ -169,7 +173,10 @@ async def ingest_data(data: Any, dataset_name: str, user: User):
         )
 
     datasets = await get_datasets_by_name(dataset_name, user.id)
-    dataset = datasets[0]
-    data_documents = await get_dataset_data(dataset_id=dataset.id)
 
-    return data_documents
+    # In case no files were processed no dataset will be created
+    if datasets:
+        dataset = datasets[0]
+        data_documents = await get_dataset_data(dataset_id=dataset.id)
+        return data_documents
+    return []
