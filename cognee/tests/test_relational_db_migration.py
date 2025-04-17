@@ -92,18 +92,12 @@ async def relational_db_migration():
             n_data = row[1]
             m_data = row[2]
 
-            source_props = {}
-            if "properties" in n_data and n_data["properties"]:
-                source_props = json.loads(n_data["properties"])
-            target_props = {}
-            if "properties" in m_data and m_data["properties"]:
-                target_props = json.loads(m_data["properties"])
+            source_name = normalize_node_name(n_data.get("name", ""))
+            target_name = normalize_node_name(m_data.get("name", ""))
 
-            source_name = normalize_node_name(source_props.get("name", f"id:{n_data['id']}"))
-            target_name = normalize_node_name(target_props.get("name", f"id:{m_data['id']}"))
-
-            found_edges.add((source_name, target_name))
-            distinct_node_names.update([source_name, target_name])
+            if source_name and target_name:
+                found_edges.add((source_name, target_name))
+                distinct_node_names.update([source_name, target_name])
 
     elif graph_db_provider == "networkx":
         nodes, edges = await graph_engine.get_graph_data()
