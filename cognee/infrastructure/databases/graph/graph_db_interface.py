@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, Dict, Any
+from typing import Protocol, Optional, Dict, Any, Type, List
 from abc import abstractmethod
 
 
@@ -49,6 +49,10 @@ class GraphDBInterface(Protocol):
     async def delete_graph(
         self,
     ):
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_subgraph(self, node_type: Type[Any], node_name: List[str]):
         raise NotImplementedError
 
     @abstractmethod
