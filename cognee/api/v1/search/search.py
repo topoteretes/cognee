@@ -13,6 +13,7 @@ async def search(
     user: User = None,
     datasets: Union[list[str], str, None] = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    top_k: int = 10,
 ) -> list:
     # We use lists from now on for datasets
     if isinstance(datasets, str):
@@ -25,7 +26,12 @@ async def search(
         raise UserNotFoundError
 
     filtered_search_results = await search_function(
-        query_text, query_type, datasets, user, system_prompt_path=system_prompt_path
+        query_text,
+        query_type,
+        datasets,
+        user,
+        system_prompt_path=system_prompt_path,
+        top_k=top_k,
     )
 
     return filtered_search_results
