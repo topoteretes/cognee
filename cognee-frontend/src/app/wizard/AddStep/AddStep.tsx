@@ -21,7 +21,7 @@ export default function AddStep({ onNext }: ConfigStepProps) {
 
   const uploadFiles = useCallback(() => {
     disableUploading()
-    addData({ id: 'main' }, files)
+    addData({ name: 'main' }, files)
       .then(() => {
         onNext();
       })
