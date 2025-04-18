@@ -37,5 +37,5 @@ async def check_permission_on_documents(user: User, permission_type: str, docume
 
         if not has_permissions:
             raise PermissionDeniedError(
-                message=f"User {user.email} does not have {permission_type} permission on documents"
+                message=f"User {user.id} does not have {permission_type} permission on documents"
             )
