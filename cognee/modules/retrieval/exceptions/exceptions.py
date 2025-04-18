@@ -1,5 +1,5 @@
-from cognee.exceptions import CogneeApiError
 from fastapi import status
+from cognee.exceptions import CogneeApiError, CriticalError
 
 
 class CollectionDistancesNotFoundError(CogneeApiError):
@@ -30,3 +30,7 @@ class CypherSearchError(CogneeApiError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class NoDataError(CriticalError):
+    message: str = "No data found in the system, please add data first."
