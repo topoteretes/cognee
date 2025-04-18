@@ -171,4 +171,4 @@ async def brute_force_search(
         send_telemetry(
             "cognee.brute_force_triplet_search EXECUTION FAILED", user.id, {"error": str(error)}
         )
-        raise RuntimeError("An error occurred during brute force search") from error
+        raise error

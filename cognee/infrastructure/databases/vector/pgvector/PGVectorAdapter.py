@@ -245,6 +245,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         except EntityNotFoundError:
             # Ignore if collection does not exist
             return []
+        except CollectionNotFoundError:
+            # Ignore if collection does not exist
+            return []
 
     async def search(
         self,
