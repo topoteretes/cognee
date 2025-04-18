@@ -65,7 +65,7 @@ async def code_description_to_code_part(
 
     try:
         if include_docs:
-            search_results = await search(query_text=query, query_type="INSIGHTS", user=user)
+            search_results = await search(query_text=query, query_type="INSIGHTS")
 
             concatenated_descriptions = " ".join(
                 obj["description"]
