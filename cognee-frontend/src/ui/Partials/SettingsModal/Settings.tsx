@@ -133,7 +133,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
   }, []);
 
   return (
-    <form onSubmit={saveConfig} style={{ width: '100%' }}>
+    <form onSubmit={saveConfig} style={{ width: "100%", overflowY: "auto", maxHeight: "500px" }}>
       <Stack gap="4" orientation="vertical">
         <Stack gap="4" orientation="vertical">
           <FormGroup orientation="vertical" align="center/" gap="2">

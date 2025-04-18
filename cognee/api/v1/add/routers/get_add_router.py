@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 from typing import List, Optional
 import subprocess
-from cognee.modules.data.methods import get_dataset, get_datasets, get_datasets_by_name
+from cognee.modules.data.methods import get_dataset
 from cognee.shared.logging_utils import get_logger
 import requests
 
@@ -56,7 +56,7 @@ def get_add_router() -> APIRouter:
 
                     return await cognee_add(file_data)
             else:
-                await cognee_add(data, datasetId, user=user)
+                await cognee_add(data, datasetName, user=user)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 
