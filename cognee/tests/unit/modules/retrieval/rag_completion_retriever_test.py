@@ -9,12 +9,12 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 
 
-class TestChunksRetriever:
+class TestRAGCompletionRetriever:
     @pytest.mark.asyncio
-    async def test_chunk_context_simple(self):
+    async def test_rag_completion_context_simple(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent, ".cognee_system/test_rag_context"
         )
@@ -64,20 +64,20 @@ class TestChunksRetriever:
 
         await add_data_points(entities)
 
-        retriever = ChunksRetriever()
+        retriever = CompletionRetriever()
 
         context = await retriever.get_context("Mike")
 
-        assert context[0]["text"] == "Mike Broski", "Failed to get Mike Broski"
+        assert context == "Mike Broski", "Failed to get Mike Broski"
 
     @pytest.mark.asyncio
-    async def test_chunk_context_complex(self):
+    async def test_rag_completion_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -153,27 +153,28 @@ class TestChunksRetriever:
 
         await add_data_points(entities)
 
-        retriever = ChunksRetriever(top_k=20)
+        # TODO: top_k doesn't affect the output, it should be fixed.
+        retriever = CompletionRetriever(top_k=20)
 
         context = await retriever.get_context("Christina")
 
-        assert context[0]["text"] == "Christina Mayer", "Failed to get Christina Mayer"
+        assert context[0:15] == "Christina Mayer", "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
-    async def test_chunk_context_on_empty_graph(self):
+    async def test_get_rag_completion_context_on_empty_graph(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context"
         )
         cognee.config.data_root_directory(data_directory_path)
 
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
-        retriever = ChunksRetriever()
+        retriever = CompletionRetriever()
 
         with pytest.raises(NoDataError):
             await retriever.get_context("Christina Mayer")
@@ -182,14 +183,14 @@ class TestChunksRetriever:
         await vector_engine.create_collection("DocumentChunk_text", payload_schema=DocumentChunk)
 
         context = await retriever.get_context("Christina Mayer")
-        assert len(context) == 0, "Found chunks when none should exist"
+        assert context == "", "Returned context should be empty on an empty graph"
 
 
 if __name__ == "__main__":
     from asyncio import run
 
-    test = TestChunksRetriever()
+    test = TestRAGCompletionRetriever()
 
-    run(test.test_chunk_context_simple())
-    run(test.test_chunk_context_complex())
-    run(test.test_chunk_context_on_empty_graph())
+    run(test.test_rag_completion_context_simple())
+    run(test.test_rag_completion_context_complex())
+    run(test.test_get_rag_completion_context_on_empty_graph())

@@ -1,4 +1,4 @@
-name: Reusable Vector DB Tests
+name: Reusable Graph DB Tests
 
 on:
   workflow_call:

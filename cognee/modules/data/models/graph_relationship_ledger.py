@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
-from uuid import uuid5, NAMESPACE_DNS
+from uuid import uuid5, NAMESPACE_OID
 from sqlalchemy import UUID, Column, DateTime, String, Index
-from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -12,7 +11,7 @@ class GraphRelationshipLedger(Base):
     id = Column(
         UUID,
         primary_key=True,
-        default=lambda: uuid5(NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"),
+        default=lambda: uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
     )
     source_node_id = Column(UUID, nullable=False)
     destination_node_id = Column(UUID, nullable=False)

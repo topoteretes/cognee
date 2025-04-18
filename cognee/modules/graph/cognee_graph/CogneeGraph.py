@@ -111,9 +111,6 @@ class CogneeGraph(CogneeAbstractGraph):
         except (ValueError, TypeError) as e:
             print(f"Error projecting graph: {e}")
             raise e
-        except Exception as ex:
-            print(f"Unexpected error: {ex}")
-            raise ex
 
     async def map_vector_distances_to_graph_nodes(self, node_distances) -> None:
         for category, scored_results in node_distances.items():

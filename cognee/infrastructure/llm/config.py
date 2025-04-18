@@ -1,8 +1,8 @@
+import os
 from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import model_validator, Field
-import os
+from pydantic import model_validator
 
 
 class LLMConfig(BaseSettings):
