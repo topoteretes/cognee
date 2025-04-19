@@ -5,8 +5,6 @@ from datetime import datetime, timezone
 from typing_extensions import TypedDict
 from typing import Optional, Any, Dict, List
 
-from cognee.modules.engine.models import NodeSet
-
 
 # Define metadata type
 class MetaData(TypedDict):
@@ -28,7 +26,7 @@ class DataPoint(BaseModel):
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
-    belongs_to_set: Optional[List[NodeSet]] = None  # List of nodesets this data point belongs to
+    belongs_to_set: Optional[List["DataPoint"]] = None
 
     def __init__(self, **data):
         super().__init__(**data)

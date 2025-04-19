@@ -312,6 +312,10 @@ class LanceDBAdapter(VectorDBInterface):
                 models_list = get_args(field_config.annotation)
                 if any(hasattr(model, "model_fields") for model in models_list):
                     related_models_fields.append(field_name)
+                elif models_list and any(get_args(model) is DataPoint for model in models_list):
+                    related_models_fields.append(field_name)
+                elif models_list and any(submodel is DataPoint for submodel in get_args(models_list[0])):
+                    related_models_fields.append(field_name)
 
             elif get_origin(field_config.annotation) == Optional:
                 model = get_args(field_config.annotation)

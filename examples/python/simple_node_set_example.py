@@ -1,7 +1,8 @@
+import os
 import asyncio
 import cognee
+from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import get_logger, ERROR
-from cognee.api.v1.search import SearchType
 
 text_a = """
     AI is revolutionizing financial services through intelligent fraud detection
@@ -30,6 +31,9 @@ async def main():
     await cognee.add(text_b, node_set=node_set_b)
     await cognee.add(text_c, node_set=node_set_c)
     await cognee.cognify()
+
+    visualization_path = os.path.join(os.path.dirname(__file__), "./.artifacts/graph_visualization.html")
+    await visualize_graph(visualization_path)
 
 
 if __name__ == "__main__":
