@@ -1,5 +1,5 @@
 import asyncio
-from typing import Generic, List, Optional, TypeVar, get_type_hints
+from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
@@ -10,11 +10,14 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.modules.storage.utils import copy_model, get_own_properties
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
+
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class IndexSchema(DataPoint):
@@ -77,7 +80,6 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
 
         payload_schema = type(data_points[0])
-        payload_schema = self.get_data_point_schema(payload_schema)
 
         if not await self.has_collection(collection_name):
             await self.create_collection(
@@ -192,11 +194,18 @@ class LanceDBAdapter(VectorDBInterface):
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
         connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
+
+        try:
+            collection = await connection.open_table(collection_name)
+        except ValueError:
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
         results = await collection.vector_search(query_vector).limit(limit).to_pandas()
 
         result_values = list(results.to_dict("index").values())
+
+        if not result_values:
+            return []
 
         normalized_values = normalize_distances(result_values)
 
@@ -230,14 +239,30 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
-        if len(data_point_ids) == 1:
-            results = await collection.delete(f"id = '{data_point_ids[0]}'")
+    def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+        async def _delete_data_points():
+            connection = await self.get_connection()
+            collection = await connection.open_table(collection_name)
+
+            # Delete one at a time to avoid commit conflicts
+            for data_point_id in data_point_ids:
+                await collection.delete(f"id = '{data_point_id}'")
+
+            return True
+
+        # Check if we're in an event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # If we're in a running event loop, create a new task
+            return loop.create_task(_delete_data_points())
         else:
-            results = await collection.delete(f"id IN {tuple(data_point_ids)}")
-        return results
+            # If we're not in an event loop, run it synchronously
+            return asyncio.run(_delete_data_points())
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
@@ -270,11 +295,33 @@ class LanceDBAdapter(VectorDBInterface):
         if self.url.startswith("/"):
             LocalStorage.remove_all(self.url)
 
-    def get_data_point_schema(self, model_type):
+    def get_data_point_schema(self, model_type: BaseModel):
+        related_models_fields = []
+
+        for field_name, field_config in model_type.model_fields.items():
+            if hasattr(field_config, "model_fields"):
+                related_models_fields.append(field_name)
+
+            elif hasattr(field_config.annotation, "model_fields"):
+                related_models_fields.append(field_name)
+
+            elif (
+                get_origin(field_config.annotation) == Union
+                or get_origin(field_config.annotation) is list
+            ):
+                models_list = get_args(field_config.annotation)
+                if any(hasattr(model, "model_fields") for model in models_list):
+                    related_models_fields.append(field_name)
+
+            elif get_origin(field_config.annotation) == Optional:
+                model = get_args(field_config.annotation)
+                if hasattr(model, "model_fields"):
+                    related_models_fields.append(field_name)
+
         return copy_model(
             model_type,
             include_fields={
                 "id": (str, ...),
             },
-            exclude_fields=["metadata"],
+            exclude_fields=["metadata"] + related_models_fields,
         )

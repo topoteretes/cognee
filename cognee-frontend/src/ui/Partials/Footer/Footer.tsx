@@ -13,10 +13,10 @@ export default function Footer() {
         </div>
         <div className={styles.rightSide}>
           <Link target="_blank" href="https://github.com/topoteretes/cognee">
-            <GithubIcon />
+            <GithubIcon color="white" />
           </Link>
           <Link target="_blank" href="https://discord.gg/m63hxKsp4p">
-            <DiscordIcon />
+            <DiscordIcon color="white" />
           </Link>
         </div>
       </Stack>
