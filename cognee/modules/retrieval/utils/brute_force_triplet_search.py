@@ -82,9 +82,6 @@ async def brute_force_triplet_search(
     if user is None:
         user = await get_default_user()
 
-    if user is None:
-        raise PermissionError("No user found in the system. Please create a user.")
-
     retrieved_results = await brute_force_search(
         query,
         user,
@@ -174,4 +171,4 @@ async def brute_force_search(
         send_telemetry(
             "cognee.brute_force_triplet_search EXECUTION FAILED", user.id, {"error": str(error)}
         )
-        raise RuntimeError("An error occurred during brute force search") from error
+        raise error

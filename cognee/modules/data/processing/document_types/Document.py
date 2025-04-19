@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.Chunker import Chunker
 

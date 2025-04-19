@@ -1,3 +1,5 @@
+# PROPOSED TO BE DEPRECATED
+
 """This module contains the OntologyEngine class which is responsible for adding graph ontology from a JSON or CSV file."""
 
 import csv

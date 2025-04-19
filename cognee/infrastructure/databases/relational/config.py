@@ -35,12 +35,12 @@ def get_relational_config():
 
 class MigrationConfig(BaseSettings):
     migration_db_path: Union[str, None] = None
-    migration_db_name: str = None
+    migration_db_name: Union[str, None] = None
     migration_db_host: Union[str, None] = None
     migration_db_port: Union[str, None] = None
     migration_db_username: Union[str, None] = None
     migration_db_password: Union[str, None] = None
-    migration_db_provider: str = None
+    migration_db_provider: Union[str, None] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

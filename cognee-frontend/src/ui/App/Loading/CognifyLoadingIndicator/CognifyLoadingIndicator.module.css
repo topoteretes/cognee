@@ -3,7 +3,7 @@
   width: 106px;
   height: 106px;
   border-radius: 50%;
-  background: linear-gradient(90deg, #D82EB5 0.52%, #9245FD 103.83%);
+  background: linear-gradient(90deg, #6510F4 0.52%, #0DFF00 103.83%);
 }
 .donut1.spin {
   animation: rotate1 1s linear infinite;
@@ -13,13 +13,13 @@
   width: 76px;
   height: 76px;
   border-radius: 50%;
-  background: linear-gradient(90deg, #D82EB5 0.52%, #9245FD 103.83%);
+  background: linear-gradient(90deg, #6510F4 0.52%, #0DFF00 103.83%);
   position: relative;
   left: 15px;
   top: 15px;
 }
 .donut2.spin {
-  background: linear-gradient(270deg, #D82EB5 0.52%, #9245FD 103.83%);
+  background: linear-gradient(270deg, #6510F4 0.52%, #0DFF00 103.83%);
   animation: rotate1 1s linear infinite;
 }
 
@@ -27,7 +27,7 @@
   width: 46px;
   height: 46px;
   border-radius: 50%;
-  background: linear-gradient(90deg, #D82EB5 0.52%, #9245FD 103.83%);
+  background: linear-gradient(90deg, #6510F4 0.52%, #0DFF00 103.83%);
   position: relative;
   left: 15px;
   top: 15px;
