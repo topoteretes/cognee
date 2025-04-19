@@ -1,13 +1,13 @@
-from typing import Protocol, Optional, Dict, Any, List, Tuple
-from abc import abstractmethod, ABC
-from uuid import UUID, uuid5, NAMESPACE_DNS
-from cognee.modules.graph.relationship_manager import create_relationship
-from functools import wraps
 import inspect
+from functools import wraps
+from abc import abstractmethod, ABC
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List, Tuple
+from uuid import NAMESPACE_OID, UUID, uuid5
+from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
 from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
-from cognee.shared.logging_utils import get_logger
-from datetime import datetime, timezone
 
 logger = get_logger()
 
@@ -44,20 +44,16 @@ def record_graph_changes(func):
 
         async with db_engine.get_async_session() as session:
             if func.__name__ == "add_nodes":
-                nodes = args[0]
+                nodes: List[DataPoint] = args[0]
                 for node in nodes:
                     try:
-                        node_id = (
-                            UUID(str(node[0])) if isinstance(node, tuple) else UUID(str(node.id))
-                        )
+                        node_id = UUID(str(node.id))
                         relationship = GraphRelationshipLedger(
-                            id=uuid5(NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"),
+                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
                             source_node_id=node_id,
                             destination_node_id=node_id,
                             creator_function=f"{creator}.node",
-                            node_label=node[1].get("type")
-                            if isinstance(node, tuple)
-                            else type(node).__name__,
+                            node_label=getattr(node, "name", None) or str(node.id),
                         )
                         session.add(relationship)
                         await session.flush()
@@ -74,7 +70,7 @@ def record_graph_changes(func):
                         target_id = UUID(str(edge[1]))
                         rel_type = str(edge[2])
                         relationship = GraphRelationshipLedger(
-                            id=uuid5(NAMESPACE_DNS, f"{datetime.now(timezone.utc).timestamp()}"),
+                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
                             source_node_id=source_id,
                             destination_node_id=target_id,
                             creator_function=f"{creator}.{rel_type}",

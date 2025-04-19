@@ -1,103 +1,216 @@
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-
+import os
 import pytest
+import pathlib
 
-from cognee.modules.retrieval.insights_retriever import InsightsRetriever
-from cognee.tests.tasks.descriptive_metrics.metrics_test_utils import create_connected_test_graph
-from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
-import unittest
+import cognee
+from cognee.low_level import setup
+from cognee.tasks.storage import add_data_points
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 
 
 class TestInsightsRetriever:
-    @pytest.fixture
-    def mock_retriever(self):
-        return InsightsRetriever()
+    @pytest.mark.asyncio
+    async def test_insights_context_simple(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_simple"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_insights_context_simple"
+        )
+        cognee.config.data_root_directory(data_directory_path)
+
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await setup()
+
+        entityTypePerson = EntityType(
+            name="Person",
+            description="An individual",
+        )
+
+        person1 = Entity(
+            name="Steve Rodger",
+            is_a=entityTypePerson,
+            description="An American actor, comedian, and filmmaker",
+        )
+
+        person2 = Entity(
+            name="Mike Broski",
+            is_a=entityTypePerson,
+            description="Financial advisor and philanthropist",
+        )
+
+        person3 = Entity(
+            name="Christina Mayer",
+            is_a=entityTypePerson,
+            description="Maker of next generation of iconic American music videos",
+        )
+
+        entityTypeCompany = EntityType(
+            name="Company",
+            description="An organization that operates on an annual basis",
+        )
+
+        company1 = Entity(
+            name="Apple",
+            is_a=entityTypeCompany,
+            description="An American multinational technology company headquartered in Cupertino, California",
+        )
+
+        company2 = Entity(
+            name="Google",
+            is_a=entityTypeCompany,
+            description="An American multinational technology company that specializes in Internet-related services and products",
+        )
+
+        company3 = Entity(
+            name="Facebook",
+            is_a=entityTypeCompany,
+            description="An American social media, messaging, and online platform",
+        )
+
+        entities = [person1, person2, person3, company1, company2, company3]
+
+        await add_data_points(entities)
+
+        retriever = InsightsRetriever()
+
+        context = await retriever.get_context("Mike")
+
+        assert context[0][0]["name"] == "Mike Broski", "Failed to get Mike Broski"
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.insights_retriever.get_graph_engine")
-    async def test_get_context_with_existing_node(self, mock_get_graph_engine, mock_retriever):
-        """Test get_context when node exists in graph."""
-        mock_graph = AsyncMock()
-        mock_get_graph_engine.return_value = mock_graph
+    async def test_insights_context_complex(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_complex"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_insights_context_complex"
+        )
+        cognee.config.data_root_directory(data_directory_path)
 
-        # Mock graph response
-        mock_graph.extract_node.return_value = {"id": "123"}
-        mock_graph.get_connections.return_value = [
-            ({"id": "123"}, {"relationship_name": "linked_to"}, {"id": "456"})
-        ]
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await setup()
 
-        result = await mock_retriever.get_context("123")
+        entityTypePerson = EntityType(
+            name="Person",
+            description="An individual",
+        )
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0][0]["id"] == "123"
-        assert result[0][1]["relationship_name"] == "linked_to"
-        assert result[0][2]["id"] == "456"
-        mock_graph.extract_node.assert_called_once_with("123")
-        mock_graph.get_connections.assert_called_once_with("123")
+        person1 = Entity(
+            name="Steve Rodger",
+            is_a=entityTypePerson,
+            description="An American actor, comedian, and filmmaker",
+        )
+
+        person2 = Entity(
+            name="Mike Broski",
+            is_a=entityTypePerson,
+            description="Financial advisor and philanthropist",
+        )
+
+        person3 = Entity(
+            name="Christina Mayer",
+            is_a=entityTypePerson,
+            description="Maker of next generation of iconic American music videos",
+        )
+
+        person4 = Entity(
+            name="Jason Statham",
+            is_a=entityTypePerson,
+            description="An American actor",
+        )
+
+        person5 = Entity(
+            name="Mike Tyson",
+            is_a=entityTypePerson,
+            description="A former professional boxer from the United States",
+        )
+
+        entityTypeCompany = EntityType(
+            name="Company",
+            description="An organization that operates on an annual basis",
+        )
+
+        company1 = Entity(
+            name="Apple",
+            is_a=entityTypeCompany,
+            description="An American multinational technology company headquartered in Cupertino, California",
+        )
+
+        company2 = Entity(
+            name="Google",
+            is_a=entityTypeCompany,
+            description="An American multinational technology company that specializes in Internet-related services and products",
+        )
+
+        company3 = Entity(
+            name="Facebook",
+            is_a=entityTypeCompany,
+            description="An American social media, messaging, and online platform",
+        )
+
+        entities = [person1, person2, person3, company1, company2, company3]
+
+        await add_data_points(entities)
+
+        graph_engine = await get_graph_engine()
+
+        await graph_engine.add_edges(
+            [
+                (person1.id, company1.id, "works_for"),
+                (person2.id, company2.id, "works_for"),
+                (person3.id, company3.id, "works_for"),
+                (person4.id, company1.id, "works_for"),
+                (person5.id, company1.id, "works_for"),
+            ]
+        )
+
+        retriever = InsightsRetriever(top_k=20)
+
+        context = await retriever.get_context("Christina")
+
+        assert context[0][0]["name"] == "Christina Mayer", "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.insights_retriever.get_vector_engine")
-    async def test_get_completion_with_empty_results(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query with no results"
-        mock_search_results = []
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
+    async def test_insights_context_on_empty_graph(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_empty"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_empty"
+        )
+        cognee.config.data_root_directory(data_directory_path)
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
 
-        # Verify
-        assert len(results) == 0
+        retriever = InsightsRetriever()
 
-    @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.insights_retriever.get_graph_engine")
-    @patch("cognee.modules.retrieval.insights_retriever.get_vector_engine")
-    async def test_get_context_with_no_exact_node(
-        self, mock_get_vector_engine, mock_get_graph_engine, mock_retriever
-    ):
-        """Test get_context when node does not exist in the graph and vector search is used."""
-        mock_graph = AsyncMock()
-        mock_get_graph_engine.return_value = mock_graph
-        mock_graph.extract_node.return_value = None  # Node does not exist
+        with pytest.raises(NoDataError):
+            await retriever.get_context("Christina Mayer")
 
-        mock_vector = AsyncMock()
-        mock_get_vector_engine.return_value = mock_vector
+        vector_engine = get_vector_engine()
+        await vector_engine.create_collection("Entity_name", payload_schema=Entity)
+        await vector_engine.create_collection("EntityType_name", payload_schema=EntityType)
 
-        mock_vector.search.side_effect = [
-            [AsyncMock(id="vec_1", score=0.4)],  # Entity_name search
-            [AsyncMock(id="vec_2", score=0.3)],  # EntityType_name search
-        ]
+        context = await retriever.get_context("Christina Mayer")
+        assert context == [], "Returned context should be empty on an empty graph"
 
-        mock_graph.get_connections.side_effect = lambda node_id: [
-            ({"id": node_id}, {"relationship_name": "related_to"}, {"id": "456"})
-        ]
 
-        result = await mock_retriever.get_context("non_existing_query")
+if __name__ == "__main__":
+    from asyncio import run
 
-        assert isinstance(result, list)
-        assert len(result) == 2
-        assert result[0][0]["id"] == "vec_1"
-        assert result[0][1]["relationship_name"] == "related_to"
-        assert result[0][2]["id"] == "456"
+    test = TestInsightsRetriever()
 
-        assert result[1][0]["id"] == "vec_2"
-        assert result[1][1]["relationship_name"] == "related_to"
-        assert result[1][2]["id"] == "456"
-
-    @pytest.mark.asyncio
-    async def test_get_context_with_none_query(self, mock_retriever):
-        """Test get_context with a None query (should return empty list)."""
-        result = await mock_retriever.get_context(None)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_completion_with_context(self, mock_retriever):
-        """Test get_completion when context is already provided."""
-        test_context = [({"id": "123"}, {"relationship_name": "linked_to"}, {"id": "456"})]
-        result = await mock_retriever.get_completion("test_query", context=test_context)
-        assert result == test_context
+    run(test.test_insights_context_simple())
+    run(test.test_insights_context_complex())
+    run(test.test_insights_context_on_empty_graph())
