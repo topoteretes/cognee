@@ -32,7 +32,9 @@ async def main():
     await cognee.add(text_c, node_set=node_set_c)
     await cognee.cognify()
 
-    visualization_path = os.path.join(os.path.dirname(__file__), "./.artifacts/graph_visualization.html")
+    visualization_path = os.path.join(
+        os.path.dirname(__file__), "./.artifacts/graph_visualization.html"
+    )
     await visualize_graph(visualization_path)
 
 
