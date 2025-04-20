@@ -50,7 +50,8 @@ Saiba mais sobre os [casos de uso](https://docs.cognee.ai/use-cases) e [avaliaç
 
 ## Primeiros Passos
 
-Dê os primeiros passos com facilidade usando um Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
+Dê os primeiros passos com facilidade usando um Google Colab  <a href="https://colab.research.
+google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  ou um <a href="https://github.com/topoteretes/cognee-starter">repositório inicial</a>
 
 ## Contribuindo
 
@@ -76,7 +77,7 @@ os.environ["LLM_API_KEY"] = "SUA_OPENAI_API_KEY"
 ```
 
 Você também pode definir as variáveis criando um arquivo .env, usando o nosso <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">modelo</a>.
-Para usar diferentes provedores de LLM, consulte nossa <a href="https://docs.cognee.ai">documentação</a> para mais informações.
+Para usar diferentes provedores de LLM, consulte nossa <a href="https://docs.cognee.ai">documentação</a> .
 
 ### Exemplo simples
 
@@ -135,7 +136,7 @@ Para um uso mais avançado, confira nossa <a href="https://docs.cognee.ai">docum
 
 [Demonstração simples do GraphRAG](https://github.com/user-attachments/assets/d80b0776-4eb9-4b8e-aa22-3691e2d44b8f)
 
-3. cognee com Ollama
+3. Cognee com Ollama
 
 [cognee com modelos locais](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
 
