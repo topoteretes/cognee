@@ -1,6 +1,5 @@
+from typing import Type
 
-from typing import Protocol, Optional, Dict, Any, Type, List
-from abc import abstractmethod
 
 import inspect
 from functools import wraps
@@ -11,7 +10,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
-from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engin
+from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
 
 logger = get_logger()
 
@@ -181,12 +180,8 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-
     async def get_subgraph(self, node_type: Type[Any], node_name: List[str]):
         raise NotImplementedError
-
-    @abstractmethod
-    async def get_graph_data(self):
 
     async def get_neighbors(self, node_id: str) -> List[NodeData]:
         """Get all neighboring nodes."""
