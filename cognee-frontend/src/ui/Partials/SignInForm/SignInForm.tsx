@@ -67,13 +67,13 @@ export default function SignInForm({ onSignInSuccess = () => window.location.hre
           <FormGroup orientation="vertical" align="center/" gap="2">
             <FormLabel>Email:</FormLabel>
             <FormInput>
-              <Input name="email" type="email" placeholder="Your email address" />
+              <Input defaultValue="default_user@example.com" name="email" type="email" placeholder="Your email address" />
             </FormInput>
           </FormGroup>
           <FormGroup orientation="vertical" align="center/" gap="2">
             <FormLabel>Password:</FormLabel>
             <FormInput>
-              <Input name="password" type="password" placeholder="Your password" />
+              <Input defaultValue="default_password" name="password" type="password" placeholder="Your password" />
             </FormInput>
           </FormGroup>
         </Stack>

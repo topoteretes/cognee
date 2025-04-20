@@ -1,9 +1,12 @@
 from typing import Union, Optional, Type, List
 
+
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import UserNotFoundError
+
 from cognee.modules.users.models import User
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 
@@ -24,9 +27,6 @@ async def search(
 
     if user is None:
         user = await get_default_user()
-
-    if user is None:
-        raise UserNotFoundError
 
     filtered_search_results = await search_function(
         query_text,

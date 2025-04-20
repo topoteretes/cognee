@@ -5,6 +5,12 @@
     "Roboto Mono", "Oxygen Mono", "Ubuntu Monospace", "Source Code Pro",
     "Fira Mono", "Droid Sans Mono", "Courier New", monospace;
 
+  --button-padding: 14px 20px !important;
+  --button-border-radius: 100px !important;
+  --global-color-primary: #6510F4 !important;
+  --global-color-primary-active: #500cc5 !important;
+  --global-color-primary-text: white !important;
+  --global-color-secondary: #0DFF00 !important;
   --global-background-default: #0D051C;
   --textarea-default-color: #0D051C !important;
 }
