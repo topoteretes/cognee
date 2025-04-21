@@ -92,7 +92,6 @@ s3fs = "^2025.3.2"
 
 [tool.poetry.extras]
 api = ["uvicorn", "gunicorn"]
-filesystem = ["s3fs", "botocore"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
 neo4j = ["neo4j"]
