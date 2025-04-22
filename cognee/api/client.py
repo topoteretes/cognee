@@ -13,6 +13,7 @@ from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
+from cognee.api.v1.delete.routers import get_delete_router
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -155,6 +156,8 @@ def health_check():
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
 
 app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
+
+app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
