@@ -80,7 +80,7 @@ def record_graph_changes(func):
                     except Exception as e:
                         logger.error(f"Error adding relationship: {e}")
                         await session.rollback()
-                        raise e
+                        continue
 
             try:
                 await session.commit()
