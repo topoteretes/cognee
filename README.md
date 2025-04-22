@@ -161,8 +161,3 @@ We are committed to making open source an enjoyable and respectful experience fo
 
 [![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
 
-## Telemetry
-
-By default, Cognee sends anonymized usage data to a centralized server.
-
-You can opt out by setting the environment variable TELEMETRY_DISABLED=1.
