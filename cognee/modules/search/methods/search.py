@@ -61,7 +61,7 @@ async def specific_search(
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever().get_completion,
         SearchType.INSIGHTS: InsightsRetriever(top_k=top_k).get_completion,
-        SearchType.CHUNKS: ChunksRetriever().get_completion,
+        SearchType.CHUNKS: ChunksRetriever(top_k=top_k).get_completion,
         SearchType.RAG_COMPLETION: CompletionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
