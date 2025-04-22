@@ -1,12 +1,12 @@
-from cognee.shared.logging_utils import get_logger
 from typing import Dict, List, Optional
-
-from cognee.infrastructure.engine.utils import parse_id
 from qdrant_client import AsyncQdrantClient, models
 
+from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.engine.utils import parse_id
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..vector_db_interface import VectorDBInterface
@@ -97,6 +97,8 @@ class QDrantAdapter(VectorDBInterface):
         await client.close()
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        from qdrant_client.http.exceptions import UnexpectedResponse
+
         client = self.get_qdrant_client()
 
         data_vectors = await self.embed_data(
@@ -114,6 +116,13 @@ class QDrantAdapter(VectorDBInterface):
 
         try:
             client.upload_points(collection_name=collection_name, points=points)
+        except UnexpectedResponse as error:
+            if "Collection not found" in str(error):
+                raise CollectionNotFoundError(
+                    message=f"Collection {collection_name} not found!"
+                ) from error
+            else:
+                raise error
         except Exception as error:
             logger.error("Error uploading data points to Qdrant: %s", str(error))
             raise error
@@ -143,19 +152,22 @@ class QDrantAdapter(VectorDBInterface):
         await client.close()
         return results
 
-    async def get_distance_from_collection_elements(
+    async def search(
         self,
         collection_name: str,
-        query_text: str = None,
-        query_vector: List[float] = None,
+        query_text: Optional[str] = None,
+        query_vector: Optional[List[float]] = None,
+        limit: int = 15,
         with_vector: bool = False,
-    ) -> List[ScoredResult]:
-        if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+    ):
+        from qdrant_client.http.exceptions import UnexpectedResponse
 
-        client = self.get_qdrant_client()
+        if query_text is None and query_vector is None:
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         try:
+            client = self.get_qdrant_client()
+
             results = await client.search(
                 collection_name=collection_name,
                 query_vector=models.NamedVector(
@@ -164,8 +176,11 @@ class QDrantAdapter(VectorDBInterface):
                     if query_vector is not None
                     else (await self.embed_data([query_text]))[0],
                 ),
+                limit=limit if limit > 0 else None,
                 with_vectors=with_vector,
             )
+
+            await client.close()
 
             return [
                 ScoredResult(
@@ -178,50 +193,15 @@ class QDrantAdapter(VectorDBInterface):
                 )
                 for result in results
             ]
-        except ValueError:
-            # Ignore if the collection doesn't exist
-            return []
+        except UnexpectedResponse as error:
+            if "Collection not found" in str(error):
+                raise CollectionNotFoundError(
+                    message=f"Collection {collection_name} not found!"
+                ) from error
+            else:
+                raise error
         finally:
             await client.close()
-
-    async def search(
-        self,
-        collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: int = 5,
-        with_vector: bool = False,
-    ):
-        if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
-
-        client = self.get_qdrant_client()
-
-        results = await client.search(
-            collection_name=collection_name,
-            query_vector=models.NamedVector(
-                name="text",
-                vector=query_vector
-                if query_vector is not None
-                else (await self.embed_data([query_text]))[0],
-            ),
-            limit=limit,
-            with_vectors=with_vector,
-        )
-
-        await client.close()
-
-        return [
-            ScoredResult(
-                id=parse_id(result.id),
-                payload={
-                    **result.payload,
-                    "id": parse_id(result.id),
-                },
-                score=1 - result.score,
-            )
-            for result in results
-        ]
 
     async def batch_search(
         self,

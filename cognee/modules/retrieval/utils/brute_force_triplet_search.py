@@ -142,8 +142,8 @@ async def brute_force_search(
     try:
         results = await asyncio.gather(
             *[
-                vector_engine.get_distance_from_collection_elements(collection, query_text=query)
-                for collection in collections
+                vector_engine.search(collection_name=collection_name, query_text=query, limit=0)
+                for collection_name in collections
             ]
         )
 
