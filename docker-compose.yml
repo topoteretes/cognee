@@ -28,6 +28,3 @@ services:
 networks:
   cognee-network:
     name: cognee-network
-
-# volumes:
-  # postgres_data:
