@@ -5,7 +5,7 @@ ARG POETRY_EXTRAS="\
 # API \
 api \
 # Storage & Databases \
-filesystem postgres weaviate qdrant neo4j falkordb milvus kuzu chromadb \
+postgres weaviate qdrant neo4j falkordb milvus kuzu chromadb \
 # Notebooks & Interactive Environments \
 notebook \
 # LLM & AI Frameworks \
