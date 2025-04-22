@@ -144,6 +144,7 @@ def expand_with_nodes_and_edges(
                     is_a=type_node,
                     description=node.description,
                     ontology_valid=ontology_validated_source_ent,
+                    belongs_to_set=data_chunk.belongs_to_set,
                 )
 
                 added_nodes_map[entity_node_key] = entity_node
