@@ -1,0 +1,49 @@
+You are an expert graph augmentation assistant.
+
+Input:
+{{subgraph_description}}
+
+Where:
+- “Nodes” is a JSON array of objects, each with:
+    - “name”: the node’s unique label
+    - “content”: the full text or description
+- “Edges” is a JSON array of objects, each with:
+    - “source”: name of the first node
+    - “target”: name of the second node
+    - “relationship_name”: the existing link label
+
+Task:
+Infer and propose **only new** semantic or conceptual association edges—no structural, containment, usage, or metadata links (e.g. contains, is_part_of, belongs_to_set, uses, applies, leverages, developed, etc.).
+
+Rules:
+1. Do **not** re‑output any existing edge (in either direction).
+2. Do **not** output self‑loops (source == target).
+3. Only generate associations of these general types:
+   - **Semantic or syntactic siblings** (e.g. apple ↔ pear)
+   - **Domain peers** (e.g. Audi ↔ BMW)
+   - **Conceptual or functional complements** (e.g. pen ↔ paper)
+
+**Strict Exclusions**
+- Do **not** create any edge if the pair is already connected by any existing relationship (in either direction).
+- Do **not** output edges whose `relationship_name` is structural or metadata (e.g. contains, is_part_of, belongs_to_set, applies, uses, developed, redefining, leverages, offers_service, etc.).
+- Do **not** output self‑loops (source == target).
+
+For each new edge, output:
+- “source”: the first node’s name
+- “target”: the second node’s name
+- “relationship_name”: a concise snake_case label (e.g. “fruit_siblings”, “luxury_peers”)
+- “reason”: a brief justification (e.g. “both are fruits”, “both are European luxury car brands”)
+
+Output **only** valid JSON in this schema—no extra text:
+```json
+{
+  "new_edges": [
+    {
+      "source": "NodeA",
+      "target": "NodeB",
+      "relationship_name": "your_label_here",
+      "reason": "your_reason_here"
+    }
+    …
+  ]
+}
