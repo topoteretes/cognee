@@ -8,11 +8,8 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
-from typing import List, Optional
-import uuid
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents

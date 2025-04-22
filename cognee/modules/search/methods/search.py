@@ -71,10 +71,11 @@ async def specific_search(
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever().get_completion,
-        SearchType.INSIGHTS: InsightsRetriever().get_completion,
+        SearchType.INSIGHTS: InsightsRetriever(top_k=top_k).get_completion,
         SearchType.CHUNKS: ChunksRetriever().get_completion,
         SearchType.RAG_COMPLETION: CompletionRetriever(
-            system_prompt_path=system_prompt_path
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
         ).get_completion,
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
             system_prompt_path=system_prompt_path,
@@ -83,7 +84,7 @@ async def specific_search(
             node_name=node_name,
         ).get_completion,
         SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
-            system_prompt_path=system_prompt_path
+            system_prompt_path=system_prompt_path,
         ).get_completion,
         SearchType.CODE: CodeRetriever().get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,

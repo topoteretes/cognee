@@ -25,9 +25,6 @@ async def search(
     if user is None:
         user = await get_default_user()
 
-    if user is None:
-        raise UserNotFoundError
-
     filtered_search_results = await search_function(
         query_text,
         query_type,

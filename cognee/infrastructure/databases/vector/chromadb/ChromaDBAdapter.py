@@ -1,12 +1,11 @@
-from cognee.shared.logging_utils import get_logger
-from typing import Dict, List, Optional, Any
-import os
 import json
 from uuid import UUID
-
+from typing import List, Optional
 from chromadb import AsyncHttpClient, Settings
 
 from cognee.exceptions import InvalidValueError
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.storage.utils import get_own_properties
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
@@ -134,7 +133,7 @@ class ChromaDBAdapter(VectorDBInterface):
 
         metadatas = []
         for data_point in data_points:
-            metadata = data_point.model_dump()
+            metadata = get_own_properties(data_point)
             metadatas.append(process_data_for_chroma(metadata))
 
         await collection.upsert(

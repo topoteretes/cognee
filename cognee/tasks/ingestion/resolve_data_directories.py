@@ -1,5 +1,8 @@
 import os
+import s3fs
 from typing import List, Union, BinaryIO
+from urllib.parse import urlparse
+from cognee.api.v1.add.config import get_s3_config
 
 
 async def resolve_data_directories(
@@ -20,10 +23,35 @@ async def resolve_data_directories(
         data = [data]
 
     resolved_data = []
+    s3_config = get_s3_config()
+
+    fs = None
+    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+        fs = s3fs.S3FileSystem(
+            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
+        )
 
     for item in data:
         if isinstance(item, str):  # Check if the item is a path
-            if os.path.isdir(item):  # If it's a directory
+            # S3
+            if urlparse(item).scheme == "s3":
+                if fs is not None:
+                    if include_subdirectories:
+                        base_path = item if item.endswith("/") else item + "/"
+                        s3_keys = fs.glob(base_path + "**")
+                    else:
+                        s3_keys = fs.ls(item)
+                    # Filter out keys that represent directories using fs.isdir
+                    s3_files = []
+                    for key in s3_keys:
+                        if not fs.isdir(key):
+                            if not key.startswith("s3://"):
+                                s3_files.append("s3://" + key)
+                            else:
+                                s3_files.append(key)
+                    resolved_data.extend(s3_files)
+
+            elif os.path.isdir(item):  # If it's a directory
                 if include_subdirectories:
                     # Recursively add all files in the directory and subdirectories
                     for root, _, files in os.walk(item):

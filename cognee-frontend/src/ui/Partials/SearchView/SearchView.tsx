@@ -31,11 +31,11 @@ export default function SearchView() {
     value: 'INSIGHTS',
     label: 'Query insights from documents',
   }, {
-    value: 'SUMMARIES',
-    label: 'Query document summaries',
+    value: 'GRAPH_COMPLETION',
+    label: 'Completion using Cognee\'s graph based memory',
   }, {
-    value: 'CHUNKS',
-    label: 'Query document chunks',
+    value: 'RAG_COMPLETION',
+    label: 'Completion using RAG',
   }];
   const [searchType, setSearchType] = useState(searchOptions[0]);
 
@@ -167,6 +167,10 @@ type InsightMessage = [Node, Relationship, Node];
 
 
 function convertToSearchTypeOutput(systemMessages: any[], searchType: string): string {
+  if (systemMessages.length > 0 && typeof(systemMessages[0]) === "string") {
+    return systemMessages[0];
+  }
+
   switch (searchType) {
     case 'INSIGHTS':
       return systemMessages.map((message: InsightMessage) => {
@@ -181,6 +185,6 @@ function convertToSearchTypeOutput(systemMessages: any[], searchType: string): s
     case 'CHUNKS':
       return systemMessages.map((message: { text: string }) => message.text).join('\n');
     default:
-      return '';
+      return "";
   }
 }

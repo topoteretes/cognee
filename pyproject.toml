@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cognee"
-version = "0.1.36"
+version = "0.1.38"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = ["Vasilije Markovic", "Boris Arzentar"]
 readme = "README.md"
@@ -48,8 +48,10 @@ lancedb = "0.16.0"
 alembic = "^1.13.3"
 pre-commit = "^4.0.1"
 scikit-learn = "^1.6.1"
+limits = "^4.4.1"
 fastapi = {version = "0.115.7"}
-fastapi-users = {version = "14.0.0", extras = ["sqlalchemy"]}
+python-multipart = "0.0.20"
+fastapi-users = {version = "14.0.1", extras = ["sqlalchemy"]}
 uvicorn = {version = "0.34.0", optional = true}
 gunicorn = {version = "^20.1.0", optional = true}
 dlt = {extras = ["sqlalchemy"], version = "^1.9.0"}
@@ -85,11 +87,11 @@ structlog = "^25.2.0"
 pyside6 = {version = "^6.8.3", optional = true}
 google-generativeai = {version = "^0.8.4", optional = true}
 notebook = {version = "^7.1.0", optional = true}
+s3fs = "^2025.3.2"
 
 
 [tool.poetry.extras]
 api = ["uvicorn", "gunicorn"]
-filesystem = ["s3fs", "botocore"]
 weaviate = ["weaviate-client"]
 qdrant = ["qdrant-client"]
 neo4j = ["neo4j"]

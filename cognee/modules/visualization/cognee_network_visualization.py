@@ -1,10 +1,9 @@
-import logging
-import networkx as nx
-import json
 import os
+import json
+import networkx
 
-from cognee.infrastructure.files.storage import LocalStorage
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.files.storage import LocalStorage
 
 logger = get_logger()
 
@@ -12,7 +11,7 @@ logger = get_logger()
 async def cognee_network_visualization(graph_data, destination_file_path: str = None):
     nodes_data, edges_data = graph_data
 
-    G = nx.DiGraph()
+    G = networkx.DiGraph()
 
     nodes_list = []
     color_map = {
