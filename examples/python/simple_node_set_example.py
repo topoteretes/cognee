@@ -2,6 +2,7 @@ import asyncio
 import cognee
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines import run_tasks, Task
 from cognee.tasks.experimental_tasks.node_set_edge_association import node_set_edge_association
 
@@ -47,7 +48,8 @@ async def main():
 
     tasks = [Task(node_set_edge_association)]
 
-    pipeline = run_tasks(tasks=tasks)
+    user = await get_default_user()
+    pipeline = run_tasks(tasks=tasks, user=user)
 
     async for pipeline_status in pipeline:
         print(f"Pipeline run status: {pipeline_status.pipeline_name} - {pipeline_status.status}")
