@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -179,7 +180,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if collection_name in metadata.tables:
                 return metadata.tables[collection_name]
             else:
-                raise EntityNotFoundError(message=f"Table '{collection_name}' not found.")
+                raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
@@ -238,6 +239,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 for row in vector_list
             ]
         except EntityNotFoundError:
+            # Ignore if collection does not exist
+            return []
+        except CollectionNotFoundError:
             # Ignore if collection does not exist
             return []
 
