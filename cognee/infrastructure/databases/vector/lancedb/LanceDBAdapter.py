@@ -239,30 +239,13 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
-    def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-        async def _delete_data_points():
-            connection = await self.get_connection()
-            collection = await connection.open_table(collection_name)
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        connection = await self.get_connection()
+        collection = await connection.open_table(collection_name)
 
-            # Delete one at a time to avoid commit conflicts
-            for data_point_id in data_point_ids:
-                await collection.delete(f"id = '{data_point_id}'")
-
-            return True
-
-        # Check if we're in an event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # If we're in a running event loop, create a new task
-            return loop.create_task(_delete_data_points())
-        else:
-            # If we're not in an event loop, run it synchronously
-            return asyncio.run(_delete_data_points())
+        # Delete one at a time to avoid commit conflicts
+        for data_point_id in data_point_ids:
+            await collection.delete(f"id = '{data_point_id}'")
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
