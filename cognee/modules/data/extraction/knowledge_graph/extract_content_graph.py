@@ -10,7 +10,7 @@ async def extract_content_graph(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
     llm_config = get_llm_config()
 
-    prompt_path = llm_config.get("GRAPH_PROMPT_PATH", "generate_graph_prompt.txt")
+    prompt_path = llm_config.graph_prompt_path
 
     # Check if the prompt path is an absolute path or just a filename
     if os.path.isabs(prompt_path):
