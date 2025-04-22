@@ -1,8 +1,10 @@
+from uuid import UUID
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
-from typing import List
+from typing import List, Optional
 import subprocess
+from cognee.modules.data.methods import get_dataset
 from cognee.shared.logging_utils import get_logger
 import requests
 
@@ -19,7 +21,8 @@ def get_add_router() -> APIRouter:
     async def add(
         file: UploadFile = UploadFile(None),
         url: str = Form(None),
-        datasetId: str = Form(...),
+        datasetId: Optional[UUID] = Form(default=None),
+        datasetName: Optional[str] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -29,6 +32,17 @@ def get_add_router() -> APIRouter:
         - url: a URL to fetch data from (supports GitHub clone or direct file download)
         """
         from cognee.api.v1.add import add as cognee_add
+
+        if not datasetId and not datasetName:
+            raise ValueError("Either datasetId or datasetName must be provided.")
+
+        if datasetId and not datasetName:
+            dataset = await get_dataset(user_id=user.id, dataset_id=datasetId)
+            try:
+                datasetName = dataset.name
+            except IndexError:
+                raise ValueError("No dataset found with the provided datasetName.")
+
         try:
             logger.info(f"Received data for datasetId={datasetId}")
             if file and file.filename:
@@ -38,7 +52,7 @@ def get_add_router() -> APIRouter:
                     logger.info(f"Passing uploaded file as text to cognee_add")
                     return await cognee_add(
                         text,
-                        datasetId,
+                        datasetName,
                         user=user
                     )
                 except Exception as e:
@@ -46,7 +60,7 @@ def get_add_router() -> APIRouter:
                     file.file.seek(0)
                     return await cognee_add(
                         file.file,
-                        datasetId,
+                        datasetName,
                         user=user
                     )
             elif url:
@@ -70,7 +84,7 @@ def get_add_router() -> APIRouter:
                         logger.info(f"Fetched content from URL: {response.text}")
                         return await cognee_add(
                             response.text,
-                            datasetId,
+                            datasetName,
                             user=user
                         )
                 else:

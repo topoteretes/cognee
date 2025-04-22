@@ -21,7 +21,11 @@ interface SelectOption {
 interface SettingsForm extends HTMLFormElement {
   vectorDBUrl: HTMLInputElement;
   vectorDBApiKey: HTMLInputElement;
+  llmProvider: HTMLInputElement;
+  llmModel: HTMLInputElement;
   llmApiKey: HTMLInputElement;
+  llmEndpoint: HTMLInputElement;
+  llmApiVersion: HTMLInputElement;
 }
 
 const defaultProvider = {
@@ -37,18 +41,16 @@ const defaultModel = {
 export default function Settings({ onDone = () => {}, submitButtonText = 'Save' }) {
   const [llmConfig, setLLMConfig] = useState<{
     apiKey: string;
-    model: SelectOption;
-    models: {
-      [key: string]: SelectOption[];
-    };
-    provider: SelectOption;
-    providers: SelectOption[];
+    model: string;
+    endpoint: string;
+    apiVersion: string;
+    provider: string;
   }>();
   const [vectorDBConfig, setVectorDBConfig] = useState<{
     url: string;
     apiKey: string;
     provider: SelectOption;
-    options: SelectOption[];
+    providers: SelectOption[];
   }>();
 
   const {
@@ -68,9 +70,11 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
     };
 
     const newLLMConfig = {
-      provider: llmConfig?.provider.value,
-      model: llmConfig?.model.value,
+      provider: formElements.llmProvider.value,
+      model: formElements.llmModel.value,
       apiKey: formElements.llmApiKey.value,
+      endpoint: formElements.llmEndpoint.value,
+      apiVersion: formElements.llmApiVersion.value,
     };
 
     startSaving();
@@ -96,40 +100,10 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
       if (config?.provider !== newVectorDBProvider) {
         return {
          ...config,
-          options: config?.options || [],
+          providers: config?.providers || [],
           provider: newVectorDBProvider,
           url: '',
           apiKey: '',
-        };
-      }
-      return config;
-    });
-  }, []);
-
-  const handleLLMProviderChange = useCallback((newLLMProvider: SelectOption) => {
-    setLLMConfig((config) => {
-      if (config?.provider !== newLLMProvider) {
-        return {
-          provider: newLLMProvider,
-          providers: config?.providers || [],
-          model: config?.models?.[newLLMProvider.value]?.[0] || defaultModel,
-          models: config?.models || {},
-          apiKey: config?.apiKey || '',
-        };
-      }
-      return config;
-    });
-  }, []);
-
-  const handleLLMModelChange = useCallback((newLLMModel: SelectOption) => {
-    setLLMConfig((config) => {
-      if (config?.model !== newLLMModel) {
-        return {
-          provider: config?.provider || defaultProvider,
-          providers: config?.providers || [],
-          model: newLLMModel,
-          models: config?.models || {},
-          apiKey: config?.apiKey || '',
         };
       }
       return config;
@@ -141,8 +115,16 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
       const response = await fetch('/v1/settings');
       const settings = await response.json();
 
+      if (!settings.llm.provider) {
+        settings.llm.provider = settings.llm.providers[0].value;
+      }
       if (!settings.llm.model) {
-        settings.llm.model = settings.llm.models[settings.llm.provider.value][0];
+        settings.llm.model = settings.llm.models[settings.llm.provider][0].value;
+      }
+      if (!settings.vectorDb.provider) {
+        settings.vectorDb.provider = settings.vectorDb.providers[0];
+      } else {
+        settings.vectorDb.provider = settings.vectorDb.providers.find((provider: SelectOption) => provider.value === settings.vectorDb.provider);
       }
       setLLMConfig(settings.llm);
       setVectorDBConfig(settings.vectorDb);
@@ -151,28 +133,39 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
   }, []);
 
   return (
-    <form onSubmit={saveConfig} style={{ width: '100%' }}>
+    <form onSubmit={saveConfig} style={{ width: "100%", overflowY: "auto", maxHeight: "500px" }}>
       <Stack gap="4" orientation="vertical">
         <Stack gap="4" orientation="vertical">
           <FormGroup orientation="vertical" align="center/" gap="2">
             <FormLabel>LLM provider:</FormLabel>
-            <DropdownSelect
-              value={llmConfig?.provider || null}
-              options={llmConfig?.providers || []}
-              onChange={handleLLMProviderChange}
-            />
+            <FormInput>
+              <Input defaultValue={llmConfig?.provider} name="llmProvider" placeholder="LLM provider" />
+            </FormInput>
           </FormGroup>
           <FormGroup orientation="vertical" align="center/" gap="2">
             <FormLabel>LLM model:</FormLabel>
-            <DropdownSelect
-              value={llmConfig?.model || null}
-              options={llmConfig?.provider ? llmConfig?.models[llmConfig?.provider.value] : []}
-              onChange={handleLLMModelChange}
-            />
+            <FormInput>
+              <Input defaultValue={llmConfig?.model} name="llmModel" placeholder="LLM model" />
+            </FormInput>
           </FormGroup>
-          <FormInput>
-            <Input defaultValue={llmConfig?.apiKey} name="llmApiKey" placeholder="LLM API key" />
-          </FormInput>
+          <FormGroup orientation="vertical" align="center/" gap="2">
+            <FormLabel>LLM endpoint:</FormLabel>
+            <FormInput>
+              <Input defaultValue={llmConfig?.endpoint} name="llmEndpoint" placeholder="LLM endpoint url" />
+            </FormInput>
+          </FormGroup>
+          <FormGroup orientation="vertical" align="center/" gap="2">
+            <FormLabel>LLM API key:</FormLabel>
+            <FormInput>
+              <Input defaultValue={llmConfig?.apiKey} name="llmApiKey" placeholder="LLM API key" />
+            </FormInput>
+          </FormGroup>
+          <FormGroup orientation="vertical" align="center/" gap="2">
+            <FormLabel>LLM API version:</FormLabel>
+            <FormInput>
+              <Input defaultValue={llmConfig?.apiVersion} name="llmApiVersion" placeholder="LLM API version" />
+            </FormInput>
+          </FormGroup>
         </Stack>
 
         <Stack gap="2" orientation="vertical">
@@ -180,7 +173,7 @@ export default function Settings({ onDone = () => {}, submitButtonText = 'Save' 
             <FormLabel>Vector DB provider:</FormLabel>
             <DropdownSelect
               value={vectorDBConfig?.provider || null}
-              options={vectorDBConfig?.options || []}
+              options={vectorDBConfig?.providers || []}
               onChange={handleVectorDBChange}
             />
           </FormGroup>

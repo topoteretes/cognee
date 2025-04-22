@@ -4,8 +4,7 @@ set -e  # Exit on error
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
-# Run Alembic migrations with proper error handling
-
+# Run Alembic migrations with proper error handling.
 # Note on UserAlreadyExists error handling:
 # During database migrations, we attempt to create a default user. If this user
 # already exists (e.g., from a previous deployment or migration), it's not a
@@ -30,7 +29,7 @@ echo "Starting Gunicorn"
 sleep 2
 
 # Modified Gunicorn startup with error handling
-if [ "$ENVIRONMENT" = "dev" ]; then
+if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Starting Gunicorn - development environment with debugger"
         echo "Waiting for the debugger to attach..."

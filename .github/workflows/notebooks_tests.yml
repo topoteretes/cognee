@@ -1,0 +1,40 @@
+name: Reusable Notebook Tests
+
+on:
+  workflow_call:
+
+jobs:
+#  run-main-notebook:
+#    name: Main Notebook Test
+#    uses: ./.github/workflows/reusable_notebook.yml
+#    with:
+#      notebook-location: notebooks/cognee_demo.ipynb
+#    secrets: inherit
+
+  run-llama-index-integration:
+    name: LlamaIndex Integration Notebook
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/llama_index_cognee_integration.ipynb
+    secrets: inherit
+
+  run-cognee-llama-index:
+    name: Cognee LlamaIndex Notebook
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/cognee_llama_index.ipynb
+    secrets: inherit
+
+  run-cognee-multimedia:
+    name: Cognee Multimedia Notebook
+    uses: ./.github/workflows/reusable_notebook.yml
+    with:
+      notebook-location: notebooks/cognee_multimedia_demo.ipynb
+    secrets: inherit
+
+#  run-graphrag-vs-rag:
+#    name: Graphrag vs Rag notebook
+#    uses: ./.github/workflows/reusable_notebook.yml
+#    with:
+#      notebook-location: notebooks/graphrag_vs_rag.ipynb
+#    secrets: inherit
