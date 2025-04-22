@@ -10,7 +10,8 @@ async def extract_content_graph(content: str, response_model: Type[BaseModel]):
     llm_client = get_llm_client()
     llm_config = get_llm_config()
 
-    prompt_path = llm_config.graph_prompt_path
+    prompt_path = llm_config.get("GRAPH_PROMPT_PATH", "generate_graph_prompt.txt")
+
     # Check if the prompt path is an absolute path or just a filename
     if os.path.isabs(prompt_path):
         # directory containing the file
@@ -21,6 +22,7 @@ async def extract_content_graph(content: str, response_model: Type[BaseModel]):
         base_directory = None
 
     system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+
     content_graph = await llm_client.acreate_structured_output(
         content, system_prompt, response_model
     )
