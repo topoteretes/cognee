@@ -7,7 +7,6 @@ description = "Async client for aws services using botocore and aiohttp"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"filesystem\""
 files = [
     {file = "aiobotocore-2.21.1-py3-none-any.whl", hash = "sha256:bd7c49a6d6f8a3d9444b0a94417c8da13813b5c7eec1c4f0ec2db7e8ce8f23e7"},
     {file = "aiobotocore-2.21.1.tar.gz", hash = "sha256:010357f43004413e92a9d066bb0db1f241aeb29ffed306e9197061ffc94e6577"},
@@ -161,7 +160,6 @@ description = "itertools and builtins for AsyncIO and mixed iterables"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"filesystem\""
 files = [
     {file = "aioitertools-0.12.0-py3-none-any.whl", hash = "sha256:fc1f5fac3d737354de8831cbba3eb04f79dd649d8f3afb4c5b114925e662a796"},
     {file = "aioitertools-0.12.0.tar.gz", hash = "sha256:c2a9055b4fbb7705f561b9d86053e8af5d10cc845d22c32008c43490b2d8dd6b"},
@@ -2110,30 +2108,30 @@ standard = ["email-validator (>=2.0.0)", "fastapi-cli[standard] (>=0.0.5)", "htt
 
 [[package]]
 name = "fastapi-users"
-version = "14.0.0"
+version = "14.0.1"
 description = "Ready-to-use and customizable users management for FastAPI"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "fastapi_users-14.0.0-py3-none-any.whl", hash = "sha256:e1230e044ddc2209b890b5b5c6fc1d13def961298d40e01c2d28f8bc2fe8c4c7"},
-    {file = "fastapi_users-14.0.0.tar.gz", hash = "sha256:6dceefbd2db87a17f791ef431d616bb5ce40cb123da7922969b704cbee5e7384"},
+    {file = "fastapi_users-14.0.1-py3-none-any.whl", hash = "sha256:074df59676dccf79412d2880bdcb661ab1fabc2ecec1f043b4e6a23be97ed9e1"},
+    {file = "fastapi_users-14.0.1.tar.gz", hash = "sha256:8c032b3a75c6fb2b1f5eab8ffce5321176e9916efe1fe93e7c15ee55f0b02236"},
 ]
 
 [package.dependencies]
 email-validator = ">=1.1.0,<2.3"
 fastapi = ">=0.65.2"
-fastapi-users-db-sqlalchemy = {version = ">=6.0.0", optional = true, markers = "extra == \"sqlalchemy\""}
+fastapi-users-db-sqlalchemy = {version = ">=7.0.0", optional = true, markers = "extra == \"sqlalchemy\""}
 makefun = ">=1.11.2,<2.0.0"
 pwdlib = {version = "0.2.1", extras = ["argon2", "bcrypt"]}
-pyjwt = {version = "2.9.0", extras = ["crypto"]}
-python-multipart = "0.0.17"
+pyjwt = {version = "2.10.1", extras = ["crypto"]}
+python-multipart = "0.0.20"
 
 [package.extras]
-beanie = ["fastapi-users-db-beanie (>=3.0.0)"]
+beanie = ["fastapi-users-db-beanie (>=4.0.0)"]
 oauth = ["httpx-oauth (>=0.13)"]
 redis = ["redis (>=4.3.3,<6.0.0)"]
-sqlalchemy = ["fastapi-users-db-sqlalchemy (>=6.0.0)"]
+sqlalchemy = ["fastapi-users-db-sqlalchemy (>=7.0.0)"]
 
 [[package]]
 name = "fastapi-users-db-sqlalchemy"
@@ -3964,8 +3962,6 @@ python-versions = "*"
 groups = ["main"]
 files = [
     {file = "jsonpath-ng-1.7.0.tar.gz", hash = "sha256:f6f5f7fd4e5ff79c785f1573b394043b39849fb2bb47bcead935d12b00beab3c"},
-    {file = "jsonpath_ng-1.7.0-py2-none-any.whl", hash = "sha256:898c93fc173f0c336784a3fa63d7434297544b7198124a68f9a3ef9597b0ae6e"},
-    {file = "jsonpath_ng-1.7.0-py3-none-any.whl", hash = "sha256:f3d7f9e848cba1b6da28c55b1c26ff915dc9e0b1ba7e752a53d6da8d5cbd00b6"},
 ]
 
 [package.dependencies]
@@ -5079,7 +5075,7 @@ files = [
     {file = "lxml-5.3.2-cp310-cp310-musllinux_1_2_ppc64le.whl", hash = "sha256:aa837e6ee9534de8d63bc4c1249e83882a7ac22bd24523f83fad68e6ffdf41ae"},
     {file = "lxml-5.3.2-cp310-cp310-musllinux_1_2_s390x.whl", hash = "sha256:da4c9223319400b97a2acdfb10926b807e51b69eb7eb80aad4942c0516934858"},
     {file = "lxml-5.3.2-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:dc0e9bdb3aa4d1de703a437576007d366b54f52c9897cae1a3716bb44fc1fc85"},
-    {file = "lxml-5.3.2-cp310-cp310-win32.whl", hash = "sha256:5f94909a1022c8ea12711db7e08752ca7cf83e5b57a87b59e8a583c5f35016ad"},
+    {file = "lxml-5.3.2-cp310-cp310-win32.win32.whl", hash = "sha256:dd755a0a78dd0b2c43f972e7b51a43be518ebc130c9f1a7c4480cf08b4385486"},
     {file = "lxml-5.3.2-cp310-cp310-win_amd64.whl", hash = "sha256:d64ea1686474074b38da13ae218d9fde0d1dc6525266976808f41ac98d9d7980"},
     {file = "lxml-5.3.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:9d61a7d0d208ace43986a92b111e035881c4ed45b1f5b7a270070acae8b0bfb4"},
     {file = "lxml-5.3.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:856dfd7eda0b75c29ac80a31a6411ca12209183e866c33faf46e77ace3ce8a79"},
@@ -7982,14 +7978,14 @@ windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
 name = "pyjwt"
-version = "2.9.0"
+version = "2.10.1"
 description = "JSON Web Token implementation in Python"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "PyJWT-2.9.0-py3-none-any.whl", hash = "sha256:3b02fb0f44517787776cf48f2ae25d8e14f300e6d7545a4315cee571a415e850"},
-    {file = "pyjwt-2.9.0.tar.gz", hash = "sha256:7e1e5b56cc735432a7369cbfa0efe50fa113ebecdc04ae6922deba8b84582d0c"},
+    {file = "PyJWT-2.10.1-py3-none-any.whl", hash = "sha256:dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb"},
+    {file = "pyjwt-2.10.1.tar.gz", hash = "sha256:3cc5772eb20009233caf06e9d8a0577824723b44e6648ee0a2aedb6cf9381953"},
 ]
 
 [package.dependencies]
@@ -8462,14 +8458,14 @@ files = [
 
 [[package]]
 name = "python-multipart"
-version = "0.0.17"
+version = "0.0.20"
 description = "A streaming multipart parser for Python"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "python_multipart-0.0.17-py3-none-any.whl", hash = "sha256:15dc4f487e0a9476cc1201261188ee0940165cffc94429b6fc565c4d3045cb5d"},
-    {file = "python_multipart-0.0.17.tar.gz", hash = "sha256:41330d831cae6e2f22902704ead2826ea038d0419530eadff3ea80175aec5538"},
+    {file = "python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104"},
+    {file = "python_multipart-0.0.20.tar.gz", hash = "sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13"},
 ]
 
 [[package]]
@@ -9429,7 +9425,6 @@ description = "Convenient Filesystem interface over S3"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"filesystem\""
 files = [
     {file = "s3fs-2025.3.2-py3-none-any.whl", hash = "sha256:81eae3f37b4b04bcc08845d7bcc607c6ca45878813ef7e6a28d77b2688417130"},
     {file = "s3fs-2025.3.2.tar.gz", hash = "sha256:6798f896ec76dd3bfd8beb89f0bb7c5263cb2760e038bae0978505cd172a307c"},
@@ -11721,7 +11716,6 @@ deepeval = ["deepeval"]
 docs = ["unstructured"]
 evals = ["gdown", "plotly"]
 falkordb = ["falkordb"]
-filesystem = ["botocore", "s3fs"]
 gemini = ["google-generativeai"]
 graphiti = ["graphiti-core"]
 groq = ["groq"]
@@ -11743,4 +11737,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "cef734016cd8fc4430277b30c639d0699361f0553c00fdd8fa0fbadbab0b7e7b"
+content-hash = "15fe7b2b02efa88fb8070dcde58f32cdc1577df7966e4cd438cbb4f197935e1f"

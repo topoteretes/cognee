@@ -53,3 +53,7 @@ class InvalidAttributeError(CogneeApiError):
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
+
+
+class CriticalError(CogneeApiError):
+    pass

@@ -13,5 +13,7 @@ async def save_vector_db_config(vector_db_config: VectorDBConfig):
     vector_config = get_vectordb_config()
 
     vector_config.vector_db_url = vector_db_config.url
-    vector_config.vector_db_key = vector_db_config.api_key
     vector_config.vector_db_provider = vector_db_config.provider
+
+    if "*****" not in vector_db_config.api_key and len(vector_db_config.api_key.strip()) > 0:
+        vector_config.vector_db_key = vector_db_config.api_key
