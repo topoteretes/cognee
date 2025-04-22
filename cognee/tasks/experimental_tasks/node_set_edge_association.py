@@ -51,7 +51,7 @@ async def node_set_edge_association():
 
         llm_client = get_llm_client()
 
-        system_prompt = system_prompt = render_prompt("edge_association_prompt.txt", {})
+        system_prompt = render_prompt("edge_association_prompt.txt", {})
         associative_edges = await llm_client.acreate_structured_output(
             subgraph_description, system_prompt, AssociativeEdges
         )
