@@ -20,6 +20,7 @@ class Data(Base):
     owner_id = Column(UUID, index=True)
     content_hash = Column(String)
     external_metadata = Column(JSON)
+    node_set = Column(JSON, nullable=True)  # Store NodeSet as JSON list of strings
     token_count = Column(Integer)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
@@ -44,5 +45,6 @@ class Data(Base):
             "rawDataLocation": self.raw_data_location,
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+            "nodeSet": self.node_set,
             # "datasets": [dataset.to_json() for dataset in self.datasets]
         }

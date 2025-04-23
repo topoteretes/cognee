@@ -1,11 +1,11 @@
 import pytest
-from cognee.modules.retrieval.exceptions import CollectionDistancesNotFoundError
+from unittest.mock import AsyncMock, patch
 from cognee.modules.users.models import User
+from cognee.modules.retrieval.exceptions import CollectionDistancesNotFoundError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     brute_force_search,
     brute_force_triplet_search,
 )
-from unittest.mock import AsyncMock, patch
 
 
 @pytest.mark.asyncio
@@ -20,12 +20,10 @@ async def test_brute_force_search_collection_not_found(mock_get_vector_engine):
     mock_vector_engine.get_distance_from_collection_elements.return_value = []
     mock_get_vector_engine.return_value = mock_vector_engine
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(CollectionDistancesNotFoundError):
         await brute_force_search(
             query, user, top_k, collections=collections, memory_fragment=mock_memory_fragment
         )
-
-    assert isinstance(exc_info.value.__cause__, CollectionDistancesNotFoundError)
 
 
 @pytest.mark.asyncio
@@ -40,9 +38,7 @@ async def test_brute_force_triplet_search_collection_not_found(mock_get_vector_e
     mock_vector_engine.get_distance_from_collection_elements.return_value = []
     mock_get_vector_engine.return_value = mock_vector_engine
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(CollectionDistancesNotFoundError):
         await brute_force_triplet_search(
             query, user, top_k, collections=collections, memory_fragment=mock_memory_fragment
         )
-
-    assert isinstance(exc_info.value.__cause__, CollectionDistancesNotFoundError)

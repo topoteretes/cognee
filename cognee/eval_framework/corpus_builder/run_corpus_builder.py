@@ -1,6 +1,6 @@
 from cognee.shared.logging_utils import get_logger, ERROR
 import json
-from typing import List
+from typing import List, Optional
 
 from cognee.infrastructure.files.storage import LocalStorage
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
@@ -34,7 +34,10 @@ async def create_and_insert_questions_table(questions_payload):
 
 
 async def run_corpus_builder(
-    params: dict, chunk_size=1024, chunker=TextChunker, instance_filter=None
+    params: dict,
+    chunk_size=1024,
+    chunker=TextChunker,
+    instance_filter=None,
 ) -> List[dict]:
     if params.get("building_corpus_from_scratch"):
         logger.info("Corpus Builder started...")

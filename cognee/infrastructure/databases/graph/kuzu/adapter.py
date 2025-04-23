@@ -14,7 +14,10 @@ from concurrent.futures import ThreadPoolExecutor
 import kuzu
 from kuzu.database import Database
 from kuzu import Connection
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    record_graph_changes,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 
@@ -43,7 +46,7 @@ class KuzuAdapter(GraphDBInterface):
             self.connection.execute("""
                 CREATE NODE TABLE IF NOT EXISTS Node(
                     id STRING PRIMARY KEY,
-                    text STRING,
+                    name STRING,
                     type STRING,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
@@ -138,12 +141,16 @@ class KuzuAdapter(GraphDBInterface):
         query = """
             MATCH (from:Node), (to:Node)
             WHERE from.id = $from_id AND to.id = $to_id
-            CREATE (from)-[r:EDGE {
-                relationship_name: $relationship_name,
-                created_at: timestamp($created_at),
-                updated_at: timestamp($updated_at),
-                properties: $properties
+            MERGE (from)-[r:EDGE {
+                relationship_name: $relationship_name
             }]->(to)
+            ON CREATE SET
+                r.created_at = timestamp($created_at),
+                r.updated_at = timestamp($updated_at),
+                r.properties = $properties
+            ON MATCH SET
+                r.updated_at = timestamp($updated_at),
+                r.properties = $properties
         """
         params = {
             "from_id": from_node,
@@ -171,7 +178,7 @@ class KuzuAdapter(GraphDBInterface):
             # Extract core fields with defaults if not present
             core_properties = {
                 "id": str(properties.get("id", "")),
-                "text": str(properties.get("text", "")),
+                "name": str(properties.get("name", "")),
                 "type": str(properties.get("type", "")),
             }
 
@@ -181,35 +188,33 @@ class KuzuAdapter(GraphDBInterface):
 
             core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
 
-            # Check if node exists
-            exists = await self.has_node(core_properties["id"])
+            # Add timestamps for new node
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            fields = []
+            params = {}
+            for key, value in core_properties.items():
+                if value is not None:
+                    param_name = f"param_{key}"
+                    fields.append(f"{key}: ${param_name}")
+                    params[param_name] = value
 
-            if not exists:
-                # Add timestamps for new node
-                now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-                fields = []
-                params = {}
-                for key, value in core_properties.items():
-                    if value is not None:
-                        param_name = f"param_{key}"
-                        fields.append(f"{key}: ${param_name}")
-                        params[param_name] = value
+            # Add timestamp fields
+            fields.extend(
+                ["created_at: timestamp($created_at)", "updated_at: timestamp($updated_at)"]
+            )
+            params.update({"created_at": now, "updated_at": now})
 
-                # Add timestamp fields
-                fields.extend(
-                    ["created_at: timestamp($created_at)", "updated_at: timestamp($updated_at)"]
-                )
-                params.update({"created_at": now, "updated_at": now})
-
-                create_query = f"""
-                CREATE (n:Node {{{", ".join(fields)}}})
-                """
-                await self.query(create_query, params)
+            merge_query = f"""
+            MERGE (n:Node {{id: $param_id}})
+            ON CREATE SET n += {{{", ".join(fields)}}}
+            """
+            await self.query(merge_query, params)
 
         except Exception as e:
             logger.error(f"Failed to add node: {e}")
             raise
 
+    @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
         """Add multiple nodes to the graph in a batch operation."""
         if not nodes:
@@ -218,15 +223,14 @@ class KuzuAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-            # Prepare all nodes data first
+            # Prepare all nodes data
             node_params = []
             for node in nodes:
                 properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
 
-                # Extract core fields
                 core_properties = {
                     "id": str(properties.get("id", "")),
-                    "text": str(properties.get("text", "")),
+                    "name": str(properties.get("name", "")),
                     "type": str(properties.get("type", "")),
                 }
 
@@ -244,36 +248,24 @@ class KuzuAdapter(GraphDBInterface):
                 )
 
             if node_params:
-                # First check which nodes don't exist yet
-                check_query = """
+                # Batch merge nodes
+                merge_query = """
                 UNWIND $nodes AS node
-                MATCH (n:Node)
-                WHERE n.id = node.id
-                RETURN n.id
+                MERGE (n:Node {id: node.id})
+                ON CREATE SET
+                    n.name = node.name,
+                    n.type = node.type,
+                    n.properties = node.properties,
+                    n.created_at = timestamp(node.created_at),
+                    n.updated_at = timestamp(node.updated_at)
+                ON MATCH SET
+                    n.name = node.name,
+                    n.type = node.type,
+                    n.properties = node.properties,
+                    n.updated_at = timestamp(node.updated_at)
                 """
-                existing_nodes = await self.query(check_query, {"nodes": node_params})
-                existing_ids = {str(row[0]) for row in existing_nodes}
-
-                # Filter out existing nodes
-                new_nodes = [node for node in node_params if node["id"] not in existing_ids]
-
-                if new_nodes:
-                    # Batch create new nodes
-                    create_query = """
-                    UNWIND $nodes AS node
-                    CREATE (n:Node {
-                        id: node.id,
-                        text: node.text,
-                        type: node.type,
-                        properties: node.properties,
-                        created_at: timestamp(node.created_at),
-                        updated_at: timestamp(node.updated_at)
-                    })
-                    """
-                    await self.query(create_query, {"nodes": new_nodes})
-                    logger.debug(f"Added {len(new_nodes)} new nodes in batch")
-                else:
-                    logger.debug("No new nodes to add - all nodes already exist")
+                await self.query(merge_query, {"nodes": node_params})
+                logger.debug(f"Processed {len(node_params)} nodes in batch")
 
         except Exception as e:
             logger.error(f"Failed to add nodes in batch: {e}")
@@ -296,7 +288,7 @@ class KuzuAdapter(GraphDBInterface):
         WHERE n.id = $id
         RETURN {
             id: n.id,
-            text: n.text,
+            name: n.name,
             type: n.type,
             properties: n.properties
         }
@@ -318,7 +310,7 @@ class KuzuAdapter(GraphDBInterface):
         WHERE n.id IN $node_ids
         RETURN {
             id: n.id,
-            text: n.text,
+            name: n.name,
             type: n.type,
             properties: n.properties
         }
@@ -401,6 +393,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
+    @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
         """Add multiple edges in a batch operation."""
         if not edges:
@@ -409,7 +402,6 @@ class KuzuAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-            # Transform edges into the format needed for batch insertion
             edge_params = [
                 {
                     "from_id": from_node,
@@ -422,17 +414,20 @@ class KuzuAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
-            # Batch create query
             query = """
             UNWIND $edges AS edge
             MATCH (from:Node), (to:Node)
             WHERE from.id = edge.from_id AND to.id = edge.to_id
-            CREATE (from)-[r:EDGE {
-                relationship_name: edge.relationship_name,
-                created_at: timestamp(edge.created_at),
-                updated_at: timestamp(edge.updated_at),
-                properties: edge.properties
+            MERGE (from)-[r:EDGE {
+                relationship_name: edge.relationship_name
             }]->(to)
+            ON CREATE SET
+                r.created_at = timestamp(edge.created_at),
+                r.updated_at = timestamp(edge.updated_at),
+                r.properties = edge.properties
+            ON MATCH SET
+                r.updated_at = timestamp(edge.updated_at),
+                r.properties = edge.properties
             """
 
             await self.query(query, {"edges": edge_params})
@@ -454,14 +449,14 @@ class KuzuAdapter(GraphDBInterface):
         WHERE n.id = $node_id
         RETURN {
             id: n.id,
-            text: n.text,
+            name: n.name,
             type: n.type,
             properties: n.properties
         },
         r.relationship_name,
         {
             id: m.id,
-            text: m.text,
+            name: m.name,
             type: m.type,
             properties: m.properties
         }
@@ -480,6 +475,50 @@ class KuzuAdapter(GraphDBInterface):
             return []
 
     # Neighbor Operations
+
+    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+        """Get all neighboring nodes."""
+        return await self.get_neighbours(node_id)
+
+    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single node by ID."""
+        query_str = """
+        MATCH (n:Node)
+        WHERE n.id = $id
+        RETURN {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            properties: n.properties
+        }
+        """
+        try:
+            result = await self.query(query_str, {"id": node_id})
+            if result and result[0]:
+                return self._parse_node(result[0][0])
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get node {node_id}: {e}")
+            return None
+
+    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get multiple nodes by their IDs."""
+        query_str = """
+        MATCH (n:Node)
+        WHERE n.id IN $node_ids
+        RETURN {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            properties: n.properties
+        }
+        """
+        try:
+            results = await self.query(query_str, {"node_ids": node_ids})
+            return [self._parse_node(row[0]) for row in results if row[0]]
+        except Exception as e:
+            logger.error(f"Failed to get nodes: {e}")
+            return []
 
     async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
         """Get all neighbouring nodes."""
@@ -554,7 +593,7 @@ class KuzuAdapter(GraphDBInterface):
         WHERE n.id = $node_id
         RETURN {
             id: n.id,
-            text: n.text,
+            name: n.name,
             type: n.type,
             properties: n.properties
         },
@@ -564,7 +603,7 @@ class KuzuAdapter(GraphDBInterface):
         },
         {
             id: m.id,
-            text: m.text,
+            name: m.name,
             type: m.type,
             properties: m.properties
         }
@@ -625,7 +664,7 @@ class KuzuAdapter(GraphDBInterface):
             nodes_query = """
             MATCH (n:Node)
             RETURN n.id, {
-                text: n.text,
+                name: n.name,
                 type: n.type,
                 properties: n.properties
             }
@@ -716,77 +755,36 @@ class KuzuAdapter(GraphDBInterface):
         return ([n[0] for n in nodes], [e[0] for e in edges])
 
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
+        """For the definition of these metrics, please refer to
+        https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+
         try:
-            # Basic metrics
-            node_count = await self.query("MATCH (n:Node) RETURN COUNT(n)")
-            edge_count = await self.query("MATCH ()-[r:EDGE]->() RETURN COUNT(r)")
-            num_nodes = node_count[0][0] if node_count else 0
-            num_edges = edge_count[0][0] if edge_count else 0
+            # Get basic graph data
+            nodes, edges = await self.get_model_independent_graph_data()
+            num_nodes = len(nodes[0]["nodes"]) if nodes else 0
+            num_edges = len(edges[0]["elements"]) if edges else 0
 
             # Calculate mandatory metrics
             mandatory_metrics = {
                 "num_nodes": num_nodes,
                 "num_edges": num_edges,
-                "mean_degree": (2 * num_edges) / num_nodes if num_nodes > 0 else 0,
-                "edge_density": (num_edges) / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
+                "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
+                "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
+                "num_connected_components": await self._get_num_connected_components(),
+                "sizes_of_connected_components": await self._get_size_of_connected_components(),
             }
 
-            # Calculate connected components
-            components_query = """
-            MATCH (n:Node)
-            WITH n.id AS node_id
-            MATCH path = (n)-[:EDGE*0..]-()
-            WITH COLLECT(DISTINCT node_id) AS component
-            RETURN COLLECT(component) AS components
-            """
-            components_result = await self.query(components_query)
-            component_sizes = (
-                [len(comp) for comp in components_result[0][0]] if components_result else []
-            )
-
-            mandatory_metrics.update(
-                {
-                    "num_connected_components": len(component_sizes),
-                    "sizes_of_connected_components": component_sizes,
-                }
-            )
-
             if include_optional:
-                # Self-loops
-                self_loops_query = """
-                MATCH (n:Node)-[r:EDGE]->(n)
-                RETURN COUNT(r)
-                """
-                self_loops = await self.query(self_loops_query)
-                num_selfloops = self_loops[0][0] if self_loops else 0
-
-                # Shortest paths (simplified for Kuzu)
-                paths_query = """
-                MATCH (n:Node), (m:Node)
-                WHERE n.id < m.id
-                MATCH path = (n)-[:EDGE*]-(m)
-                RETURN MIN(LENGTH(path)) AS length
-                """
-                paths = await self.query(paths_query)
-                path_lengths = [p[0] for p in paths if p[0] is not None]
-
-                # Local clustering coefficient
-                clustering_query = """
-                MATCH (n:Node)-[:EDGE]-(neighbor)
-                WITH n, COUNT(DISTINCT neighbor) as degree
-                MATCH (n)-[:EDGE]-(n1)-[:EDGE]-(n2)-[:EDGE]-(n)
-                WHERE n1 <> n2
-                RETURN AVG(CASE WHEN degree <= 1 THEN 0 ELSE COUNT(DISTINCT n2) / (degree * (degree-1)) END)
-                """
-                clustering = await self.query(clustering_query)
-
+                # Calculate optional metrics
+                shortest_path_lengths = await self._get_shortest_path_lengths()
                 optional_metrics = {
-                    "num_selfloops": num_selfloops,
-                    "diameter": max(path_lengths) if path_lengths else -1,
-                    "avg_shortest_path_length": sum(path_lengths) / len(path_lengths)
-                    if path_lengths
+                    "num_selfloops": await self._count_self_loops(),
+                    "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
+                    "avg_shortest_path_length": sum(shortest_path_lengths)
+                    / len(shortest_path_lengths)
+                    if shortest_path_lengths
                     else -1,
-                    "avg_clustering": clustering[0][0] if clustering and clustering[0][0] else -1,
+                    "avg_clustering": await self._get_avg_clustering(),
                 }
             else:
                 optional_metrics = {
@@ -812,6 +810,65 @@ class KuzuAdapter(GraphDBInterface):
                 "avg_shortest_path_length": -1,
                 "avg_clustering": -1,
             }
+
+    async def _get_num_connected_components(self) -> int:
+        """Get the number of connected components in the graph."""
+        query = """
+        MATCH (n:Node)
+        WITH n.id AS node_id
+        MATCH path = (n)-[:EDGE*1..3]-(m)
+        WITH node_id, COLLECT(DISTINCT m.id) AS connected_nodes
+        WITH COLLECT(DISTINCT connected_nodes + [node_id]) AS components
+        RETURN SIZE(components) AS num_components
+        """
+        result = await self.query(query)
+        return result[0][0] if result else 0
+
+    async def _get_size_of_connected_components(self) -> List[int]:
+        """Get the sizes of all connected components in the graph."""
+        query = """
+        MATCH (n:Node)
+        WITH n.id AS node_id
+        MATCH path = (n)-[:EDGE*1..3]-(m)
+        WITH node_id, COLLECT(DISTINCT m.id) AS connected_nodes
+        WITH COLLECT(DISTINCT connected_nodes + [node_id]) AS components
+        UNWIND components AS component
+        RETURN SIZE(component) AS component_size
+        """
+        result = await self.query(query)
+        return [row[0] for row in result] if result else []
+
+    async def _get_shortest_path_lengths(self) -> List[int]:
+        """Get the lengths of shortest paths between all pairs of nodes."""
+        query = """
+        MATCH (n:Node), (m:Node)
+        WHERE n.id < m.id
+        MATCH path = (n)-[:EDGE*]-(m)
+        RETURN MIN(LENGTH(path)) AS length
+        """
+        result = await self.query(query)
+        return [row[0] for row in result if row[0] is not None] if result else []
+
+    async def _count_self_loops(self) -> int:
+        """Count the number of self-loops in the graph."""
+        query = """
+        MATCH (n:Node)-[r:EDGE]->(n)
+        RETURN COUNT(r) AS count
+        """
+        result = await self.query(query)
+        return result[0][0] if result else 0
+
+    async def _get_avg_clustering(self) -> float:
+        """Calculate the average clustering coefficient of the graph."""
+        query = """
+        MATCH (n:Node)-[:EDGE]-(neighbor)
+        WITH n, COUNT(DISTINCT neighbor) as degree
+        MATCH (n)-[:EDGE]-(n1)-[:EDGE]-(n2)-[:EDGE]-(n)
+        WHERE n1 <> n2
+        RETURN AVG(CASE WHEN degree <= 1 THEN 0 ELSE COUNT(DISTINCT n2) / (degree * (degree-1)) END) AS avg_clustering
+        """
+        result = await self.query(query)
+        return result[0][0] if result and result[0][0] is not None else -1
 
     async def get_disconnected_nodes(self) -> List[str]:
         """Get nodes that are not connected to any other node."""
@@ -847,10 +904,8 @@ class KuzuAdapter(GraphDBInterface):
     async def delete_graph(self) -> None:
         """Delete all data from the graph while preserving the database structure."""
         try:
-            # Delete relationships from the fixed table EDGE
-            await self.query("MATCH ()-[r:EDGE]->() DELETE r")
-            # Then delete nodes
-            await self.query("MATCH (n:Node) DELETE n")
+            # Use DETACH DELETE to remove both nodes and their relationships in one operation
+            await self.query("MATCH (n:Node) DETACH DELETE n")
             logger.info("Cleared all data from graph while preserving structure")
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
@@ -922,3 +977,73 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to import graph from file: {e}")
             raise
+
+    async def get_document_subgraph(self, content_hash: str):
+        """Get all nodes that should be deleted when removing a document."""
+        query = """
+        MATCH (doc:Node)
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.name = $content_hash
+
+        OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
+        WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
+
+        OPTIONAL MATCH (chunk)-[e2:EDGE]->(entity:Node)
+        WHERE e2.relationship_name = 'contains' AND entity.type = 'Entity'
+        AND NOT EXISTS {
+            MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
+            WHERE e3.relationship_name = 'contains'
+            AND e4.relationship_name = 'is_part_of'
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND otherDoc.id <> doc.id
+        }
+
+        OPTIONAL MATCH (chunk)<-[e5:EDGE]-(made_node:Node)
+        WHERE e5.relationship_name = 'made_from' AND made_node.type = 'TextSummary'
+
+        OPTIONAL MATCH (entity)-[e6:EDGE]->(type:Node)
+        WHERE e6.relationship_name = 'is_a' AND type.type = 'EntityType'
+        AND NOT EXISTS {
+            MATCH (type)<-[e7:EDGE]-(otherEntity:Node)-[e8:EDGE]-(otherChunk:Node)-[e9:EDGE]-(otherDoc:Node)
+            WHERE e7.relationship_name = 'is_a'
+            AND e8.relationship_name = 'contains'
+            AND e9.relationship_name = 'is_part_of'
+            AND otherEntity.type = 'Entity'
+            AND otherChunk.type = 'DocumentChunk'
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND otherDoc.id <> doc.id
+        }
+
+        RETURN
+            COLLECT(DISTINCT doc) as document,
+            COLLECT(DISTINCT chunk) as chunks,
+            COLLECT(DISTINCT entity) as orphan_entities,
+            COLLECT(DISTINCT made_node) as made_from_nodes,
+            COLLECT(DISTINCT type) as orphan_types
+        """
+        result = await self.query(query, {"content_hash": f"text_{content_hash}"})
+        if not result or not result[0]:
+            return None
+
+        # Convert tuple to dictionary
+        return {
+            "document": result[0][0],
+            "chunks": result[0][1],
+            "orphan_entities": result[0][2],
+            "made_from_nodes": result[0][3],
+            "orphan_types": result[0][4],
+        }
+
+    async def get_degree_one_nodes(self, node_type: str):
+        """Get all nodes that have only one connection."""
+        if not node_type or node_type not in ["Entity", "EntityType"]:
+            raise ValueError("node_type must be either 'Entity' or 'EntityType'")
+
+        query = f"""
+        MATCH (n:Node)
+        WHERE n.type = '{node_type}'
+        WITH n, COUNT {{ MATCH (n)--() }} as degree
+        WHERE degree = 1
+        RETURN n
+        """
+        result = await self.query(query)
+        return [record[0] for record in result] if result else []
