@@ -36,11 +36,11 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "graph_model_file": {
                         "type": "string",
-                        "description": "The path to the graph model file",
+                        "description": "The path to the graph model file (Optional)",
                     },
                     "graph_model_name": {
                         "type": "string",
-                        "description": "The name of the graph model",
+                        "description": "The name of the graph model (Optional)",
                     },
                 },
                 "required": ["text"],
