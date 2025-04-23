@@ -7,7 +7,12 @@ from cognee.modules.data.extraction.extract_summary import extract_summary
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
-async def summarize_text(data_chunks: list[DocumentChunk], edges: list, summarization_model: Type[BaseModel]):
+async def summarize_text(
+    data_points_and_relationships: tuple[list[DocumentChunk], list], summarization_model: Type[BaseModel]
+):
+    data_chunks = data_points_and_relationships[0]
+    edges = data_points_and_relationships[1]
+
     if len(data_chunks) == 0:
         return data_chunks
 

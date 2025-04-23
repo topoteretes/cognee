@@ -18,15 +18,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-
-ENV PYTHONPATH=/app
-WORKDIR /app
-COPY pyproject.toml poetry.lock /app/
-
+COPY pyproject.toml poetry.lock README.md /app/
 
 RUN pip install poetry
 
-RUN poetry install --all-extras --no-root --without dev
+RUN poetry config virtualenvs.create false
+
+RUN poetry install --extras neo4j --extras qdrant --no-root --without dev
 
 COPY cognee/ /app/cognee
-COPY README.md /app/README.md
+COPY distributed/ /app/distributed
+RUN chmod +x /app/distributed/entrypoint.sh
+
+ENTRYPOINT ["/app/distributed/entrypoint.sh"]
