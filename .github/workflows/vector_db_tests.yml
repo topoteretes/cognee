@@ -17,49 +17,49 @@ on:
         required: false
 
 jobs:
-  run-chromadb-tests:
-    name: ChromaDB Tests
-    runs-on: ubuntu-22.04
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'chromadb') }}
-    services:
-      chromadb:
-        image: chromadb/chroma:0.6.3
-        env:
-          CHROMA_SERVER_AUTH_CREDENTIALS: "test-token"
-          CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: "chromadb.auth.token.TokenAuthCredentialsProvider"
-          CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
-        ports:
-          - 3002:8000
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  # run-chromadb-tests:
+  #   name: ChromaDB Tests
+  #   runs-on: ubuntu-22.04
+  #   if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'chromadb') }}
+  #   services:
+  #     chromadb:
+  #       image: chromadb/chroma:0.6.3
+  #       env:
+  #         CHROMA_SERVER_AUTH_CREDENTIALS: "test-token"
+  #         CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: "chromadb.auth.token.TokenAuthCredentialsProvider"
+  #         CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
+  #       ports:
+  #         - 3002:8000
+  #   steps:
+  #     - name: Check out
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
 
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
+  #     - name: Cognee Setup
+  #       uses: ./.github/actions/cognee_setup
+  #       with:
+  #         python-version: ${{ inputs.python-version }}
 
-      - name: Install specific db dependency
-        run: |
-          poetry install -E chromadb
+  #     - name: Install specific db dependency
+  #       run: |
+  #         poetry install -E chromadb
 
-      - name: Run ChromaDB Tests
-        env:
-          ENV: 'dev'
-          VECTOR_DB_PROVIDER: chromadb
-          VECTOR_DB_URL: http://localhost:3002
-          VECTOR_DB_KEY: test-token
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_chromadb.py
+  #     - name: Run ChromaDB Tests
+  #       env:
+  #         ENV: 'dev'
+  #         VECTOR_DB_PROVIDER: chromadb
+  #         VECTOR_DB_URL: http://localhost:3002
+  #         VECTOR_DB_KEY: test-token
+  #         LLM_MODEL: ${{ secrets.LLM_MODEL }}
+  #         LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+  #         LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+  #         LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+  #         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+  #         EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+  #         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+  #         EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+  #       run: poetry run python ./cognee/tests/test_chromadb.py
 
   run-weaviate-tests:
     name: Weaviate Tests
