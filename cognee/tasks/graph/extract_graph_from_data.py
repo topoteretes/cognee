@@ -24,6 +24,7 @@ async def integrate_chunk_graphs(
     """Updates DocumentChunk objects, integrates data points and edges into databases."""
     graph_engine = await get_graph_engine()
 
+    # Note: Filter edges with missing source or target nodes
     if graph_model is not KnowledgeGraph:
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
