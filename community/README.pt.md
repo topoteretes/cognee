@@ -114,8 +114,8 @@ Exemplo do output:
 ```
 
 Visualização do grafo:
-<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/add-visualization-readme/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="Visualização do Grafo"></a>
-Abra no [navegador](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/add-visualization-readme/assets/graph_visualization.html).
+<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="graph_visualization_pt.png" width="100%" alt="Visualização do Grafo"></a>
+Abra no [navegador](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html).
 
 
 Para um uso mais avançado, confira nossa <a href="https://docs.cognee.ai">documentação</a>.
@@ -124,7 +124,7 @@ Para um uso mais avançado, confira nossa <a href="https://docs.cognee.ai">docum
 ## Entenda nossa arquitetura
 
 <div style="text-align: center">
-  <img src="assets/cognee_diagram.png" alt="diagrama conceitual do cognee" width="100%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_diagram.png" alt="diagrama conceitual do cognee" width="100%" />
 </div>
 
 ## Demonstrações
