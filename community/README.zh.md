@@ -117,7 +117,7 @@ if __name__ == '__main__':
   
 ```
 图形可视化：
-<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="图形可视化"></a>
+<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.png" width="100%" alt="图形可视化"></a>
 在[浏览器](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html)中打开。
 
 有关更高级的用法，请查看我们的<a href="https://docs.cognee.ai">文档</a>。
