@@ -8,7 +8,8 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
 async def summarize_text(
-    data_points_and_relationships: tuple[list[DocumentChunk], list], summarization_model: Type[BaseModel]
+    data_points_and_relationships: tuple[list[DocumentChunk], list],
+    summarization_model: Type[BaseModel],
 ):
     data_chunks = data_points_and_relationships[0]
     edges = data_points_and_relationships[1]

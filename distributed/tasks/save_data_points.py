@@ -4,9 +4,7 @@ from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_fr
 from distributed.queues import save_data_points_queue
 
 
-async def save_data_points(
-    data_points_and_relationships: tuple[list, list]
-):
+async def save_data_points(data_points_and_relationships: tuple[list, list]):
     data_points = data_points_and_relationships[0]
     data_point_connections = data_points_and_relationships[1]
 
