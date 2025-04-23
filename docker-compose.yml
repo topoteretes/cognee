@@ -9,6 +9,7 @@ services:
     volumes:
       - .:/app
       - /app/cognee-frontend/ # Ignore frontend code
+      - /app/.venv/
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
