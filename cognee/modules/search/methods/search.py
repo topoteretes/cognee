@@ -28,12 +28,13 @@ async def search(
     datasets: list[str],
     user: User,
     system_prompt_path="answer_simple_question.txt",
+    top_k: int = 10,
 ):
     query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(
-        query_type, query_text, user, system_prompt_path=system_prompt_path
+        query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
     )
 
     filtered_search_results = []
@@ -51,22 +52,28 @@ async def search(
 
 
 async def specific_search(
-    query_type: SearchType, query: str, user: User, system_prompt_path="answer_simple_question.txt"
+    query_type: SearchType,
+    query: str,
+    user: User,
+    system_prompt_path="answer_simple_question.txt",
+    top_k: int = 10,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
-        SearchType.SUMMARIES: SummariesRetriever().get_completion,
-        SearchType.INSIGHTS: InsightsRetriever().get_completion,
-        SearchType.CHUNKS: ChunksRetriever().get_completion,
-        SearchType.COMPLETION: CompletionRetriever(
-            system_prompt_path=system_prompt_path
+        SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
+        SearchType.INSIGHTS: InsightsRetriever(top_k=top_k).get_completion,
+        SearchType.CHUNKS: ChunksRetriever(top_k=top_k).get_completion,
+        SearchType.RAG_COMPLETION: CompletionRetriever(
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
         ).get_completion,
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
-            system_prompt_path=system_prompt_path
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
         ).get_completion,
         SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
-            system_prompt_path=system_prompt_path
+            system_prompt_path=system_prompt_path, top_k=top_k
         ).get_completion,
-        SearchType.CODE: CodeRetriever().get_completion,
+        SearchType.CODE: CodeRetriever(top_k=top_k).get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
     }
