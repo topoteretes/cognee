@@ -198,9 +198,11 @@ async def search(search_query: str, search_type: str) -> str:
             return search_results[0]
         elif search_type.upper() == "CHUNKS":
             return str(search_results)
-        else:
+        elif search_type.upper() == "INSIGHTS":
             results = retrieved_edges_to_string(search_results)
             return results
+        else:
+            return str(search_results)
 
 
 async def prune():
