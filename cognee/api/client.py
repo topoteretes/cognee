@@ -13,6 +13,7 @@ from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
+from cognee.api.v1.delete.routers import get_delete_router
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -163,6 +164,8 @@ app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"]
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
+
+app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
