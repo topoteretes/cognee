@@ -196,6 +196,8 @@ async def search(search_query: str, search_type: str) -> str:
             return json.dumps(search_results, cls=JSONEncoder)
         elif search_type.upper() == "GRAPH_COMPLETION" or search_type.upper() == "RAG_COMPLETION":
             return search_results[0]
+        elif search_type.upper() == "CHUNKS":
+            return str(search_results)
         else:
             results = retrieved_edges_to_string(search_results)
             return results
