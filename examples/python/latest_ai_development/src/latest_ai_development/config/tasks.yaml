@@ -1,0 +1,22 @@
+research_task:
+  description: >
+    Conduct a thorough research about filesystem files you have available.
+    Make sure you find any interesting and relevant information given
+    the current year is {current_year}.
+    Load the data in the multimedia folder and load the files using system tools.
+    Use the Cognee Add tool
+    to store important findings for later reference.
+  expected_output: >
+    A list with 10 data points you loaded, and your observations you loaded.
+  agent: researcher
+
+reporting_task:
+  description: >
+    Review the context you got and expand each topic into a full section for a report.
+    Make sure the report is detailed and contains any and all relevant information.
+     use Cognee Add to save your report sections during your work. 
+    Use cognee search, and don't pass any parameters
+  expected_output: >
+    A fully fledged report with the main topics, each with a full section of information.
+    Formatted as markdown without '```'
+  agent: reporting_analyst
