@@ -21,10 +21,10 @@ Node = Tuple[str, NodeData]  # (node_id, properties)
 
 def record_graph_changes(func):
     """Decorator to record graph changes in the relationship database."""
-    db_engine = get_relational_engine()
 
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
+        db_engine = get_relational_engine()
         frame = inspect.currentframe()
         while frame:
             if frame.f_back and frame.f_back.f_code.co_name != "wrapper":
