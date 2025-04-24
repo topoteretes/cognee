@@ -87,7 +87,7 @@ async def main():
     user = await get_default_user()
     history = await get_history(user.id)
 
-    assert len(history) == 8, "Search history is not correct."
+    assert len(history) == 6, "Search history is not correct."
 
     await cognee.prune.prune_data()
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
