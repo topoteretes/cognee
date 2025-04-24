@@ -7,8 +7,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - .:/app
-      - /app/cognee-frontend/ # Ignore frontend code
+      - ./cognee:/app/cognee
+      - .env:/app/.env
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
@@ -26,10 +26,8 @@ services:
           cpus: "4.0"
           memory: 8GB
 
-# NOTE: Frontend is a work in progress and is not intended to be used by users yet.
-#       If you want to use Cognee with a UI environment you can run the cognee-gui.py script or
-#       integrate the Cognee MCP Server to Cursor / Claude Desktop / Visual Studio Code ( through Cline/Roo )
-
+  # NOTE: Frontend is a work in progress and supports minimum amount of features required to be functional.
+  # If you want to use Cognee with a UI environment you can integrate the Cognee MCP Server into Cursor / Claude Desktop / Visual Studio Code (through Cline/Roo)
   frontend:
     container_name: frontend
     profiles:

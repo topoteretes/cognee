@@ -25,7 +25,7 @@ ENV DEBUG=${DEBUG}
 ENV PIP_NO_CACHE_DIR=true
 ENV PATH="${PATH}:/root/.poetry/bin"
 
-RUN apt-get update && apt-get install
+RUN apt-get update
 
 RUN apt-get install -y \
   gcc \

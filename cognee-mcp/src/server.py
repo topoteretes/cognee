@@ -36,11 +36,11 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "graph_model_file": {
                         "type": "string",
-                        "description": "The path to the graph model file",
+                        "description": "The path to the graph model file (Optional)",
                     },
                     "graph_model_name": {
                         "type": "string",
-                        "description": "The name of the graph model",
+                        "description": "The name of the graph model (Optional)",
                     },
                 },
                 "required": ["text"],
@@ -196,9 +196,13 @@ async def search(search_query: str, search_type: str) -> str:
             return json.dumps(search_results, cls=JSONEncoder)
         elif search_type.upper() == "GRAPH_COMPLETION" or search_type.upper() == "RAG_COMPLETION":
             return search_results[0]
-        else:
+        elif search_type.upper() == "CHUNKS":
+            return str(search_results)
+        elif search_type.upper() == "INSIGHTS":
             results = retrieved_edges_to_string(search_results)
             return results
+        else:
+            return str(search_results)
 
 
 async def prune():
