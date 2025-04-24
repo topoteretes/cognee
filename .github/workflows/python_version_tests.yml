@@ -57,6 +57,15 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Setup pytest to read all files as UTF-8 (for windows)
+        run: |
+          cat > pytest.ini << 'EOF'
+          [pytest]
+          addopts = -ra
+          env =
+              PYTHONUTF8 = 1
+          EOF
+
       - name: Run unit tests
         run: poetry run pytest cognee/tests/unit/
         env:
