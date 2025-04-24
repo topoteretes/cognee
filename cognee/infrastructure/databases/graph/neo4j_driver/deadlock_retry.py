@@ -27,7 +27,7 @@ def deadlock_retry(max_retries=5):
 
     def decorator(func):
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(self, *args, **kwargs):
             from neo4j.exceptions import Neo4jError, DatabaseUnavailable
 
             attempt = 0
@@ -43,7 +43,7 @@ def deadlock_retry(max_retries=5):
             while attempt <= max_retries:
                 try:
                     attempt += 1
-                    return await func(*args, **kwargs)
+                    return await func(self, *args, **kwargs)
                 except Neo4jError as error:
                     if attempt > max_retries:
                         raise  # Re-raise the original error

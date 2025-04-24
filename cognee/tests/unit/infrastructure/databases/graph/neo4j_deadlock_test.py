@@ -15,7 +15,7 @@ async def test_deadlock_retry_errored():
     wrapped_function = deadlock_retry(max_retries=1)(mock_function)
 
     with pytest.raises(Neo4jError):
-        await wrapped_function()
+        await wrapped_function(self=None)
 
 
 async def test_deadlock_retry():
@@ -25,7 +25,7 @@ async def test_deadlock_retry():
 
     wrapped_function = deadlock_retry(max_retries=2)(mock_function)
 
-    result = await wrapped_function()
+    result = await wrapped_function(self=None)
     assert result == True, "Function should have succeded on second time"
 
 
@@ -38,7 +38,7 @@ async def test_deadlock_retry_exhaustive():
 
     wrapped_function = deadlock_retry(max_retries=2)(mock_function)
 
-    result = await wrapped_function()
+    result = await wrapped_function(self=None)
     assert result == True, "Function should have succeded on second time"
 
 

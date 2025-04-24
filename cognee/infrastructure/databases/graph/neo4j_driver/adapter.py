@@ -51,7 +51,7 @@ class Neo4jAdapter(GraphDBInterface):
         async with self.driver.session() as session:
             yield session
 
-    @deadlock_retry
+    @deadlock_retry()
     async def query(
         self,
         query: str,
