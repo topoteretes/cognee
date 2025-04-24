@@ -58,6 +58,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Setup pytest to read all files with UTF-8 (for windows)
+        shell: bash
         run: |
           cat > pytest.ini <<EOF
           [pytest]
