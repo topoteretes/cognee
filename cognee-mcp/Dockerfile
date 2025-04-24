@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     git \
     curl \
+    build-essential \
+    cmake \
     clang \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
