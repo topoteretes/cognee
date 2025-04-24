@@ -29,6 +29,7 @@ RUN apt-get update
 
 RUN apt-get install -y \
   gcc \
+  build-essential \
   libpq-dev
 
 WORKDIR /app
