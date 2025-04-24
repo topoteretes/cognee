@@ -26,6 +26,8 @@ from .neo4j_metrics_utils import (
     get_size_of_connected_components,
     count_self_loops,
 )
+from .deadlock_retry import deadlock_retry
+
 
 logger = get_logger("Neo4jAdapter", level=ERROR)
 
@@ -49,19 +51,16 @@ class Neo4jAdapter(GraphDBInterface):
         async with self.driver.session() as session:
             yield session
 
+    @deadlock_retry
     async def query(
         self,
         query: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        try:
-            async with self.get_session() as session:
-                result = await session.run(query, parameters=params)
-                data = await result.data()
-                return data
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        async with self.get_session() as session:
+            result = await session.run(query, parameters=params)
+            data = await result.data()
+            return data
 
     async def has_node(self, node_id: str) -> bool:
         results = self.query(

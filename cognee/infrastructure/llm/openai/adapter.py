@@ -1,17 +1,18 @@
 import os
 import base64
-from pathlib import Path
 from typing import Type
 
 import litellm
 import instructor
 from pydantic import BaseModel
+from openai import ContentFilterFinishReasonError
 
-from cognee.modules.data.processing.document_types.open_data_file import open_data_file
-from cognee.shared.data_models import MonitoringTool
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.llm.llm_interface import LLMInterface
+from cognee.shared.data_models import MonitoringTool
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.llm_interface import LLMInterface
+from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.modules.data.processing.document_types.open_data_file import open_data_file
 from cognee.infrastructure.llm.rate_limiter import (
     rate_limit_async,
     rate_limit_sync,
@@ -45,6 +46,9 @@ class OpenAIAdapter(LLMInterface):
         transcription_model: str,
         max_tokens: int,
         streaming: bool = False,
+        fallback_model: str = None,
+        fallback_api_key: str = None,
+        fallback_endpoint: str = None,
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
         self.client = instructor.from_litellm(litellm.completion)
@@ -56,6 +60,10 @@ class OpenAIAdapter(LLMInterface):
         self.max_tokens = max_tokens
         self.streaming = streaming
 
+        self.fallback_model = fallback_model
+        self.fallback_api_key = fallback_api_key
+        self.fallback_endpoint = fallback_endpoint
+
     @observe(as_type="generation")
     @sleep_and_retry_async()
     @rate_limit_async
@@ -64,25 +72,55 @@ class OpenAIAdapter(LLMInterface):
     ) -> BaseModel:
         """Generate a response from a user query."""
 
-        return await self.aclient.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"""Use the given format to
-                extract information from the following input: {text_input}. """,
-                },
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-            ],
-            api_key=self.api_key,
-            api_base=self.endpoint,
-            api_version=self.api_version,
-            response_model=response_model,
-            max_retries=self.MAX_RETRIES,
-        )
+        try:
+            return await self.aclient.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"""Use the given format to
+                    extract information from the following input: {text_input}. """,
+                    },
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                response_model=response_model,
+                max_retries=self.MAX_RETRIES,
+            )
+        except ContentFilterFinishReasonError:
+            if not (self.fallback_model and self.fallback_api_key):
+                raise ContentPolicyFilterError(
+                    f"The provided input contains content that is not aligned with our content policy: {text_input}"
+                )
+
+            try:
+                return await self.aclient.chat.completions.create(
+                    model=self.fallback_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"""Use the given format to
+                        extract information from the following input: {text_input}. """,
+                        },
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                    ],
+                    api_key=self.fallback_api_key,
+                    # api_base=self.fallback_endpoint,
+                    response_model=response_model,
+                    max_retries=self.MAX_RETRIES,
+                )
+            except ContentFilterFinishReasonError:
+                raise ContentPolicyFilterError(
+                    f"The provided input contains content that is not aligned with our content policy: {text_input}"
+                )
 
     @observe
     @sleep_and_retry_sync()
