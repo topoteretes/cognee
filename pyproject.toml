@@ -106,12 +106,6 @@ gui = [
     "qasync>=0.27.1,<0.28",
 ]
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
-
-[project.urls]
-Homepage = "https://www.cognee.ai"
-Repository = "https://github.com/topoteretes/cognee"
-
-[dependency-groups]
 dev = [
     "pytest>=7.4.0,<8",
     "pytest-asyncio>=0.21.1,<0.22",
@@ -125,17 +119,18 @@ dev = [
     "tweepy==4.14.0",
     "gitpython>=3.1.43,<4",
     "pylance==0.19.2",
-]
-docs = [
     "mkdocs-material>=9.5.42,<10",
     "mkdocs-minify-plugin>=0.8.0,<0.9",
     "mkdocstrings[python]>=0.26.2,<0.27",
 ]
 
+[project.urls]
+Homepage = "https://www.cognee.ai"
+Repository = "https://github.com/topoteretes/cognee"
+
 [tool.uv]
 default-groups = [
     "dev",
-    "docs",
 ]
 
 [build-system]
