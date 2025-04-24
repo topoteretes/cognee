@@ -19,7 +19,12 @@ ENV DEBUG=${DEBUG}
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
-    libpq-dev
+    libpq-dev \
+    git \
+    curl \
+    clang \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy pyproject.toml and lockfile first for better caching
 COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh ./
