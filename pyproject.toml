@@ -56,7 +56,6 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
     "s3fs>=2025.3.2,<2026",
-    "pypika==0.48.8",
 ]
 
 [project.optional-dependencies]
@@ -89,7 +88,10 @@ falkordb = ["falkordb==1.0.9"]
 kuzu = ["kuzu==0.8.2"]
 groq = ["groq==0.8.0"]
 milvus = ["pymilvus>=2.5.0,<3"]
-chromadb = ["chromadb>=0.3.0,<0.7"]
+chromadb = [
+    "chromadb>=0.3.0,<0.7",
+    "pypika==0.48.8",
+]
 docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<0.17"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
@@ -127,11 +129,6 @@ dev = [
 [project.urls]
 Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
-
-[tool.uv]
-default-groups = [
-    "dev",
-]
 
 [build-system]
 requires = ["hatchling"]

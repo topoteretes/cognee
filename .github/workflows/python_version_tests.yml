@@ -61,6 +61,7 @@ jobs:
         shell: bash
         run: poetry run pytest cognee/tests/unit/
         env:
+          PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}

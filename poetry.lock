@@ -8235,9 +8235,10 @@ image = ["Pillow (>=8.0.0)"]
 name = "pypika"
 version = "0.48.8"
 description = "A SQL query builder API for Python"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"chromadb\""
 files = [
     {file = "pypika-0.48.8.tar.gz", hash = "sha256:45af481d8523d60f87e308dee6ff5c454f331c8ce3a675e5398fbea6c20fe1b1"},
 ]
@@ -11943,7 +11944,7 @@ cffi = ["cffi (>=1.11)"]
 [extras]
 anthropic = ["anthropic"]
 api = ["gunicorn", "uvicorn"]
-chromadb = ["chromadb"]
+chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 deepeval = ["deepeval"]
 dev = ["coverage", "debugpy", "deptry", "gitpython", "mkdocs-material", "mkdocs-minify-plugin", "mkdocstrings", "mypy", "notebook", "pylance", "pylint", "pytest", "pytest-asyncio", "ruff", "tweepy"]
@@ -11971,4 +11972,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "922860cca1c5cf36532bded14bdbb93d3ecb42f79506f834c64c5a47f5f99fa3"
+content-hash = "8ef9af57a2718509290e2c893a8c03df16c11af92a644876c9271a1e97b32ec1"
