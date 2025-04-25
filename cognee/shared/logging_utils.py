@@ -312,7 +312,7 @@ def setup_logging(log_level=None, name=None):
     root_logger.addHandler(file_handler)
     root_logger.setLevel(log_level)
 
-    if log_level > logging.WARNING:
+    if log_level > logging.DEBUG:
         import warnings
         from sqlalchemy.exc import SAWarning
 
