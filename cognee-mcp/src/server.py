@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import argparse
 import cognee
 import asyncio
 from cognee.shared.logging_utils import get_logger, get_log_file_location
@@ -168,21 +169,29 @@ def load_class(model_file, model_name):
 
 
 async def main():
-    await mcp.run_stdio_async()
-    # Run the server with stdio transport for MCP in the same event loop
-    # logger.info(f'Starting MCP server with transport: {mcp_config.transport}')
-    # if mcp_config.transport == 'stdio':
-    #     await mcp.run_stdio_async()
-    # elif mcp_config.transport == 'sse':
-    #     logger.info(
-    #         f'Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}'
-    #     )
-    #     await mcp.run_sse_async()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--transport",
+        choices=["sse", "stdio"],
+        default="stdio",
+        help="Transport to use for communication with the client. (default: stdio)",
+    )
+
+    args = parser.parse_args()
+
+    logger.info(f"Starting MCP server with transport: {args.transport}")
+    if args.transport == "stdio":
+        await mcp.run_stdio_async()
+    elif args.transport == "sse":
+        logger.info(
+            f"Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}"
+        )
+        await mcp.run_sse_async()
 
 
 if __name__ == "__main__":
     try:
-        # Run everything in a single event loop
         asyncio.run(main())
     except Exception as e:
         logger.error(f"Error initializing Cognee MCP server: {str(e)}")
