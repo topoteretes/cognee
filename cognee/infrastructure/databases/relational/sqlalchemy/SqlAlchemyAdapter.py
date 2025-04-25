@@ -330,15 +330,16 @@ class SQLAlchemyAdapter:
                     # Create a MetaData instance to load table information
                     metadata = MetaData()
                     # Drop all tables from the public schema
-                    schema_name = "public"
-                    # Load the schema information into the MetaData object
-                    await connection.run_sync(metadata.reflect, schema=schema_name)
-                    for table in metadata.sorted_tables:
-                        drop_table_query = text(
-                            f'DROP TABLE IF EXISTS {schema_name}."{table.name}" CASCADE'
-                        )
-                        await connection.execute(drop_table_query)
-                    metadata.clear()
+                    schema_list = ["public", "public_staging"]
+                    for schema_name in schema_list:
+                        # Load the schema information into the MetaData object
+                        await connection.run_sync(metadata.reflect, schema=schema_name)
+                        for table in metadata.sorted_tables:
+                            drop_table_query = text(
+                                f'DROP TABLE IF EXISTS {schema_name}."{table.name}" CASCADE'
+                            )
+                            await connection.execute(drop_table_query)
+                        metadata.clear()
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
             raise e
