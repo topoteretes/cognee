@@ -50,9 +50,7 @@ Saiba mais sobre os [casos de uso](https://docs.cognee.ai/use-cases) e [avaliaç
 
 ## Primeiros Passos
 
-Dê os primeiros passos com facilidade usando um Google Colab  <a href="https://colab.research.
-google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  ou um <a href="https://github.com/topoteretes/cognee-starter">repositório inicial</a>
-
+Dê os primeiros passos com facilidade usando um Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  ou um <a href="https://github.com/topoteretes/cognee-starter">repositório inicial</a>
 ## Contribuindo
 
 Suas contribuições estão no centro de tornar este um verdadeiro projeto open source. Qualquer contribuição que você fizer será **muito bem-vinda**. Veja o [`CONTRIBUTING.md`](CONTRIBUTING.md) para mais informações.
