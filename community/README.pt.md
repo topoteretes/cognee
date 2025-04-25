@@ -139,7 +139,7 @@ Para um uso mais avançado, confira nossa <a href="https://docs.cognee.ai">docum
 
 ## Código de Conduta
 
-Estamos comprometidos em tornar o open source uma experiência agradável e respeitosa para nossa comunidade. Veja o <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> para mais informações.
+Estamos comprometidos em tornar o open source uma experiência agradável e respeitosa para nossa comunidade. Veja o <a href="/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> para mais informações.
 
 ## 💫 Contribuidores
 
