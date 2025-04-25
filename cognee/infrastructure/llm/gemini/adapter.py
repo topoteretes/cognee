@@ -1,9 +1,10 @@
-from typing import Type, Optional
-from pydantic import BaseModel
-from cognee.shared.logging_utils import get_logger
 import litellm
+from pydantic import BaseModel
+from typing import Type, Optional
 from litellm import acompletion, JSONSchemaValidationError
-from cognee.shared.data_models import MonitoringTool
+
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability.get_observe import get_observe
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -11,14 +12,9 @@ from cognee.infrastructure.llm.rate_limiter import (
     rate_limit_async,
     sleep_and_retry_async,
 )
-from cognee.base_config import get_base_config
 
 logger = get_logger()
-
-monitoring = get_base_config().monitoring_tool
-
-if monitoring == MonitoringTool.LANGFUSE:
-    from langfuse.decorators import observe
+observe = get_observe()
 
 
 class GeminiAdapter(LLMInterface):
