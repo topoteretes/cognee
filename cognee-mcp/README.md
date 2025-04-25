@@ -84,3 +84,22 @@ To apply new changes while developing cognee you need to do:
 1. `poetry lock` in cognee folder
 2. `uv sync --dev --all-extras --reinstall`
 3. `mcp dev src/server.py`
+
+### Development
+In order to use local cognee build, run in root of the cognee repo:
+```bash
+poetry build -o ./cognee-mcp/sources
+```
+After the build process is done, change the cognee library dependency inside the `cognee-mcp/pyproject.toml` from
+```toml
+cognee[postgres,codegraph,gemini,huggingface]==0.1.38
+```
+to
+```toml
+cognee[postgres,codegraph,gemini,huggingface]
+```
+After that add the following snippet to the same file (`cognee-mcp/pyproject.toml`).
+```toml
+[tool.uv.sources]
+cognee = { path = "sources/cognee-0.1.38-py3-none-any.whl" }
+```
