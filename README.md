@@ -32,6 +32,14 @@ Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) 
 
 More on [use-cases](https://docs.cognee.ai/use_cases).
 
+  <p align="center">
+  🌐 Available Languages
+  :
+  <a href="community/README.pt.md">🇵🇹 Português</a>
+  ·
+  <a href="community/README.zh.md">🇨🇳 [中文]</a>
+  </p>
+
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="100%" />
 </div>
@@ -117,8 +125,8 @@ Example output:
   
 ```
 Graph visualization:
-<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/add-visualization-readme/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="Graph Visualization"></a>
-Open in [browser](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/add-visualization-readme/assets/graph_visualization.html).
+<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="Graph Visualization"></a>
+Open in [browser](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html).
 
 For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
 
