@@ -1,3 +1,6 @@
+from typing import Type
+
+
 import inspect
 from functools import wraps
 from abc import abstractmethod, ABC
@@ -39,9 +42,7 @@ def record_graph_changes(func):
             else None
         )
         creator = f"{caller_class}.{caller_name}" if caller_class else caller_name
-
         result = await func(self, *args, **kwargs)
-
         async with db_engine.get_async_session() as session:
             if func.__name__ == "add_nodes":
                 nodes: List[DataPoint] = args[0]
@@ -179,6 +180,9 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_subgraph(self, node_type: Type[Any], node_name: List[str]):
+        raise NotImplementedError
+
     async def get_neighbors(self, node_id: str) -> List[NodeData]:
         """Get all neighboring nodes."""
         raise NotImplementedError

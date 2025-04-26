@@ -1,6 +1,6 @@
 import asyncio
 from cognee.shared.logging_utils import get_logger, ERROR
-from typing import List, Optional
+from typing import List, Optional, Type
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -54,6 +54,8 @@ def format_triplets(edges):
 
 async def get_memory_fragment(
     properties_to_project: Optional[List[str]] = None,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     graph_engine = await get_graph_engine()
@@ -66,6 +68,8 @@ async def get_memory_fragment(
         graph_engine,
         node_properties_to_project=properties_to_project,
         edge_properties_to_project=["relationship_name"],
+        node_type=node_type,
+        node_name=node_name,
     )
 
     return memory_fragment
@@ -78,6 +82,8 @@ async def brute_force_triplet_search(
     collections: List[str] = None,
     properties_to_project: List[str] = None,
     memory_fragment: Optional[CogneeGraph] = None,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ) -> list:
     if user is None:
         user = await get_default_user()
@@ -89,6 +95,8 @@ async def brute_force_triplet_search(
         collections=collections,
         properties_to_project=properties_to_project,
         memory_fragment=memory_fragment,
+        node_type=node_type,
+        node_name=node_name,
     )
     return retrieved_results
 
@@ -100,6 +108,8 @@ async def brute_force_search(
     collections: List[str] = None,
     properties_to_project: List[str] = None,
     memory_fragment: Optional[CogneeGraph] = None,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ) -> list:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -111,6 +121,8 @@ async def brute_force_search(
         collections (Optional[List[str]]): List of collections to query.
         properties_to_project (Optional[List[str]]): List of properties to project.
         memory_fragment (Optional[CogneeGraph]): Existing memory fragment to reuse.
+        node_type: node type to filter
+        node_name: node name to filter
 
     Returns:
         list: The top triplet results.
@@ -121,7 +133,9 @@ async def brute_force_search(
         raise ValueError("top_k must be a positive integer.")
 
     if memory_fragment is None:
-        memory_fragment = await get_memory_fragment(properties_to_project)
+        memory_fragment = await get_memory_fragment(
+            properties_to_project=properties_to_project, node_type=node_type, node_name=node_name
+        )
 
     if collections is None:
         collections = [

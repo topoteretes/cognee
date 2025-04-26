@@ -1,5 +1,5 @@
 import json
-from typing import Callable
+from typing import Callable, Optional, Type, List
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine.utils import parse_id
@@ -11,6 +11,7 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
@@ -29,12 +30,20 @@ async def search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ):
     query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(
-        query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
+        query_type,
+        query_text,
+        user,
+        system_prompt_path=system_prompt_path,
+        top_k=top_k,
+        node_type=node_type,
+        node_name=node_name,
     )
 
     filtered_search_results = []
@@ -57,6 +66,8 @@ async def specific_search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
@@ -69,6 +80,8 @@ async def specific_search(
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         ).get_completion,
         SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
             system_prompt_path=system_prompt_path, top_k=top_k

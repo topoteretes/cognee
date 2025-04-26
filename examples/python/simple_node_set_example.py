@@ -3,19 +3,21 @@ import asyncio
 import cognee
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.api.v1.search import SearchType
+from cognee.modules.engine.models.Entity import Entity
 
 text_a = """
     AI is revolutionizing financial services through intelligent fraud detection
-    and automated customer service platforms.
+    and automated customer service platforms. Roco Balboa works in FinTech and so does Marlon Brando. AI company there is Ulala Inc.
     """
 
 text_b = """
-    Advances in AI are enabling smarter systems that learn and adapt over time.
+    Advances in AI are enabling smarter systems that learn and adapt over time. Major companies are Robuttu Inc and Fooror Inc.
     """
 
 text_c = """
     MedTech startups have seen significant growth in recent years, driven by innovation
-    in digital health and medical devices.
+    in digital health and medical devices. Major company in the Sector is Bus Redo Healthcare
     """
 
 node_set_a = ["AI", "FinTech"]
@@ -36,6 +38,15 @@ async def main():
         os.path.dirname(__file__), "./.artifacts/graph_visualization.html"
     )
     await visualize_graph(visualization_path)
+
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Who works in Fintech and AI and what are major companies there based on context provided?",
+        node_type=Entity,
+        node_name=["AI"],
+    )
+
+    print(search_results)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import os
 import json
 import asyncio
 from cognee.shared.logging_utils import get_logger
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List, Union, Type, Tuple
 from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
@@ -634,3 +634,115 @@ class NetworkXAdapter(GraphDBInterface):
             for node_id in node_ids
             if self.graph.has_node(node_id)
         ]
+
+    async def get_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """
+        Get a subgraph containing the specified nodes and their direct neighbors.
+
+        Args:
+            node_type: The type of nodes to find
+            node_name: List of node names to look for
+
+        Returns:
+            A tuple containing:
+            - List of nodes as tuples (node_id, properties_dict)
+            - List of edges as tuples (source_id, target_id, edge_type, properties_dict)
+        """
+        # Ensure graph is loaded
+        if self.graph is None:
+            await self.load_graph_from_file()
+
+        label = node_type.__name__
+
+        # Convert node names to lowercase for case-insensitive matching
+        lowercase_node_names = [
+            name.lower() if isinstance(name, str) else name for name in node_name
+        ]
+
+        # Find primary nodes based on type and name (case-insensitive)
+        primary_nodes = []
+        for node_id, attrs in self.graph.nodes(data=True):
+            node_name_value = attrs.get("name")
+            if (
+                attrs.get("type") == label
+                and isinstance(node_name_value, str)
+                and node_name_value.lower() in lowercase_node_names
+            ):
+                primary_nodes.append(node_id)
+
+        if not primary_nodes:
+            return [], []
+
+        # Collect nodes to include in the subgraph
+        included_nodes = set(primary_nodes)
+
+        # First pass: Get direct neighbors
+        for primary_node in primary_nodes:
+            included_nodes.update(self.graph.predecessors(primary_node))
+            included_nodes.update(self.graph.successors(primary_node))
+
+        # Second pass: Get documents, chunks, and related nodes
+        nodes_to_process = list(included_nodes)
+        processed_nodes = set()
+
+        while nodes_to_process:
+            current_node = nodes_to_process.pop()
+            if current_node in processed_nodes:
+                continue
+
+            processed_nodes.add(current_node)
+
+            # Get node data
+            node_data = self.graph.nodes[current_node]
+            node_type = node_data.get("type")
+
+            # For each edge connected to this node
+            for edge_source, edge_target, key, edge_data in list(
+                self.graph.in_edges(current_node, data=True, keys=True)
+            ) + list(self.graph.out_edges(current_node, data=True, keys=True)):
+                relationship = key
+
+                # Include connected nodes based on relationship type
+                if relationship in ["is_part_of", "contains", "belongs_to_set", "made_from"]:
+                    neighbor = edge_source if edge_target == current_node else edge_target
+                    if neighbor not in processed_nodes and neighbor not in nodes_to_process:
+                        included_nodes.add(neighbor)
+                        nodes_to_process.append(neighbor)
+
+                # For entities, include their types
+                if node_type == "Entity" and relationship == "is_a":
+                    neighbor = edge_source if edge_target == current_node else edge_target
+                    if neighbor not in processed_nodes and neighbor not in nodes_to_process:
+                        included_nodes.add(neighbor)
+                        nodes_to_process.append(neighbor)
+
+                # Follow "works_in" relationships
+                if relationship == "works_in":
+                    neighbor = edge_source if edge_target == current_node else edge_target
+                    if neighbor not in processed_nodes and neighbor not in nodes_to_process:
+                        included_nodes.add(neighbor)
+                        nodes_to_process.append(neighbor)
+
+        # Get all edges between these nodes
+        edges = []
+        # Create a subgraph with just the nodes we want
+        subgraph = self.graph.subgraph(included_nodes)
+
+        # Get all edges in the subgraph
+        for source, target, key, edge_data in subgraph.edges(data=True, keys=True):
+            # The key is the relationship type in NetworkX
+            edge_type = key
+
+            # Ensure we have source_node_id and target_node_id in edge properties
+            edge_props = edge_data.copy()
+            edge_props["source_node_id"] = source
+            edge_props["target_node_id"] = target
+
+            edges.append((source, target, edge_type, edge_props))
+
+        # Format nodes as (id, properties) tuples
+        nodes = [(node_id, self.graph.nodes[node_id]) for node_id in included_nodes]
+
+        return nodes, edges

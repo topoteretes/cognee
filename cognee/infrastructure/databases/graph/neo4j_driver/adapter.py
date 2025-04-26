@@ -6,7 +6,7 @@ import json
 from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Type, Tuple
 from contextlib import asynccontextmanager
 from uuid import UUID
 from neo4j import AsyncSession
@@ -516,6 +516,58 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
         return (nodes, edges)
+
+    async def get_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        label = node_type.__name__
+
+        query = f"""
+        UNWIND $names AS wantedName
+        MATCH (n:`{label}`)
+        WHERE n.name = wantedName
+        WITH collect(DISTINCT n) AS primary
+
+        UNWIND primary AS p
+        OPTIONAL MATCH (p)--(nbr)
+        WITH primary, collect(DISTINCT nbr) AS nbrs
+        WITH primary + nbrs AS nodelist
+
+        UNWIND nodelist AS node
+        WITH collect(DISTINCT node) AS nodes
+
+        MATCH (a)-[r]-(b)
+        WHERE a IN nodes AND b IN nodes
+        WITH nodes, collect(DISTINCT r) AS rels
+
+        RETURN
+          [n IN nodes |
+             {{ id: n.id,
+                properties: properties(n) }}] AS rawNodes,
+          [r IN rels  |
+             {{ type: type(r),
+                properties: properties(r) }}] AS rawRels
+        """
+
+        result = await self.query(query, {"names": node_name})
+        if not result:
+            return [], []
+
+        raw_nodes = result[0]["rawNodes"]
+        raw_rels = result[0]["rawRels"]
+
+        nodes = [(n["properties"]["id"], n["properties"]) for n in raw_nodes]
+        edges = [
+            (
+                r["properties"]["source_node_id"],
+                r["properties"]["target_node_id"],
+                r["type"],
+                r["properties"],
+            )
+            for r in raw_rels
+        ]
+
+        return nodes, edges
 
     async def get_filtered_graph_data(self, attribute_filters):
         """
