@@ -58,7 +58,7 @@ def record_graph_changes(func):
                         session.add(relationship)
                         await session.flush()
                     except Exception as e:
-                        logger.error(f"Error adding relationship: {e}")
+                        logger.debug(f"Error adding relationship: {e}")
                         await session.rollback()
                         continue
 
@@ -78,14 +78,14 @@ def record_graph_changes(func):
                         session.add(relationship)
                         await session.flush()
                     except Exception as e:
-                        logger.error(f"Error adding relationship: {e}")
+                        logger.debug(f"Error adding relationship: {e}")
                         await session.rollback()
                         continue
 
             try:
                 await session.commit()
             except Exception as e:
-                logger.error(f"Error committing session: {e}")
+                logger.debug(f"Error committing session: {e}")
 
         return result
 
