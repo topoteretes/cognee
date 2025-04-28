@@ -56,8 +56,8 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
 
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
-        f"Average completion time is around 4 minutes.\n"
-        f"For current cognify status you can check the log file at: {log_file}"
+        f"To check current cognify status use the cognify_status tool\n"
+        f"or check the log file at: {log_file}"
     )
 
     return [
@@ -88,8 +88,8 @@ async def codify(repo_path: str) -> list:
 
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
-        f"Average completion time is around 4 minutes.\n"
-        f"For current codify status you can check the log file at: {log_file}"
+        f"To check current codify status use the codify_status tool\n"
+        f"or you can check the log file at: {log_file}"
     )
 
     return [
@@ -146,7 +146,7 @@ async def cognify_status():
         status = await cognee_datasets.get_status(
             [await cognee_datasets.get_unique_dataset_id("main_dataset", user)]
         )
-        return [types.TextContent(type="text", text=status)]
+        return [types.TextContent(type="text", text=str(status))]
 
 
 @mcp.tool()
@@ -157,7 +157,7 @@ async def codify_status():
         status = await cognee_datasets.get_status(
             [await cognee_datasets.get_unique_dataset_id("codebase", user)]
         )
-        return [types.TextContent(type="text", text=status)]
+        return [types.TextContent(type="text", text=str(status))]
 
 
 def node_to_string(node):
