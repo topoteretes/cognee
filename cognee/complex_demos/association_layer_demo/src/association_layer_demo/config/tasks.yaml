@@ -1,0 +1,24 @@
+google_task:
+  description: >
+    Search on the internet for cognee. You can execute multiple searches
+    til you think he information is enough to answer everything about Cognee.
+    Perform at least 5 different searches about cognee and Pass all the google search results to cognee.add separately.
+  expected_output: >
+    yes if all tool usage was successful false otherwise
+  agent: ingestion_agent
+
+cognify_task:
+  description: >
+    After you added every search result to cognee.add, Cognify the ingested dataset with cognee.cognify.
+  expected_output: >
+    yes if all tool usage was successful false otherwise
+  agent: ingestion_agent
+
+search_task:
+  description: >
+    Once everything is done and the dataset is cognified. Wait till all the executions are finished.
+    Research what is cognee using the cognee search tool.
+    Ask at least 3 questions about the topic.
+  expected_output: >
+    The answer to the question.
+  agent: search_agent

@@ -1,0 +1,33 @@
+This is a demo project to showcase and test how cognee and CrewAI can work together:
+
+Short description:
+
+There were two basic agents implemented:
+
+1 - Data Ingestion Expert:
+    - Performs google search about cognee using Serper (SERPER_API_KEY is needed).
+    - Ingests all the search results into cognee metastore using cognee.add
+    - Performs cognify step using the cognee.cognify
+
+2 - Cognee Search Expert
+    - Uses the cognee.search (graph completion, other search tools can be added)
+    - Asks multiple questions to research what is cognee
+
+
+The following tools were implemented:
+    - Serper search tool: Searches the internet via google (Ingestion AGENT)
+    - Cognee add: adds google search results to cognee's metastore (Ingestion AGENT)
+    - Cognee cognify: cognifies the added documents (Ingestion AGENT)
+    - Cognee Search searches the cognee memory (Search AGENT)
+
+Tried but not the part of the pushed code:
+    - agents delegating each other
+    - collaboration and communication via pydantic
+    - File reading and directory discovery using agents + file ingestion into cognee
+
+
+In general agents are working together to search what cognee is, ingest the knowledge into cognee
+build the knowledgegraph and perform different searches to collect the knowledge about cognee.
+
+
+Works from IDE and not from CLI,(one import has to be changed then)
