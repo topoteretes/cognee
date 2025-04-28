@@ -14,6 +14,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, MonitoringTool
 from cognee.shared.utils import render_graph
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
+from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.ingestion import ingest_data
 from cognee.tasks.repo_processor import get_non_py_files, get_repo_file_dependencies
@@ -69,7 +70,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
             ),
         ]
 
-    dataset_id = uuid5(NAMESPACE_OID, "codebase")
+    dataset_id = await cognee_datasets.get_unique_dataset_id("codebase", user)
 
     if include_docs:
         non_code_pipeline_run = run_tasks(

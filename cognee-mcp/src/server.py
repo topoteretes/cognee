@@ -9,6 +9,8 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
+from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
@@ -28,7 +30,6 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
         """Build knowledge graph from the input text"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
-        #       As cognify is an async background job the output had to be redirected again.
         with redirect_stdout(sys.stderr):
             logger.info("Cognify process starting.")
             if graph_model_file and graph_model_name:
@@ -72,7 +73,6 @@ async def codify(repo_path: str) -> list:
     async def codify_task(repo_path: str):
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
-        #       As codify is an async background job the output had to be redirected again.
         with redirect_stdout(sys.stderr):
             logger.info("Codify process starting.")
             results = []
@@ -136,6 +136,28 @@ async def prune():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
         return [types.TextContent(type="text", text="Pruned")]
+
+
+@mcp.tool()
+async def cognify_status():
+    """Get status of cognify pipeline"""
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        status = await cognee_datasets.get_status(
+            [await cognee_datasets.get_unique_dataset_id("main_dataset", user)]
+        )
+        return [types.TextContent(type="text", text=status)]
+
+
+@mcp.tool()
+async def codify_status():
+    """Get status of codify pipeline"""
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        status = await cognee_datasets.get_status(
+            [await cognee_datasets.get_unique_dataset_id("codebase", user)]
+        )
+        return [types.TextContent(type="text", text=status)]
 
 
 def node_to_string(node):
