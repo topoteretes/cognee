@@ -69,7 +69,7 @@ class SQLAlchemyAdapter:
     async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # SQLite doesn’t support schema namespaces and the CASCADE keyword.
+                # SQLite doesn't support schema namespaces and the CASCADE keyword.
                 # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
                 await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}";'))
             else:
@@ -327,10 +327,10 @@ class SQLAlchemyAdapter:
                     file.write("")
             else:
                 async with self.engine.begin() as connection:
-                    schema_list = await self.get_schema_list()
                     # Create a MetaData instance to load table information
                     metadata = MetaData()
-                    # Drop all tables from all schemas
+                    # Drop all tables from the public schema
+                    schema_list = ["public", "public_staging"]
                     for schema_name in schema_list:
                         # Load the schema information into the MetaData object
                         await connection.run_sync(metadata.reflect, schema=schema_name)
