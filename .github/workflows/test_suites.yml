@@ -59,7 +59,6 @@ jobs:
 
   python-version-tests:
     name: Python Version Tests
-    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/python_version_tests.yml
     secrets: inherit
 
