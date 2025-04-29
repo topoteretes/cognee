@@ -48,7 +48,6 @@ dependencies = [
     "pypdf>=5.4.0",
     "python-dotenv>=1.1.0",
     "python-multipart>=0.0.20",
-    "s3fs>=2025.3.2",
     "scikit-learn>=1.6.1",
     "sentry-sdk[fastapi]>=2.27.0",
     "sqlalchemy>=2.0.40",
