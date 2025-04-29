@@ -29,6 +29,7 @@ RUN apt-get update
 
 RUN apt-get install -y \
   gcc \
+  build-essential \
   libpq-dev
 
 WORKDIR /app
@@ -40,7 +41,7 @@ RUN pip install poetry
 RUN poetry config virtualenvs.create false
 
 # Install the dependencies using the defined extras
-RUN poetry install --extras "${POETRY_EXTRAS}" --no-root --without dev
+RUN poetry install --extras "${POETRY_EXTRAS}" --no-root
 
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH=/app
