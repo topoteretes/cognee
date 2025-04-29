@@ -7,7 +7,6 @@ import os
 class IngestionCrew:
     @before_kickoff
     def dump_env(self, *args, **kwargs):
-        """Print environment variables at startup."""
         print("=== Environment Variables ===")
         for key in sorted(os.environ):
             print(f"{key}={os.environ[key]}")

@@ -1,19 +1,15 @@
 [project]
-name = "association_layer_demo"
+name = "crewai_demo"
 version = "0.1.0"
-description = "association-layer-demo using crewAI"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+description = "Cognee crewAI demo"
+authors = [{ name = "Laszlo Hajdu", email = "laszlo@topoteretes.com" }]
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "crewai[tools]>=0.114.0,<1.0.0"
 ]
 
 [project.scripts]
-association_layer_demo = "association_layer_demo.main:run"
 run_crew = "association_layer_demo.main:run"
-train = "association_layer_demo.main:train"
-replay = "association_layer_demo.main:replay"
-test = "association_layer_demo.main:test"
 
 [build-system]
 requires = ["hatchling"]

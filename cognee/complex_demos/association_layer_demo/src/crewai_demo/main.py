@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 import warnings
-import os
 from ingestion_crew import IngestionCrew
-import cognee
-import asyncio
-# from association_layer_demo.ingestion_crew import IngestionCrew
+# from crewai_demo.ingestion_crew import IngestionCrew
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
