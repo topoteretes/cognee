@@ -7,19 +7,18 @@ from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-from .serialize_data import serialize_data
 from ..utils import normalize_distances
+from ..models.ScoredResult import ScoredResult
+from ..exceptions import CollectionNotFoundError
+from ..vector_db_interface import VectorDBInterface
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from .serialize_data import serialize_data
 
 
 class IndexSchema(DataPoint):
@@ -223,45 +222,44 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
-        try:
-            # Use async session to connect to the database
-            async with self.get_async_session() as session:
-                query = select(
-                    PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
+        # Use async session to connect to the database
+        async with self.get_async_session() as session:
+            query = select(
+                PGVectorDataPoint,
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+            ).order_by("similarity")
 
-                if limit > 0:
-                    query.limit(limit)
+            if limit > 0:
+                query = query.limit(limit)
 
-                # Find closest vectors to query_vector
-                closest_items = await session.execute(query)
+            # Find closest vectors to query_vector
+            closest_items = await session.execute(query)
 
-            vector_list = []
+        vector_list = []
 
-            # Extract distances and find min/max for normalization
-            for vector in closest_items:
-                vector_list.append(
-                    {
-                        "id": parse_id(str(vector.id)),
-                        "payload": vector.payload,
-                        "_distance": vector.similarity,
-                    }
-                )
+        # Extract distances and find min/max for normalization
+        for vector in closest_items.all():
+            vector_list.append(
+                {
+                    "id": parse_id(str(vector.id)),
+                    "payload": vector.payload,
+                    "_distance": vector.similarity,
+                }
+            )
 
-            # Normalize vector distance and add this as score information to vector_list
-            normalized_values = normalize_distances(vector_list)
-            for i in range(0, len(normalized_values)):
-                vector_list[i]["score"] = normalized_values[i]
-
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(id=row.get("id"), payload=row.get("payload"), score=row.get("score"))
-                for row in vector_list
-            ]
-        except EntityNotFoundError:
-            # Ignore if collection does not exist
+        if len(vector_list) == 0:
             return []
+
+        # Normalize vector distance and add this as score information to vector_list
+        normalized_values = normalize_distances(vector_list)
+        for i in range(0, len(normalized_values)):
+            vector_list[i]["score"] = normalized_values[i]
+
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(id=row.get("id"), payload=row.get("payload"), score=row.get("score"))
+            for row in vector_list
+        ]
 
     async def batch_search(
         self,

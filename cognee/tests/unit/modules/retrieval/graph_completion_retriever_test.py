@@ -154,6 +154,9 @@ if __name__ == "__main__":
 
     test = TestGraphCompletionRetriever()
 
-    run(test.test_graph_completion_context_simple())
-    run(test.test_graph_completion_context_complex())
-    run(test.test_get_graph_completion_context_on_empty_graph())
+    async def main():
+        await test.test_graph_completion_context_simple()
+        await test.test_graph_completion_context_complex()
+        await test.test_get_graph_completion_context_on_empty_graph()
+
+    run(main())

@@ -16,11 +16,11 @@ class TestChunksRetriever:
     @pytest.mark.asyncio
     async def test_chunk_context_simple(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_rag_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_chunks_context_simple"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_rag_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_chunks_context_simple"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -73,11 +73,11 @@ class TestChunksRetriever:
     @pytest.mark.asyncio
     async def test_chunk_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_complex"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_complex"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -162,11 +162,11 @@ class TestChunksRetriever:
     @pytest.mark.asyncio
     async def test_chunk_context_on_empty_graph(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_empty"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_empty"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -190,6 +190,9 @@ if __name__ == "__main__":
 
     test = TestChunksRetriever()
 
-    run(test.test_chunk_context_simple())
-    run(test.test_chunk_context_complex())
-    run(test.test_chunk_context_on_empty_graph())
+    async def main():
+        await test.test_chunk_context_simple()
+        await test.test_chunk_context_complex()
+        await test.test_chunk_context_on_empty_graph()
+
+    run(main())
