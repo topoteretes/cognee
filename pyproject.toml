@@ -48,7 +48,6 @@ dependencies = [
     "pypdf>=5.4.0",
     "python-dotenv>=1.1.0",
     "python-multipart>=0.0.20",
-    "rich>=13.4.0",
     "s3fs>=2025.3.2",
     "scikit-learn>=1.6.1",
     "sentry-sdk[fastapi]>=2.27.0",
@@ -109,7 +108,7 @@ anthropic = [
     "anthropic>=0.50.0",
 ]
 deepeval = [
-    "deepeval>=2.0",
+    "deepeval>=2.5",
 ]
 posthog = [
     "posthog>=4.0.1",
@@ -144,7 +143,7 @@ gui = [
     "qasync>=0.27.1",
 ]
 graphiti = [
-    "graphiti-core>=0.7.0,<0.8",
+    "graphiti-core>=0.10",
 ]
 dev = [
     "coverage>=7.8.0",

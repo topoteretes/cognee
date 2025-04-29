@@ -2788,6 +2788,18 @@ protobuf = ">=3.20.2,<4.21.1 || >4.21.1,<4.21.2 || >4.21.2,<4.21.3 || >4.21.3,<4
 grpc = ["grpcio (>=1.44.0,<2.0.0)"]
 
 [[package]]
+name = "graph-service"
+version = "1.0.0.7"
+description = "project descriptions here"
+optional = true
+python-versions = "*"
+groups = ["main"]
+markers = "extra == \"graphiti\""
+files = [
+    {file = "graph_service-1.0.0.7-py3-none-any.whl", hash = "sha256:d34cd38529ff0704b83fa4e8692b4f8fcf1524dce7110f89d4ee33423eeff0bd"},
+]
+
+[[package]]
 name = "graphistry"
 version = "0.36.1"
 description = "A visual graph analytics library for extracting, transforming, displaying, and sharing big graphs with end-to-end GPU acceleration"
@@ -2831,25 +2843,31 @@ umap-learn = ["scikit-learn", "scipy", "skrub", "umap-learn"]
 
 [[package]]
 name = "graphiti-core"
-version = "0.7.9"
+version = "0.10.5"
 description = "A temporal graph building library"
 optional = true
-python-versions = "<4.0,>=3.10"
+python-versions = "<4,>=3.10"
 groups = ["main"]
 markers = "extra == \"graphiti\""
 files = [
-    {file = "graphiti_core-0.7.9-py3-none-any.whl", hash = "sha256:a06ef86616c0e989b12e6f4660b3c7031f4a679d85c27c95e7a75ab5e7a65bde"},
-    {file = "graphiti_core-0.7.9.tar.gz", hash = "sha256:0b3e80848c4f43e44fb20dc59276f747ec1385ca967fdf3f430af41afaf0fe31"},
+    {file = "graphiti_core-0.10.5-py3-none-any.whl", hash = "sha256:73172818ce696c0ab3ece827099522924e61a918d6f80e665927a0724a13d941"},
+    {file = "graphiti_core-0.10.5.tar.gz", hash = "sha256:f118c3d7a504fa2dcd17ca8795c0eed77ad8ff787e35fbe73c94ec059e2ec543"},
 ]
 
 [package.dependencies]
-diskcache = ">=5.6.3,<6.0.0"
-neo4j = ">=5.23.0,<6.0.0"
+diskcache = ">=5.6.3"
+graph-service = ">=1.0.0.7,<2.0.0.0"
+neo4j = ">=5.23.0"
 numpy = ">=1.0.0"
-openai = ">=1.53.0,<2.0.0"
-pydantic = ">=2.8.2,<3.0.0"
-python-dotenv = ">=1.0.1,<2.0.0"
-tenacity = "9.0.0"
+openai = ">=1.53.0"
+pydantic = ">=2.8.2"
+python-dotenv = ">=1.0.1"
+tenacity = ">=9.0.0"
+
+[package.extras]
+anthropic = ["anthropic (>=0.49.0)"]
+google-genai = ["google-genai (>=1.8.0)"]
+groq = ["groq (>=0.2.0)"]
 
 [[package]]
 name = "greenlet"
@@ -11841,4 +11859,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "6adef8d94007e2ce779801a523dd25d4bf4e455bae670733029cd0182a91c369"
+content-hash = "285723db78f9230ec8857b45eb5857110456ca8a8ad2646226b99d9adccce20b"
