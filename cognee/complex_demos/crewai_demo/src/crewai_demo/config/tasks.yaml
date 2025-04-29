@@ -1,6 +1,13 @@
-google_task:
+preliminary_task:
   description: >
-    description
+    Call the cognee build tool and create a memory where we store facts.
   expected_output: >
-    exp_output
-  agent: agent_name
+    Detailed information about about the process
+  agent: test_agent
+
+search_task:
+  description: >
+    Use the cognee search tool and give me the answer what is cognee?
+  expected_output: >
+    The answer to the question: "What is cognee?"
+  agent: test_agent

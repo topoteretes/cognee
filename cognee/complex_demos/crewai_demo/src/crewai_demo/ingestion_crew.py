@@ -1,6 +1,8 @@
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task, before_kickoff
 import os
+from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.cognee_build import CogneeBuild
+from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.cognee_search import CogneeSearch
 
 
 @CrewBase
@@ -15,12 +17,18 @@ class IngestionCrew:
     tasks_config = "config/tasks.yaml"
 
     @agent
-    def ingestion_agent(self) -> Agent:
+    def test_agent(self) -> Agent:
+        print(self.agents_config)
         return Agent(
-            config=self.agents_config["ingestion_agent"],
+            config=self.agents_config["test_agent"],
+            tools=[CogneeBuild(), CogneeSearch()],
             verbose=True,
             allow_delegation=True,
         )
+
+    @task
+    def preliminary(self) -> Task:
+        return Task(config=self.tasks_config["preliminary_task"], async_execution=False)
 
     @task
     def search(self) -> Task:

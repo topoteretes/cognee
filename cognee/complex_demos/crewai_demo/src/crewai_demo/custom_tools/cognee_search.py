@@ -3,6 +3,7 @@ from typing import Type, List, Optional
 from pydantic import BaseModel, Field
 from cognee.api.v1.search import SearchType
 from cognee.modules.search.methods import search
+from cognee.modules.users.methods import get_default_user
 
 
 class CogneeSearchInput(BaseModel):
@@ -13,9 +14,7 @@ class CogneeSearchInput(BaseModel):
 
 class CogneeSearch(BaseTool):
     name: str = "Cognee Memory SEARCH"
-    description: str = (
-        "Search inside the cognee memory engine, providing different questions/queries to answer."
-    )
+    description: str = "Search inside the cognee memory engine by providing the query"
     args_schema: Type[BaseModel] = CogneeSearchInput
     pruned: bool = False
 
@@ -25,6 +24,7 @@ class CogneeSearch(BaseTool):
 
         async def main():
             try:
+                print(kwargs.get("query"))
                 search_results = await cognee.search(
                     query_type=SearchType.GRAPH_COMPLETION, query_text=kwargs.get("query")
                 )

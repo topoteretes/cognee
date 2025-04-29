@@ -1,7 +1,7 @@
-ingestion_agent:
+test_agent:
   role: >
-    ROLE
+    Question answering agent
   goal: >
-    GOAL
+    To execute your tasks
   backstory: >
-    BACKSTORY
+    You are a talkative agent
