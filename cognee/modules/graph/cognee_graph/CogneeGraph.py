@@ -79,11 +79,8 @@ class CogneeGraph(CogneeAbstractGraph):
                     attribute_filters=memory_fragment_filter
                 )
 
-            if not nodes_data:
-                #:TODO: quick and dirty solution for sf demo, as the list of nodes can be empty
-                return None
-            if not edges_data:
-                #:TODO: quick and dirty solution for sf demo, as the list of edges can be empty
+            if not nodes_data or not edges_data:
+                logger.warning("Empty projected graph.")
                 return None
 
             for node_id, properties in nodes_data:
