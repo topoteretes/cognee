@@ -184,7 +184,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if collection_name in metadata.tables:
                 return metadata.tables[collection_name]
             else:
-                raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
+                raise CollectionNotFoundError(
+                    f"Collection '{collection_name}' not found!", log_level="DEBUG"
+                )
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
@@ -218,6 +220,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
+        # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
         try:
