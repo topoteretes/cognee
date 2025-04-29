@@ -23,8 +23,11 @@ dependencies = [
     "aiohttp>=3.11.18",
     "aiosqlite>=0.21.0",
     "alembic>=1.15.2",
-    "boto3>=1.37",
     "dlt[sqlalchemy]>=1.10.0",
+    # Note: New s3fs and boto3 versions don't work well together
+    # Always use comaptible fixed versions of these two dependencies
+    "s3fs==2025.3.2",
+    "boto3==1.37.1",
     "fastapi>=0.115.12",
     "fastapi-users[sqlalchemy]>=14.0.1",
     "filetype>=1.2.0",
@@ -48,7 +51,6 @@ dependencies = [
     "pypdf>=5.4.0",
     "python-dotenv>=1.1.0",
     "python-multipart>=0.0.20",
-    "s3fs>=2025.3.2",
     "scikit-learn>=1.6.1",
     "sentry-sdk[fastapi]>=2.27.0",
     "sqlalchemy>=2.0.40",
