@@ -1,0 +1,7 @@
+ingestion_agent:
+  role: >
+    ROLE
+  goal: >
+    GOAL
+  backstory: >
+    BACKSTORY

@@ -1,0 +1,6 @@
+google_task:
+  description: >
+    description
+  expected_output: >
+    exp_output
+  agent: agent_name

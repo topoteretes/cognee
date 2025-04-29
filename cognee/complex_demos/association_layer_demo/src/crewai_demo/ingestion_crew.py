@@ -1,9 +1,5 @@
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task, before_kickoff
-from custom_tools.cognee_add import CogneeAdd
-from custom_tools.cognee_cognify import CogneeCognify
-from custom_tools.cognee_search import CogneeSearch
-from crewai_tools import SerperDevTool
 import os
 
 
@@ -23,26 +19,8 @@ class IngestionCrew:
     def ingestion_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["ingestion_agent"],
-            tools=[CogneeAdd(), CogneeCognify(), SerperDevTool()],
             verbose=True,
             allow_delegation=True,
-        )
-
-    @agent
-    def search_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config["search_agent"], tools=[CogneeSearch()], verbose=True
-        )
-
-    @task
-    def search_on_google(self) -> Task:
-        return Task(config=self.tasks_config["google_task"], async_execution=False)
-
-    @task
-    def cognify(self) -> Task:
-        return Task(
-            config=self.tasks_config["cognify_task"],
-            async_execution=False,
         )
 
     @task
