@@ -315,4 +315,7 @@ class ChromaDBAdapter(VectorDBInterface):
         """Get a list of all collection names in the database."""
         client = await self.get_connection()
         collections = await client.list_collections()
-        return [collection.name if hasattr(collection, "name") else collection["name"] for collection in collections]
+        return [
+            collection.name if hasattr(collection, "name") else collection["name"]
+            for collection in collections
+        ]

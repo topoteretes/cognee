@@ -145,16 +145,15 @@ async def brute_force_search(
 
     async def search_in_collection(collection_name: str):
         try:
-            return await vector_engine.search(collection_name=collection_name, query_text=query, limit=top_k)
+            return await vector_engine.search(
+                collection_name=collection_name, query_text=query, limit=top_k
+            )
         except CollectionNotFoundError:
             return []
 
     try:
         results = await asyncio.gather(
-            *[
-                search_in_collection(collection_name)
-                for collection_name in collections
-            ]
+            *[search_in_collection(collection_name) for collection_name in collections]
         )
 
         if all(not item for item in results):
