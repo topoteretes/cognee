@@ -57,6 +57,16 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Build with Poetry
+        shell: bash
+        run: poetry build
+
+      - name: Install Package
+        if: ${{ !contains(matrix.os, 'windows') }}
+        run: |
+          cd dist
+          pip install *.whl
+
       - name: Run unit tests
         shell: bash
         run: poetry run pytest cognee/tests/unit/
@@ -111,13 +121,3 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: poetry run python ./cognee/tests/test_library.py
-
-      - name: Build with Poetry
-        shell: bash
-        run: poetry build
-
-      - name: Install Package
-        if: ${{ !contains(matrix.os, 'windows') }}
-        run: |
-          cd dist
-          pip install *.whl
