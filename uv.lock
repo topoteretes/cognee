@@ -980,7 +980,7 @@ requires-dist = [
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.44" },
     { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.8.5" },
     { name = "graphistry", specifier = ">=0.36.1" },
-    { name = "graphiti-core", marker = "extra == 'graphiti'", specifier = ">=0.3.21" },
+    { name = "graphiti-core", marker = "extra == 'graphiti'", specifier = ">=0.7.0,<0.8" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.23.1" },
     { name = "gunicorn", marker = "extra == 'api'", specifier = ">=23.0.0" },
     { name = "instructor", specifier = "==1.7.2" },
@@ -2167,14 +2167,6 @@ wheels = [
 ]
 
 [[package]]
-name = "graph-service"
-version = "1.0.0.7"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/68/c94b57ddc6bd38b50a3f7357793f8c6a0e9d039af02dadac02b50b05746c/graph_service-1.0.0.7-py3-none-any.whl", hash = "sha256:d34cd38529ff0704b83fa4e8692b4f8fcf1524dce7110f89d4ee33423eeff0bd", size = 6392 },
-]
-
-[[package]]
 name = "graphistry"
 version = "0.36.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2196,11 +2188,10 @@ wheels = [
 
 [[package]]
 name = "graphiti-core"
-version = "0.10.5"
+version = "0.7.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diskcache" },
-    { name = "graph-service" },
     { name = "neo4j" },
     { name = "numpy" },
     { name = "openai" },
@@ -2208,9 +2199,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/37/18/64852bf053aaf9ac3e4ab1a594c704be5b226971d3d2d25732a8531054aa/graphiti_core-0.10.5.tar.gz", hash = "sha256:f118c3d7a504fa2dcd17ca8795c0eed77ad8ff787e35fbe73c94ec059e2ec543", size = 67525 }
+sdist = { url = "https://files.pythonhosted.org/packages/94/ec/c05b61286bb3cf3cf7664068f8720575937fae21922ee4fd959cbc9b7fcc/graphiti_core-0.7.9.tar.gz", hash = "sha256:0b3e80848c4f43e44fb20dc59276f747ec1385ca967fdf3f430af41afaf0fe31", size = 60654 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/5a/d01664ea93abf1836a4d86987c3946c72e4cb5092a31611cad3e77858d73/graphiti_core-0.10.5-py3-none-any.whl", hash = "sha256:73172818ce696c0ab3ece827099522924e61a918d6f80e665927a0724a13d941", size = 105809 },
+    { url = "https://files.pythonhosted.org/packages/d4/d0/84cdbaf5549e6aaacd76596320c7698b6b74442ce0cea58f59e3fe3bf97b/graphiti_core-0.7.9-py3-none-any.whl", hash = "sha256:a06ef86616c0e989b12e6f4660b3c7031f4a679d85c27c95e7a75ab5e7a65bde", size = 93560 },
 ]
 
 [[package]]

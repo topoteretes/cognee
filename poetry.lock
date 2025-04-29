@@ -1159,7 +1159,7 @@ description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "sys_platform == \"win32\" and (extra == \"chromadb\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"codegraph\") or platform_system == \"Windows\" or (extra == \"chromadb\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"codegraph\") and (extra == \"chromadb\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\") and (extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"codegraph\") and (extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"codegraph\" or extra == \"chromadb\") and (extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\")"
+markers = "(extra == \"chromadb\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or platform_system == \"Windows\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\") or sys_platform == \"win32\" and (extra == \"codegraph\" or extra == \"dev\") or extra == \"dev\" or (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\") and (platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -11841,4 +11841,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "ebc1f36f224a5f8a5bdef66da5e2b6fa3d464b5f9aa2eba12cfe10b9858d8256"
+content-hash = "6adef8d94007e2ce779801a523dd25d4bf4e455bae670733029cd0182a91c369"

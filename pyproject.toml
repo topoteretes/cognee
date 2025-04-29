@@ -144,7 +144,7 @@ gui = [
     "qasync>=0.27.1",
 ]
 graphiti = [
-    "graphiti-core>=0.3.21",
+    "graphiti-core>=0.7.0,<0.8",
 ]
 dev = [
     "coverage>=7.8.0",
