@@ -82,7 +82,7 @@ async def main():
     assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    collections = get_vector_engine().client.collections.list_all()
+    collections = await get_vector_engine().client.collections.list_all()
     assert len(collections) == 0, "Weaviate vector database is not empty"
 
 

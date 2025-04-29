@@ -40,11 +40,17 @@ class WeaviateAdapter(VectorDBInterface):
             additional_config=wvc.init.AdditionalConfig(timeout=wvc.init.Timeout(init=30)),
         )
 
+    async def get_client(self):
+        await self.client.connect()
+
+        return self.client
+
     async def embed_data(self, data: List[str]) -> List[float]:
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
-        return await self.client.collections.exists(collection_name)
+        client = await self.get_client()
+        return await client.collections.exists(collection_name)
 
     async def create_collection(
         self,
@@ -54,7 +60,8 @@ class WeaviateAdapter(VectorDBInterface):
         import weaviate.classes.config as wvcc
 
         if not await self.has_collection(collection_name):
-            return await self.client.collections.create(
+            client = await self.get_client()
+            return await client.collections.create(
                 name=collection_name,
                 properties=[
                     wvcc.Property(
@@ -68,7 +75,9 @@ class WeaviateAdapter(VectorDBInterface):
     async def get_collection(self, collection_name: str):
         if not await self.has_collection(collection_name):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found.")
-        return self.client.collections.get(collection_name)
+
+        client = await self.get_client()
+        return client.collections.get(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         from weaviate.classes.data import DataObject
@@ -174,7 +183,7 @@ class WeaviateAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
 
         try:
-            search_result = collection.query.hybrid(
+            search_result = await collection.query.hybrid(
                 query=None,
                 vector=query_vector,
                 limit=limit if limit > 0 else None,
@@ -217,4 +226,5 @@ class WeaviateAdapter(VectorDBInterface):
         return result
 
     async def prune(self):
-        await self.client.collections.delete_all()
+        client = await self.get_client()
+        await client.collections.delete_all()
