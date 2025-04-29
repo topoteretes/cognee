@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 
 dependencies = [
     "cognee[postgres,codegraph,gemini,huggingface]==0.1.39",
+    "fastmcp>=1.0",
     "mcp==1.5.0",
     "uv>=0.6.3",
 ]
