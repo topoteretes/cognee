@@ -120,12 +120,11 @@ Example output:
 
 You can also cognify your files and query using cognee UI. 
 
-Below is an example: 
 
 <img src="assets/cognee-ui-2.webp" width="100%" alt="Cognee UI 2"></a>
 
 
-Try cognee UI out locally: [here](https://docs.cognee.ai/how-to-guides/cognee-ui).
+Try cognee UI out locally [here](https://docs.cognee.ai/how-to-guides/cognee-ui).
 
 
 ## Understand our architecture
