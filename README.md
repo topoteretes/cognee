@@ -124,12 +124,18 @@ Example output:
   Natural Language Processing (NLP) is a cross-disciplinary and interdisciplinary field that involves computer science and information retrieval. It focuses on the interaction between computers and human language, enabling machines to understand and process natural language.
   
 ```
+
 Graph visualization:
 <a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="Graph Visualization"></a>
 Open in [browser](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html).
 
-For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
+### cognee UI 
 
+You can also cognify your files and query using cognee UI. 
+
+<img src="assets/cognee-ui-2.webp" width="100%" alt="Cognee UI 2"></a>
+
+Try cognee UI out locally [here](https://docs.cognee.ai/how-to-guides/cognee-ui).
 
 ## Understand our architecture
 

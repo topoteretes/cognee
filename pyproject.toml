@@ -27,7 +27,10 @@ dependencies = [
     "nltk==3.9.1",
     "numpy>=1.26.4, <=2.1",
     "pandas==2.2.3",
-    "boto3>=1.26.125,<2",
+    # Note: New s3fs and boto3 versions don't work well together
+    # Always use comaptible fixed versions of these two dependencies
+    "s3fs==2025.3.2",
+    "boto3==1.37.1",
     "botocore>=1.35.54,<2",
     "sqlalchemy==2.0.39",
     "aiosqlite>=0.20.0,<0.21",
@@ -55,7 +58,6 @@ dependencies = [
     "dlt[sqlalchemy]>=1.9.0,<2",
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
-    "s3fs>=2025.3.2,<2026",
 ]
 
 [project.optional-dependencies]
@@ -110,6 +112,7 @@ gui = [
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
 dev = [
     "pytest>=7.4.0,<8",
+    "pytest-cov>=6.1.1",
     "pytest-asyncio>=0.21.1,<0.22",
     "coverage>=7.3.2,<8",
     "mypy>=1.7.1,<2",
