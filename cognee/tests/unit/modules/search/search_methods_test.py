@@ -68,7 +68,7 @@ async def test_search(
     mock_log_query.assert_called_once_with(query_text, query_type.value, mock_user.id)
     mock_get_document_ids.assert_called_once_with(mock_user.id, datasets)
     mock_specific_search.assert_called_once_with(
-        query_type, query_text, mock_user, system_prompt_path="answer_simple_question.txt"
+        query_type, query_text, mock_user, system_prompt_path="answer_simple_question.txt", top_k=10
     )
 
     # Only the first two results should be included (doc_id3 is filtered out)

@@ -8,7 +8,7 @@ from cognee.modules.graph.models.EdgeType import EdgeType
 logger = get_logger(level=ERROR)
 
 
-async def index_graph_edges():
+async def index_graph_edges(batch_size: int = 1024):
     """
     Indexes graph edges by creating and managing vector indexes for relationship types.
 
@@ -66,8 +66,11 @@ async def index_graph_edges():
             indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
-    for index_name, indexable_points in index_points.items():
-        index_name, field_name = index_name.split(".")
-        await vector_engine.index_data_points(index_name, field_name, indexable_points)
+    for index_key, points in index_points.items():
+        index_name, field_name = index_key.split(".")
+
+        for start in range(0, len(points), batch_size):
+            batch = points[start : start + batch_size]
+            await vector_engine.index_data_points(index_name, field_name, batch)
 
     return None

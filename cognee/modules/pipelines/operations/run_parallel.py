@@ -1,6 +1,6 @@
 from typing import Any, Callable, Generator, List
 import asyncio
-from ..tasks.Task import Task
+from ..tasks.task import Task
 
 
 def run_tasks_parallel(tasks: List[Task]) -> Callable[[Any], Generator[Any, Any, Any]]:

@@ -1,1 +1,1 @@
-from cognee.tasks.completion.exceptions import NoRelevantDataFound
+from cognee.tasks.completion.exceptions import NoRelevantDataError

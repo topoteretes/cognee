@@ -7,38 +7,42 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - .:/app
-      - /app/cognee-frontend/ # Ignore frontend code
+      - ./cognee:/app/cognee
+      - .env:/app/.env
     environment:
+      - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
       - ENVIRONMENT=local
       - PYTHONPATH=.
+    extra_hosts:
+      # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
+      - "host.docker.internal:host-gateway"
     ports:
       - 8000:8000
-      # - 5678:5678 # Debugging
+      - 5678:5678 # Debugger port
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: "4.0"
           memory: 8GB
 
-# NOTE: Frontend is a work in progress and is not intended to be used by users yet.
-#       If you want to use Cognee with a UI environment you can run the cognee-gui.py script or
-#       integrate the Cognee MCP Server to Cursor / Claude Desktop / Visual Studio Code ( through Cline/Roo )
-
-#  frontend:
-#    container_name: frontend
-#    build:
-#      context: ./cognee-frontend
-#      dockerfile: Dockerfile
-#    volumes:
-#      - ./cognee-frontend/src:/app/src
-#      - ./cognee-frontend/public:/app/public
-#    ports:
-#      - 3000:3000
-#      # - 9229:9229 # Debugging
-#    networks:
-#      - cognee-network
+  # NOTE: Frontend is a work in progress and supports minimum amount of features required to be functional.
+  # If you want to use Cognee with a UI environment you can integrate the Cognee MCP Server into Cursor / Claude Desktop / Visual Studio Code (through Cline/Roo)
+  frontend:
+    container_name: frontend
+    profiles:
+        - ui
+    build:
+      context: ./cognee-frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./cognee-frontend/src:/app/src
+      - ./cognee-frontend/public:/app/public
+    ports:
+      - 3000:3000
+      # - 9229:9229 # Debugging
+    networks:
+      - cognee-network
 
   neo4j:
     image: neo4j:latest
@@ -83,21 +87,20 @@ services:
     ports:
       - "3002:8000"
 
-  # UNCOMMENT IF USING POSTGRES
-  # postgres:
-  #   image: pgvector/pgvector:pg17
-  #   container_name: postgres
-  #   environment:
-  #     POSTGRES_USER: cognee
-  #     POSTGRES_PASSWORD: cognee
-  #     POSTGRES_DB: cognee_db
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - 5432:5432
-  #   networks:
-  #     - cognee-network
-  # UNCOMMENT THE VOLUES SECTION BELOW AS WELL TO USE POSTGRES
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: postgres
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_USER: cognee
+      POSTGRES_PASSWORD: cognee
+      POSTGRES_DB: cognee_db
+      # - postgres_data:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    networks:
+      - cognee-network
 
 networks:
   cognee-network:
@@ -105,5 +108,4 @@ networks:
 
 volumes:
   chromadb_data:
-# UNCOMMENT IF USING POSTGRES
-#   postgres_data:
+  postgres_data:

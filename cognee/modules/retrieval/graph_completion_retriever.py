@@ -8,7 +8,6 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
-from cognee.tasks.completion.exceptions import NoRelevantDataFound
 
 
 class GraphCompletionRetriever(BaseRetriever):
@@ -72,14 +71,15 @@ class GraphCompletionRetriever(BaseRetriever):
             query, top_k=self.top_k, collections=vector_index_collections or None
         )
 
-        if len(found_triplets) == 0:
-            raise NoRelevantDataFound
-
         return found_triplets
 
-    async def get_context(self, query: str) -> Any:
+    async def get_context(self, query: str) -> str:
         """Retrieves and resolves graph triplets into context."""
         triplets = await self.get_triplets(query)
+
+        if len(triplets) == 0:
+            return ""
+
         return await self.resolve_edges_to_text(triplets)
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:

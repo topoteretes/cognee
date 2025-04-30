@@ -1,19 +1,20 @@
 [project]
 name = "cognee-mcp"
-version = "0.2.1"
+version = "0.2.3"
 description = "A MCP server project"
 readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
-    "cognee[postgres,codegraph,gemini,huggingface]",
+    "cognee[postgres,codegraph,gemini,huggingface]==0.1.39",
+    "fastmcp>=1.0",
     "mcp==1.5.0",
     "uv>=0.6.3",
 ]
 
 [[project.authors]]
-name = "Rita Aleksziev"
-email = "rita@topoteretes.com"
+name = "Boris Arzentar"
+email = "boris@topoteretes.com"
 
 [build-system]
 requires = [ "hatchling", ]

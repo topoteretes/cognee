@@ -68,9 +68,9 @@ export default function Home() {
 
   return (
     <main className={styles.main}>
-      <Spacer inset vertical="1" horizontal="2">
+      <Spacer inset vertical="2" horizontal="2">
         <Stack orientation="horizontal" gap="between" align="center">
-          <TextLogo width={225} height={64} />
+          <TextLogo width={158} height={44} color="white" />
           <GhostButton hugContent onClick={openSettingsModal}>
             <SettingsIcon />
           </GhostButton>

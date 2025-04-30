@@ -18,8 +18,10 @@ class ModelName(Enum):
 
 class LLMConfig(BaseModel):
     api_key: str
-    model: ConfigChoice
-    provider: ConfigChoice
+    model: str
+    provider: str
+    endpoint: str
+    api_version: str
     models: dict[str, list[ConfigChoice]]
     providers: list[ConfigChoice]
 
@@ -27,7 +29,7 @@ class LLMConfig(BaseModel):
 class VectorDBConfig(BaseModel):
     api_key: str
     url: str
-    provider: ConfigChoice
+    provider: str
     providers: list[ConfigChoice]
 
 
@@ -82,19 +84,11 @@ def get_settings() -> SettingsDict:
     return SettingsDict.model_validate(
         dict(
             llm={
-                "provider": {
-                    "label": llm_config.llm_provider,
-                    "value": llm_config.llm_provider,
-                }
-                if llm_config.llm_provider
-                else llm_providers[0],
-                "model": {
-                    "value": llm_config.llm_model,
-                    "label": llm_config.llm_model,
-                }
-                if llm_config.llm_model
-                else None,
-                "api_key": (llm_config.llm_api_key[:-10] + "**********")
+                "provider": llm_config.llm_provider,
+                "model": llm_config.llm_model,
+                "endpoint": llm_config.llm_endpoint,
+                "api_version": llm_config.llm_api_version,
+                "api_key": (llm_config.llm_api_key[0:10] + "*" * (len(llm_config.llm_api_key) - 10))
                 if llm_config.llm_api_key
                 else None,
                 "providers": llm_providers,
@@ -150,12 +144,12 @@ def get_settings() -> SettingsDict:
                 },
             },
             vector_db={
-                "provider": {
-                    "label": vector_config.vector_db_provider,
-                    "value": vector_config.vector_db_provider.lower(),
-                },
+                "provider": vector_config.vector_db_provider,
                 "url": vector_config.vector_db_url,
-                "api_key": vector_config.vector_db_key,
+                "api_key": (
+                    vector_config.vector_db_key[0:10]
+                    + "*" * (len(vector_config.vector_db_key) - 10)
+                ),
                 "providers": vector_dbs,
             },
         )

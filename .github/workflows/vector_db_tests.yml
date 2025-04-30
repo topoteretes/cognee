@@ -1,0 +1,210 @@
+name: Reusable Vector DB Tests
+
+on:
+  workflow_call:
+    inputs:
+      databases:
+        required: false
+        type: string
+        default: "all"
+        description: "Which vector databases to test (comma-separated list or 'all')"
+    secrets:
+      WEAVIATE_API_URL:
+        required: false
+      WEAVIATE_API_KEY:
+        required: false
+      POSTGRES_PASSWORD:
+        required: false
+
+jobs:
+  # run-chromadb-tests:
+  #   name: ChromaDB Tests
+  #   runs-on: ubuntu-22.04
+  #   if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'chromadb') }}
+  #   services:
+  #     chromadb:
+  #       image: chromadb/chroma:0.6.3
+  #       env:
+  #         CHROMA_SERVER_AUTH_CREDENTIALS: "test-token"
+  #         CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: "chromadb.auth.token.TokenAuthCredentialsProvider"
+  #         CHROMA_SERVER_AUTH_PROVIDER: "chromadb.auth.token.TokenAuthServerProvider"
+  #       ports:
+  #         - 3002:8000
+  #   steps:
+  #     - name: Check out
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+
+  #     - name: Cognee Setup
+  #       uses: ./.github/actions/cognee_setup
+  #       with:
+  #         python-version: ${{ inputs.python-version }}
+
+  #     - name: Install specific db dependency
+  #       run: |
+  #         poetry install -E chromadb
+
+  #     - name: Run ChromaDB Tests
+  #       env:
+  #         ENV: 'dev'
+  #         VECTOR_DB_PROVIDER: chromadb
+  #         VECTOR_DB_URL: http://localhost:3002
+  #         VECTOR_DB_KEY: test-token
+  #         LLM_MODEL: ${{ secrets.LLM_MODEL }}
+  #         LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+  #         LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+  #         LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+  #         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+  #         EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+  #         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+  #         EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+  #       run: poetry run python ./cognee/tests/test_chromadb.py
+
+  run-weaviate-tests:
+    name: Weaviate Tests
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'weaviate') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E weaviate
+
+      - name: Run Weaviate Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          VECTOR_DB_URL: ${{ secrets.WEAVIATE_API_URL }}
+          VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
+        run: poetry run python ./cognee/tests/test_weaviate.py
+
+  run-milvus-tests:
+    name: Milvus Tests
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'milvus') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E milvus
+
+      - name: Run Milvus Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_milvus.py
+
+  run_qdrant_integration_test:
+    name: Qdrant Tests
+    runs-on: ubuntu-latest
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'qdrant') }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E qdrant
+
+      - name: Run default Qdrant
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
+          VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
+        run: poetry run python ./cognee/tests/test_qdrant.py
+
+  run-postgres-tests:
+    name: PostgreSQL Tests
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E postgres
+
+      - name: Run PGVector Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run python ./cognee/tests/test_pgvector.py

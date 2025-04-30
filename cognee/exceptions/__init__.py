@@ -10,4 +10,5 @@ from .exceptions import (
     ServiceError,
     InvalidValueError,
     InvalidAttributeError,
+    CriticalError,
 )

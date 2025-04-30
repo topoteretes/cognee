@@ -1,8 +1,10 @@
+from uuid import UUID
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
-from typing import List
+from typing import List, Optional
 import subprocess
+from cognee.modules.data.methods import get_dataset
 from cognee.shared.logging_utils import get_logger
 import requests
 
@@ -18,11 +20,22 @@ def get_add_router() -> APIRouter:
     @router.post("/", response_model=None)
     async def add(
         data: List[UploadFile],
-        datasetId: str = Form(...),
+        datasetId: Optional[UUID] = Form(default=None),
+        datasetName: Optional[str] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):
         """This endpoint is responsible for adding data to the graph."""
         from cognee.api.v1.add import add as cognee_add
+
+        if not datasetId and not datasetName:
+            raise ValueError("Either datasetId or datasetName must be provided.")
+
+        if datasetId and not datasetName:
+            dataset = await get_dataset(user_id=user.id, dataset_id=datasetId)
+            try:
+                datasetName = dataset.name
+            except IndexError:
+                raise ValueError("No dataset found with the provided datasetName.")
 
         try:
             if isinstance(data, str) and data.startswith("http"):
@@ -43,11 +56,7 @@ def get_add_router() -> APIRouter:
 
                     return await cognee_add(file_data)
             else:
-                await cognee_add(
-                    data,
-                    datasetId,
-                    user=user,
-                )
+                await cognee_add(data, datasetName, user=user)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

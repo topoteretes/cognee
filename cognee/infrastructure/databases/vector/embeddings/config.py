@@ -14,6 +14,21 @@ class EmbeddingConfig(BaseSettings):
     huggingface_tokenizer: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+    def to_dict(self) -> dict:
+        """
+        Serialize all embedding configuration settings to a dictionary.
+        """
+        return {
+            "embedding_provider": self.embedding_provider,
+            "embedding_model": self.embedding_model,
+            "embedding_dimensions": self.embedding_dimensions,
+            "embedding_endpoint": self.embedding_endpoint,
+            "embedding_api_key": self.embedding_api_key,
+            "embedding_api_version": self.embedding_api_version,
+            "embedding_max_tokens": self.embedding_max_tokens,
+            "huggingface_tokenizer": self.huggingface_tokenizer,
+        }
+
 
 @lru_cache
 def get_embedding_config():

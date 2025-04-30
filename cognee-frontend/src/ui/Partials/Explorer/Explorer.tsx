@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
 import classNames from 'classnames';
+import { useCallback, useEffect, useState } from 'react';
 import { Spacer, Stack, Text } from 'ohmy-ui';
-import { getExplorationGraphUrl } from '@/modules/exploration';
-import { IFrameView, SearchView } from '@/ui/Partials';
 import { LoadingIndicator } from '@/ui/App';
+import { IFrameView, SearchView } from '@/ui/Partials';
+import { getExplorationGraphUrl } from '@/modules/exploration';
 import styles from './Explorer.module.css';
 
 interface ExplorerProps {
@@ -14,13 +14,13 @@ interface ExplorerProps {
 
 export default function Explorer({ dataset, className, style }: ExplorerProps) {
   const [error, setError] = useState<Error | null>(null);
-  const [graphUrl, setGraphUrl] = useState<string | null>(null);
+  const [graphHtml, setGraphHtml] = useState<string | null>(null);
 
   const exploreData = useCallback(() => {
     getExplorationGraphUrl(dataset)
-      .then((graphUrl) => {
+      .then((graphHtml) => {
         setError(null);
-        setGraphUrl(graphUrl);
+        setGraphHtml(graphHtml);
       })
       .catch((error) => {
         setError(error);
@@ -43,12 +43,12 @@ export default function Explorer({ dataset, className, style }: ExplorerProps) {
           <Text color="red">{error.message}</Text>
         ) : (
           <>
-            {!graphUrl ? (
+            {!graphHtml ? (
               <Spacer horizontal="2" wrap>
                 <LoadingIndicator />
               </Spacer>
             ) : (
-              <IFrameView src={graphUrl} />
+              <IFrameView src="http://127.0.0.1:8000/api/v1/visualize" />
             )}
           </>
         )}

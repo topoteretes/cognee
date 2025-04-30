@@ -77,7 +77,7 @@ async def main():
     print(completion)
 
     # Completion query that uses document chunks to form context.
-    completion = await cognee.search(SearchType.COMPLETION, "What is Python?")
+    completion = await cognee.search(SearchType.RAG_COMPLETION, "What is Python?")
     assert len(completion) != 0, "Completion search didn't return any result."
     print("Completion result is:")
     print(completion)

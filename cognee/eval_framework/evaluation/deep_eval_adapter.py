@@ -33,7 +33,9 @@ class DeepEvalAdapter(BaseEvalAdapter):
                 input=answer["question"],
                 actual_output=answer["answer"],
                 expected_output=answer["golden_answer"],
-                retrieval_context=[answer["retrieval_context"]],
+                retrieval_context=[answer["retrieval_context"]]
+                if "golden_context" in answer
+                else None,
                 context=[answer["golden_context"]] if "golden_context" in answer else None,
             )
             metric_results = {}

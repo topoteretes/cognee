@@ -10,7 +10,10 @@ from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
 import networkx as nx
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    GraphDBInterface,
+    record_graph_changes,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
@@ -39,23 +42,17 @@ class NetworkXAdapter(GraphDBInterface):
     async def query(self, query: str, params: dict):
         pass
 
-    async def has_node(self, node_id: str) -> bool:
+    async def has_node(self, node_id: UUID) -> bool:
         return self.graph.has_node(node_id)
 
-    async def add_node(
-        self,
-        node: DataPoint,
-    ) -> None:
+    async def add_node(self, node: DataPoint) -> None:
         self.graph.add_node(node.id, **node.model_dump())
 
         await self.save_graph_to_file(self.filename)
 
-    async def add_nodes(
-        self,
-        nodes: list[DataPoint],
-    ) -> None:
+    @record_graph_changes
+    async def add_nodes(self, nodes: list[DataPoint]) -> None:
         nodes = [(node.id, node.model_dump()) for node in nodes]
-
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
 
@@ -74,6 +71,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         return result
 
+    @record_graph_changes
     async def add_edge(
         self,
         from_node: str,
@@ -91,38 +89,76 @@ class NetworkXAdapter(GraphDBInterface):
 
         await self.save_graph_to_file(self.filename)
 
-    async def add_edges(
-        self,
-        edges: tuple[str, str, str, dict],
-    ) -> None:
-        edges = [
-            (
-                edge[0],
-                edge[1],
-                edge[2],
-                {
-                    **(edge[3] if len(edge) == 4 else {}),
-                    "updated_at": datetime.now(timezone.utc),
-                },
-            )
-            for edge in edges
-        ]
+    @record_graph_changes
+    async def add_edges(self, edges: list[tuple[str, str, str, dict]]) -> None:
+        if not edges:
+            logger.debug("No edges to add")
+            return
 
-        self.graph.add_edges_from(edges)
-        await self.save_graph_to_file(self.filename)
+        try:
+            # Validate edge format and convert UUIDs to strings
+            processed_edges = []
+            for edge in edges:
+                if len(edge) < 3 or len(edge) > 4:
+                    raise ValueError(
+                        f"Invalid edge format: {edge}. Expected (from_node, to_node, relationship_name[, properties])"
+                    )
 
-    async def get_edges(self, node_id: str):
+                # Convert UUIDs to strings if needed
+                from_node = str(edge[0]) if isinstance(edge[0], UUID) else edge[0]
+                to_node = str(edge[1]) if isinstance(edge[1], UUID) else edge[1]
+                relationship_name = edge[2]
+
+                if not all(isinstance(x, str) for x in [from_node, to_node, relationship_name]):
+                    raise ValueError(
+                        f"First three elements of edge must be strings or UUIDs: {edge}"
+                    )
+
+                # Process edge with updated_at timestamp
+                processed_edge = (
+                    from_node,
+                    to_node,
+                    relationship_name,
+                    {
+                        **(edge[3] if len(edge) == 4 else {}),
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                )
+                processed_edges.append(processed_edge)
+
+            # Add edges to graph
+            self.graph.add_edges_from(processed_edges)
+            logger.debug(f"Added {len(processed_edges)} edges to graph")
+
+            # Save changes
+            await self.save_graph_to_file(self.filename)
+        except Exception as e:
+            logger.error(f"Failed to add edges: {e}")
+            raise
+
+    async def get_edges(self, node_id: UUID):
         return list(self.graph.in_edges(node_id, data=True)) + list(
             self.graph.out_edges(node_id, data=True)
         )
 
-    async def delete_node(self, node_id: str) -> None:
-        """Asynchronously delete a node from the graph if it exists."""
-        if self.graph.has_node(node_id):
-            self.graph.remove_node(node_id)
-            await self.save_graph_to_file(self.filename)
+    async def delete_node(self, node_id: UUID) -> None:
+        """Asynchronously delete a node and all its relationships from the graph if it exists."""
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+        if self.graph.has_node(node_id):
+            # First remove all edges connected to the node
+            for edge in list(self.graph.edges(node_id, data=True)):
+                source, target, data = edge
+                self.graph.remove_edge(source, target, key=data.get("relationship_name"))
+
+            # Then remove the node itself
+            self.graph.remove_node(node_id)
+
+            # Save the updated graph state
+            await self.save_graph_to_file(self.filename)
+        else:
+            logger.error(f"Node {node_id} not found in graph")
+
+    async def delete_nodes(self, node_ids: List[UUID]) -> None:
         self.graph.remove_nodes_from(node_ids)
         await self.save_graph_to_file(self.filename)
 
@@ -138,13 +174,13 @@ class NetworkXAdapter(GraphDBInterface):
 
         return disconnected_nodes
 
-    async def extract_node(self, node_id: str) -> dict:
+    async def extract_node(self, node_id: UUID) -> dict:
         if self.graph.has_node(node_id):
             return self.graph.nodes[node_id]
 
         return None
 
-    async def extract_nodes(self, node_ids: List[str]) -> List[dict]:
+    async def extract_nodes(self, node_ids: List[UUID]) -> List[dict]:
         return [self.graph.nodes[node_id] for node_id in node_ids if self.graph.has_node(node_id)]
 
     async def get_predecessors(self, node_id: UUID, edge_label: str = None) -> list:
@@ -179,7 +215,7 @@ class NetworkXAdapter(GraphDBInterface):
 
             return nodes
 
-    async def get_neighbours(self, node_id: str) -> list:
+    async def get_neighbors(self, node_id: UUID) -> list:
         if not self.graph.has_node(node_id):
             return []
 
@@ -188,9 +224,9 @@ class NetworkXAdapter(GraphDBInterface):
             self.get_successors(node_id),
         )
 
-        neighbours = predecessors + successors
+        neighbors = predecessors + successors
 
-        return neighbours
+        return neighbors
 
     async def get_connections(self, node_id: UUID) -> list:
         if not self.graph.has_node(node_id):
@@ -208,22 +244,27 @@ class NetworkXAdapter(GraphDBInterface):
 
         connections = []
 
-        for neighbor in predecessors:
-            if "id" in neighbor:
-                edge_data = self.graph.get_edge_data(neighbor["id"], node["id"])
-                for edge_properties in edge_data.values():
-                    connections.append((neighbor, edge_properties, node))
+        # Handle None values for predecessors and successors
+        if predecessors is not None:
+            for neighbor in predecessors:
+                if "id" in neighbor:
+                    edge_data = self.graph.get_edge_data(neighbor["id"], node["id"])
+                    if edge_data is not None:
+                        for edge_properties in edge_data.values():
+                            connections.append((neighbor, edge_properties, node))
 
-        for neighbor in successors:
-            if "id" in neighbor:
-                edge_data = self.graph.get_edge_data(node["id"], neighbor["id"])
-                for edge_properties in edge_data.values():
-                    connections.append((node, edge_properties, neighbor))
+        if successors is not None:
+            for neighbor in successors:
+                if "id" in neighbor:
+                    edge_data = self.graph.get_edge_data(node["id"], neighbor["id"])
+                    if edge_data is not None:
+                        for edge_properties in edge_data.values():
+                            connections.append((node, edge_properties, neighbor))
 
         return connections
 
     async def remove_connection_to_predecessors_of(
-        self, node_ids: list[str], edge_label: str
+        self, node_ids: list[UUID], edge_label: str
     ) -> None:
         for node_id in node_ids:
             if self.graph.has_node(node_id):
@@ -234,7 +275,7 @@ class NetworkXAdapter(GraphDBInterface):
         await self.save_graph_to_file(self.filename)
 
     async def remove_connection_to_successors_of(
-        self, node_ids: list[str], edge_label: str
+        self, node_ids: list[UUID], edge_label: str
     ) -> None:
         for node_id in node_ids:
             if self.graph.has_node(node_id):
@@ -247,8 +288,9 @@ class NetworkXAdapter(GraphDBInterface):
     async def create_empty_graph(self, file_path: str) -> None:
         self.graph = nx.MultiDiGraph()
 
+        # Only create directory if file_path contains a directory
         file_dir = os.path.dirname(file_path)
-        if not os.path.exists(file_dir):
+        if file_dir and not os.path.exists(file_dir):
             os.makedirs(file_dir, exist_ok=True)
 
         await self.save_graph_to_file(file_path)
@@ -266,9 +308,6 @@ class NetworkXAdapter(GraphDBInterface):
 
     async def load_graph_from_file(self, file_path: str = None):
         """Asynchronously load the graph from a file in JSON format."""
-        if file_path == self.filename:
-            return
-
         if not file_path:
             file_path = self.filename
         try:
@@ -460,3 +499,138 @@ class NetworkXAdapter(GraphDBInterface):
             }
 
         return mandatory_metrics | optional_metrics
+
+    async def get_document_subgraph(self, content_hash: str):
+        """Get all nodes that should be deleted when removing a document."""
+        # Ensure graph is loaded
+        if self.graph is None:
+            await self.load_graph_from_file()
+
+        # Find the document node by looking for content_hash in the name field
+        document = None
+        document_node_id = None
+        for node_id, attrs in self.graph.nodes(data=True):
+            if (
+                attrs.get("type") in ["TextDocument", "PdfDocument"]
+                and attrs.get("name") == f"text_{content_hash}"
+            ):
+                document = {"id": str(node_id), **attrs}  # Convert UUID to string for consistency
+                document_node_id = node_id  # Keep the original UUID
+                break
+
+        if not document:
+            return None
+
+        # Find chunks connected via is_part_of (chunks point TO document)
+        chunks = []
+        for source, target, edge_data in self.graph.in_edges(document_node_id, data=True):
+            if edge_data.get("relationship_name") == "is_part_of":
+                chunks.append({"id": source, **self.graph.nodes[source]})  # Keep as UUID object
+
+        # Find entities connected to chunks (chunks point TO entities via contains)
+        entities = []
+        for chunk in chunks:
+            chunk_id = chunk["id"]  # Already a UUID object
+            for source, target, edge_data in self.graph.out_edges(chunk_id, data=True):
+                if edge_data.get("relationship_name") == "contains":
+                    entities.append(
+                        {"id": target, **self.graph.nodes[target]}
+                    )  # Keep as UUID object
+
+        # Find orphaned entities (entities only connected to chunks we're deleting)
+        orphan_entities = []
+        for entity in entities:
+            entity_id = entity["id"]  # Already a UUID object
+            # Get all chunks that contain this entity
+            containing_chunks = []
+            for source, target, edge_data in self.graph.in_edges(entity_id, data=True):
+                if edge_data.get("relationship_name") == "contains":
+                    containing_chunks.append(source)  # Keep as UUID object
+
+            # Check if all containing chunks are in our chunks list
+            chunk_ids = [chunk["id"] for chunk in chunks]
+            if containing_chunks and all(c in chunk_ids for c in containing_chunks):
+                orphan_entities.append(entity)
+
+        # Find orphaned entity types
+        orphan_types = []
+        seen_types = set()  # Track seen types to avoid duplicates
+        for entity in orphan_entities:
+            entity_id = entity["id"]  # Already a UUID object
+            for _, target, edge_data in self.graph.out_edges(entity_id, data=True):
+                if edge_data.get("relationship_name") in ["is_a", "instance_of"]:
+                    # Check if this type is only connected to entities we're deleting
+                    type_node = self.graph.nodes[target]
+                    if type_node.get("type") == "EntityType" and target not in seen_types:
+                        is_orphaned = True
+                        # Get all incoming edges to this type node
+                        for source, _, edge_data in self.graph.in_edges(target, data=True):
+                            if edge_data.get("relationship_name") in ["is_a", "instance_of"]:
+                                # Check if the source entity is not in our orphan_entities list
+                                if source not in [e["id"] for e in orphan_entities]:
+                                    is_orphaned = False
+                                    break
+                        if is_orphaned:
+                            orphan_types.append({"id": target, **type_node})  # Keep as UUID object
+                            seen_types.add(target)  # Mark as seen
+
+        # Find nodes connected via made_from (chunks point TO summaries)
+        made_from_nodes = []
+        for chunk in chunks:
+            chunk_id = chunk["id"]  # Already a UUID object
+            for source, target, edge_data in self.graph.in_edges(chunk_id, data=True):
+                if edge_data.get("relationship_name") == "made_from":
+                    made_from_nodes.append(
+                        {"id": source, **self.graph.nodes[source]}
+                    )  # Keep as UUID object
+
+        # Return UUIDs directly without string conversion
+        return {
+            "document": [{"id": document["id"], **{k: v for k, v in document.items() if k != "id"}}]
+            if document
+            else [],
+            "chunks": [
+                {"id": chunk["id"], **{k: v for k, v in chunk.items() if k != "id"}}
+                for chunk in chunks
+            ],
+            "orphan_entities": [
+                {"id": entity["id"], **{k: v for k, v in entity.items() if k != "id"}}
+                for entity in orphan_entities
+            ],
+            "made_from_nodes": [
+                {"id": node["id"], **{k: v for k, v in node.items() if k != "id"}}
+                for node in made_from_nodes
+            ],
+            "orphan_types": [
+                {"id": type_node["id"], **{k: v for k, v in type_node.items() if k != "id"}}
+                for type_node in orphan_types
+            ],
+        }
+
+    async def get_degree_one_nodes(self, node_type: str):
+        """Get all nodes that have only one connection."""
+        if not node_type or node_type not in ["Entity", "EntityType"]:
+            raise ValueError("node_type must be either 'Entity' or 'EntityType'")
+
+        nodes = []
+        for node_id, node_data in self.graph.nodes(data=True):
+            if node_data.get("type") == node_type:
+                # Count both incoming and outgoing edges
+                degree = self.graph.degree(node_id)
+                if degree == 1:
+                    nodes.append(node_data)
+        return nodes
+
+    async def get_node(self, node_id: UUID) -> dict:
+        if self.graph.has_node(node_id):
+            return self.graph.nodes[node_id]
+        return None
+
+    async def get_nodes(self, node_ids: List[UUID] = None) -> List[dict]:
+        if node_ids is None:
+            return [{"id": node_id, **data} for node_id, data in self.graph.nodes(data=True)]
+        return [
+            {"id": node_id, **self.graph.nodes[node_id]}
+            for node_id in node_ids
+            if self.graph.has_node(node_id)
+        ]

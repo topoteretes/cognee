@@ -11,7 +11,6 @@
   display: flex;
   flex-direction: row;
   flex: 1;
-  gap: 32px;
 }
 
 .datasetsView {
@@ -28,6 +27,7 @@
 .dataView {
   width: 70%;
   animation: grow-width 0.3s ease-in-out;
+  padding: 0 0 0 32px;
 }
 
 @keyframes grow-width {

@@ -1,122 +1,168 @@
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-
+import os
 import pytest
+import pathlib
 
+import cognee
+from cognee.low_level import setup
+from cognee.tasks.storage import add_data_points
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.chunking.models import DocumentChunk
+from cognee.tasks.summarization.models import TextSummary
+from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 
 
-class TestSummariesRetriever:
-    @pytest.fixture
-    def mock_retriever(self):
-        return SummariesRetriever()
+class TextSummariesRetriever:
+    @pytest.mark.asyncio
+    async def test_chunk_context(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_summary_context"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_summary_context"
+        )
+        cognee.config.data_root_directory(data_directory_path)
+
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await setup()
+
+        document1 = TextDocument(
+            name="Employee List",
+            raw_data_location="somewhere",
+            external_metadata="",
+            mime_type="text/plain",
+        )
+
+        document2 = TextDocument(
+            name="Car List",
+            raw_data_location="somewhere",
+            external_metadata="",
+            mime_type="text/plain",
+        )
+
+        chunk1 = DocumentChunk(
+            text="Steve Rodger",
+            chunk_size=2,
+            chunk_index=0,
+            cut_type="sentence_end",
+            is_part_of=document1,
+            contains=[],
+        )
+        chunk1_summary = TextSummary(
+            text="S.R.",
+            made_from=chunk1,
+        )
+        chunk2 = DocumentChunk(
+            text="Mike Broski",
+            chunk_size=2,
+            chunk_index=1,
+            cut_type="sentence_end",
+            is_part_of=document1,
+            contains=[],
+        )
+        chunk2_summary = TextSummary(
+            text="M.B.",
+            made_from=chunk2,
+        )
+        chunk3 = DocumentChunk(
+            text="Christina Mayer",
+            chunk_size=2,
+            chunk_index=2,
+            cut_type="sentence_end",
+            is_part_of=document1,
+            contains=[],
+        )
+        chunk3_summary = TextSummary(
+            text="C.M.",
+            made_from=chunk3,
+        )
+        chunk4 = DocumentChunk(
+            text="Range Rover",
+            chunk_size=2,
+            chunk_index=0,
+            cut_type="sentence_end",
+            is_part_of=document2,
+            contains=[],
+        )
+        chunk4_summary = TextSummary(
+            text="R.R.",
+            made_from=chunk4,
+        )
+        chunk5 = DocumentChunk(
+            text="Hyundai",
+            chunk_size=2,
+            chunk_index=1,
+            cut_type="sentence_end",
+            is_part_of=document2,
+            contains=[],
+        )
+        chunk5_summary = TextSummary(
+            text="H.Y.",
+            made_from=chunk5,
+        )
+        chunk6 = DocumentChunk(
+            text="Chrysler",
+            chunk_size=2,
+            chunk_index=2,
+            cut_type="sentence_end",
+            is_part_of=document2,
+            contains=[],
+        )
+        chunk6_summary = TextSummary(
+            text="C.H.",
+            made_from=chunk6,
+        )
+
+        entities = [
+            chunk1_summary,
+            chunk2_summary,
+            chunk3_summary,
+            chunk4_summary,
+            chunk5_summary,
+            chunk6_summary,
+        ]
+
+        await add_data_points(entities)
+
+        retriever = SummariesRetriever(top_k=20)
+
+        context = await retriever.get_context("Christina")
+
+        assert context[0]["text"] == "C.M.", "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.summaries_retriever.get_vector_engine")
-    async def test_get_completion(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query"
-        doc_id1 = str(uuid.uuid4())
-        doc_id2 = str(uuid.uuid4())
+    async def test_chunk_context_on_empty_graph(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_summary_context"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_summary_context"
+        )
+        cognee.config.data_root_directory(data_directory_path)
 
-        # Mock search results
-        mock_result_1 = MagicMock()
-        mock_result_1.payload = {
-            "id": str(uuid.uuid4()),
-            "score": 0.95,
-            "payload": {
-                "text": "This is the first summary.",
-                "document_id": doc_id1,
-                "metadata": {"title": "Document 1"},
-            },
-        }
-        mock_result_2 = MagicMock()
-        mock_result_2.payload = {
-            "id": str(uuid.uuid4()),
-            "score": 0.85,
-            "payload": {
-                "text": "This is the second summary.",
-                "document_id": doc_id2,
-                "metadata": {"title": "Document 2"},
-            },
-        }
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
 
-        mock_search_results = [mock_result_1, mock_result_2]
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
+        retriever = SummariesRetriever()
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
+        with pytest.raises(NoDataError):
+            await retriever.get_context("Christina Mayer")
 
-        # Verify
-        assert len(results) == 2
+        vector_engine = get_vector_engine()
+        await vector_engine.create_collection("TextSummary_text", payload_schema=TextSummary)
 
-        # Check first result
-        assert results[0]["payload"]["text"] == "This is the first summary."
-        assert results[0]["payload"]["document_id"] == doc_id1
-        assert results[0]["payload"]["metadata"]["title"] == "Document 1"
-        assert results[0]["score"] == 0.95
+        context = await retriever.get_context("Christina Mayer")
+        assert context == [], "Returned context should be empty on an empty graph"
 
-        # Check second result
-        assert results[1]["payload"]["text"] == "This is the second summary."
-        assert results[1]["payload"]["document_id"] == doc_id2
-        assert results[1]["payload"]["metadata"]["title"] == "Document 2"
-        assert results[1]["score"] == 0.85
 
-        # Verify search was called correctly
-        mock_vector_engine.search.assert_called_once_with("TextSummary_text", query, limit=5)
+if __name__ == "__main__":
+    from asyncio import run
 
-    @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.summaries_retriever.get_vector_engine")
-    async def test_get_completion_with_empty_results(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query with no results"
-        mock_search_results = []
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
+    test = TextSummariesRetriever()
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
-
-        # Verify
-        assert len(results) == 0
-        mock_vector_engine.search.assert_called_once_with("TextSummary_text", query, limit=5)
-
-    @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.summaries_retriever.get_vector_engine")
-    async def test_get_completion_with_custom_limit(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query with custom limit"
-        doc_id = str(uuid.uuid4())
-
-        # Mock search results
-        mock_result = MagicMock()
-        mock_result.payload = {
-            "id": str(uuid.uuid4()),
-            "score": 0.95,
-            "payload": {
-                "text": "This is a summary.",
-                "document_id": doc_id,
-                "metadata": {"title": "Document 1"},
-            },
-        }
-
-        mock_search_results = [mock_result]
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
-
-        # Set custom limit
-        mock_retriever.limit = 10
-
-        # Execute
-        results = await mock_retriever.get_completion(query)
-
-        # Verify
-        assert len(results) == 1
-        assert results[0]["payload"]["text"] == "This is a summary."
-
-        # Verify search was called with custom limit
-        mock_vector_engine.search.assert_called_once_with("TextSummary_text", query, limit=10)
+    run(test.test_chunk_context())
+    run(test.test_chunk_context_on_empty_graph())

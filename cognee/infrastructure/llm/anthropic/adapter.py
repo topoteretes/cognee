@@ -5,6 +5,7 @@ import instructor
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_retry_async
 
 
 class AnthropicAdapter(LLMInterface):
@@ -23,6 +24,8 @@ class AnthropicAdapter(LLMInterface):
         self.model = model
         self.max_tokens = max_tokens
 
+    @sleep_and_retry_async()
+    @rate_limit_async
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:

@@ -1,5 +1,4 @@
 import logging
-from decimal import Decimal
 from uuid import uuid5, NAMESPACE_OID
 from sqlalchemy import text
 from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
@@ -8,8 +7,6 @@ from cognee.infrastructure.databases.relational.get_migration_relational_engine 
 
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
-
-from uuid import uuid4
 
 from cognee.modules.engine.models import TableRow, TableType
 
@@ -148,12 +145,33 @@ async def migrate_relational_database(graph_db, schema):
                         )
                     )
 
+    def _remove_duplicate_edges(edge_mapping):
+        seen = set()
+        unique_original_shape = []
+
+        for tup in edge_mapping:
+            # We go through all the tuples in the edge_mapping and we only add unique tuples to the list
+            # To eliminate duplicate edges.
+            source_id, target_id, rel_name, rel_dict = tup
+            # We need to convert the dictionary to a frozenset to be able to compare values for it
+            rel_dict_hashable = frozenset(sorted(rel_dict.items()))
+            hashable_tup = (source_id, target_id, rel_name, rel_dict_hashable)
+
+            # We use the seen set to keep track of unique edges
+            if hashable_tup not in seen:
+                # A list that has frozensets elements instead of dictionaries is needed to be able to compare values
+                seen.add(hashable_tup)
+                # append the original tuple shape (with the dictionary) if it's the first time we see it
+                unique_original_shape.append(tup)
+
+        return unique_original_shape
+
     # Add all nodes and edges to the graph
     # NOTE: Nodes and edges have to be added in batch for speed optimization, Especially for NetworkX.
     #       If we'd create nodes and add them to graph in real time the process would take too long.
     #       Every node and edge added to NetworkX is saved to file which is very slow when not done in batches.
     await graph_db.add_nodes(list(node_mapping.values()))
-    await graph_db.add_edges(edge_mapping)
+    await graph_db.add_edges(_remove_duplicate_edges(edge_mapping))
 
     # In these steps we calculate the vector embeddings of our nodes and edges and save them to vector database
     # Cognee uses this information to perform searches on the knowledge graph.

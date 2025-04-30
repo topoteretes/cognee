@@ -2,7 +2,7 @@ import asyncio
 
 import cognee
 from cognee.modules.pipelines.operations.run_tasks import run_tasks_base
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.infrastructure.databases.relational import create_db_and_tables
 
@@ -19,11 +19,11 @@ async def run_and_check_tasks():
         for num in nums:
             yield num + 1
 
-    async def multiply_by_two(num):
-        yield num * 2
+    async def multiply_by_two(nums):
+        yield nums[0] * 2
 
-    async def add_one_single(num):
-        yield num + 1
+    async def add_one_single(nums):
+        yield nums[0] + 1
 
     await create_db_and_tables()
     user = await get_default_user()
@@ -42,7 +42,7 @@ async def run_and_check_tasks():
     results = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23]
     index = 0
     async for result in pipeline:
-        assert result == results[index], f"at {index = }: {result = } != {results[index] = }"
+        assert result[0] == results[index], f"at {index = }: {result = } != {results[index] = }"
         index += 1
 
 

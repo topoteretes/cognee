@@ -1,13 +1,11 @@
 name: test | ollama
 
 on:
-  workflow_dispatch:
-  pull_request:
-    types: [ labeled, synchronize ]
+  workflow_call:
 
 jobs:
 
-  run_simple_example_test:
+  run_ollama_test:
 
     # needs 16 Gb RAM for phi4
     runs-on: buildjet-4vcpu-ubuntu-2204
@@ -21,21 +19,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.12.x'
+          python-version: '3.11.x'
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-
-      - name: Install dependencies
+      - name: Install torch dependency
         run: |
-          poetry install --no-interaction --all-extras
           poetry add torch
 
 #      - name: Install ollama
@@ -110,7 +100,7 @@ jobs:
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://localhost:11434/v1/"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/api/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: poetry run python ./examples/python/simple_example.py

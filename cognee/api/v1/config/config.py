@@ -8,7 +8,7 @@ from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
 from cognee.infrastructure.files.storage import LocalStorage
 
 
@@ -126,6 +126,20 @@ class config:
         for key, value in config_dict.items():
             if hasattr(relational_db_config, key):
                 object.__setattr__(relational_db_config, key, value)
+            else:
+                raise InvalidAttributeError(
+                    message=f"'{key}' is not a valid attribute of the config."
+                )
+
+    @staticmethod
+    def set_migration_db_config(config_dict: dict):
+        """
+        Updates the relational db config with values from config_dict.
+        """
+        migration_db_config = get_migration_config()
+        for key, value in config_dict.items():
+            if hasattr(migration_db_config, key):
+                object.__setattr__(migration_db_config, key, value)
             else:
                 raise InvalidAttributeError(
                     message=f"'{key}' is not a valid attribute of the config."

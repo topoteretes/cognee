@@ -40,6 +40,7 @@ async def extract_chunks_from_documents(
         document_token_count = 0
         for document_chunk in document.read(max_chunk_size=max_chunk_size, chunker_cls=chunker):
             document_token_count += document_chunk.chunk_size
+            document_chunk.belongs_to_set = document.belongs_to_set
             yield document_chunk
 
         await update_document_token_count(document.id, document_token_count)

@@ -1,0 +1,27 @@
+name: cognee-setup
+description: "Sets up Python, installs Poetry, loads venv from cache, and installs dependencies for Cognee."
+
+inputs:
+  python-version:
+    description: "Which Python version to use"
+    required: false
+    default: "3.11.x"
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Poetry
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install poetry
+
+    - name: Install dependencies
+      shell: bash
+      run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama -E dev

@@ -9,6 +9,10 @@ import aiohttp.http_exceptions
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.embedding_rate_limiter import (
+    embedding_rate_limit_async,
+    embedding_sleep_and_retry_async,
+)
 
 logger = get_logger("OllamaEmbeddingEngine")
 
@@ -43,6 +47,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
+    @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
         Given a list of text prompts, returns a list of embedding vectors.
@@ -53,6 +58,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
+    @embedding_sleep_and_retry_async()
     async def _get_embedding(self, prompt: str) -> List[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
@@ -66,26 +72,12 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        retries = 0
-        while retries < self.MAX_RETRIES:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self.endpoint, json=payload, headers=headers, timeout=60.0
-                    ) as response:
-                        data = await response.json()
-                        return data["embedding"]
-            except aiohttp.http_exceptions.HttpBadRequest as e:
-                logger.error(f"HTTP error on attempt {retries + 1}: {e}")
-                retries += 1
-                await asyncio.sleep(min(2**retries, 60))
-            except Exception as e:
-                logger.error(f"Error on attempt {retries + 1}: {e}")
-                retries += 1
-                await asyncio.sleep(min(2**retries, 60))
-        raise EmbeddingException(
-            f"Failed to embed text using model {self.model} after {self.MAX_RETRIES} retries"
-        )
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.endpoint, json=payload, headers=headers, timeout=60.0
+            ) as response:
+                data = await response.json()
+                return data["embedding"]
 
     def get_vector_size(self) -> int:
         return self.dimensions

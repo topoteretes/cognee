@@ -1,10 +1,9 @@
-from datetime import datetime, timezone
-from typing import Optional, Any, Dict
-from uuid import UUID, uuid4
-
-from pydantic import BaseModel, Field
-from typing_extensions import TypedDict
 import pickle
+from uuid import UUID, uuid4
+from pydantic import BaseModel, Field
+from datetime import datetime, timezone
+from typing_extensions import TypedDict
+from typing import Optional, Any, Dict, List
 
 
 # Define metadata type
@@ -27,6 +26,7 @@ class DataPoint(BaseModel):
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
+    belongs_to_set: Optional[List["DataPoint"]] = None
 
     def __init__(self, **data):
         super().__init__(**data)

@@ -20,9 +20,6 @@ async def code_description_to_code_part_search(
     if user is None:
         user = await get_default_user()
 
-    if user is None:
-        raise PermissionError("No user found in the system. Please create a user.")
-
     retrieved_codeparts = await code_description_to_code_part(query, user, top_k, include_docs)
     return retrieved_codeparts
 
@@ -65,7 +62,7 @@ async def code_description_to_code_part(
 
     try:
         if include_docs:
-            search_results = await search(query_text=query, query_type="INSIGHTS", user=user)
+            search_results = await search(query_text=query, query_type="INSIGHTS")
 
             concatenated_descriptions = " ".join(
                 obj["description"]

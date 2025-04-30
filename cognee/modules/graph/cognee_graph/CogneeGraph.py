@@ -111,9 +111,6 @@ class CogneeGraph(CogneeAbstractGraph):
         except (ValueError, TypeError) as e:
             print(f"Error projecting graph: {e}")
             raise e
-        except Exception as ex:
-            print(f"Unexpected error: {ex}")
-            raise ex
 
     async def map_vector_distances_to_graph_nodes(self, node_distances) -> None:
         for category, scored_results in node_distances.items():
@@ -131,8 +128,10 @@ class CogneeGraph(CogneeAbstractGraph):
             if query_vector is None or len(query_vector) == 0:
                 raise ValueError("Failed to generate query embedding.")
 
-            edge_distances = await vector_engine.get_distance_from_collection_elements(
-                "EdgeType_relationship_name", query_text=query
+            edge_distances = await vector_engine.search(
+                collection_name="EdgeType_relationship_name",
+                query_text=query,
+                limit=0,
             )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}

@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, List
+from typing import Type, List, Optional
 
 from pydantic import BaseModel
 
@@ -51,12 +51,27 @@ async def integrate_chunk_graphs(
 
 
 async def extract_graph_from_data(
-    data_chunks: list[DocumentChunk],
+    data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_adapter: OntologyResolver = OntologyResolver(),
+    ontology_adapter: OntologyResolver = None,
 ) -> List[DocumentChunk]:
-    """Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model."""
+    """
+    Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
+    """
     chunk_graphs = await asyncio.gather(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
+
+    # Note: Filter edges with missing source or target nodes
+    if graph_model == KnowledgeGraph:
+        for graph in chunk_graphs:
+            valid_node_ids = {node.id for node in graph.nodes}
+            graph.edges = [
+                edge
+                for edge in graph.edges
+                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
+            ]
+
+    return await integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_adapter or OntologyResolver()
+    )

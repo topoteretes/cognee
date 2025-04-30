@@ -1,120 +1,198 @@
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-
+import os
 import pytest
+import pathlib
 
+import cognee
+from cognee.low_level import setup
+from cognee.tasks.storage import add_data_points
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 
 
 class TestChunksRetriever:
-    @pytest.fixture
-    def mock_retriever(self):
-        return ChunksRetriever()
+    @pytest.mark.asyncio
+    async def test_chunk_context_simple(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_chunks_context_simple"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_chunks_context_simple"
+        )
+        cognee.config.data_root_directory(data_directory_path)
+
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await setup()
+
+        document = TextDocument(
+            name="Steve Rodger's career",
+            raw_data_location="somewhere",
+            external_metadata="",
+            mime_type="text/plain",
+        )
+
+        chunk1 = DocumentChunk(
+            text="Steve Rodger",
+            chunk_size=2,
+            chunk_index=0,
+            cut_type="sentence_end",
+            is_part_of=document,
+            contains=[],
+        )
+        chunk2 = DocumentChunk(
+            text="Mike Broski",
+            chunk_size=2,
+            chunk_index=1,
+            cut_type="sentence_end",
+            is_part_of=document,
+            contains=[],
+        )
+        chunk3 = DocumentChunk(
+            text="Christina Mayer",
+            chunk_size=2,
+            chunk_index=2,
+            cut_type="sentence_end",
+            is_part_of=document,
+            contains=[],
+        )
+
+        entities = [chunk1, chunk2, chunk3]
+
+        await add_data_points(entities)
+
+        retriever = ChunksRetriever()
+
+        context = await retriever.get_context("Mike")
+
+        assert context[0]["text"] == "Mike Broski", "Failed to get Mike Broski"
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.chunks_retriever.get_vector_engine")
-    async def test_get_completion(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query"
-        doc_id1 = str(uuid.uuid4())
-        doc_id2 = str(uuid.uuid4())
+    async def test_chunk_context_complex(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_complex"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_complex"
+        )
+        cognee.config.data_root_directory(data_directory_path)
 
-        # Mock search results
-        mock_result_1 = MagicMock()
-        mock_result_1.payload = {
-            "id": str(uuid.uuid4()),
-            "text": "This is the first chunk result.",
-            "document_id": doc_id1,
-            "metadata": {"title": "Document 1"},
-        }
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await setup()
 
-        mock_result_2 = MagicMock()
-        mock_result_2.payload = {
-            "id": str(uuid.uuid4()),
-            "text": "This is the second chunk result.",
-            "document_id": doc_id2,
-            "metadata": {"title": "Document 2"},
-        }
+        document1 = TextDocument(
+            name="Employee List",
+            raw_data_location="somewhere",
+            external_metadata="",
+            mime_type="text/plain",
+        )
 
-        mock_search_results = [mock_result_1, mock_result_2]
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
+        document2 = TextDocument(
+            name="Car List",
+            raw_data_location="somewhere",
+            external_metadata="",
+            mime_type="text/plain",
+        )
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
+        chunk1 = DocumentChunk(
+            text="Steve Rodger",
+            chunk_size=2,
+            chunk_index=0,
+            cut_type="sentence_end",
+            is_part_of=document1,
+            contains=[],
+        )
+        chunk2 = DocumentChunk(
+            text="Mike Broski",
+            chunk_size=2,
+            chunk_index=1,
+            cut_type="sentence_end",
+            is_part_of=document1,
+            contains=[],
+        )
+        chunk3 = DocumentChunk(
+            text="Christina Mayer",
+            chunk_size=2,
+            chunk_index=2,
+            cut_type="sentence_end",
+            is_part_of=document1,
+            contains=[],
+        )
 
-        # Verify
-        assert len(results) == 2
+        chunk4 = DocumentChunk(
+            text="Range Rover",
+            chunk_size=2,
+            chunk_index=0,
+            cut_type="sentence_end",
+            is_part_of=document2,
+            contains=[],
+        )
+        chunk5 = DocumentChunk(
+            text="Hyundai",
+            chunk_size=2,
+            chunk_index=1,
+            cut_type="sentence_end",
+            is_part_of=document2,
+            contains=[],
+        )
+        chunk6 = DocumentChunk(
+            text="Chrysler",
+            chunk_size=2,
+            chunk_index=2,
+            cut_type="sentence_end",
+            is_part_of=document2,
+            contains=[],
+        )
 
-        # Check first result
-        assert results[0]["text"] == "This is the first chunk result."
-        assert results[0]["document_id"] == doc_id1
-        assert results[0]["metadata"]["title"] == "Document 1"
+        entities = [chunk1, chunk2, chunk3, chunk4, chunk5, chunk6]
 
-        # Check second result
-        assert results[1]["text"] == "This is the second chunk result."
-        assert results[1]["document_id"] == doc_id2
-        assert results[1]["metadata"]["title"] == "Document 2"
+        await add_data_points(entities)
 
-        # Verify search was called correctly
-        mock_vector_engine.search.assert_called_once_with("DocumentChunk_text", query, limit=5)
+        retriever = ChunksRetriever(top_k=20)
+
+        context = await retriever.get_context("Christina")
+
+        assert context[0]["text"] == "Christina Mayer", "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.chunks_retriever.get_vector_engine")
-    async def test_get_completion_with_empty_results(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query with no results"
-        mock_search_results = []
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
+    async def test_chunk_context_on_empty_graph(self):
+        system_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_empty"
+        )
+        cognee.config.system_root_directory(system_directory_path)
+        data_directory_path = os.path.join(
+            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_empty"
+        )
+        cognee.config.data_root_directory(data_directory_path)
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
 
-        # Verify
-        assert len(results) == 0
-        mock_vector_engine.search.assert_called_once_with("DocumentChunk_text", query, limit=5)
+        retriever = ChunksRetriever()
 
-    @pytest.mark.asyncio
-    @patch("cognee.modules.retrieval.chunks_retriever.get_vector_engine")
-    async def test_get_completion_with_missing_fields(self, mock_get_vector_engine, mock_retriever):
-        # Setup
-        query = "test query with incomplete data"
+        with pytest.raises(NoDataError):
+            await retriever.get_context("Christina Mayer")
 
-        # Mock search results
-        mock_result_1 = MagicMock()
-        mock_result_1.payload = {
-            "id": str(uuid.uuid4()),
-            "text": "This chunk has no document_id.",
-            # Missing document_id and metadata
-        }
-        mock_result_2 = MagicMock()
-        mock_result_2.payload = {
-            "id": str(uuid.uuid4()),
-            # Missing text
-            "document_id": str(uuid.uuid4()),
-            "metadata": {"title": "Document with missing text"},
-        }
+        vector_engine = get_vector_engine()
+        await vector_engine.create_collection("DocumentChunk_text", payload_schema=DocumentChunk)
 
-        mock_search_results = [mock_result_1, mock_result_2]
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.search.return_value = mock_search_results
-        mock_get_vector_engine.return_value = mock_vector_engine
+        context = await retriever.get_context("Christina Mayer")
+        assert len(context) == 0, "Found chunks when none should exist"
 
-        # Execute
-        results = await mock_retriever.get_completion(query)
 
-        # Verify
-        assert len(results) == 2
+if __name__ == "__main__":
+    from asyncio import run
 
-        # First result should have content but no document_id
-        assert results[0]["text"] == "This chunk has no document_id."
-        assert "document_id" not in results[0]
-        assert "metadata" not in results[0]
+    test = TestChunksRetriever()
 
-        # Second result should have document_id and metadata but no content
-        assert "text" not in results[1]
-        assert "document_id" in results[1]
-        assert results[1]["metadata"]["title"] == "Document with missing text"
+    async def main():
+        await test.test_chunk_context_simple()
+        await test.test_chunk_context_complex()
+        await test.test_chunk_context_on_empty_graph()
+
+    run(main())
