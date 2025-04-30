@@ -7,19 +7,18 @@ from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-from .serialize_data import serialize_data
 from ..utils import normalize_distances
+from ..models.ScoredResult import ScoredResult
+from ..exceptions import CollectionNotFoundError
+from ..vector_db_interface import VectorDBInterface
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from .serialize_data import serialize_data
 
 
 class IndexSchema(DataPoint):
@@ -203,60 +202,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 for result in results
             ]
 
-    async def get_distance_from_collection_elements(
-        self,
-        collection_name: str,
-        query_text: str = None,
-        query_vector: List[float] = None,
-        with_vector: bool = False,
-    ) -> List[ScoredResult]:
-        if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
-
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
-
-        try:
-            # Get PGVectorDataPoint Table from database
-            PGVectorDataPoint = await self.get_table(collection_name)
-
-            # Use async session to connect to the database
-            async with self.get_async_session() as session:
-                # Find closest vectors to query_vector
-                closest_items = await session.execute(
-                    select(
-                        PGVectorDataPoint,
-                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                            "similarity"
-                        ),
-                    ).order_by("similarity")
-                )
-
-            vector_list = []
-
-            # Extract distances and find min/max for normalization
-            for vector in closest_items:
-                # TODO: Add normalization of similarity score
-                vector_list.append(vector)
-
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(id=parse_id(str(row.id)), payload=row.payload, score=row.similarity)
-                for row in vector_list
-            ]
-        except EntityNotFoundError:
-            # Ignore if collection does not exist
-            return []
-        except CollectionNotFoundError:
-            # Ignore if collection does not exist
-            return []
-
     async def search(
         self,
         collection_name: str,
         query_text: Optional[str] = None,
         query_vector: Optional[List[float]] = None,
-        limit: int = 5,
+        limit: int = 15,
         with_vector: bool = False,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
@@ -273,20 +224,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Use async session to connect to the database
         async with self.get_async_session() as session:
+            query = select(
+                PGVectorDataPoint,
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+            ).order_by("similarity")
+
+            if limit > 0:
+                query = query.limit(limit)
+
             # Find closest vectors to query_vector
-            closest_items = await session.execute(
-                select(
-                    PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                )
-                .order_by("similarity")
-                .limit(limit)
-            )
+            closest_items = await session.execute(query)
 
         vector_list = []
 
         # Extract distances and find min/max for normalization
-        for vector in closest_items:
+        for vector in closest_items.all():
             vector_list.append(
                 {
                     "id": parse_id(str(vector.id)),
@@ -294,6 +246,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     "_distance": vector.similarity,
                 }
             )
+
+        if len(vector_list) == 0:
+            return []
 
         # Normalize vector distance and add this as score information to vector_list
         normalized_values = normalize_distances(vector_list)

@@ -112,6 +112,7 @@ gui = [
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
 dev = [
     "pytest>=7.4.0,<8",
+    "pytest-cov>=6.1.1",
     "pytest-asyncio>=0.21.1,<0.22",
     "coverage>=7.3.2,<8",
     "mypy>=1.7.1,<2",
