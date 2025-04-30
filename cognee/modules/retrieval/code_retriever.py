@@ -19,9 +19,9 @@ class CodeRetriever(BaseRetriever):
         filenames: List[str] = []
         sourcecode: str
 
-    def __init__(self, limit: int = 3):
+    def __init__(self, top_k: int = 3):
         """Initialize retriever with search parameters."""
-        self.limit = limit
+        self.top_k = top_k
         self.file_name_collections = ["CodeFile_name"]
         self.classes_and_functions_collections = [
             "ClassDefinition_source_code",
@@ -60,7 +60,7 @@ class CodeRetriever(BaseRetriever):
         if not files_and_codeparts.filenames or not files_and_codeparts.sourcecode:
             for collection in self.file_name_collections:
                 search_results_file = await vector_engine.search(
-                    collection, query, limit=self.limit
+                    collection, query, limit=self.top_k
                 )
                 for res in search_results_file:
                     similar_filenames.append(
@@ -69,7 +69,7 @@ class CodeRetriever(BaseRetriever):
 
             for collection in self.classes_and_functions_collections:
                 search_results_code = await vector_engine.search(
-                    collection, query, limit=self.limit
+                    collection, query, limit=self.top_k
                 )
                 for res in search_results_code:
                     similar_codepieces.append(
@@ -79,7 +79,7 @@ class CodeRetriever(BaseRetriever):
             for collection in self.file_name_collections:
                 for file_from_query in files_and_codeparts.filenames:
                     search_results_file = await vector_engine.search(
-                        collection, file_from_query, limit=self.limit
+                        collection, file_from_query, limit=self.top_k
                     )
                     for res in search_results_file:
                         similar_filenames.append(
@@ -88,7 +88,7 @@ class CodeRetriever(BaseRetriever):
 
             for collection in self.classes_and_functions_collections:
                 search_results_code = await vector_engine.search(
-                    collection, files_and_codeparts.sourcecode, limit=self.limit
+                    collection, files_and_codeparts.sourcecode, limit=self.top_k
                 )
                 for res in search_results_code:
                     similar_codepieces.append(
