@@ -53,7 +53,7 @@ def deadlock_retry(max_retries=5):
                         await wait()
                     else:
                         raise  # Re-raise the original error
-                except DatabaseUnavailable as error:
+                except DatabaseUnavailable:
                     if attempt >= max_retries:
                         raise  # Re-raise the original error
 

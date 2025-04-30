@@ -26,7 +26,7 @@ async def test_deadlock_retry():
     wrapped_function = deadlock_retry(max_retries=2)(mock_function)
 
     result = await wrapped_function(self=None)
-    assert result == True, "Function should have succeded on second time"
+    assert result, "Function should have succeded on second time"
 
 
 async def test_deadlock_retry_exhaustive():
@@ -39,7 +39,7 @@ async def test_deadlock_retry_exhaustive():
     wrapped_function = deadlock_retry(max_retries=2)(mock_function)
 
     result = await wrapped_function(self=None)
-    assert result == True, "Function should have succeded on second time"
+    assert result, "Function should have succeded on second time"
 
 
 if __name__ == "__main__":
