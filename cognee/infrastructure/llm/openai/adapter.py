@@ -1,14 +1,11 @@
 import os
 import base64
-from pathlib import Path
-from typing import Type
-
 import litellm
 import instructor
+from typing import Type
 from pydantic import BaseModel
 
 from cognee.modules.data.processing.document_types.open_data_file import open_data_file
-from cognee.shared.data_models import MonitoringTool
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -18,12 +15,9 @@ from cognee.infrastructure.llm.rate_limiter import (
     sleep_and_retry_async,
     sleep_and_retry_sync,
 )
-from cognee.base_config import get_base_config
+from cognee.modules.observability.get_observe import get_observe
 
-monitoring = get_base_config().monitoring_tool
-
-if monitoring == MonitoringTool.LANGFUSE:
-    from langfuse.decorators import observe
+observe = get_observe()
 
 
 class OpenAIAdapter(LLMInterface):
