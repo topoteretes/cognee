@@ -1,13 +1,53 @@
-preliminary_task:
+soft_skills_assessment_task:
   description: >
-    Call the cognee build tool and create a memory where we store facts.
+    Ask multiple questions to cognee search (database that contains the user comments) and try to explore the different comments the user made.
+    Evaluate the comments based on the communications clarity, community engagement, and general kindness.
+    Please make the output in a way that it expresses the soft skills of the person.
+    The people to evaluate are:
+    -Dean P.
+    -Thomas M.
+    You can search them by asking comments by 'person', however you are allowed
+    and encouraged to ask multiple questions.
   expected_output: >
-    Detailed information about about the process
-  agent: test_agent
+    results strictly containing:
+      - Name of the person
+      - communication_clarity (0–1),
+      - community_engagement (0–1),
+      - kindness (0-1),
+      - reasoning (string)
+  agent: soft_skills_expert_agent
 
-search_task:
+technical_assessment_task:
   description: >
-    Use the cognee search tool and give me the answer what is cognee?
+    Evaluate each candidate’s codebase and commit history to produce
+    scores for code_diversity, depth_of_contrib, and commit_quality,
+    along with narrative comments detailing your findings. Use strictly the technical input
+    when you are scoring the candidate, you are not allowed to make any comment about soft skills.
+    The people to evaluate are:
+        -Dean P.
+        -Thomas M.
+    You can search them by code written by 'person', however you are allowed
+    and encouraged to ask multiple questions.
   expected_output: >
-    The answer to the question: "What is cognee?"
-  agent: test_agent
+    results strictly containing:
+      - Name of the person
+      - code_diversity (0–1),
+      - depth_of_contribution (0–1),
+      - commit_quality (0–1),
+      - reasoning (string)
+  agent: technical_expert_agent
+
+hiring_decision_task:
+  description: >
+    Review the technical_assessment_task and soft_skills_assessment_task outputs,
+    then decide HIRE or NO_HIRE for each candidate with a detailed reasoning.
+    The people to evaluate are:
+      -Dean P.
+      -Thomas M.
+    We have to hire one of them.
+  expected_output: >
+    A string strictly containing the following for each person:
+      - Person
+      - decision: "HIRE" or "NO_HIRE",
+      - reasoning: (string)
+  agent: decision_maker_agent

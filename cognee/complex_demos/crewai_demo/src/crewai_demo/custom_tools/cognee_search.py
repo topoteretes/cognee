@@ -1,22 +1,25 @@
 from crewai.tools import BaseTool
 from typing import Type, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from cognee.api.v1.search import SearchType
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.search.methods import search
 from cognee.modules.users.methods import get_default_user
 
 
 class CogneeSearchInput(BaseModel):
-    query: Optional[str] = Field(
-        None, description="The query/question provided to the search engine"
-    )
+    query: str = Field(None, description="Query to ask from the search engine.")
 
 
 class CogneeSearch(BaseTool):
     name: str = "Cognee Memory SEARCH"
     description: str = "Search inside the cognee memory engine by providing the query"
     args_schema: Type[BaseModel] = CogneeSearchInput
-    pruned: bool = False
+    _nodeset_name: List[str] = PrivateAttr()
+
+    def __init__(self, nodeset_name: List[str], **kwargs):
+        super().__init__(**kwargs)
+        self._nodeset_name = nodeset_name
 
     def _run(self, **kwargs) -> str:
         import cognee
@@ -26,7 +29,10 @@ class CogneeSearch(BaseTool):
             try:
                 print(kwargs.get("query"))
                 search_results = await cognee.search(
-                    query_type=SearchType.GRAPH_COMPLETION, query_text=kwargs.get("query")
+                    query_type=SearchType.GRAPH_COMPLETION,
+                    query_text=kwargs.get("query"),
+                    node_type=NodeSet,
+                    node_name=self._nodeset_name,
                 )
                 return search_results
             except Exception as e:

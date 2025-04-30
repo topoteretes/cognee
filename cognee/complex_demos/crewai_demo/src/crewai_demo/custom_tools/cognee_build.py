@@ -4,22 +4,21 @@ from crewai.tools import BaseTool
 class CogneeBuild(BaseTool):
     name: str = "Cognee Build"
     description: str = "Creates a memory and builds a knowledge graph using cognee."
-    pruned: bool = False
 
-    def _run(self, **kwargs) -> str:
+    def _run(self, inputs) -> str:
         import cognee
         import asyncio
 
         async def main():
             try:
-                text_1 = "Cognee is an AI memory engine"
-                text_2 = "Germany is a country"
-
                 await cognee.prune.prune_data()
                 await cognee.prune.prune_system(metadata=True)
 
-                await cognee.add(text_1, node_set=["first_text"])
-                await cognee.add(text_2, node_set=["second_text"])
+                for meta in inputs.values():
+                    text = meta["file_content"]
+                    node_set = meta["nodeset"]
+                    await cognee.add(text, node_set=node_set)
+
                 await cognee.cognify()
 
                 return "Knowledge Graph is done."
