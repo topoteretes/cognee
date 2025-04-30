@@ -170,6 +170,8 @@ async def brute_force_search(
 
         return results
 
+    except CollectionNotFoundError:
+        return []
     except Exception as error:
         logger.error(
             "Error during brute force search for user: %s, query: %s. Error: %s",
