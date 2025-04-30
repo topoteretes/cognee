@@ -15,11 +15,9 @@ async def main():
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
-    # Configure KuzuDB as the vector database provider
-    cognee.config.set_vector_db_config({
-        "vector_db_url": "",                      # Not needed for KuzuDB
-        "vector_db_key": "",                      # Not needed for KuzuDB
-        "vector_db_provider": "kuzu",             # Specify KuzuDB as provider
+    # Configure KuzuDB as the graph database provider
+    cognee.config.set_graph_db_config({
+        "graph_database_provider": "kuzu",             # Specify KuzuDB as provider
     })
 
     # Set up data directories for storing documents and system files

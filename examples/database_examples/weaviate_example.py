@@ -16,15 +16,12 @@ async def main():
     5. Performs different types of searches
     """
     # Configure Weaviate as the vector database provider
-    # Option 1: Simple configuration with just the provider
-    cognee.config.set_vector_db_provider("weaviate")
-    
-    # Option 2: More detailed configuration
-    # cognee.config.set_vector_db_config({
-    #     "vector_db_url": "http://localhost:8080",  # Default Weaviate URL
-    #     "vector_db_key": "",                      # API key if needed
-    #     "vector_db_provider": "weaviate",         # Specify Weaviate as provider
-    # })
+
+    cognee.config.set_vector_db_config({
+        "vector_db_url": "",                      # Set your Weaviate Endpoint
+        "vector_db_key": "",                      # Set your Weaviate API key 
+        "vector_db_provider": "weaviate",         # Specify Weaviate as provider
+    })
 
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs

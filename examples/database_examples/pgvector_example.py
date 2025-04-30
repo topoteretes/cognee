@@ -17,15 +17,12 @@ async def main():
     """
     # Configure PGVector as the vector database provider
     cognee.config.set_vector_db_config({
-        "vector_db_url": "",                      # Not needed for PGVector
-        "vector_db_key": "",                      # Not needed for PGVector
         "vector_db_provider": "pgvector",         # Specify PGVector as provider
     })
     
     # Configure PostgreSQL connection details
     # These settings are required for PGVector
     cognee.config.set_relational_db_config({
-        "db_path": "",
         "db_name": "cognee_db",                 # Database name
         "db_host": "127.0.0.1",                 # Database host
         "db_port": "5432",                      # PostgreSQL port

@@ -9,19 +9,18 @@ async def main():
     Example script demonstrating how to use Cognee with Neo4j
     
     This example:
-    1. Configures Cognee to use Neo4j as vector database
+    1. Configures Cognee to use Neo4j as graph database
     2. Sets up data directories
     3. Adds sample data to Cognee
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
-    # Configure Neo4j as the vector database provider
-    cognee.config.set_vector_db_config({
-        "vector_db_url": "bolt://localhost:7687",  # Neo4j Bolt URL
-        "vector_db_key": "",                       # Not used for Neo4j
-        "vector_db_provider": "neo4j",             # Specify Neo4j as provider
-        "db_username": "neo4j",                    # Neo4j username 
-        "db_password": "password",                 # Neo4j password
+    # Configure Neo4j as the graph database provider
+    cognee.config.set_graph_db_config({
+        "graph_database_url": "bolt://localhost:7687",  # Neo4j Bolt URL
+        "graph_database_provider": "neo4j",             # Specify Neo4j as provider
+        "graph_database_username": "neo4j",            # Neo4j username 
+        "graph_database_password": "pleaseletmein",         # Neo4j password
     })
 
     # Set up data directories for storing documents and system files

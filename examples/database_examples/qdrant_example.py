@@ -16,15 +16,12 @@ async def main():
     5. Performs different types of searches
     """
     # Configure Qdrant as the vector database provider
-    # Option 1: Simple configuration with just the provider
-    cognee.config.set_vector_db_provider("qdrant")
-    
-    # Option 2: More detailed configuration
-    # cognee.config.set_vector_db_config({
-    #     "vector_db_url": "http://localhost:6333",  # Default Qdrant URL
-    #     "vector_db_key": "",                       # API key if needed
-    #     "vector_db_provider": "qdrant",            # Specify Qdrant as provider
-    # })
+
+    cognee.config.set_vector_db_config({
+        "vector_db_url": "",  # Enter Qdrant URL
+        "vector_db_key": "",                       # API key needed
+        "vector_db_provider": "qdrant",            # Specify Qdrant as provider
+    })
 
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs

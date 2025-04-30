@@ -17,8 +17,8 @@ async def main():
     """
     # Configure Milvus as the vector database provider
     cognee.config.set_vector_db_config({
-        "vector_db_url": "localhost:19530",      # Default Milvus URL
-        "vector_db_key": "",                     # Not required for Milvus
+        "vector_db_url": "",      # Enter Milvus Endpoint
+        "vector_db_key": "",                     # Enter Token
         "vector_db_provider": "milvus",          # Specify Milvus as provider
     })
 

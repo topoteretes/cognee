@@ -15,11 +15,11 @@ async def main():
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
-    # Configure FalkorDB as the vector database provider
-    cognee.config.set_vector_db_config({
-        "vector_db_url": "redis://localhost:6379",  # FalkorDB URL (using Redis protocol)
-        "vector_db_key": "",                        # Not used for FalkorDB
-        "vector_db_provider": "falkordb",           # Specify FalkorDB as provider
+    # Configure FalkorDB as the graph database provider
+    cognee.config.set_graph_db_config({
+        "graph_database_url": "localhost",  # FalkorDB URL (using Redis protocol)
+        "graph_database_port":6379,
+        "graph_database_provider": "falkordb",    
     })
 
     # Set up data directories for storing documents and system files
