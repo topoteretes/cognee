@@ -118,14 +118,14 @@ Example output:
 ```
 ### cognee UI 
 
-You can also cognify your files and query using cognee UI. Below is an example: 
-<img src="assets/cognee-ui-1.webp" width="100%" alt="Cognee UI 1"></a>
+You can also cognify your files and query using cognee UI. 
+
+Below is an example: 
+
 <img src="assets/cognee-ui-2.webp" width="100%" alt="Cognee UI 2"></a>
 
 
-See more details on cognee UI [here](https://docs.cognee.ai/how-to-guides/cognee-ui).
-
-For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
+Try cognee UI out locally: [here](https://docs.cognee.ai/how-to-guides/cognee-ui).
 
 
 ## Understand our architecture
