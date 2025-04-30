@@ -5,6 +5,7 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.databases.graph.neo4j_driver.deadlock_retry import deadlock_retry
 
 
+@pytest.mark.asyncio
 async def test_deadlock_retry_errored():
     mock_return = asyncio.Future()
     mock_return.set_result(True)
@@ -18,6 +19,7 @@ async def test_deadlock_retry_errored():
         await wrapped_function(self=None)
 
 
+@pytest.mark.asyncio
 async def test_deadlock_retry():
     mock_return = asyncio.Future()
     mock_return.set_result(True)
@@ -29,6 +31,7 @@ async def test_deadlock_retry():
     assert result, "Function should have succeded on second time"
 
 
+@pytest.mark.asyncio
 async def test_deadlock_retry_exhaustive():
     mock_return = asyncio.Future()
     mock_return.set_result(True)
