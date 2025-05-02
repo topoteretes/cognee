@@ -1,3 +1,4 @@
+
 """Get the LLM client."""
 
 from enum import Enum
@@ -14,6 +15,7 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
     GEMINI = "gemini"
+    LM_STUDIO = "lm_studio"  # Add LM Studio provider
 
 
 def get_llm_client():
@@ -92,6 +94,20 @@ def get_llm_client():
             max_tokens=max_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
+            streaming=llm_config.llm_streaming,
+        )
+
+    elif provider == LLMProvider.LM_STUDIO:
+        if llm_config.llm_api_key is None:
+            raise InvalidValueError(message="LLM API key is not set.")
+
+        from .lm_studio.adapter import LMStudioAdapter
+
+        return LMStudioAdapter(
+            endpoint=llm_config.llm_endpoint,
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_tokens=max_tokens,
             streaming=llm_config.llm_streaming,
         )
 
