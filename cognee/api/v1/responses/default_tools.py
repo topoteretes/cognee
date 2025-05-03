@@ -55,6 +55,7 @@ DEFAULT_TOOLS = [
                     "description": "Path to a custom graph model file",
                 },
             },
+            "required": ["text"],
         },
     },
     # Commented as dangerous

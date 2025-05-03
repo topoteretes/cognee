@@ -38,7 +38,7 @@ def get_responses_router() -> APIRouter:
         Get appropriate client based on model name
         """
         llm_config = get_llm_config()
-        return openai.OpenAI(api_key=llm_config.llm_api_key)
+        return openai.AsyncOpenAI(api_key=llm_config.llm_api_key)
 
     async def call_openai_api_for_model(
         input_text: str,
@@ -58,7 +58,7 @@ def get_responses_router() -> APIRouter:
 
         logger.debug(f"Using model: {model}")
 
-        response = client.responses.create(
+        response = await client.responses.create(
             model=model,
             input=input_text,
             temperature=temperature,
