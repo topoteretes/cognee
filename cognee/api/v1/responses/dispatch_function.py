@@ -66,7 +66,7 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
         logger.warning(f"Invalid search_type: {search_type_str}, defaulting to GRAPH_COMPLETION")
         search_type_str = "GRAPH_COMPLETION"
 
-    query_type = search_type_str
+    query_type = SearchType[search_type_str]
 
     top_k = arguments.get("top_k")
     datasets = arguments.get("datasets")
