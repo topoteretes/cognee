@@ -72,7 +72,8 @@ Your contributions are at the core of making this a true open source project. An
 
 ## 📦 Installation
 
-You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
+You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager. 
+Cognee supports Python 3.8 to 3.12
 
 ### With pip
 
