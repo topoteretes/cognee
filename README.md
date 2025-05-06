@@ -38,7 +38,10 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   <a href="community/README.pt.md">🇵🇹 Português</a>
   ·
   <a href="community/README.zh.md">🇨🇳 [中文]</a>
+  ·
+  <a href="community/README.ru.md">🇷🇺 Русский</a>
   </p>
+  
 
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
