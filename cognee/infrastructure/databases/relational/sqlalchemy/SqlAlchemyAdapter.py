@@ -69,7 +69,7 @@ class SQLAlchemyAdapter:
     async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # SQLite doesn’t support schema namespaces and the CASCADE keyword.
+                # SQLite doesn't support schema namespaces and the CASCADE keyword.
                 # However, foreign key constraint can be defined with ON DELETE CASCADE during table creation.
                 await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}";'))
             else:
@@ -323,6 +323,8 @@ class SQLAlchemyAdapter:
                 from cognee.infrastructure.files.storage import LocalStorage
 
                 await self.engine.dispose(close=True)
+                db_directory = path.dirname(self.db_path)
+                LocalStorage.ensure_directory_exists(db_directory)
                 with open(self.db_path, "w") as file:
                     file.write("")
             else:
