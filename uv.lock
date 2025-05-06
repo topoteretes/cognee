@@ -26,6 +26,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/95/67/026598918f92145156f2feb7957f57daefda20375cc2ac1a0692a9b8010b/aiobotocore-2.21.1-py3-none-any.whl", hash = "sha256:bd7c49a6d6f8a3d9444b0a94417c8da13813b5c7eec1c4f0ec2db7e8ce8f23e7", size = 78313 },
 ]
 
+[package.optional-dependencies]
+boto3 = [
+    { name = "boto3" },
+]
+
 [[package]]
 name = "aiofiles"
 version = "23.2.1"
@@ -861,8 +866,6 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "alembic" },
-    { name = "boto3" },
-    { name = "botocore" },
     { name = "dlt", extra = ["sqlalchemy"] },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
@@ -887,7 +890,7 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
-    { name = "s3fs" },
+    { name = "s3fs", extra = ["boto3"] },
     { name = "scikit-learn" },
     { name = "sentry-sdk", extra = ["fastapi"] },
     { name = "sqlalchemy" },
@@ -1004,14 +1007,12 @@ weaviate = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiofiles", specifier = ">=23.2.1,<24" },
-    { name = "aiohttp", specifier = ">=3.11.14,<4" },
+    { name = "aiofiles", specifier = ">=23.2.1" },
+    { name = "aiohttp", specifier = ">=3.11.14" },
     { name = "aiosqlite", specifier = ">=0.20.0,<0.21" },
     { name = "alembic", specifier = ">=1.13.3,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.26.1,<0.27" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = "==0.30.0" },
-    { name = "boto3", specifier = "==1.37.1" },
-    { name = "botocore", specifier = ">=1.35.54,<2" },
     { name = "chromadb", marker = "extra == 'chromadb'", specifier = ">=0.3.0,<0.7" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.3.2,<8" },
     { name = "debugpy", marker = "extra == 'dev'", specifier = "==1.8.9" },
@@ -1022,7 +1023,7 @@ requires-dist = [
     { name = "fastapi", specifier = "==0.115.7" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = "==14.0.1" },
     { name = "fastembed", marker = "python_full_version < '3.13' and extra == 'codegraph'", specifier = "<=0.6.0" },
-    { name = "filetype", specifier = ">=1.2.0,<2" },
+    { name = "filetype", specifier = ">=1.2.0" },
     { name = "gdown", marker = "extra == 'evals'", specifier = ">=5.2.0,<6" },
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.43,<4" },
     { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.8.4,<0.9" },
@@ -1035,7 +1036,7 @@ requires-dist = [
     { name = "kuzu", marker = "extra == 'kuzu'", specifier = "==0.8.2" },
     { name = "lancedb", specifier = "==0.16.0" },
     { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = "==0.3.2" },
-    { name = "langfuse", specifier = ">=2.32.0,<3" },
+    { name = "langfuse", specifier = ">=2.32.0" },
     { name = "langsmith", marker = "extra == 'langchain'", specifier = "==0.2.3" },
     { name = "limits", specifier = ">=4.4.1,<5" },
     { name = "litellm", specifier = ">=1.57.4" },
@@ -1054,7 +1055,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26.4,<=2.1" },
     { name = "openai", specifier = ">=1.59.4,<2" },
     { name = "owlready2", specifier = ">=0.47,<0.48" },
-    { name = "pandas", specifier = "==2.2.3" },
+    { name = "pandas", specifier = ">=2.2.2" },
     { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4" },
     { name = "plotly", marker = "extra == 'evals'", specifier = ">=6.0.0,<7" },
     { name = "posthog", marker = "extra == 'posthog'", specifier = ">=3.5.0,<4" },
@@ -1071,12 +1072,12 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0,<8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.1,<0.22" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.1.1" },
-    { name = "python-dotenv", specifier = "==1.0.1" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "python-multipart", specifier = "==0.0.20" },
     { name = "qasync", marker = "extra == 'gui'", specifier = ">=0.27.1,<0.28" },
     { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.9.0,<2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<1.0.0" },
-    { name = "s3fs", specifier = "==2025.3.2" },
+    { name = "s3fs", extras = ["boto3"], specifier = "==2025.3.2" },
     { name = "scikit-learn", specifier = ">=1.6.1,<2" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.9.0,<3" },
     { name = "sqlalchemy", specifier = "==2.0.39" },
@@ -6887,6 +6888,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/72/df/559dc6d796c38f1b8a09a5f6dcf62a467a84f3c87a837ee07c59f60a26ad/s3fs-2025.3.2.tar.gz", hash = "sha256:6798f896ec76dd3bfd8beb89f0bb7c5263cb2760e038bae0978505cd172a307c", size = 77280 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/66/e1/4db0388df5655de92ce5f9b60d2bef220a58dde130e0453e5433c579986e/s3fs-2025.3.2-py3-none-any.whl", hash = "sha256:81eae3f37b4b04bcc08845d7bcc607c6ca45878813ef7e6a28d77b2688417130", size = 30485 },
+]
+
+[package.optional-dependencies]
+boto3 = [
+    { name = "aiobotocore", extra = ["boto3"] },
 ]
 
 [[package]]

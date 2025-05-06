@@ -15,6 +15,7 @@ files = [
 [package.dependencies]
 aiohttp = ">=3.9.2,<4.0.0"
 aioitertools = ">=0.5.1,<1.0.0"
+boto3 = {version = ">=1.37.0,<1.37.2", optional = true, markers = "extra == \"boto3\""}
 botocore = ">=1.37.0,<1.37.2"
 jmespath = ">=0.7.1,<2.0.0"
 multidict = ">=6.0.0,<7.0.0"
@@ -1225,7 +1226,7 @@ description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "(sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\") and (platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"codegraph\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\" or extra == \"codegraph\") and (python_version < \"3.13\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\")"
+markers = "(sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"codegraph\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\" or extra == \"codegraph\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\") and (python_version < \"3.13\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\")"
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -1238,7 +1239,7 @@ description = "Colored terminal output for Python's logging module"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
-markers = "python_version == \"3.10\" and (extra == \"codegraph\" or extra == \"chromadb\") or extra == \"chromadb\" or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "coloredlogs-15.0.1-py2.py3-none-any.whl", hash = "sha256:612ee75c546f53e92e70049c9dbfcc18c935a2b9a53b66085ce9ef6a6e5c0934"},
     {file = "coloredlogs-15.0.1.tar.gz", hash = "sha256:7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0"},
@@ -2298,7 +2299,7 @@ description = "The FlatBuffers serialization format for Python"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "python_version == \"3.10\" and (extra == \"codegraph\" or extra == \"chromadb\") or extra == \"chromadb\" or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "flatbuffers-25.2.10-py2.py3-none-any.whl", hash = "sha256:ebba5f4d5ea615af3f7fd70fc310636fbb2bbd1f566ac0a23d98dd412de50051"},
     {file = "flatbuffers-25.2.10.tar.gz", hash = "sha256:97e451377a41262f8d9bd4295cc836133415cc03d8cb966410a4af92eb00d26e"},
@@ -3451,7 +3452,7 @@ description = "Human friendly output for text interfaces using Python"
 optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
-markers = "python_version == \"3.10\" and (extra == \"codegraph\" or extra == \"chromadb\") or extra == \"chromadb\" or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477"},
     {file = "humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc"},
@@ -5954,7 +5955,7 @@ description = "Python library for arbitrary-precision floating-point arithmetic"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "python_version == \"3.10\" and (extra == \"codegraph\" or extra == \"chromadb\") or extra == \"chromadb\" or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"},
     {file = "mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"},
@@ -6536,7 +6537,7 @@ description = "ONNX Runtime is a runtime accelerator for Machine Learning models
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version == \"3.10\" and (extra == \"codegraph\" or extra == \"chromadb\") or extra == \"chromadb\" or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "onnxruntime-1.21.1-cp310-cp310-macosx_13_0_universal2.whl", hash = "sha256:daedb5d33d8963062a25f4a3c788262074587f685a19478ef759a911b4b12c25"},
     {file = "onnxruntime-1.21.1-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3a402f9bda0b1cc791d9cf31d23c471e8189a55369b49ef2b9d0854eb11d22c4"},
@@ -6936,8 +6937,8 @@ files = [
 [package.dependencies]
 numpy = [
     {version = ">=1.22.4", markers = "python_version < \"3.11\""},
-    {version = ">=1.23.2", markers = "python_version == \"3.11\""},
     {version = ">=1.26.0", markers = "python_version >= \"3.12\""},
+    {version = ">=1.23.2", markers = "python_version == \"3.11\""},
 ]
 python-dateutil = ">=2.8.2"
 pytz = ">=2020.1"
@@ -7556,7 +7557,7 @@ description = ""
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version == \"3.10\" and extra == \"codegraph\" or (extra == \"chromadb\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"gemini\" or extra == \"deepeval\" or extra == \"milvus\") and python_version < \"3.11\" or python_version == \"3.11\" and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"gemini\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"deepeval\" or extra == \"milvus\") or (python_version == \"3.12\" or extra == \"gemini\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"deepeval\" or extra == \"milvus\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"gemini\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"deepeval\" or extra == \"milvus\") and python_version >= \"3.12\""
+markers = "python_version == \"3.10\" and extra == \"codegraph\" or (extra == \"chromadb\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"gemini\" or extra == \"deepeval\" or extra == \"milvus\") and python_version < \"3.11\" or (python_version == \"3.12\" or extra == \"gemini\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"deepeval\" or extra == \"milvus\" or extra == \"chromadb\") and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"gemini\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"deepeval\" or extra == \"milvus\") and python_version >= \"3.12\" or python_version == \"3.11\" and (extra == \"codegraph\" or extra == \"chromadb\" or extra == \"gemini\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"deepeval\" or extra == \"milvus\")"
 files = [
     {file = "protobuf-5.29.4-cp310-abi3-win32.whl", hash = "sha256:13eb236f8eb9ec34e63fc8b1d6efd2777d062fa6aaa68268fb67cf77f6839ad7"},
     {file = "protobuf-5.29.4-cp310-abi3-win_amd64.whl", hash = "sha256:bcefcdf3976233f8a502d265eb65ea740c989bacc6c30a58290ed0e519eb4b8d"},
@@ -8140,8 +8141,8 @@ astroid = ">=3.3.8,<=3.4.0.dev0"
 colorama = {version = ">=0.4.5", markers = "sys_platform == \"win32\""}
 dill = [
     {version = ">=0.2", markers = "python_version < \"3.11\""},
-    {version = ">=0.3.6", markers = "python_version >= \"3.11\""},
     {version = ">=0.3.7", markers = "python_version >= \"3.12\""},
+    {version = ">=0.3.6", markers = "python_version == \"3.11\""},
 ]
 isort = ">=4.2.5,<5.13 || >5.13,<7"
 mccabe = ">=0.6,<0.8"
@@ -8270,7 +8271,7 @@ description = "A python implementation of GNU readline."
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "sys_platform == \"win32\" and python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or sys_platform == \"win32\" and extra == \"chromadb\" or sys_platform == \"win32\" and (extra == \"chromadb\" or extra == \"codegraph\") and python_version == \"3.11\" or sys_platform == \"win32\" and (extra == \"chromadb\" or extra == \"codegraph\") and python_version == \"3.12\""
+markers = "sys_platform == \"win32\" and (python_version == \"3.10\" or extra == \"chromadb\" or extra == \"codegraph\") and (extra == \"chromadb\" or python_version == \"3.12\" or python_version == \"3.10\" or python_version == \"3.11\") and (extra == \"codegraph\" or extra == \"chromadb\")"
 files = [
     {file = "pyreadline3-3.5.4-py3-none-any.whl", hash = "sha256:eaf8e6cc3c49bcccf145fc6067ba8643d1df34d604a1ec0eccbf7a18e6d3fae6"},
     {file = "pyreadline3-3.5.4.tar.gz", hash = "sha256:8d57d53039a1c75adba8e50dd3d992b28143480816187ea5efbd5c78e6c885b7"},
@@ -9544,7 +9545,10 @@ files = [
 ]
 
 [package.dependencies]
-aiobotocore = ">=2.5.4,<3.0.0"
+aiobotocore = [
+    {version = ">=2.5.4,<3.0.0"},
+    {version = ">=2.5.4,<3.0.0", extras = ["boto3"], optional = true, markers = "extra == \"boto3\""},
+]
 aiohttp = "<4.0.0a0 || >4.0.0a0,<4.0.0a1 || >4.0.0a1"
 fsspec = "==2025.3.2.*"
 
@@ -10319,7 +10323,7 @@ description = "Computer algebra system (CAS) in Python"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version == \"3.10\" and (extra == \"codegraph\" or extra == \"chromadb\") or extra == \"chromadb\" or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "python_version == \"3.10\" and (extra == \"chromadb\" or extra == \"codegraph\") or extra == \"chromadb\" or python_version == \"3.12\" and (extra == \"chromadb\" or extra == \"codegraph\") or python_version == \"3.11\" and (extra == \"chromadb\" or extra == \"codegraph\")"
 files = [
     {file = "sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"},
     {file = "sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517"},
@@ -12012,4 +12016,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "7a300700800488853f060001d915b84d108461a6a39ec8299dcb6390fa78ea41"
+content-hash = "4683c16fc40ace9b32102a8463ec8bdd54ceac0998ddb369bc6453cf83453367"
