@@ -127,6 +127,7 @@ class GraphCompletionRetriever(BaseRetriever):
             else:
                 triplets += await self.get_triplets(followup_question)
                 context = await self.resolve_edges_to_text(list(set(triplets)))
+                t_logger.info(f"Round {round_idx} - context: {context}")
 
             # Generate answer
             answer = await generate_completion(
