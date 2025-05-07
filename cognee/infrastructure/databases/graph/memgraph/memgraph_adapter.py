@@ -50,7 +50,7 @@ class MemgraphAdapter(GraphDBInterface):
             raise error
     
     async def has_node(self, node_id: str) -> bool:
-        results = self.query(
+        results = await self.query(
             """
                 MATCH (n)
                 WHERE n.id = $node_id
@@ -75,7 +75,6 @@ class MemgraphAdapter(GraphDBInterface):
             "node_label": type(node).__name__,
             "properties": serialized_properties,
         }
-        print("params", params)
         return await self.query(query, params)
 
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
@@ -117,10 +116,10 @@ class MemgraphAdapter(GraphDBInterface):
         return [result["node"] for result in results]
     
     async def delete_node(self, node_id: str):
-        node_id = id.replace(":", "_")
+        sanitized_id = node_id.replace(":", "_")
         
-        query = f"MATCH (node:`{node_id}` {{id: $node_id}}) DETACH DELETE n"
-        params = {"node_id": node_id}
+        query = "MATCH (node: {{id: $node_id}}) DETACH DELETE node"
+        params = {"node_id": sanitized_id}
 
         return await self.query(query, params)
     
@@ -146,9 +145,9 @@ class MemgraphAdapter(GraphDBInterface):
             "to_node_id": str(to_node),
             "edge_label": edge_label,
         }
-
-        edge_exists = await self.query(query, params)
-        return edge_exists
+        
+        records = await self.query(query, params)
+        return records[0]["edge_exists"] if records else False
     
     async def has_edges(self, edges):
         query = """
@@ -181,9 +180,9 @@ class MemgraphAdapter(GraphDBInterface):
         from_node: UUID,
         to_node: UUID,
         relationship_name: str,
-        edge_properties: Optional[Dict[str, Any]] = {},
+        edge_properties: Optional[Dict[str, Any]] = None,
     ):
-        serialized_properties = self.serialize_properties(edge_properties)
+        serialized_properties = self.serialize_properties(edge_properties or {})
 
         query = dedent(
             f"""\
@@ -398,12 +397,13 @@ class MemgraphAdapter(GraphDBInterface):
         self, node_ids: list[str], edge_label: str
     ) -> None:
         query = f"""
-        UNWIND $node_ids AS id
-        MATCH (node:`{id}`)-[r:{edge_label}]->(predecessor)
+        UNWIND $node_ids AS nid
+        MATCH (node {id: nid})-[r]->(predecessor)
+        WHERE type(r) = $edge_label
         DELETE r;
         """
 
-        params = {"node_ids": node_ids}
+        params = {"node_ids": node_ids, "edge_label": edge_label}
 
         return await self.query(query, params)
     

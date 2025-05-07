@@ -71,7 +71,7 @@ def create_graph_engine(
         if not (graph_database_url and graph_database_username and graph_database_password):
             raise EnvironmentError("Missing required Memgraph credentials.")
 
-        from .memgraph.adapter import MemgraphAdapter
+        from .memgraph.memgraph_adapter import MemgraphAdapter
 
         return MemgraphAdapter(
             graph_database_url=graph_database_url,
