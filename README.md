@@ -5,7 +5,7 @@
 
   <br />
 
-  cognee - memory layer for AI apps and Agents
+  cognee - Memory for AI Agents in 5 lines of code
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
@@ -24,13 +24,13 @@
   [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
   [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
 
-  AI Agent responses you can rely on.
+<a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
 
 
 Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
-More on [use-cases](https://docs.cognee.ai/use_cases).
+More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github.com/topoteretes/cognee/tree/main/evals) 
 
   <p align="center">
   🌐 Available Languages
@@ -41,7 +41,7 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
   </p>
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee_benefits.png" alt="Why cognee?" width="100%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
 </div>
 
 </div>
@@ -58,7 +58,7 @@ More on [use-cases](https://docs.cognee.ai/use_cases).
 
 ## Get Started
 
-Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1g-Qnx6l_ecHZi0IOw23rg0qC4TYvEvWZ?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
+Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
 
 ## Contributing
 Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
@@ -124,12 +124,14 @@ Example output:
   Natural Language Processing (NLP) is a cross-disciplinary and interdisciplinary field that involves computer science and information retrieval. It focuses on the interaction between computers and human language, enabling machines to understand and process natural language.
   
 ```
-Graph visualization:
-<a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="assets/graph_visualization.png" width="100%" alt="Graph Visualization"></a>
-Open in [browser](https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html).
 
-For more advanced usage, have a look at our <a href="https://docs.cognee.ai"> documentation</a>.
+### cognee UI
 
+You can also cognify your files and query using cognee UI. 
+
+<img src="assets/cognee-ui-2.webp" width="100%" alt="Cognee UI 2"></a>
+
+Try cognee UI out locally [here](https://docs.cognee.ai/how-to-guides/cognee-ui).
 
 ## Understand our architecture
 
