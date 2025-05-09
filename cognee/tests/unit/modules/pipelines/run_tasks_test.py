@@ -48,3 +48,7 @@ async def run_and_check_tasks():
 
 def test_run_tasks():
     asyncio.run(run_and_check_tasks())
+
+
+if __name__ == "__main__":
+    test_run_tasks()

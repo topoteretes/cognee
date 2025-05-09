@@ -1,11 +1,12 @@
 from __future__ import annotations
-
 import asyncio
-from cognee.shared.logging_utils import get_logger
+from uuid import UUID
 from typing import List, Optional
 
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -96,7 +97,7 @@ class MilvusAdapter(VectorDBInterface):
             raise e
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
-        from pymilvus import MilvusException
+        from pymilvus import MilvusException, exceptions
 
         client = self.get_milvus_client()
         data_vectors = await self.embed_data(
@@ -118,6 +119,10 @@ class MilvusAdapter(VectorDBInterface):
                 f"Inserted {result.get('insert_count', 0)} data points into collection '{collection_name}'."
             )
             return result
+        except exceptions.CollectionNotExistException as error:
+            raise CollectionNotFoundError(
+                f"Collection '{collection_name}' does not exist!"
+            ) from error
         except MilvusException as e:
             logger.error(
                 f"Error inserting data points into collection '{collection_name}': {str(e)}"
@@ -140,8 +145,8 @@ class MilvusAdapter(VectorDBInterface):
         collection_name = f"{index_name}_{index_property_name}"
         await self.create_data_points(collection_name, formatted_data_points)
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        from pymilvus import MilvusException
+    async def retrieve(self, collection_name: str, data_point_ids: list[UUID]):
+        from pymilvus import MilvusException, exceptions
 
         client = self.get_milvus_client()
         try:
@@ -153,6 +158,10 @@ class MilvusAdapter(VectorDBInterface):
                 output_fields=["*"],
             )
             return results
+        except exceptions.CollectionNotExistException as error:
+            raise CollectionNotFoundError(
+                f"Collection '{collection_name}' does not exist!"
+            ) from error
         except MilvusException as e:
             logger.error(
                 f"Error retrieving data points from collection '{collection_name}': {str(e)}"
@@ -164,10 +173,10 @@ class MilvusAdapter(VectorDBInterface):
         collection_name: str,
         query_text: Optional[str] = None,
         query_vector: Optional[List[float]] = None,
-        limit: int = 5,
+        limit: int = 15,
         with_vector: bool = False,
     ):
-        from pymilvus import MilvusException
+        from pymilvus import MilvusException, exceptions
 
         client = self.get_milvus_client()
         if query_text is None and query_vector is None:
@@ -184,7 +193,7 @@ class MilvusAdapter(VectorDBInterface):
                 collection_name=collection_name,
                 data=[query_vector],
                 anns_field="vector",
-                limit=limit,
+                limit=limit if limit > 0 else None,
                 output_fields=output_fields,
                 search_params={
                     "metric_type": "COSINE",
@@ -199,6 +208,10 @@ class MilvusAdapter(VectorDBInterface):
                 )
                 for result in results[0]
             ]
+        except exceptions.CollectionNotExistException as error:
+            raise CollectionNotFoundError(
+                f"Collection '{collection_name}' does not exist!"
+            ) from error
         except MilvusException as e:
             logger.error(f"Error during search in collection '{collection_name}': {str(e)}")
             raise e
@@ -220,7 +233,7 @@ class MilvusAdapter(VectorDBInterface):
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         from pymilvus import MilvusException
 
         client = self.get_milvus_client()

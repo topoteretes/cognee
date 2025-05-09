@@ -1,14 +1,14 @@
 import os
 from typing import Optional
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.root_dir import get_absolute_path
-from cognee.shared.data_models import MonitoringTool
+from cognee.modules.observability.observers import Observer
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
-    monitoring_tool: object = MonitoringTool.LANGFUSE
+    monitoring_tool: object = Observer.LANGFUSE
     graphistry_username: Optional[str] = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password: Optional[str] = os.getenv("GRAPHISTRY_PASSWORD")
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")

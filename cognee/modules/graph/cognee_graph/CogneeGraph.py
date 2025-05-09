@@ -133,8 +133,10 @@ class CogneeGraph(CogneeAbstractGraph):
             if query_vector is None or len(query_vector) == 0:
                 raise ValueError("Failed to generate query embedding.")
 
-            edge_distances = await vector_engine.get_distance_from_collection_elements(
-                "EdgeType_relationship_name", query_text=query
+            edge_distances = await vector_engine.search(
+                collection_name="EdgeType_relationship_name",
+                query_text=query,
+                limit=0,
             )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}

@@ -6,8 +6,9 @@ from chromadb import AsyncHttpClient, Settings
 from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.storage.utils import get_own_properties
-from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -108,9 +109,7 @@ class ChromaDBAdapter(VectorDBInterface):
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
-        client = await self.get_connection()
-        collections = await client.list_collections()
-        # In ChromaDB v0.6.0, list_collections returns collection names directly
+        collections = await self.get_collection_names()
         return collection_name in collections
 
     async def create_collection(self, collection_name: str, payload_schema=None):
@@ -119,13 +118,17 @@ class ChromaDBAdapter(VectorDBInterface):
         if not await self.has_collection(collection_name):
             await client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
 
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
-        client = await self.get_connection()
-
+    async def get_collection(self, collection_name: str) -> AsyncHttpClient:
         if not await self.has_collection(collection_name):
-            await self.create_collection(collection_name)
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
-        collection = await client.get_collection(collection_name)
+        client = await self.get_connection()
+        return await client.get_collection(collection_name)
+
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+        await self.create_collection(collection_name)
+
+        collection = await self.get_collection(collection_name)
 
         texts = [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         embeddings = await self.embed_data(texts)
@@ -161,8 +164,7 @@ class ChromaDBAdapter(VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Retrieve data points by their IDs from a collection."""
-        client = await self.get_connection()
-        collection = await client.get_collection(collection_name)
+        collection = await self.get_collection(collection_name)
         results = await collection.get(ids=data_point_ids, include=["metadatas"])
 
         return [
@@ -174,62 +176,12 @@ class ChromaDBAdapter(VectorDBInterface):
             for id, metadata in zip(results["ids"], results["metadatas"])
         ]
 
-    async def get_distance_from_collection_elements(
-        self, collection_name: str, query_text: str = None, query_vector: List[float] = None
-    ):
-        """Calculate distance between query and all elements in a collection."""
-        if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
-
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
-
-        client = await self.get_connection()
-        try:
-            collection = await client.get_collection(collection_name)
-
-            collection_count = await collection.count()
-
-            results = await collection.query(
-                query_embeddings=[query_vector],
-                include=["metadatas", "distances"],
-                n_results=collection_count,
-            )
-
-            result_values = []
-            for i, (id, metadata, distance) in enumerate(
-                zip(results["ids"][0], results["metadatas"][0], results["distances"][0])
-            ):
-                result_values.append(
-                    {
-                        "id": parse_id(id),
-                        "payload": restore_data_from_chroma(metadata),
-                        "_distance": distance,
-                    }
-                )
-
-            normalized_values = normalize_distances(result_values)
-
-            scored_results = []
-            for i, result in enumerate(result_values):
-                scored_results.append(
-                    ScoredResult(
-                        id=result["id"],
-                        payload=result["payload"],
-                        score=normalized_values[i],
-                    )
-                )
-
-            return scored_results
-        except Exception:
-            return []
-
     async def search(
         self,
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 5,
+        limit: int = 15,
         with_vector: bool = False,
         normalized: bool = True,
     ):
@@ -241,8 +193,10 @@ class ChromaDBAdapter(VectorDBInterface):
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
         try:
-            client = await self.get_connection()
-            collection = await client.get_collection(collection_name)
+            collection = await self.get_collection(collection_name)
+
+            if limit == 0:
+                limit = await collection.count()
 
             results = await collection.query(
                 query_embeddings=[query_vector],
@@ -296,8 +250,7 @@ class ChromaDBAdapter(VectorDBInterface):
         """Perform multiple searches in a single request for efficiency."""
         query_vectors = await self.embed_data(query_texts)
 
-        client = await self.get_connection()
-        collection = await client.get_collection(collection_name)
+        collection = await self.get_collection(collection_name)
 
         results = await collection.query(
             query_embeddings=query_vectors,
@@ -346,15 +299,14 @@ class ChromaDBAdapter(VectorDBInterface):
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         """Remove data points from a collection by their IDs."""
-        client = await self.get_connection()
-        collection = await client.get_collection(collection_name)
+        collection = await self.get_collection(collection_name)
         await collection.delete(ids=data_point_ids)
         return True
 
     async def prune(self):
         """Delete all collections in the ChromaDB database."""
         client = await self.get_connection()
-        collections = await client.list_collections()
+        collections = await self.list_collections()
         for collection_name in collections:
             await client.delete_collection(collection_name)
         return True
@@ -362,4 +314,8 @@ class ChromaDBAdapter(VectorDBInterface):
     async def get_collection_names(self):
         """Get a list of all collection names in the database."""
         client = await self.get_connection()
-        return await client.list_collections()
+        collections = await client.list_collections()
+        return [
+            collection.name if hasattr(collection, "name") else collection["name"]
+            for collection in collections
+        ]
