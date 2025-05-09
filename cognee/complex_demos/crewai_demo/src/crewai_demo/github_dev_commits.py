@@ -91,6 +91,9 @@ class GitHubDevCommits:
 
         prs = self._get_user_prs()
 
+        if not prs:
+            return []
+
         all_commits = []
         for pr in prs[: self.prs_limit]:
             pr_commits = self._get_commits_from_pr(pr, include_files)

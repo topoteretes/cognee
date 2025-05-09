@@ -60,9 +60,12 @@ class GitHubDevComments:
     def _get_comments_from_search(self, query):
         """Retrieves comments based on a search query for issues."""
         try:
-            issues = self.profile.github.search_issues(query)
+            issues = list(self.profile.github.search_issues(query))
         except Exception as e:
             print(f"Error executing search query: {e}")
+            return []
+
+        if not issues:
             return []
 
         all_comments = [
