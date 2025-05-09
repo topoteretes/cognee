@@ -131,7 +131,7 @@ if __name__ == "__main__":
     dotenv.load_dotenv()
 
     username = ""
-    # asyncio.run(main(username))
-    token = os.getenv("GITHUB_TOKEN")
-    github_data = get_github_data_for_cognee(username=username, token=token)
-    print(json.dumps(github_data, indent=2, default=str))
+    asyncio.run(main(username))
+    # token = os.getenv("GITHUB_TOKEN")
+    # github_data = get_github_data_for_cognee(username=username, token=token)
+    # print(json.dumps(github_data, indent=2, default=str))
