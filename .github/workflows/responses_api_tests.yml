@@ -1,0 +1,92 @@
+name: Reusable Responses API Tests
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '3.11.x'
+    secrets:
+      LLM_PROVIDER:
+        required: true
+      LLM_MODEL:
+        required: true
+      LLM_ENDPOINT:
+        required: true
+      LLM_API_KEY:
+        required: true
+      LLM_API_VERSION:
+        required: true
+      EMBEDDING_PROVIDER:
+        required: true
+      EMBEDDING_MODEL:
+        required: true
+      EMBEDDING_ENDPOINT:
+        required: true
+      EMBEDDING_API_KEY:
+        required: true
+      EMBEDDING_API_VERSION:
+        required: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  responses-api-tests:
+    name: Run Responses API Tests
+    runs-on: ubuntu-22.04
+    env:
+      LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+      EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install httpx
+        run: poetry run pip install httpx
+
+      - name: Start Cognee API Server
+        run: |
+          # Start API server in the background and save the process ID
+          poetry run python run_cognee_api_server.py --env dev &
+          echo "API_SERVER_PID=$!" >> $GITHUB_ENV
+          
+          # Wait for the server to start
+          echo "Waiting for API server to start..."
+          sleep 10
+        
+      - name: Run Basic API Tests
+        run: |
+          echo "Running basic responses API tests..."
+          poetry run python test_cognee_responses_api.py
+        
+      - name: Run Comprehensive API Tests
+        run: |
+          echo "Running comprehensive responses API tests..."
+          poetry run python test_cognee_responses_api_comprehensive.py
+        
+      - name: Clean up API server
+        if: always()
+        run: |
+          if [ -n "${{ env.API_SERVER_PID }}" ]; then
+            echo "Shutting down API server (PID: ${{ env.API_SERVER_PID }})..."
+            kill ${{ env.API_SERVER_PID }} || true
+          fi 
