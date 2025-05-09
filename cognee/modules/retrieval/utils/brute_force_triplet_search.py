@@ -1,14 +1,15 @@
 import asyncio
-from cognee.shared.logging_utils import get_logger, ERROR
 from typing import List, Optional
 
+from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
-from cognee.modules.retrieval.exceptions import CollectionDistancesNotFoundError
 
 logger = get_logger(level=ERROR)
 
@@ -62,11 +63,14 @@ async def get_memory_fragment(
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
-    await memory_fragment.project_graph_from_db(
-        graph_engine,
-        node_properties_to_project=properties_to_project,
-        edge_properties_to_project=["relationship_name"],
-    )
+    try:
+        await memory_fragment.project_graph_from_db(
+            graph_engine,
+            node_properties_to_project=properties_to_project,
+            edge_properties_to_project=["relationship_name"],
+        )
+    except EntityNotFoundError:
+        pass
 
     return memory_fragment
 
@@ -139,16 +143,21 @@ async def brute_force_search(
 
     send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
 
+    async def search_in_collection(collection_name: str):
+        try:
+            return await vector_engine.search(
+                collection_name=collection_name, query_text=query, limit=top_k
+            )
+        except CollectionNotFoundError:
+            return []
+
     try:
         results = await asyncio.gather(
-            *[
-                vector_engine.get_distance_from_collection_elements(collection, query_text=query)
-                for collection in collections
-            ]
+            *[search_in_collection(collection_name) for collection_name in collections]
         )
 
         if all(not item for item in results):
-            raise CollectionDistancesNotFoundError()
+            return []
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
@@ -161,6 +170,8 @@ async def brute_force_search(
 
         return results
 
+    except CollectionNotFoundError:
+        return []
     except Exception as error:
         logger.error(
             "Error during brute force search for user: %s, query: %s. Error: %s",
