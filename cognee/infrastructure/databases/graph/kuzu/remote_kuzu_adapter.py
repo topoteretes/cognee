@@ -116,10 +116,10 @@ class RemoteKuzuAdapter(KuzuAdapter):
     async def _check_schema_exists(self) -> bool:
         """Check if the required schema exists without causing recursion."""
         try:
-            # Make a direct request to check schema
+            # Make a direct request to check schema using Cypher
             response = await self._make_request(
                 "/query",
-                {"query": "SELECT name FROM node_tables() WHERE name = 'Node'", "parameters": {}},
+                {"query": "MATCH (n:Node) RETURN COUNT(n) > 0", "parameters": {}},
             )
             return bool(response.get("data") and response["data"][0][0])
         except Exception as e:
