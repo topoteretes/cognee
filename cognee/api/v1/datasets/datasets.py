@@ -1,6 +1,7 @@
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_OID
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.ingestion import discover_directory_datasets
+from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 
 
@@ -11,6 +12,10 @@ class datasets:
 
         user = await get_default_user()
         return await get_datasets(user.id)
+
+    @staticmethod
+    async def get_unique_dataset_id(dataset_name: str, user: User) -> UUID:
+        return uuid5(NAMESPACE_OID, f"{dataset_name}{str(user.id)}")
 
     @staticmethod
     def discover_datasets(directory_path: str):

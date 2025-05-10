@@ -5,6 +5,7 @@ from uuid import uuid5, NAMESPACE_OID
 
 from cognee.modules.data.methods import get_datasets, get_datasets_by_name
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -93,7 +94,7 @@ async def run_pipeline(
     elif isinstance(dataset, str):
         check_dataset_name(dataset)
         # Generate id based on unique dataset_id formula
-        dataset_id = uuid5(NAMESPACE_OID, f"{dataset}{str(user.id)}")
+        dataset_id = await cognee_datasets.get_unique_dataset_id(dataset_name=dataset, user=user)
 
     if not data:
         data: list[Data] = await get_dataset_data(dataset_id=dataset_id)
