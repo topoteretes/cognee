@@ -45,11 +45,18 @@ def expand_with_nodes_and_edges(
             type_node_key = f"{type_node_id}_type"
 
             if type_node_key not in added_nodes_map and type_node_key not in key_mapping:
-                (
-                    ontology_entity_type_nodes,
-                    ontology_entity_type_edges,
-                    ontology_closest_class_node,
-                ) = ontology_resolver.get_subgraph(node_name=type_node_name, node_type="classes")
+                if ontology_resolver:
+                    (
+                        ontology_entity_type_nodes,
+                        ontology_entity_type_edges,
+                        ontology_closest_class_node,
+                    ) = ontology_resolver.get_subgraph(
+                        node_name=type_node_name, node_type="classes"
+                    )
+                else:
+                    ontology_entity_type_nodes = []
+                    ontology_entity_type_edges = []
+                    ontology_closest_class_node = None
 
                 if ontology_closest_class_node:
                     name_mapping[type_node_name] = ontology_closest_class_node.name
@@ -125,9 +132,14 @@ def expand_with_nodes_and_edges(
             entity_node_key = f"{node_id}_entity"
 
             if entity_node_key not in added_nodes_map and entity_node_key not in key_mapping:
-                ontology_entity_nodes, ontology_entity_edges, start_ent_ont = (
-                    ontology_resolver.get_subgraph(node_name=node_name, node_type="individuals")
-                )
+                if ontology_resolver:
+                    ontology_entity_nodes, ontology_entity_edges, start_ent_ont = (
+                        ontology_resolver.get_subgraph(node_name=node_name, node_type="individuals")
+                    )
+                else:
+                    ontology_entity_nodes = []
+                    ontology_entity_edges = []
+                    start_ent_ont = None
 
                 if start_ent_ont:
                     name_mapping[node_name] = start_ent_ont.name
@@ -234,7 +246,7 @@ def expand_with_nodes_and_edges(
                 )
                 existing_edges_map[edge_key] = True
 
-    graph_nodes = data_chunks + list(added_ontology_nodes_map.values())
+    graph_nodes = list(added_ontology_nodes_map.values())
     graph_edges = relationships + ontology_relationships
 
     return graph_nodes, graph_edges
