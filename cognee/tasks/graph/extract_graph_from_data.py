@@ -1,6 +1,5 @@
 import asyncio
-from typing import Type, List, Optional
-
+from typing import Type, List
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -12,7 +11,6 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.storage import add_data_points
 
 
 async def integrate_chunk_graphs(
@@ -28,7 +26,6 @@ async def integrate_chunk_graphs(
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
 
-        await add_data_points(chunk_graphs)
         return data_chunks
 
     existing_edges_map = await retrieve_existing_edges(
@@ -41,7 +38,7 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes)
+        await graph_engine.add_nodes(graph_nodes)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)

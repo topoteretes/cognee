@@ -16,9 +16,7 @@ image = (
     Image.from_dockerfile(
         path=pathlib.Path(path.join(path.dirname(__file__), "Dockerfile")).resolve(),
         force_build=False,
-    ).env(local_env_vars)
-    # .pip_install_from_pyproject(pyproject_toml=pathlib.Path(path.join(path.dirname(__file__), "../pyproject.toml")).resolve())
-    # .poetry_install_from_file(poetry_pyproject_toml=pathlib.Path(path.join(path.dirname(__file__), "../pyproject.toml")).resolve())
-    # .add_local_dir(pathlib.Path("./venv/bin").resolve(), remote_path="/app/.venv")
-    # .add_local_python_source(pathlib.Path("./cognee").resolve())
+    )
+    .env(local_env_vars)
+    .add_local_python_source("cognee", "entrypoint")
 )

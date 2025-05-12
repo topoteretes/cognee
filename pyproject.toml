@@ -58,6 +58,7 @@ dependencies = [
     "dlt[sqlalchemy]>=1.9.0,<2",
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
+    "pympler>=1.1",
 ]
 
 [project.optional-dependencies]

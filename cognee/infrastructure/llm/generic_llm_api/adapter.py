@@ -4,6 +4,9 @@ import litellm
 import instructor
 from typing import Type
 from pydantic import BaseModel
+from openai import ContentFilterFinishReasonError
+from litellm.exceptions import ContentPolicyViolationError
+from instructor.exceptions import InstructorRetryException
 
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.llm_interface import LLMInterface
@@ -67,7 +70,17 @@ class GenericAPIAdapter(LLMInterface):
                 api_base=self.endpoint,
                 response_model=response_model,
             )
-        except litellm.exceptions.ContentPolicyViolationError:
+        except (
+            ContentFilterFinishReasonError,
+            ContentPolicyViolationError,
+            InstructorRetryException,
+        ) as error:
+            if (
+                isinstance(error, InstructorRetryException)
+                and not "content management policy" in str(error).lower()
+            ):
+                raise error
+
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
@@ -92,7 +105,17 @@ class GenericAPIAdapter(LLMInterface):
                     api_base=self.fallback_endpoint,
                     response_model=response_model,
                 )
-            except litellm.exceptions.ContentPolicyViolationError:
-                raise ContentPolicyFilterError(
-                    f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+            except (
+                ContentFilterFinishReasonError,
+                ContentPolicyViolationError,
+                InstructorRetryException,
+            ) as error:
+                if (
+                    isinstance(error, InstructorRetryException)
+                    and not "content management policy" in str(error).lower()
+                ):
+                    raise error
+                else:
+                    raise ContentPolicyFilterError(
+                        f"The provided input contains content that is not aligned with our content policy: {text_input}"
+                    )

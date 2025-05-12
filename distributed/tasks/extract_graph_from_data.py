@@ -38,4 +38,4 @@ async def extract_graph_from_data(
         data_chunks, chunk_graphs, ontology_adapter, existing_edges_map
     )
 
-    return graph_nodes, graph_edges
+    return data_chunks, graph_nodes, graph_edges

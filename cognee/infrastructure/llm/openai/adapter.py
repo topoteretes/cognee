@@ -5,6 +5,8 @@ import instructor
 from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
+from litellm.exceptions import ContentPolicyViolationError
+from instructor.exceptions import InstructorRetryException
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -87,7 +89,17 @@ class OpenAIAdapter(LLMInterface):
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
             )
-        except ContentFilterFinishReasonError:
+        except (
+            ContentFilterFinishReasonError,
+            ContentPolicyViolationError,
+            InstructorRetryException,
+        ) as error:
+            if (
+                isinstance(error, InstructorRetryException)
+                and not "content management policy" in str(error).lower()
+            ):
+                raise error
+
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
@@ -112,10 +124,20 @@ class OpenAIAdapter(LLMInterface):
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
                 )
-            except ContentFilterFinishReasonError:
-                raise ContentPolicyFilterError(
-                    f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+            except (
+                ContentFilterFinishReasonError,
+                ContentPolicyViolationError,
+                InstructorRetryException,
+            ) as error:
+                if (
+                    isinstance(error, InstructorRetryException)
+                    and not "content management policy" in str(error).lower()
+                ):
+                    raise error
+                else:
+                    raise ContentPolicyFilterError(
+                        f"The provided input contains content that is not aligned with our content policy: {text_input}"
+                    )
 
     @observe
     @sleep_and_retry_sync()

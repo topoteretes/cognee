@@ -24,7 +24,7 @@ RUN pip install poetry
 
 RUN poetry config virtualenvs.create false
 
-RUN poetry install --extras neo4j --extras qdrant --no-root --without dev
+RUN poetry install --extras neo4j --extras qdrant --no-root
 
 COPY cognee/ /app/cognee
 COPY distributed/ /app/distributed
