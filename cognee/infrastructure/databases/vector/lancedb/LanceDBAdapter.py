@@ -1,6 +1,5 @@
 import asyncio
 from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
-
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
@@ -76,9 +75,14 @@ class LanceDBAdapter(VectorDBInterface):
                 exist_ok=True,
             )
 
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
-        connection = await self.get_connection()
+    async def get_collection(self, collection_name: str):
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
+        connection = await self.get_connection()
+        return await connection.open_table(collection_name)
+
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
@@ -87,7 +91,7 @@ class LanceDBAdapter(VectorDBInterface):
                 payload_schema,
             )
 
-        collection = await connection.open_table(collection_name)
+        collection = await self.get_collection(collection_name)
 
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
@@ -125,8 +129,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
+        collection = await self.get_collection(collection_name)
 
         if len(data_point_ids) == 1:
             results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
@@ -142,48 +145,12 @@ class LanceDBAdapter(VectorDBInterface):
             for result in results.to_dict("index").values()
         ]
 
-    async def get_distance_from_collection_elements(
-        self, collection_name: str, query_text: str = None, query_vector: List[float] = None
-    ):
-        if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
-
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
-
-        connection = await self.get_connection()
-
-        try:
-            collection = await connection.open_table(collection_name)
-
-            collection_size = await collection.count_rows()
-
-            results = (
-                await collection.vector_search(query_vector).limit(collection_size).to_pandas()
-            )
-
-            result_values = list(results.to_dict("index").values())
-
-            normalized_values = normalize_distances(result_values)
-
-            return [
-                ScoredResult(
-                    id=parse_id(result["id"]),
-                    payload=result["payload"],
-                    score=normalized_values[value_index],
-                )
-                for value_index, result in enumerate(result_values)
-            ]
-        except ValueError:
-            # Ignore if collection doesn't exist
-            return []
-
     async def search(
         self,
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 5,
+        limit: int = 15,
         with_vector: bool = False,
         normalized: bool = True,
     ):
@@ -193,12 +160,10 @@ class LanceDBAdapter(VectorDBInterface):
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
-        connection = await self.get_connection()
+        collection = await self.get_collection(collection_name)
 
-        try:
-            collection = await connection.open_table(collection_name)
-        except ValueError:
-            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
+        if limit == 0:
+            limit = await collection.count_rows()
 
         results = await collection.vector_search(query_vector).limit(limit).to_pandas()
 
@@ -240,8 +205,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
+        collection = await self.get_collection(collection_name)
 
         # Delete one at a time to avoid commit conflicts
         for data_point_id in data_point_ids:
@@ -271,7 +235,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
 
         for collection_name in collection_names:
-            collection = await connection.open_table(collection_name)
+            collection = await self.get_collection(collection_name)
             await collection.delete("id IS NOT NULL")
             await connection.drop_table(collection_name)
 

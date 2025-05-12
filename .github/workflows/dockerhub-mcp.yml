@@ -36,9 +36,10 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: cognee-mcp
+          context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          file: cognee-mcp/Dockerfile
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=cognee/cognee-mcp:buildcache

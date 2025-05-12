@@ -1,12 +1,14 @@
-[tool.poetry]
+[project]
 name = "cognee"
-version = "0.1.38"
+version = "0.1.39"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
-authors = ["Vasilije Markovic", "Boris Arzentar"]
+authors = [
+    { name = "Vasilije Markovic" },
+    { name = "Boris Arzentar" },
+]
+requires-python = ">=3.10,<=3.13"
 readme = "README.md"
 license = "Apache-2.0"
-homepage = "https://www.cognee.ai"
-repository = "https://github.com/topoteretes/cognee"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -14,129 +16,126 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
-    "Operating System :: Microsoft :: Windows"
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    "openai>=1.59.4,<2",
+    "python-dotenv>=1.0.1",
+    "pydantic==2.10.5",
+    "pydantic-settings>=2.2.1,<3",
+    "typing_extensions==4.12.2",
+    "nltk==3.9.1",
+    "numpy>=1.26.4, <=2.1",
+    "pandas>=2.2.2",
+    # Note: New s3fs and boto3 versions don't work well together
+    # Always use comaptible fixed versions of these two dependencies
+    "s3fs[boto3]==2025.3.2",
+    "sqlalchemy==2.0.39",
+    "aiosqlite>=0.20.0,<0.21",
+    "tiktoken<=0.9.0",
+    "litellm>=1.57.4",
+    "instructor==1.7.2",
+    "langfuse>=2.32.0",
+    "filetype>=1.2.0",
+    "aiohttp>=3.11.14",
+    "aiofiles>=23.2.1",
+    "owlready2>=0.47,<0.48",
+    "graphistry>=0.33.5,<0.34",
+    "pypdf>=4.1.0,<6.0.0",
+    "jinja2>=3.1.3,<4",
+    "matplotlib>=3.8.3,<4",
+    "networkx>=3.4.2,<4",
+    "lancedb==0.21.0",
+    "alembic>=1.13.3,<2",
+    "pre-commit>=4.0.1,<5",
+    "scikit-learn>=1.6.1,<2",
+    "limits>=4.4.1,<5",
+    "fastapi==0.115.7",
+    "python-multipart==0.0.20",
+    "fastapi-users[sqlalchemy]==14.0.1",
+    "dlt[sqlalchemy]>=1.9.0,<2",
+    "sentry-sdk[fastapi]>=2.9.0,<3",
+    "structlog>=25.2.0,<26",
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.10,<=3.13"
-openai = "^1.59.4"
-python-dotenv = "1.0.1"
-pydantic = "2.10.5"
-pydantic-settings = "^2.2.1"
-typing_extensions = "4.12.2"
-nltk = "3.9.1"
-numpy = ">=1.26.4, <=2.1"
-pandas = "2.2.3"
-boto3 = "^1.26.125"
-botocore="^1.35.54"
-sqlalchemy = "2.0.39"
-aiosqlite = "^0.20.0"
-tiktoken = "<=0.9.0"
-litellm = ">=1.57.4"
-instructor = "1.7.2"
-langfuse = "^2.32.0"
-filetype = "^1.2.0"
-aiohttp = "^3.11.14"
-aiofiles = "^23.2.1"
-owlready2 = "^0.47"
-graphistry = "^0.33.5"
-pypdf = ">=4.1.0,<6.0.0"
-jinja2 = "^3.1.3"
-matplotlib = "^3.8.3"
-networkx = "^3.4.2"
-lancedb = "0.21.0"
-alembic = "^1.13.3"
-pre-commit = "^4.0.1"
-scikit-learn = "^1.6.1"
-limits = "^4.4.1"
-fastapi = {version = "0.115.7"}
-python-multipart = "0.0.20"
-fastapi-users = {version = "14.0.1", extras = ["sqlalchemy"]}
-uvicorn = {version = "0.34.0", optional = true}
-gunicorn = {version = "^20.1.0", optional = true}
-dlt = {extras = ["sqlalchemy"], version = "^1.9.0"}
-qdrant-client = {version = "^1.9.0", optional = true}
-weaviate-client = {version = "4.9.6", optional = true}
-neo4j = {version = "^5.20.0", optional = true}
-falkordb = {version = "1.0.9", optional = true}
-kuzu = {version = "0.8.2", optional = true}
-chromadb = {version = "^0.6.0", optional = true}
-langchain_text_splitters = {version = "0.3.2", optional = true}
-langsmith = {version = "0.2.3", optional = true}
-posthog = {version = "^3.5.0", optional = true}
-groq = {version = "0.8.0", optional = true}
-anthropic = {version = "^0.26.1", optional = true}
-sentry-sdk = {extras = ["fastapi"], version = "^2.9.0"}
-asyncpg =  {version = "0.30.0", optional = true}
-pgvector = {version = "^0.3.5", optional = true}
-psycopg2 = {version = "^2.9.10", optional = true}
-llama-index-core = {version = "^0.12.11", optional = true}
-deepeval = {version = "^2.0.1", optional = true}
-transformers = {version = "^4.46.3", optional = true}
-pymilvus = {version = "^2.5.0", optional = true}
-unstructured = { extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], version = "^0.16.13", optional = true }
-mistral-common = {version = "^1.5.2", optional = true}
-fastembed = {version = "<=0.6.0", optional = true, markers = "python_version < '3.13'"}
-tree-sitter = {version = "^0.24.0", optional = true}
-tree-sitter-python = {version = "^0.23.6", optional = true}
-plotly = {version = "^6.0.0", optional = true}
-gdown = {version = "^5.2.0", optional = true}
-qasync = {version = "^0.27.1", optional = true}
-graphiti-core = {version = "^0.7.0", optional = true}
-structlog = "^25.2.0"
-pyside6 = {version = "^6.8.3", optional = true}
-google-generativeai = {version = "^0.8.4", optional = true}
-notebook = {version = "^7.1.0", optional = true}
-s3fs = "^2025.3.2"
+[project.optional-dependencies]
+api = [
+    "uvicorn==0.34.0",
+    "gunicorn>=20.1.0,<21",
+]
+weaviate = ["weaviate-client==4.9.6"]
+qdrant = ["qdrant-client>=1.9.0,<2"]
+neo4j = ["neo4j>=5.20.0,<6"]
+postgres = [
+    "psycopg2>=2.9.10,<3",
+    "pgvector>=0.3.5,<0.4",
+    "asyncpg==0.30.0",
+]
+notebook = ["notebook>=7.1.0,<8"]
+langchain = [
+    "langsmith==0.2.3",
+    "langchain_text_splitters==0.3.2",
+]
+llama-index = ["llama-index-core>=0.12.11,<0.13"]
+gemini = ["google-generativeai>=0.8.4,<0.9"]
+huggingface = ["transformers>=4.46.3,<5"]
+ollama = ["transformers>=4.46.3,<5"]
+mistral = ["mistral-common>=1.5.2,<2"]
+anthropic = ["anthropic>=0.26.1,<0.27"]
+deepeval = ["deepeval>=2.0.1,<3"]
+posthog = ["posthog>=3.5.0,<4"]
+falkordb = ["falkordb==1.0.9"]
+kuzu = ["kuzu==0.8.2"]
+groq = ["groq==0.8.0"]
+milvus = ["pymilvus>=2.5.0,<3"]
+chromadb = [
+    "chromadb>=0.3.0,<0.7",
+    "pypika==0.48.8",
+]
+docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<0.17"]
+codegraph = [
+    "fastembed<=0.6.0 ; python_version < '3.13'",
+    "transformers>=4.46.3,<5",
+    "tree-sitter>=0.24.0,<0.25",
+    "tree-sitter-python>=0.23.6,<0.24",
+]
+evals = [
+    "plotly>=6.0.0,<7",
+    "gdown>=5.2.0,<6",
+]
+gui = [
+    "pyside6>=6.8.3,<7",
+    "qasync>=0.27.1,<0.28",
+]
+graphiti = ["graphiti-core>=0.7.0,<0.8"]
+dev = [
+    "pytest>=7.4.0,<8",
+    "pytest-cov>=6.1.1",
+    "pytest-asyncio>=0.21.1,<0.22",
+    "coverage>=7.3.2,<8",
+    "mypy>=1.7.1,<2",
+    "notebook>=7.1.0,<8",
+    "deptry>=0.20.0,<0.21",
+    "debugpy==1.8.9",
+    "pylint>=3.0.3,<4",
+    "ruff>=0.9.2,<1.0.0",
+    "tweepy==4.14.0",
+    "gitpython>=3.1.43,<4",
+    "pylance==0.22.0",
+    "mkdocs-material>=9.5.42,<10",
+    "mkdocs-minify-plugin>=0.8.0,<0.9",
+    "mkdocstrings[python]>=0.26.2,<0.27",
+]
 
+[project.urls]
+Homepage = "https://www.cognee.ai"
+Repository = "https://github.com/topoteretes/cognee"
 
-[tool.poetry.extras]
-api = ["uvicorn", "gunicorn"]
-weaviate = ["weaviate-client"]
-qdrant = ["qdrant-client"]
-neo4j = ["neo4j"]
-postgres = ["psycopg2", "pgvector", "asyncpg"]
-notebook = ["notebook", "ipykernel", "overrides", "ipywidgets", "jupyterlab", "jupyterlab_widgets", "jupyterlab-server", "jupyterlab-git"]
-langchain = ["langsmith", "langchain_text_splitters"]
-llama-index = ["llama-index-core"]
-gemini = ["google-generativeai"]
-huggingface = ["transformers"]
-ollama = ["transformers"]
-mistral = ["mistral-common"]
-anthropic = ["anthropic"]
-deepeval = ["deepeval"]
-posthog = ["posthog"]
-falkordb = ["falkordb"]
-kuzu = ["kuzu"]
-groq = ["groq"]
-milvus = ["pymilvus"]
-chromadb = ["chromadb"]
-docs = ["unstructured"]
-codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
-evals = ["plotly", "gdown"]
-gui = ["pyside6", "qasync"]
-graphiti = ["graphiti-core"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.4.0"
-pytest-asyncio = "^0.21.1"
-coverage = "^7.3.2"
-mypy = "^1.7.1"
-notebook = {version = "^7.1.0", optional = true}
-deptry = "^0.20.0"
-debugpy = "1.8.9"
-pylint = "^3.0.3"
-ruff = ">=0.9.2,<1.0.0"
-tweepy = "4.14.0"
-gitpython = "^3.1.43"
-pylance = "0.22.0"
-
-[tool.poetry.group.docs.dependencies]
-mkdocs-material = "^9.5.42"
-mkdocs-minify-plugin = "^0.8.0"
-mkdocstrings = {extras = ["python"], version = "^0.26.2"}
-
-[tool.ruff] # https://beta.ruff.rs/docs/
+[tool.ruff]
 line-length = 100
 exclude = [
     "migrations/",  # Ignore migrations directory
@@ -151,7 +150,3 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
