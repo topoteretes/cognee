@@ -95,7 +95,7 @@ async def main():
 
     await cognee.prune.prune_system(metadata=True)
     from cognee.infrastructure.databases.graph import get_graph_engine
-    
+
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Memgraph graph database is not empty"
