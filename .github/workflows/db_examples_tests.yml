@@ -21,7 +21,6 @@ on:
         required: true
       LLM_API_VERSION:
         required: true
-
       EMBEDDING_MODEL:
         required: true
       EMBEDDING_ENDPOINT:
@@ -30,7 +29,6 @@ on:
         required: true
       EMBEDDING_API_VERSION:
         required: true
-
       QDRANT_API_URL:
         required: false
       QDRANT_API_KEY:

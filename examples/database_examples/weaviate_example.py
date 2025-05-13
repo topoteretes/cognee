@@ -16,12 +16,16 @@ async def main():
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
-    # Configure Weaviate as the vector database provider
 
+    # Set up Neo4j credentials in .env file and get the values from environment variables
+    weaviate_url = os.getenv("VECTOR_DB_URL")
+    weaviate_key = os.getenv("VECTOR_DB_KEY")
+
+    # Configure Weaviate as the vector database provider
     cognee.config.set_vector_db_config(
         {
-            "vector_db_url": "",  # Set your Weaviate Endpoint
-            "vector_db_key": "",  # Set your Weaviate API key
+            "vector_db_url": weaviate_url,  # Set your Weaviate Endpoint
+            "vector_db_key": weaviate_key,  # Set your Weaviate API key
             "vector_db_provider": "weaviate",  # Specify Weaviate as provider
         }
     )
