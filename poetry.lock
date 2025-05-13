@@ -8085,10 +8085,9 @@ tests = ["coverage[toml] (==5.0.4)", "pytest (>=6.0.0,<7.0.0)"]
 name = "pylance"
 version = "0.22.0"
 description = "python wrapper for Lance columnar format"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"dev\""
 files = [
     {file = "pylance-0.22.0-cp39-abi3-macosx_10_15_x86_64.whl", hash = "sha256:2c0bb6bf7320e500f0f5948e5b23e4d70d9c84bba15a2db2e877be9637c4dc0c"},
     {file = "pylance-0.22.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:341a8cbac762c1f446a05a1513dab1b7930f433a8331b08b0b89a975f3864f6a"},
@@ -11963,7 +11962,7 @@ api = ["gunicorn", "uvicorn"]
 chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 deepeval = ["deepeval"]
-dev = ["coverage", "debugpy", "deptry", "gitpython", "mkdocs-material", "mkdocs-minify-plugin", "mkdocstrings", "mypy", "notebook", "pylance", "pylint", "pytest", "pytest-asyncio", "pytest-cov", "ruff", "tweepy"]
+dev = ["coverage", "debugpy", "deptry", "gitpython", "mkdocs-material", "mkdocs-minify-plugin", "mkdocstrings", "mypy", "notebook", "pylint", "pytest", "pytest-asyncio", "pytest-cov", "ruff", "tweepy"]
 docs = ["unstructured"]
 evals = ["gdown", "plotly"]
 falkordb = ["falkordb"]
@@ -11988,4 +11987,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "94d75c451c7580381771508ddcf6cee599b196d97c36b8b5bb5a3b64146f3224"
+content-hash = "9d2a3beda2b6c329e69319e51c28c90d2806d8a257cd971e990600e99c1d96bd"
