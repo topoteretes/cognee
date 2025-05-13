@@ -21,7 +21,7 @@ async def main():
     neo4j_url = os.getenv("GRAPH_DATABASE_URL")
     neo4j_user = os.getenv("GRAPH_DATABASE_USERNAME")
     neo4j_pass = os.getenv("GRAPH_DATABASE_PASSWORD")
-    
+
     # Configure Neo4j as the graph database provider
     cognee.config.set_graph_db_config(
         {
@@ -31,8 +31,6 @@ async def main():
             "graph_database_password": neo4j_pass,  # Neo4j password
         }
     )
-
-
 
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs
