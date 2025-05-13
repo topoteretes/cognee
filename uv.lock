@@ -1053,7 +1053,7 @@ requires-dist = [
     { name = "notebook", marker = "extra == 'dev'", specifier = ">=7.1.0,<8" },
     { name = "notebook", marker = "extra == 'notebook'", specifier = ">=7.1.0,<8" },
     { name = "numpy", specifier = ">=1.26.4,<=2.1" },
-    { name = "onnxruntime", specifier = "==1.21.1" },
+    { name = "onnxruntime", specifier = "<=1.21.1" },
     { name = "openai", specifier = ">=1.59.4,<2" },
     { name = "owlready2", specifier = ">=0.47,<0.48" },
     { name = "pandas", specifier = ">=2.2.2" },
