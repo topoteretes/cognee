@@ -16,12 +16,17 @@ async def main():
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
+
+    # Set up Qdrant credentials in .env file and get the values from environment variables
+    qdrant_url = os.getenv("VECTOR_DB_URL")
+    qdrant_key = os.getenv("VECTOR_DB_KEY")
+
     # Configure Qdrant as the vector database provider
 
     cognee.config.set_vector_db_config(
         {
-            "vector_db_url": "",  # Enter Qdrant URL
-            "vector_db_key": "",  # API key needed
+            "vector_db_url": qdrant_url,  # Enter Qdrant URL
+            "vector_db_key": qdrant_key,  # API key needed
             "vector_db_provider": "qdrant",  # Specify Qdrant as provider
         }
     )
