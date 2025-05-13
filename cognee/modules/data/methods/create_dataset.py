@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from cognee.modules.data.models import Dataset
 
-from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.modules.users.models import User
 
 
@@ -22,9 +22,7 @@ async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -
 
     if dataset is None:
         # Dataset id should be generated based on dataset_name and owner_id/user so multiple users can use the same dataset_name
-        dataset_id = await cognee_datasets.get_unique_dataset_id(
-            dataset_name=dataset_name, user=user
-        )
+        dataset_id = await get_unique_dataset_id(dataset_name=dataset_name, user=user)
         dataset = Dataset(id=dataset_id, name=dataset_name, data=[])
         dataset.owner_id = owner_id
 

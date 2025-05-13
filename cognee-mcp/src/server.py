@@ -10,7 +10,7 @@ from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.data.methods import get_unique_dataset_id
+from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
