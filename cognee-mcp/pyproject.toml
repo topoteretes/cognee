@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
-    # For local cognee repo usage remove comment bellow
-    #"cognee[postgres,codegraph,gemini,huggingface] @ file:/Users/igorilic/Desktop/cognee",
+    # For local cognee repo usage remove comment bellow and add absolute path to cognee
+    #"cognee[postgres,codegraph,gemini,huggingface] @ file:/Users/<username>/Desktop/cognee",
     "cognee[postgres,codegraph,gemini,huggingface]==0.1.40",
     "fastmcp>=1.0",
     "mcp==1.5.0",
