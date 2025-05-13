@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Optional
 from pydantic import BaseModel
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.llm import get_llm_config
@@ -20,8 +21,8 @@ class LLMConfig(BaseModel):
     api_key: str
     model: str
     provider: str
-    endpoint: str
-    api_version: str
+    endpoint: Optional[str]
+    api_version: Optional[str]
     models: dict[str, list[ConfigChoice]]
     providers: list[ConfigChoice]
 
