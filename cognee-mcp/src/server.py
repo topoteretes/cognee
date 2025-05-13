@@ -9,7 +9,8 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
-from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
@@ -143,9 +144,7 @@ async def cognify_status():
     """Get status of cognify pipeline"""
     with redirect_stdout(sys.stderr):
         user = await get_default_user()
-        status = await cognee_datasets.get_status(
-            [await cognee_datasets.get_unique_dataset_id("main_dataset", user)]
-        )
+        status = await get_pipeline_status([await get_unique_dataset_id("main_dataset", user)])
         return [types.TextContent(type="text", text=str(status))]
 
 
@@ -154,9 +153,7 @@ async def codify_status():
     """Get status of codify pipeline"""
     with redirect_stdout(sys.stderr):
         user = await get_default_user()
-        status = await cognee_datasets.get_status(
-            [await cognee_datasets.get_unique_dataset_id("codebase", user)]
-        )
+        status = await get_pipeline_status([await get_unique_dataset_id("codebase", user)])
         return [types.TextContent(type="text", text=str(status))]
 
 
