@@ -56,7 +56,7 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j') }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@master
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
