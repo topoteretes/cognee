@@ -24,11 +24,11 @@ async def main():
     )
 
     # Set up PostgreSQL credentials from environment variables
-    pg_db = os.getenv("DB_NAME", "cognee_db")
-    pg_host = os.getenv("DB_HOST", "127.0.0.1")
-    pg_port = os.getenv("DB_PORT", "5432")
-    pg_user = os.getenv("DB_USERNAME", "cognee")
-    pg_pass = os.getenv("DB_PASSWORD", "cognee")
+    pg_db = os.getenv("DB_NAME")
+    pg_host = os.getenv("DB_HOST")
+    pg_port = os.getenv("DB_PORT")
+    pg_user = os.getenv("DB_USERNAME")
+    pg_pass = os.getenv("DB_PASSWORD")
 
     # Configure PostgreSQL connection details
     # These settings are required for PGVector
