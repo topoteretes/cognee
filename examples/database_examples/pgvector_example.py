@@ -23,15 +23,22 @@ async def main():
         }
     )
 
+    # Set up PostgreSQL credentials from environment variables
+    pg_db = os.getenv("DB_NAME")
+    pg_host = os.getenv("DB_HOST")
+    pg_port = os.getenv("DB_PORT")
+    pg_user = os.getenv("DB_USERNAME")
+    pg_pass = os.getenv("DB_PASSWORD")
+
     # Configure PostgreSQL connection details
     # These settings are required for PGVector
     cognee.config.set_relational_db_config(
         {
-            "db_name": "cognee_db",  # Database name
-            "db_host": "127.0.0.1",  # Database host
-            "db_port": "5432",  # PostgreSQL port
-            "db_username": "postgres",  # Database username
-            "db_password": "postgres",  # Database password
+            "db_name": pg_db,  # Database name
+            "db_host": pg_host,  # Database host
+            "db_port": pg_port,  # PostgreSQL port
+            "db_username": pg_user,  # Database username
+            "db_password": pg_pass,  # Database password
             "db_provider": "postgres",  # Must be postgres for PGVector
         }
     )
