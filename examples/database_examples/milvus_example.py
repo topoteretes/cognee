@@ -17,7 +17,6 @@ async def main():
     5. Performs different types of searches
     """
 
-
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs
     current_dir = pathlib.Path(__file__).parent
