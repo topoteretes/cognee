@@ -16,15 +16,23 @@ async def main():
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
+
+    # Set up Neo4j credentials in .env file and get the values from environment variables
+    neo4j_url = os.getenv("GRAPH_DATABASE_URL", "bolt://localhost:7687")
+    neo4j_user = os.getenv("GRAPH_DATABASE_USERNAME", "neo4j")
+    neo4j_pass = os.getenv("GRAPH_DATABASE_PASSWORD", "pleaseletmein")
+    
     # Configure Neo4j as the graph database provider
     cognee.config.set_graph_db_config(
         {
-            "graph_database_url": "bolt://localhost:7687",  # Neo4j Bolt URL
+            "graph_database_url": neo4j_url,  # Neo4j Bolt URL
             "graph_database_provider": "neo4j",  # Specify Neo4j as provider
-            "graph_database_username": "neo4j",  # Neo4j username
-            "graph_database_password": "pleaseletmein",  # Neo4j password
+            "graph_database_username": neo4j_user,  # Neo4j username
+            "graph_database_password": neo4j_pass,  # Neo4j password
         }
     )
+
+
 
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs
