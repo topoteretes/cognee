@@ -14,6 +14,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_forc
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.users.methods import get_default_user
 
 text_list = [
     "Kamala Harris is the Attorney General of California. She was previously "
@@ -27,6 +28,9 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     await create_relational_db_and_tables()
 
+    # Initialize default user
+    user = await get_default_user()
+
     for text in text_list:
         await cognee.add(text)
 
@@ -34,7 +38,7 @@ async def main():
         Task(build_graph_with_temporal_awareness, text_list=text_list),
     ]
 
-    pipeline = run_tasks(tasks)
+    pipeline = run_tasks(tasks, user=user)
 
     async for result in pipeline:
         print(result)
