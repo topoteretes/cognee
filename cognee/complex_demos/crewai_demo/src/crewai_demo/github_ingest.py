@@ -49,9 +49,9 @@ def get_github_data_for_cognee(
     username,
     token=None,
     days=30,
-    prs_limit=5,
+    prs_limit=3,
     commits_per_pr=3,
-    issues_limit=5,
+    issues_limit=3,
     max_comments=3,
     skip_no_diff=True,
 ):
@@ -89,17 +89,18 @@ async def cognify_github_profile(username, token=None):
     if not github_data:
         return False
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(json.dumps(github_data["user"], default=str), node_set=["soft", "technical"])
+    await cognee.add(
+        json.dumps(github_data["user"], default=str), node_set=["soft", "technical", username]
+    )
 
     for comment in github_data["comments"]:
-        await cognee.add("Comment: " + json.dumps(comment, default=str), node_set=["soft"])
+        await cognee.add(
+            "Comment: " + json.dumps(comment, default=str), node_set=["soft", username]
+        )
 
     for file_change in github_data["file_changes"]:
         await cognee.add(
-            "File Change: " + json.dumps(file_change, default=str), node_set=["technical"]
+            "File Change: " + json.dumps(file_change, default=str), node_set=["technical", username]
         )
 
     await cognee.cognify()
