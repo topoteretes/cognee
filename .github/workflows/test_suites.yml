@@ -119,6 +119,7 @@ jobs:
       python-version-tests,
       vector-db-tests,
       example-tests,
+      db-examples-tests,
       gemini-tests,
       ollama-tests,
       relational-db-migration-tests,
@@ -137,6 +138,7 @@ jobs:
                 "${{ needs.python-version-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
                 "${{ needs.example-tests.result }}" == "success" &&
+                "${{ needs.db-examples-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&

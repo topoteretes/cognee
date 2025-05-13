@@ -16,14 +16,7 @@ async def main():
     4. Processes (cognifies) the data
     5. Performs different types of searches
     """
-    # Configure Milvus as the vector database provider
-    cognee.config.set_vector_db_config(
-        {
-            "vector_db_url": "",  # Enter Milvus Endpoint
-            "vector_db_key": "",  # Enter Token
-            "vector_db_provider": "milvus",  # Specify Milvus as provider
-        }
-    )
+
 
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs
@@ -34,6 +27,16 @@ async def main():
     cognee_directory_path = str(current_dir / "cognee_system")
     cognee.config.system_root_directory(cognee_directory_path)
 
+    local_milvus_db_path = os.path.join(cognee_directory_path, "databases", "milvus.db")
+
+    # Configure Milvus as the vector database provider
+    cognee.config.set_vector_db_config(
+        {
+            "vector_db_url": local_milvus_db_path,  # Enter Milvus Endpoint if exist
+            "vector_db_key": "",  # Enter Token
+            "vector_db_provider": "milvus",  # Specify Milvus as provider
+        }
+    )
     # Clean any existing data (optional)
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
