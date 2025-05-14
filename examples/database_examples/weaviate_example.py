@@ -17,7 +17,7 @@ async def main():
     5. Performs different types of searches
     """
 
-    # Set up Neo4j credentials in .env file and get the values from environment variables
+    # Set up Weaviate credentials in .env file and get the values from environment variables
     weaviate_url = os.getenv("VECTOR_DB_URL")
     weaviate_key = os.getenv("VECTOR_DB_KEY")
 
