@@ -65,22 +65,20 @@ async def cognee_pipeline(
         # Get datasets from database if none sent.
         datasets = existing_datasets
     else:
-        if existing_datasets:
-            # Filter out datasets that match with the ones from database owned by the user.
-            datasets = [
-                dataset
-                for dataset in existing_datasets
-                if str(dataset.id) in datasets or dataset.name in datasets
-            ]
-        else:
-            datasets = [
-                Dataset(
-                    id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
-                    name=dataset_name,
-                    owner_id=user.id,
-                )
-                for dataset_name in datasets
-            ]
+        # If dataset is already in database, use it, otherwise create a new instance.
+        datasets = [
+            dataset
+            if any(
+                existing_dataset.name == dataset_name or existing_dataset.id == dataset_name
+                for existing_dataset in existing_datasets
+            )
+            else Dataset(
+                id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
+                name=dataset_name,
+                owner_id=user.id,
+            )
+            for dataset_name in datasets
+        ]
 
     awaitables = []
 
