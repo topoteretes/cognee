@@ -20,8 +20,8 @@ def run():
         for key in sorted(os.environ):
             print(f"{key}={os.environ[key]}")
 
-        applicant_1 = ""
-        applicant_2 = ""
+        applicant_1 = "lxobr"
+        applicant_2 = "hajdul88"
 
         GithubIngestion().run(applicant_1=applicant_1, applicant_2=applicant_2)
 

@@ -219,10 +219,6 @@ async def cognify_github_data(github_data: dict):
 
     dataset_id = uuid5(NAMESPACE_OID, "GitHub")
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    await cognee_setup()
-
     cognee_user = await get_default_user()
     tasks = [Task(add_data_points, task_config={"batch_size": 50})]
     results = run_tasks(

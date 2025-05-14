@@ -1,5 +1,5 @@
 from crewai.tools import BaseTool
-from ..github_ingest import cognify_github_profile
+from ..github_ingest_datapoints import cognify_github_data_from_username
 
 
 class GithubIngestion(BaseTool):
@@ -10,16 +10,17 @@ class GithubIngestion(BaseTool):
         import asyncio
         import cognee
         import os
+        from cognee.low_level import DataPoint, setup as cognee_setup
 
         async def main():
             try:
                 await cognee.prune.prune_data()
                 await cognee.prune.prune_system(metadata=True)
-
+                await cognee_setup()
                 token = os.getenv("GITHUB_TOKEN")
 
-                await cognify_github_profile(applicant_1, token)
-                await cognify_github_profile(applicant_2, token)
+                await cognify_github_data_from_username(applicant_1, token)
+                await cognify_github_data_from_username(applicant_2, token)
                 return "Github ingestion finished"
             except Exception as e:
                 return f"Error: {str(e)}"
