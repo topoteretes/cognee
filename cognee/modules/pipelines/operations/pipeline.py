@@ -1,7 +1,8 @@
 import asyncio
-from cognee.shared.logging_utils import get_logger
 from typing import Union
+from uuid import NAMESPACE_OID, uuid5
 
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
@@ -12,6 +13,7 @@ from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -65,9 +67,20 @@ async def cognee_pipeline(
     else:
         if existing_datasets:
             # Filter out datasets that match with the ones from database owned by the user.
-            datasets = [dataset for dataset in existing_datasets if str(dataset.id) in datasets or dataset.name in datasets]
+            datasets = [
+                dataset
+                for dataset in existing_datasets
+                if str(dataset.id) in datasets or dataset.name in datasets
+            ]
         else:
-            datasets = [Dataset(id=await get_unique_dataset_id(dataset_name=dataset_name, user=user), name=dataset_name, owner_id=user.id) for dataset_name in datasets]
+            datasets = [
+                Dataset(
+                    id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
+                    name=dataset_name,
+                    owner_id=user.id,
+                )
+                for dataset_name in datasets
+            ]
 
     awaitables = []
 
@@ -90,6 +103,26 @@ async def run_pipeline(
 ):
     check_dataset_name(dataset.name)
 
+    # Ugly hack, but no easier way to do this.
+    if pipeline_name == "add_pipeline":
+        # Refresh the add pipeline status so data is added to a dataset.
+        # Without this the app_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
+        dataset_id = uuid5(NAMESPACE_OID, f"{dataset.name}{str(user.id)}")
+
+        await log_pipeline_run_initiated(
+            pipeline_id=uuid5(NAMESPACE_OID, "add_pipeline"),
+            pipeline_name="add_pipeline",
+            dataset_id=dataset_id,
+        )
+
+        # Refresh the cognify pipeline status after we add new files.
+        # Without this the cognify_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
+        await log_pipeline_run_initiated(
+            pipeline_id=uuid5(NAMESPACE_OID, "cognify_pipeline"),
+            pipeline_name="cognify_pipeline",
+            dataset_id=dataset_id,
+        )
+
     dataset_id = dataset.id
 
     if not data:
@@ -103,7 +136,7 @@ async def run_pipeline(
             PipelineRunStatus.DATASET_PROCESSING_COMPLETED
         ]  # TODO: this is a random assignment, find permanent solution
 
-    if (str(dataset_id) in task_status):
+    if str(dataset_id) in task_status:
         if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
             logger.info("Dataset %s is already being processed.", dataset_id)
             return

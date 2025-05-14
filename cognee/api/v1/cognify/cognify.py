@@ -34,7 +34,9 @@ async def cognify(
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
-    return await cognee_pipeline(tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline")
+    return await cognee_pipeline(
+        tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
+    )
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)

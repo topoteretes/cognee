@@ -3,9 +3,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 
 
-async def log_pipeline_run_initiated(
-    pipeline_id: str, pipeline_name: str, dataset_id: UUID
-):
+async def log_pipeline_run_initiated(pipeline_id: str, pipeline_name: str, dataset_id: UUID):
     pipeline_run = PipelineRun(
         pipeline_run_id=uuid4(),
         pipeline_name=pipeline_name,
