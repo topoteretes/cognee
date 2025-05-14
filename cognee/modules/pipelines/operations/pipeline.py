@@ -72,7 +72,10 @@ async def cognee_pipeline(
             is_dataset_found = False
 
             for existing_dataset in existing_datasets:
-                if existing_dataset.name == dataset_name or str(existing_dataset.id) == dataset_name:
+                if (
+                    existing_dataset.name == dataset_name
+                    or str(existing_dataset.id) == dataset_name
+                ):
                     dataset_instances.append(existing_dataset)
                     is_dataset_found = True
                     break
