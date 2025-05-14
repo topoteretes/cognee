@@ -51,7 +51,6 @@ def create_repository_datapoint(repo_name: str, nodesets: List[NodeSet]) -> Repo
         name=repo_name,
         has_issue=[],
         has_commit=[],
-        contains=[],
         belongs_to_set=nodesets,
     )
     logger.debug(f"Created Repository with ID: {repo_id} for {repo_name}")
@@ -80,7 +79,6 @@ def create_commit_datapoint(
         commit_url=commit_data.get("commit_url", ""),
         author_name=commit_data.get("login", ""),
         repo=commit_data.get("repo", ""),
-        authored_by=user,
         has_change=[],
         belongs_to_set=nodesets,
     )
@@ -89,7 +87,7 @@ def create_commit_datapoint(
 
 
 def create_file_change_datapoint(
-    fc_data: Dict[str, Any], file: File, nodesets: List[NodeSet]
+    fc_data: Dict[str, Any], user: GitHubUser, file: File, nodesets: List[NodeSet]
 ) -> FileChange:
     """Creates a FileChange DataPoint with a consistent ID."""
     fc_key = (
@@ -107,7 +105,8 @@ def create_file_change_datapoint(
         diff=fc_data.get("diff", ""),
         commit_sha=fc_data.get("commit_sha", ""),
         repo=fc_data.get("repo", ""),
-        modifies=file,
+        modifies=file.filename,
+        changed_by=user,
         belongs_to_set=nodesets,
     )
     logger.debug(f"Created FileChange with ID: {fc_id} for {fc_data.get('filename', '')}")

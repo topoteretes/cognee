@@ -82,7 +82,6 @@ def get_or_create_file(
         return files[file_key]
     file = create_file_datapoint(filename, repo_name, [technical_nodeset])
     files[file_key] = file
-    link_file_to_repo(file, repository)
     return file
 
 
@@ -137,11 +136,11 @@ def process_file_changes_data(
         repository = get_or_create_repository(repo_name, repositories, user, [technical_nodeset])
         file = get_or_create_file(filename, repo_name, files, repository, technical_nodeset)
         commit = get_or_create_commit(fc_data, user, commits, repository, technical_nodeset)
-        file_change = create_file_change_datapoint(fc_data, file, [technical_nodeset])
+        file_change = create_file_change_datapoint(fc_data, user, file, [technical_nodeset])
         file_changes_list.append(file_change)
         if file_change not in commit.has_change:
             commit.has_change.append(file_change)
-    all_datapoints = list(files.values()) + list(commits.values()) + file_changes_list
+    all_datapoints = list(commits.values()) + file_changes_list
     return all_datapoints
 
 
@@ -244,9 +243,9 @@ async def cognify_github_data_from_username(
     username: str,
     token: Optional[str] = None,
     days: int = 30,
-    prs_limit: int = 5,
+    prs_limit: int = 3,
     commits_per_pr: int = 3,
-    issues_limit: int = 5,
+    issues_limit: int = 3,
     max_comments: int = 3,
     skip_no_diff: bool = True,
 ):
@@ -300,5 +299,5 @@ if __name__ == "__main__":
     # asyncio.run(process_github_from_file(json_file_path))
     #
     # Option 2: Process directly from GitHub
-    username = "Vasilije1990"
+    username = ""
     asyncio.run(cognify_github_data_from_username(username, token))

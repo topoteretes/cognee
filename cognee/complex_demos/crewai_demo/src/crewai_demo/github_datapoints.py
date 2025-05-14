@@ -34,7 +34,8 @@ class FileChange(DataPoint):
     diff: str
     commit_sha: str
     repo: str
-    modifies: File
+    modifies: str
+    changed_by: GitHubUser
     metadata: dict = {"index_fields": ["diff"]}
 
 
@@ -67,7 +68,6 @@ class Commit(DataPoint):
     commit_url: str
     author_name: str
     repo: str
-    authored_by: GitHubUser
     has_change: List[FileChange] = []
     metadata: dict = {"index_fields": ["commit_message"]}
 
@@ -76,5 +76,4 @@ class Repository(DataPoint):
     name: str
     has_issue: List[Issue] = []
     has_commit: List[Commit] = []
-    contains: List[File] = []
     metadata: dict = {"index_fields": ["name"]}
