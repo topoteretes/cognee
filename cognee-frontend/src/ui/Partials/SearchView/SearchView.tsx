@@ -28,9 +28,6 @@ export default function SearchView() {
   }, []);
 
   const searchOptions = [{
-    value: 'INSIGHTS',
-    label: 'Query insights from documents',
-  }, {
     value: 'GRAPH_COMPLETION',
     label: 'Completion using Cognee\'s graph based memory',
   }, {

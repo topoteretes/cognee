@@ -13,7 +13,7 @@ echo "Environment: $ENVIRONMENT"
 # inconsistencies and should cause the startup to fail. This check allows for
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
-MIGRATION_OUTPUT=$(.venv/bin/alembic upgrade head 2>&1) || {
+MIGRATION_OUTPUT=$(alembic upgrade head 2>&1) || {
     if [[ $MIGRATION_OUTPUT == *"UserAlreadyExists"* ]] || [[ $MIGRATION_OUTPUT == *"User default_user@example.com already exists"* ]]; then
         echo "Warning: Default user already exists, continuing startup..."
     else
@@ -22,8 +22,9 @@ MIGRATION_OUTPUT=$(.venv/bin/alembic upgrade head 2>&1) || {
         exit 1
     fi
 }
+echo "Database migrations done."
 
-echo "Starting Gunicorn"
+echo "Starting server..."
 
 # Add startup delay to ensure DB is ready
 sleep 2
@@ -32,10 +33,10 @@ sleep 2
 if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
+        debugpy --wait-for-client --listen 0.0.0.0:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
     else
-        exec .venv/bin/gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
+        gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
     fi
 else
-    exec .venv/bin/gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level error cognee.api.client:app 
+    gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level error cognee.api.client:app 
 fi

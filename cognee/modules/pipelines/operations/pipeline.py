@@ -1,9 +1,8 @@
 import asyncio
 from cognee.shared.logging_utils import get_logger
 from typing import Union
-from uuid import uuid5, NAMESPACE_OID
 
-from cognee.modules.data.methods import get_datasets, get_datasets_by_name
+from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.modules.data.models import Data, Dataset
@@ -59,15 +58,16 @@ async def cognee_pipeline(
 
     # If no datasets are provided, work with all existing datasets.
     existing_datasets = await get_datasets(user.id)
-    if datasets is None or len(datasets) == 0:
+
+    if not datasets:
+        # Get datasets from database if none sent.
         datasets = existing_datasets
-        if isinstance(datasets[0], str):
-            datasets = await get_datasets_by_name(datasets, user.id)
     else:
-        # Try to get datasets objects from database, if they don't exist use dataset name
-        datasets_names = await get_datasets_by_name(datasets, user.id)
-        if datasets_names:
-            datasets = datasets_names
+        if existing_datasets:
+            # Filter out datasets that match with the ones from database owned by the user.
+            datasets = [dataset for dataset in existing_datasets if str(dataset.id) in datasets or dataset.name in datasets]
+        else:
+            datasets = [Dataset(id=await get_unique_dataset_id(dataset_name=dataset_name, user=user), name=dataset_name, owner_id=user.id) for dataset_name in datasets]
 
     awaitables = []
 
@@ -88,31 +88,28 @@ async def run_pipeline(
     data=None,
     pipeline_name: str = "custom_pipeline",
 ):
-    if isinstance(dataset, Dataset):
-        check_dataset_name(dataset.name)
-        dataset_id = dataset.id
-    elif isinstance(dataset, str):
-        check_dataset_name(dataset)
-        # Generate id based on unique dataset_id formula
-        dataset_id = await get_unique_dataset_id(dataset_name=dataset, user=user)
+    check_dataset_name(dataset.name)
+
+    dataset_id = dataset.id
 
     if not data:
         data: list[Data] = await get_dataset_data(dataset_id=dataset_id)
 
     # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
     if isinstance(dataset, Dataset):
-        task_status = await get_pipeline_status([dataset_id])
+        task_status = await get_pipeline_status([dataset_id], pipeline_name)
     else:
         task_status = [
             PipelineRunStatus.DATASET_PROCESSING_COMPLETED
         ]  # TODO: this is a random assignment, find permanent solution
 
-    if (
-        str(dataset_id) in task_status
-        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
-    ):
-        logger.info("Dataset %s is already being processed.", dataset_id)
-        return
+    if (str(dataset_id) in task_status):
+        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
+            logger.info("Dataset %s is already being processed.", dataset_id)
+            return
+        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+            logger.info("Dataset %s is already processed.", dataset_id)
+            return
 
     if not isinstance(tasks, list):
         raise ValueError("Tasks must be a list")

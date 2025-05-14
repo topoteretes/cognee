@@ -7,7 +7,7 @@ import { getExplorationGraphUrl } from '@/modules/exploration';
 import styles from './Explorer.module.css';
 
 interface ExplorerProps {
-  dataset: { id: string };
+  dataset: { name: string };
   className?: string;
   style?: React.CSSProperties;
 }
