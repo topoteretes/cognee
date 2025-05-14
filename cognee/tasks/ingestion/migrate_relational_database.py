@@ -8,12 +8,12 @@ from cognee.infrastructure.databases.relational.get_migration_relational_engine 
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
-from cognee.modules.engine.models import TableRow, TableType
+from cognee.modules.engine.models import TableRow, TableType, ColumnValue
 
 logger = logging.getLogger(__name__)
 
 
-async def migrate_relational_database(graph_db, schema):
+async def migrate_relational_database(graph_db, schema, migrate_column_data=True):
     """
     Migrates data from a relational database into a graph database.
 
@@ -94,6 +94,36 @@ async def migrate_relational_database(graph_db, schema):
                         ),
                     )
                 )
+                # Migrate data stored in columns of table rows
+                if migrate_column_data:
+                    for key, value in row_properties.items():
+                        # Skip mapping primary key information to itself
+                        if key is primary_key_col:
+                            continue
+                        # TODO: Add skipping of mapping of columns used in foreign key relationships
+
+                        column_node_id = f"{key}:{value}"
+                        column_node = ColumnValue(
+                            id=uuid5(NAMESPACE_OID, name=column_node_id),
+                            name=column_node_id,
+                            properties=f"{key} {value}",
+                            description=f"Column name={key} and value={value}",
+                        )
+                        node_mapping[column_node_id] = column_node
+
+                        # Create relationship between column value of table row and table row
+                        edge_mapping.append(
+                            (
+                                row_node.id,
+                                column_node.id,
+                                key,
+                                dict(
+                                    relationship_name=key,
+                                    source_node_id=row_node.id,
+                                    target_node_id=column_node.id,
+                                ),
+                            )
+                        )
 
         # Process foreign key relationships after all nodes are created
         for table_name, details in schema.items():
