@@ -66,19 +66,27 @@ async def cognee_pipeline(
         datasets = existing_datasets
     else:
         # If dataset is already in database, use it, otherwise create a new instance.
-        datasets = [
-            dataset
-            if any(
-                existing_dataset.name == dataset_name or existing_dataset.id == dataset_name
-                for existing_dataset in existing_datasets
-            )
-            else Dataset(
-                id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
-                name=dataset_name,
-                owner_id=user.id,
-            )
-            for dataset_name in datasets
-        ]
+        dataset_instances = []
+
+        for dataset_name in datasets:
+            is_dataset_found = False
+
+            for existing_dataset in existing_datasets:
+                if existing_dataset.name == dataset_name or existing_dataset.id == dataset_name:
+                    dataset_instances.append(existing_dataset)
+                    is_dataset_found = True
+                    break
+
+            if not is_dataset_found:
+                dataset_instances.append(
+                    Dataset(
+                        id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
+                        name=dataset_name,
+                        owner_id=user.id,
+                    )
+                )
+
+        datasets = dataset_instances
 
     awaitables = []
 
