@@ -89,7 +89,7 @@ class GitHubDevComments:
     def _extract_comment_data(self, issue, comment):
         """Creates a structured data object from a comment."""
         comment_data = {
-            "repo": issue.repository.name,
+            "repo": issue.repository.full_name,
             "issue_number": issue.number,
             "comment_id": comment.id,
             "body": comment.body,
