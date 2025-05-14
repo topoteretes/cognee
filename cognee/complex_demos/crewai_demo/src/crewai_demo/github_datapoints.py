@@ -35,7 +35,7 @@ class FileChange(DataPoint):
     commit_sha: str
     repo: str
     modifies: File
-    metadata: dict = {"index_fields": ["filename"]}
+    metadata: dict = {"index_fields": ["diff"]}
 
 
 class Comment(DataPoint):
