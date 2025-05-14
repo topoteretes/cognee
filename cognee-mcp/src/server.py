@@ -144,7 +144,9 @@ async def cognify_status():
     """Get status of cognify pipeline"""
     with redirect_stdout(sys.stderr):
         user = await get_default_user()
-        status = await get_pipeline_status([await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline")
+        status = await get_pipeline_status(
+            [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
+        )
         return [types.TextContent(type="text", text=str(status))]
 
 
@@ -153,7 +155,9 @@ async def codify_status():
     """Get status of codify pipeline"""
     with redirect_stdout(sys.stderr):
         user = await get_default_user()
-        status = await get_pipeline_status([await get_unique_dataset_id("codebase", user)], "cognify_code_pipeline")
+        status = await get_pipeline_status(
+            [await get_unique_dataset_id("codebase", user)], "cognify_code_pipeline"
+        )
         return [types.TextContent(type="text", text=str(status))]
 
 
