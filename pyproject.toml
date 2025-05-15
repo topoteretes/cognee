@@ -57,6 +57,7 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
     "onnxruntime<=1.21.1",
+    "pylance==0.22.0",
 ]
 
 [project.optional-dependencies]
@@ -122,7 +123,6 @@ dev = [
     "ruff>=0.9.2,<1.0.0",
     "tweepy==4.14.0",
     "gitpython>=3.1.43,<4",
-    "pylance==0.22.0",
     "mkdocs-material>=9.5.42,<10",
     "mkdocs-minify-plugin>=0.8.0,<0.9",
     "mkdocstrings[python]>=0.26.2,<0.27",
