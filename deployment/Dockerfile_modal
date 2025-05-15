@@ -28,5 +28,5 @@ RUN pip install poetry
 
 RUN poetry install --all-extras --no-root --without dev
 
-COPY cognee /app/cognee
+COPY cognee/ /app/cognee
 COPY README.md /app/README.md
