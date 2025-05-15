@@ -1,6 +1,6 @@
 [project]
 name = "cognee"
-version = "0.1.39"
+version = "0.1.40"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -135,6 +135,27 @@ Repository = "https://github.com/topoteretes/cognee"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+  "/bin",
+  "/dist",
+  "/.data",
+  "/.github",
+  "/alembic",
+  "/distributed",
+  "/deployment",
+  "/cognee-mcp",
+  "/cognee-frontend",
+  "/examples",
+  "/helm",
+  "/licenses",
+  "/logs",
+  "/notebooks",
+  "/profiling",
+  "/tests",
+  "/tools",
+]
 
 [tool.ruff]
 line-length = 100
