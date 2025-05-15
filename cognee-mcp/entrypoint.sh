@@ -13,7 +13,7 @@ echo "Environment: $ENVIRONMENT"
 # inconsistencies and should cause the startup to fail. This check allows for
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
-MIGRATION_OUTPUT=$(uv run alembic upgrade head 2>&1) || {
+MIGRATION_OUTPUT=$(uv run alembic -c tools/alembic.ini upgrade head 2>&1) || {
     if [[ $MIGRATION_OUTPUT == *"UserAlreadyExists"* ]] || [[ $MIGRATION_OUTPUT == *"User default_user@example.com already exists"* ]]; then
         echo "Warning: Default user already exists, continuing startup..."
     else
