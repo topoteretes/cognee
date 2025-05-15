@@ -9,6 +9,10 @@ class HiringCrew:
     agents_config = "config/agents.yaml"
     tasks_config = "config/tasks.yaml"
 
+    def __init__(self, inputs):
+        self.inputs = inputs
+        self
+
     @agent
     def soft_skills_expert_agent(self) -> Agent:
         return Agent(
@@ -31,14 +35,23 @@ class HiringCrew:
 
     @task
     def soft_skills_assessment_task(self) -> Task:
+        self.tasks_config["soft_skills_assessment_task"]["description"] = self.tasks_config[
+            "soft_skills_assessment_task"
+        ]["description"].format(**self.inputs)
         return Task(config=self.tasks_config["soft_skills_assessment_task"], async_execution=False)
 
     @task
     def technical_assessment_task(self) -> Task:
+        self.tasks_config["technical_assessment_task"]["description"] = self.tasks_config[
+            "technical_assessment_task"
+        ]["description"].format(**self.inputs)
         return Task(config=self.tasks_config["technical_assessment_task"], async_execution=False)
 
     @task
     def hiring_decision_task(self) -> Task:
+        self.tasks_config["hiring_decision_task"]["description"] = self.tasks_config[
+            "hiring_decision_task"
+        ]["description"].format(**self.inputs)
         return Task(config=self.tasks_config["hiring_decision_task"], async_execution=False)
 
     @crew

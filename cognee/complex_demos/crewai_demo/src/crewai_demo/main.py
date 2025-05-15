@@ -22,12 +22,13 @@ def run():
         for key in sorted(os.environ):
             print(f"{key}={os.environ[key]}")
 
-        applicant_1 = "lxobr"
-        applicant_2 = "hajdul88"
+        applicants = {"applicant_1": "hajdul88", "applicant_2": "Vasilije1990"}
 
-        GithubIngestion().run(applicant_1=applicant_1, applicant_2=applicant_2)
+        GithubIngestion().run(
+            applicant_1=applicants["applicant_1"], applicant_2=applicants["applicant_2"]
+        )
 
-        HiringCrew().crew().kickoff()
+        HiringCrew(inputs=applicants).crew().kickoff()
 
     except Exception as e:
         raise Exception(f"An error occurred while running the crew: {e}")

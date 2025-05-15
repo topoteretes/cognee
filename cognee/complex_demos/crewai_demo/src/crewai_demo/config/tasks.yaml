@@ -4,8 +4,8 @@ soft_skills_assessment_task:
     Evaluate the comments based on the communications clarity, community engagement, and general kindness.
     Please make the output in a way that it expresses the soft skills of the person.
     The people to evaluate are:
-    -lxobr
-    -hajdul88
+      -{applicant_1}
+      -{applicant_2}
     You can search them by asking comments authored by the 'person', however you are allowed
     and encouraged to ask multiple questions.
   expected_output: >
@@ -24,8 +24,8 @@ technical_assessment_task:
     along with narrative comments detailing your findings. Use strictly the technical input
     when you are scoring the candidate, you are not allowed to make any comment about soft skills.
     The people to evaluate are:
-        -lxobr
-        -hajdul88
+        -{applicant_1}
+        -{applicant_2}
     You can search them by code changed by the 'person', however you are allowed
     and encouraged to ask multiple questions.
   expected_output: >
@@ -42,8 +42,8 @@ hiring_decision_task:
     Review the technical_assessment_task and soft_skills_assessment_task outputs,
     then decide HIRE or NO_HIRE for each candidate with a detailed reasoning.
     The people to evaluate are:
-      -lxobr
-      -hajdul88
+      -{applicant_1}
+      -{applicant_2}
     We have to hire one of them.
   expected_output: >
     A string strictly containing the following for each person:

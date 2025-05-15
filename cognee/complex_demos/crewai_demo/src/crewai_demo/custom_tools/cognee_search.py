@@ -31,7 +31,7 @@ class CogneeSearch(BaseTool):
                 print(kwargs.get("query"))
 
                 search_results = await GraphCompletionRetriever(
-                    top_k=10,
+                    top_k=5,
                     node_type=NodeSet,
                     node_name=self._nodeset_name,
                 ).get_context(query=kwargs.get("query"))
