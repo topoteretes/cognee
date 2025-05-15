@@ -8,6 +8,7 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_retry_async
 
 
+
 class AnthropicAdapter(LLMInterface):
     """Adapter for Anthropic API"""
 
