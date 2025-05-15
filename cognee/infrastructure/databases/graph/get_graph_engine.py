@@ -5,17 +5,24 @@ from functools import lru_cache
 from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
 
+from contextvars import ContextVar
+
+graph_db_config = ContextVar("graph_db_config", default=None)
+
 
 async def get_graph_engine() -> GraphDBInterface:
     """Factory function to get the appropriate graph client based on the graph type."""
-    config = get_graph_config()
+    if graph_db_config.get():
+        config = graph_db_config.get()
+    else:
+        config = get_graph_config().to_hashable_dict()
 
-    graph_client = create_graph_engine(**get_graph_config().to_hashable_dict())
+    graph_client = create_graph_engine(**config)
 
     # Async functions can't be cached. After creating and caching the graph engine
     # handle all necessary async operations for different graph types bellow.
     # Handle loading of graph for NetworkX
-    if config.graph_database_provider.lower() == "networkx" and graph_client.graph is None:
+    if config["graph_database_provider"].lower() == "networkx" and graph_client.graph is None:
         await graph_client.load_graph_from_file()
 
     return graph_client
@@ -24,11 +31,11 @@ async def get_graph_engine() -> GraphDBInterface:
 @lru_cache
 def create_graph_engine(
     graph_database_provider,
-    graph_database_url,
-    graph_database_username,
-    graph_database_password,
-    graph_database_port,
     graph_file_path,
+    graph_database_url="",
+    graph_database_username="",
+    graph_database_password="",
+    graph_database_port="",
 ):
     """Factory function to create the appropriate graph client based on the graph type."""
 
