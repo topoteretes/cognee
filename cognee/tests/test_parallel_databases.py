@@ -40,8 +40,45 @@ async def main():
     """
 
     await cognee.add([text], dataset_name)
+    await cognee.add(["TEST1"], "test1")
+    await cognee.add(["TEST2"], "test2")
 
     await cognee.cognify([dataset_name])
+
+    task_1_config = {
+        "vector_db_url": "/Users/igorilic/Desktop/cognee1.test",
+        "vector_db_key": "",
+        "vector_db_provider": "lancedb",
+    }
+    task_2_config = {
+        "vector_db_url": "/Users/igorilic/Desktop/cognee2.test",
+        "vector_db_key": "",
+        "vector_db_provider": "lancedb",
+    }
+
+    task_1_graph_config = {
+        "graph_database_provider": "kuzu",
+        "graph_file_path": "/Users/igorilic/Desktop/kuzu1.db",
+    }
+    task_2_graph_config = {
+        "graph_database_provider": "kuzu",
+        "graph_file_path": "/Users/igorilic/Desktop/kuzu2.db",
+    }
+
+    # schedule both cognify calls concurrently
+    task1 = asyncio.create_task(
+        cognee.cognify(
+            ["test1"], vector_db_config=task_1_config, graph_db_config=task_1_graph_config
+        )
+    )
+    task2 = asyncio.create_task(
+        cognee.cognify(
+            ["test2"], vector_db_config=task_2_config, graph_db_config=task_2_graph_config
+        )
+    )
+
+    # wait until both are done (raises first error if any)
+    await asyncio.gather(task1, task2)
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
