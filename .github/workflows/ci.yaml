@@ -21,6 +21,6 @@ jobs:
           export SHA_SHORT="$(git rev-parse --short HEAD)"
           export CUR_DATE="$(date +%Y%m%d%H%M%S)"
           export VERSION="dev-$CUR_DATE-$SHA_SHORT"
-          image_name="cognee" docker_login="false" version="$VERSION" account="${{ env.AWS_ACCOUNT_ID_DEV }}" app_dir="." publish="false" ./bin/dockerize
+          image_name="cognee" docker_login="false" version="$VERSION" account="${{ env.AWS_ACCOUNT_ID_DEV }}" app_dir="." publish="false" .deployment/bin/dockerize
           export DOCKER_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
           echo "Successfully built cognee Docker image. Tag is: $DOCKER_TAG"

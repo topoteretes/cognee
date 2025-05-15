@@ -21,11 +21,11 @@ async def main():
     # and description of these files
     mp3_file_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent,
-        ".data/multimedia/text_to_speech.mp3",
+        "assets/.data/multimedia/text_to_speech.mp3",
     )
     png_file_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent,
-        ".data/multimedia/example.png",
+        "assets/.data/multimedia/example.png",
     )
 
     # Add the files, and make it available for cognify
