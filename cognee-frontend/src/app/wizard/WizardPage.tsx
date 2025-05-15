@@ -29,7 +29,7 @@ export default function WizardPage({
     setFalse: closeSettingsModal,
   } = useBoolean(false);
 
-  const dataset = { id: 'main' };
+  const dataset = { name: 'main' };
 
   return (
     <main className={styles.main}>
