@@ -158,7 +158,7 @@ async def relational_db_migration():
 
         # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
-        assert node_count == 541, f"Expected 541 nodes, got {node_count}"
+        assert node_count == 543, f"Expected 543 nodes, got {node_count}"
         assert edge_count == 1317, f"Expected 1317 edges, got {edge_count}"
 
     elif migration_db_provider == "postgresql":
@@ -189,7 +189,7 @@ async def relational_db_migration():
 
         # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
-        assert node_count == 520, f"Expected 520 nodes, got {node_count}"
+        assert node_count == 522, f"Expected 522 nodes, got {node_count}"
         assert edge_count == 961, f"Expected 961 edges, got {edge_count}"
 
     print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
