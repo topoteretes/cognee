@@ -9,7 +9,7 @@ import openai
 from fastapi import APIRouter, Depends
 from cognee.api.v1.responses.models import (
     ResponseRequest,
-    ResponseResponse,
+    ResponseBody,
     ResponseToolCall,
     ChatUsage,
     FunctionCall,
@@ -68,11 +68,11 @@ def get_responses_router() -> APIRouter:
         logger.info(f"Response: {response}")
         return response.model_dump()
 
-    @router.post("/", response_model=ResponseResponse)
+    @router.post("/", response_model=ResponseBody)
     async def create_response(
         request: ResponseRequest,
         user: User = Depends(get_authenticated_user),
-    ) -> ResponseResponse:
+    ) -> ResponseBody:
         """
         OpenAI-compatible responses endpoint with function calling support
         """
@@ -133,7 +133,7 @@ def get_responses_router() -> APIRouter:
         usage = response.get("usage", {})
 
         # Create the response object with all processed tool calls
-        response_obj = ResponseResponse(
+        response_obj = ResponseBody(
             id=response_id,
             model=request.model,
             tool_calls=processed_tool_calls,

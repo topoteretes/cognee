@@ -36,7 +36,7 @@ async def dispatch_function(tool_call: Union[ToolCall, Dict[str, Any]]) -> str:
 
     if function_name == "search":
         return await handle_search(arguments, user)
-    elif function_name == "cognify_text":
+    elif function_name == "cognify":
         return await handle_cognify(arguments, user)
     elif function_name == "prune":
         return await handle_prune(arguments, user)
@@ -87,12 +87,12 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
 async def handle_cognify(arguments: Dict[str, Any], user) -> str:
     """Handle cognify function call"""
     text = arguments.get("text")
-    graph_model_file = arguments.get("graph_model_file")
+    ontology_file_path = arguments.get("ontology_file_path")
 
     if text:
         await add(data=text, user=user)
 
-    await cognify(user=user, ontology_file_path=graph_model_file if graph_model_file else None)
+    await cognify(user=user, ontology_file_path=ontology_file_path if ontology_file_path else None)
 
     return (
         "Text successfully converted into knowledge graph."

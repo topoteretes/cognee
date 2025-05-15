@@ -37,7 +37,7 @@ DEFAULT_TOOLS = [
     },
     {
         "type": "function",
-        "name": "cognify_text",
+        "name": "cognify",
         "description": "Convert text into a knowledge graph or process all added content",
         "parameters": {
             "type": "object",
@@ -46,13 +46,9 @@ DEFAULT_TOOLS = [
                     "type": "string",
                     "description": "Text content to be converted into a knowledge graph",
                 },
-                "graph_model_name": {
+                "ontology_file_path": {
                     "type": "string",
-                    "description": "Name of the graph model to use",
-                },
-                "graph_model_file": {
-                    "type": "string",
-                    "description": "Path to a custom graph model file",
+                    "description": "Path to a custom ontology file",
                 },
             },
             "required": ["text"],

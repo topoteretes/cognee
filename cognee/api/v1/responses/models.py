@@ -89,7 +89,7 @@ class ResponseToolCall(BaseModel):
     output: Optional[ToolCallOutput] = None
 
 
-class ResponseResponse(OutDTO):
+class ResponseBody(OutDTO):
     """Response body for the new responses endpoint"""
 
     id: str = Field(default_factory=lambda: f"resp_{uuid.uuid4().hex}")

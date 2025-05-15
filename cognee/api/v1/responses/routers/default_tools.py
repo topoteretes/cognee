@@ -37,7 +37,7 @@ DEFAULT_TOOLS = [
     },
     {
         "type": "function",
-        "name": "cognify_text",
+        "name": "cognify",
         "description": "Convert text into a knowledge graph or process all added content",
         "parameters": {
             "type": "object",
