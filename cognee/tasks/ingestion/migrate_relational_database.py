@@ -94,14 +94,20 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                         ),
                     )
                 )
+
                 # Migrate data stored in columns of table rows
                 if migrate_column_data:
-                    for key, value in row_properties.items():
-                        # Skip mapping primary key information to itself
-                        if key is primary_key_col:
-                            continue
-                        # TODO: Add skipping of mapping of columns used in foreign key relationships
+                    # Get foreign key columns to filter them out from column migration
+                    foreign_keys = []
+                    for fk in details.get("foreign_keys", []):
+                        foreign_keys.append(fk["ref_column"])
 
+                    for key, value in row_properties.items():
+                        # Skip mapping primary key information to itself and mapping of foreign key information (as it will be mapped bellow)
+                        if key is primary_key_col or key in foreign_keys:
+                            continue
+
+                        # Create column value node
                         column_node_id = f"{key}:{value}"
                         column_node = ColumnValue(
                             id=uuid5(NAMESPACE_OID, name=column_node_id),
