@@ -3,15 +3,15 @@ import asyncio
 from uuid import uuid5, NAMESPACE_OID
 from typing import Optional, List, Dict, Any
 from pathlib import Path
-
+from cognee.api.v1.search import SearchType
 import cognee
 from cognee.low_level import DataPoint, setup as cognee_setup
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.complex_demos.crewai_demo.src.crewai_demo.github_dev_profile import GitHubDevProfile
 from cognee.shared.logging_utils import get_logger
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest import (
     get_github_data_for_cognee,
@@ -22,9 +22,6 @@ from cognee.complex_demos.crewai_demo.src.crewai_demo.github_datapoints import (
     GitHubUser,
     Repository,
     File,
-    FileChange,
-    Comment,
-    Issue,
     Commit,
 )
 
@@ -37,7 +34,6 @@ from cognee.complex_demos.crewai_demo.src.crewai_demo.github_datapoint_creators 
     create_file_change_datapoint,
     create_issue_datapoint,
     create_comment_datapoint,
-    create_github_datapoints,
 )
 
 logger = get_logger("github_ingest")
@@ -74,7 +70,6 @@ def get_or_create_file(
     filename: str,
     repo_name: str,
     files: Dict[str, File],
-    repository: Repository,
     technical_nodeset: NodeSet,
 ) -> File:
     file_key = f"{repo_name}:{filename}"
@@ -134,7 +129,7 @@ def process_file_changes_data(
         if not repo_name or not filename or not commit_sha:
             continue
         repository = get_or_create_repository(repo_name, repositories, user, [technical_nodeset])
-        file = get_or_create_file(filename, repo_name, files, repository, technical_nodeset)
+        file = get_or_create_file(filename, repo_name, files, technical_nodeset)
         commit = get_or_create_commit(fc_data, user, commits, repository, technical_nodeset)
         file_change = create_file_change_datapoint(fc_data, user, file, [technical_nodeset])
         file_changes_list.append(file_change)
@@ -246,6 +241,7 @@ async def cognify_github_data_from_username(
     skip_no_diff: bool = True,
 ):
     """Fetches GitHub data for a username and processes it through the DataPoint pipeline."""
+
     logger.info(f"Fetching GitHub data for user: {username}")
 
     github_data = get_github_data_for_cognee(
@@ -265,7 +261,9 @@ async def cognify_github_data_from_username(
 
     github_data = json.loads(json.dumps(github_data, default=str))
 
-    return await cognify_github_data(github_data)
+    await cognify_github_data(github_data)
+
+    return None
 
 
 async def process_github_from_file(json_file_path: str):
@@ -295,5 +293,6 @@ if __name__ == "__main__":
     # asyncio.run(process_github_from_file(json_file_path))
     #
     # Option 2: Process directly from GitHub
+
     username = ""
     asyncio.run(cognify_github_data_from_username(username, token))

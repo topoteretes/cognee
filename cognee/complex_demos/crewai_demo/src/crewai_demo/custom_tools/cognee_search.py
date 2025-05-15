@@ -3,6 +3,7 @@ from typing import Type, List, Optional
 from pydantic import BaseModel, Field, PrivateAttr
 from cognee.api.v1.search import SearchType
 from cognee.modules.engine.models import NodeSet
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.search.methods import search
 from cognee.modules.users.methods import get_default_user
 
@@ -28,12 +29,13 @@ class CogneeSearch(BaseTool):
         async def main():
             try:
                 print(kwargs.get("query"))
-                search_results = await cognee.search(
-                    query_type=SearchType.GRAPH_COMPLETION,
-                    query_text=kwargs.get("query"),
+
+                search_results = await GraphCompletionRetriever(
+                    top_k=10,
                     node_type=NodeSet,
                     node_name=self._nodeset_name,
-                )
+                ).get_context(query=kwargs.get("query"))
+
                 return search_results
             except Exception as e:
                 return f"Error: {str(e)}"

@@ -26,8 +26,7 @@ def create_github_user_datapoint(user_data, nodesets: List[NodeSet]):
 
     user = GitHubUser(
         id=user_id,
-        login=user_data.get("login", ""),
-        name=user_data.get("name"),
+        name=user_data.get("login", ""),
         bio=user_data.get("bio"),
         company=user_data.get("company"),
         location=user_data.get("location"),
@@ -74,7 +73,7 @@ def create_commit_datapoint(
     commit = Commit(
         id=commit_id,
         commit_sha=commit_data.get("commit_sha", ""),
-        commit_message=commit_data.get("commit_message", ""),
+        text="Commit message:" + (str)(commit_data.get("commit_message", "")),
         commit_date=commit_data.get("commit_date", ""),
         commit_url=commit_data.get("commit_url", ""),
         author_name=commit_data.get("login", ""),
@@ -102,7 +101,7 @@ def create_file_change_datapoint(
         additions=fc_data.get("additions", 0),
         deletions=fc_data.get("deletions", 0),
         changes=fc_data.get("changes", 0),
-        diff=fc_data.get("diff", ""),
+        text=fc_data.get("diff", ""),
         commit_sha=fc_data.get("commit_sha", ""),
         repo=fc_data.get("repo", ""),
         modifies=file.filename,
@@ -123,7 +122,7 @@ def create_issue_datapoint(
     issue = Issue(
         id=issue_id,
         number=issue_data.get("issue_number", 0),
-        title=issue_data.get("issue_title", ""),
+        text=issue_data.get("issue_title", ""),
         state=issue_data.get("issue_state", ""),
         repository=repo_name,
         is_pr=False,
@@ -144,7 +143,7 @@ def create_comment_datapoint(
     comment = Comment(
         id=comment_id,
         comment_id=str(comment_data.get("comment_id", "")),
-        body=comment_data.get("body", ""),
+        text=comment_data.get("body", ""),
         created_at=comment_data.get("created_at", ""),
         updated_at=comment_data.get("updated_at", ""),
         author_name=comment_data.get("login", ""),

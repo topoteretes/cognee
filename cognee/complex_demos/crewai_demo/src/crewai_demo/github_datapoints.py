@@ -1,7 +1,6 @@
 from uuid import uuid5, NAMESPACE_OID
 from typing import Optional, List
-from cognee.low_level import DataPoint
-from cognee.modules.engine.models.node_set import NodeSet
+from cognee.infrastructure.engine import DataPoint
 
 
 class File(DataPoint):
@@ -13,7 +12,6 @@ class File(DataPoint):
 
 
 class GitHubUser(DataPoint):
-    login: str
     name: Optional[str]
     bio: Optional[str]
     company: Optional[str]
@@ -22,7 +20,7 @@ class GitHubUser(DataPoint):
     followers: int
     following: int
     interacts_with: List["Repository"] = []
-    metadata: dict = {"index_fields": ["login"]}
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class FileChange(DataPoint):
@@ -31,49 +29,46 @@ class FileChange(DataPoint):
     additions: int
     deletions: int
     changes: int
-    diff: str
+    text: str
     commit_sha: str
     repo: str
     modifies: str
     changed_by: GitHubUser
-    metadata: dict = {"index_fields": ["diff"]}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class Comment(DataPoint):
     comment_id: str
-    body: str
+    text: str
     created_at: str
     updated_at: str
     author_name: str
     issue_number: int
     repo: str
     authored_by: GitHubUser
-    metadata: dict = {"index_fields": ["body"]}
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class Issue(DataPoint):
     number: int
-    title: str
+    text: str
     state: str
     repository: str
     is_pr: bool
     has_comment: List[Comment] = []
-    metadata: dict = {"index_fields": ["title"]}
 
 
 class Commit(DataPoint):
     commit_sha: str
-    commit_message: str
+    text: str
     commit_date: str
     commit_url: str
     author_name: str
     repo: str
     has_change: List[FileChange] = []
-    metadata: dict = {"index_fields": ["commit_message"]}
 
 
 class Repository(DataPoint):
     name: str
     has_issue: List[Issue] = []
     has_commit: List[Commit] = []
-    metadata: dict = {"index_fields": ["name"]}

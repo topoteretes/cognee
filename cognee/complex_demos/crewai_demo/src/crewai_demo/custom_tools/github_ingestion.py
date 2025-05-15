@@ -1,4 +1,7 @@
 from crewai.tools import BaseTool
+
+from cognee.modules.engine.models import NodeSet
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from ..github_ingest_datapoints import cognify_github_data_from_username
 
 
@@ -21,6 +24,7 @@ class GithubIngestion(BaseTool):
 
                 await cognify_github_data_from_username(applicant_1, token)
                 await cognify_github_data_from_username(applicant_2, token)
+
                 return "Github ingestion finished"
             except Exception as e:
                 return f"Error: {str(e)}"

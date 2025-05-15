@@ -2,6 +2,8 @@
 import os
 import warnings
 import cognee
+from cognee.modules.engine.models import NodeSet
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from hiring_crew import HiringCrew
 
 # from crewai_demo.cognify_crew import CognifyCrew
