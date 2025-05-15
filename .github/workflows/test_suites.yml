@@ -79,7 +79,7 @@ jobs:
 
   db-examples-tests:
     name: DB Examples Tests
-    needs: [basic-tests, e2e-tests]
+    needs: [vector-db-tests]
     uses: ./.github/workflows/db_examples_tests.yml
     secrets: inherit
 
