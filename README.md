@@ -37,8 +37,12 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   :
   <a href="assets/community/README.pt.md">🇵🇹 Português</a>
   ·
-  <a href="assets/community/README.zh.md">🇨🇳 [中文]</a>
+
+  <a href="community/README.zh.md">🇨🇳 [中文]</a>
+  ·
+  <a href="community/README.ru.md">🇷🇺 Русский</a>
   </p>
+  
 
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
@@ -60,6 +64,7 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
 
+
 ## Contributing
 Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
@@ -69,7 +74,8 @@ Your contributions are at the core of making this a true open source project. An
 
 ## 📦 Installation
 
-You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
+You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager. 
+Cognee supports Python 3.8 to 3.12
 
 ### With pip
 

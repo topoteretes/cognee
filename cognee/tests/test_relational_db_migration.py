@@ -112,10 +112,10 @@ async def relational_db_migration():
     else:
         raise ValueError(f"Unsupported graph database provider: {graph_db_provider}")
 
-    assert len(distinct_node_names) == 8, (
-        f"Expected 8 distinct node references, found {len(distinct_node_names)}"
+    assert len(distinct_node_names) == 12, (
+        f"Expected 12 distinct node references, found {len(distinct_node_names)}"
     )
-    assert len(found_edges) == 7, f"Expected 7 {relationship_label} edges, got {len(found_edges)}"
+    assert len(found_edges) == 15, f"Expected 15 {relationship_label} edges, got {len(found_edges)}"
 
     expected_edges = {
         ("Employee:5", "Employee:2"),
@@ -158,8 +158,8 @@ async def relational_db_migration():
 
         # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
-        assert node_count == 227, f"Expected 227 nodes, got {node_count}"
-        assert edge_count == 580, f"Expected 580 edges, got {edge_count}"
+        assert node_count == 543, f"Expected 543 nodes, got {node_count}"
+        assert edge_count == 1317, f"Expected 1317 edges, got {edge_count}"
 
     elif migration_db_provider == "postgresql":
         if graph_db_provider == "neo4j":
@@ -189,8 +189,8 @@ async def relational_db_migration():
 
         # NOTE: Because of the different size of the postgres and sqlite databases,
         #       different number of nodes and edges are expected
-        assert node_count == 115, f"Expected 115 nodes, got {node_count}"
-        assert edge_count == 356, f"Expected 356 edges, got {edge_count}"
+        assert node_count == 522, f"Expected 522 nodes, got {node_count}"
+        assert edge_count == 961, f"Expected 961 edges, got {edge_count}"
 
     print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
 
