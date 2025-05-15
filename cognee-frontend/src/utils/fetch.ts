@@ -1,7 +1,7 @@
 import handleServerErrors from './handleServerErrors';
 
 export default function fetch(url: string, options: RequestInit = {}): Promise<Response> {
-  return global.fetch('http://127.0.0.1:8000/api' + url, {
+  return global.fetch('http://localhost:8000/api' + url, {
     ...options,
     headers: {
       ...options.headers,

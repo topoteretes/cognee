@@ -6,6 +6,8 @@ import {
   Text,
   UploadInput,
   CloseIcon,
+  CTAButton,
+  useBoolean,
 } from "ohmy-ui";
 import { fetch } from '@/utils';
 import RawDataPreview from './RawDataPreview';
@@ -28,9 +30,10 @@ interface DataViewProps {
   datasetId: string;
   onClose: () => void;
   onDataAdd: (dataset: DatasetLike, files: File[]) => void;
+  onCognify: () => Promise<any>;
 }
 
-export default function DataView({ datasetId, data, onClose, onDataAdd }: DataViewProps) {
+export default function DataView({ datasetId, data, onClose, onDataAdd, onCognify }: DataViewProps) {
   // const handleDataDelete = () => {};
   const [rawData, setRawData] = useState<ArrayBuffer | null>(null);
   const [selectedData, setSelectedData] = useState<Data | null>(null);
@@ -52,7 +55,19 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
 
   const handleDataAdd = (files: File[]) => {
     onDataAdd({ id: datasetId }, files);
-  }
+  };
+
+  const {
+    value: isCognifyButtonDisabled,
+    setTrue: disableCognifyButton,
+    setFalse: enableCognifyButton,
+  } = useBoolean(false);
+
+  const handleCognify = () => {
+    disableCognifyButton();
+    onCognify()
+      .finally(() => enableCognifyButton());
+  };
 
   return (
     <Stack orientation="vertical" gap="4">
@@ -61,6 +76,11 @@ export default function DataView({ datasetId, data, onClose, onDataAdd }: DataVi
           <UploadInput onChange={handleDataAdd}>
             <Text>Add data</Text>
           </UploadInput>
+        </div>
+        <div>
+          <CTAButton disabled={isCognifyButtonDisabled} onClick={handleCognify}>
+              <Text>Cognify</Text>
+          </CTAButton>
         </div>
         <GhostButton hugContent onClick={onClose}>
           <CloseIcon />

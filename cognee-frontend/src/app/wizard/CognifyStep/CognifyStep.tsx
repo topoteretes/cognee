@@ -7,7 +7,7 @@ import cognifyDataset from '@/modules/datasets/cognifyDataset';
 
 interface ConfigStepProps {
   onNext: () => void;
-  dataset: { id: string }
+  dataset: { name: string }
 }
 
 export default function CognifyStep({ onNext, dataset }: ConfigStepProps) {

@@ -28,7 +28,7 @@ class datasets:
 
     @staticmethod
     async def get_status(dataset_ids: list[UUID]) -> dict:
-        return await get_pipeline_status(dataset_ids)
+        return await get_pipeline_status(dataset_ids, pipeline_name="cognify_pipeline")
 
     @staticmethod
     async def delete_dataset(dataset_id: str):
