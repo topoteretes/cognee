@@ -39,7 +39,7 @@ COPY tools/alembic /app/tools/alembic
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
-COPY ../cognee /app/cognee
+COPY ./cognee /app/cognee
 RUN --mount=type=cache,target=/root/.cache/uv \
 uv sync --extra debug --extra api --extra postgres --extra weaviate --extra qdrant --extra neo4j --extra kuzu --extra llama-index --extra gemini --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
