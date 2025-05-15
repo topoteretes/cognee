@@ -5,7 +5,7 @@ services:
       - cognee-network
     build:
       context: ..
-      dockerfile: ../Dockerfile
+      dockerfile: Dockerfile
     volumes:
       - ./cognee:/app/cognee
       - .env:/app/.env
