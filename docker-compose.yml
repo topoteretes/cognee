@@ -4,8 +4,8 @@ services:
     networks:
       - cognee-network
     build:
-      context: ..
-      dockerfile: ../Dockerfile
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - ./cognee:/app/cognee
       - .env:/app/.env
@@ -33,8 +33,8 @@ services:
     profiles:
         - ui
     build:
-      context: ../cognee-frontend
-      dockerfile: ../cognee-frontend/Dockerfile
+      context: ./cognee-frontend
+      dockerfile: Dockerfile
     volumes:
       - ./cognee-frontend/src:/app/src
       - ./cognee-frontend/public:/app/public

@@ -1,4 +1,4 @@
-examples/.data
+.data
 .env
 .local.env
 .prod.env

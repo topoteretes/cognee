@@ -21,12 +21,12 @@ WORKDIR /app
 
 ENV PYTHONPATH=/app
 WORKDIR /app
-COPY ../pyproject.toml poetry.lock /app/
+COPY pyproject.toml poetry.lock /app/
 
 
 RUN pip install poetry
 
 RUN poetry install --all-extras --no-root --without dev
 
-COPY ../cognee /app/cognee
-COPY ../README.md /app/README.md
+COPY cognee/ /app/cognee
+COPY README.md /app/README.md

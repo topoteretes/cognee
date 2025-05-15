@@ -12,8 +12,8 @@ app = modal.App("cognee-runner")
 
 image = (
     modal.Image.from_dockerfile(path="Dockerfile_modal", force_build=False)
-    .copy_local_file("../pyproject.toml", "pyproject.toml")
-    .copy_local_file("../poetry.lock", "poetry.lock")
+    .copy_local_file("pyproject.toml", "pyproject.toml")
+    .copy_local_file("poetry.lock", "poetry.lock")
     .env({"ENV": os.getenv("ENV"), "LLM_API_KEY": os.getenv("LLM_API_KEY")})
     .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
     .pip_install("protobuf", "h2")
