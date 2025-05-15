@@ -7,6 +7,8 @@ from .graph_db_interface import GraphDBInterface
 
 from contextvars import ContextVar
 
+# Note: ContextVar allows us to use different graph db configurations in Cognee
+#       for different async tasks, threads and processes
 graph_db_config = ContextVar("graph_db_config", default=None)
 
 

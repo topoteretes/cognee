@@ -18,12 +18,6 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines import cognee_pipeline
-from cognee.infrastructure.databases.graph.get_graph_engine import (
-    graph_db_config as context_graph_db_config,
-)
-from cognee.infrastructure.databases.vector.get_vector_engine import (
-    vector_db_config as context_vector_db_config,
-)
 
 logger = get_logger("cognify")
 
@@ -40,8 +34,6 @@ async def cognify(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
 ):
-    context_graph_db_config.set(graph_db_config)
-    context_vector_db_config.set(vector_db_config)
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
     return await cognee_pipeline(
@@ -49,6 +41,8 @@ async def cognify(
         datasets=datasets,
         user=user,
         pipeline_name="cognify_pipeline",
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
     )
 
 

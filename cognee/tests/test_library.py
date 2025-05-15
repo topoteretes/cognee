@@ -40,8 +40,8 @@ async def main():
     """
 
     await cognee.add([text], dataset_name)
-    await cognee.add([text], "test1")
-    await cognee.add([text], "test2")
+    await cognee.add(["TEST1"], "test1")
+    await cognee.add(["TEST2"], "test2")
 
     await cognee.cognify([dataset_name])
 

@@ -3,7 +3,8 @@ from .create_vector_engine import create_vector_engine
 from contextvars import ContextVar
 
 
-# Think of this as a “global” task-local
+# Note: ContextVar allows us to use different graph db configurations in Cognee
+#       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 
 

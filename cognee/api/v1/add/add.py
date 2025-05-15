@@ -11,9 +11,17 @@ async def add(
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
 ):
     tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user, node_set)]
 
     await cognee_pipeline(
-        tasks=tasks, datasets=dataset_name, data=data, user=user, pipeline_name="add_pipeline"
+        tasks=tasks,
+        datasets=dataset_name,
+        data=data,
+        user=user,
+        pipeline_name="add_pipeline",
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
     )
