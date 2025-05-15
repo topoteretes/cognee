@@ -1,8 +1,8 @@
 import asyncio
-from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 import lancedb
-from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
+from lancedb.pydantic import LanceModel, Vector
+from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
@@ -15,8 +15,6 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
-
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class IndexSchema(DataPoint):
