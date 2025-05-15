@@ -108,12 +108,12 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                             continue
 
                         # Create column value node
-                        column_node_id = f"{key}:{value}"
+                        column_node_id = f"{table_name}:{key}:{value}"
                         column_node = ColumnValue(
                             id=uuid5(NAMESPACE_OID, name=column_node_id),
                             name=column_node_id,
-                            properties=f"{key} {value}",
-                            description=f"Column name={key} and value={value}",
+                            properties=f"{key} {value} {table_name}",
+                            description=f"Column name={key} and value={value} from column from table={table_name}",
                         )
                         node_mapping[column_node_id] = column_node
 
