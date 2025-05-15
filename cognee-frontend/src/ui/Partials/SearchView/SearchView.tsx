@@ -28,9 +28,6 @@ export default function SearchView() {
   }, []);
 
   const searchOptions = [{
-    value: 'INSIGHTS',
-    label: 'Query insights from documents',
-  }, {
     value: 'GRAPH_COMPLETION',
     label: 'Completion using Cognee\'s graph based memory',
   }, {
@@ -81,6 +78,8 @@ export default function SearchView() {
 
     scrollToBottom();
 
+    setInputValue('');
+
     const searchTypeValue = searchType.value;
 
     fetch('/v1/search', {
@@ -103,10 +102,12 @@ export default function SearchView() {
             text: convertToSearchTypeOutput(systemMessage, searchTypeValue),
           },
         ]);
-        setInputValue('');
 
         scrollToBottom();
       })
+      .catch(() => {
+        setInputValue(inputValue);
+      });
   }, [inputValue, scrollToBottom, searchType.value]);
 
   const {
