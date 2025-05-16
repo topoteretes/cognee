@@ -4,11 +4,11 @@ services:
     networks:
       - cognee-network
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: deployment/Dockerfile
     volumes:
-      - ./cognee:/app/cognee
-      - .env:/app/.env
+      - ../cognee:/app/cognee
+      - ../.env:/app/.env
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
@@ -33,11 +33,11 @@ services:
     profiles:
         - ui
     build:
-      context: ./cognee-frontend
+      context: ../cognee-frontend
       dockerfile: Dockerfile
     volumes:
-      - ./cognee-frontend/src:/app/src
-      - ./cognee-frontend/public:/app/public
+      - ../cognee-frontend/src:/app/src
+      - ../cognee-frontend/public:/app/public
     ports:
       - 3000:3000
       # - 9229:9229 # Debugging
@@ -81,7 +81,7 @@ services:
       - CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER=AUTHORIZATION
       - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider
     volumes:
-      - .chromadb_data/:/chroma/chroma/
+      - ../.chromadb_data/:/chroma/chroma/
     networks:
       - cognee-network
     ports:
