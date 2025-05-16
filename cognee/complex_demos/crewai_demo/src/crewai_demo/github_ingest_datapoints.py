@@ -286,13 +286,15 @@ if __name__ == "__main__":
     dotenv.load_dotenv()
     token = os.getenv("GITHUB_TOKEN")
 
-    # Choose one of these options:
-
-    # Option 1: Process from JSON file, mostly for testing
-    # json_file_path = ""
-    # asyncio.run(process_github_from_file(json_file_path))
-    #
-    # Option 2: Process directly from GitHub
-
     username = ""
-    asyncio.run(cognify_github_data_from_username(username, token))
+
+    async def cognify_from_username(username, token):
+        from cognee.infrastructure.databases.relational import create_db_and_tables
+
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await create_db_and_tables()
+        await cognify_github_data_from_username(username, token)
+
+    # Run it
+    asyncio.run(cognify_from_username(username, token))

@@ -62,13 +62,27 @@ class GitHubDevProfile:
 
         return self.commits.get_user_file_changes()
 
-    def get_issue_comments(self, limit=10, include_issue_details=True):
+    def get_issue_comments(
+        self, limit=10, include_issue_details=True, days=None, issues_limit=None, max_comments=None
+    ):
         """Fetches the most recent comments made by the user on issues and PRs across repositories."""
         if not self.comments:
             return None
 
+        # Use max_comments if provided, otherwise use limit
+        actual_limit = (
+            max_comments
+            if max_comments is not None
+            else issues_limit
+            if issues_limit is not None
+            else limit
+        )
+
+        # Note: 'days' parameter is accepted for API compatibility but not currently used by providers
+        # To implement date filtering, we would need to add this logic to the providers
+
         self.comments.set_limit(
-            limit=limit,
+            limit=actual_limit,
             include_issue_details=include_issue_details,
         )
 
