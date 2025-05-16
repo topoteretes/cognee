@@ -40,7 +40,7 @@ def run(enable_ingestion=True, enable_crew=True):
             run_github_ingestion(applicants["applicant_1"], applicants["applicant_2"])
 
         if enable_crew:
-            run_hiring_crew(applicants=applicants, number_of_rounds=3)
+            run_hiring_crew(applicants=applicants, number_of_rounds=5)
 
     except Exception as e:
         raise Exception(f"An error occurred while running the process: {e}")
