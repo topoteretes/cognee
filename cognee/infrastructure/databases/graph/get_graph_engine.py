@@ -4,12 +4,7 @@ from functools import lru_cache
 
 from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
-
-from contextvars import ContextVar
-
-# Note: ContextVar allows us to use different graph db configurations in Cognee
-#       for different async tasks, threads and processes
-graph_db_config = ContextVar("graph_db_config", default=None)
+from cognee.context_global_variables import graph_db_config
 
 
 async def get_graph_engine() -> GraphDBInterface:
