@@ -16,22 +16,22 @@ class GitHubDevComments:
         self.include_issue_details = include_issue_details
 
     def get_issue_comments(self):
-        """Fetches comments made by the user on issues across repositories within timeframe."""
+        """Fetches comments made by the user on issues and PRs across repositories within timeframe."""
         if not self.profile.user:
             return None
 
         date_filter = self._get_date_filter(self.days)
-        query = f"commenter:{self.profile.username} is:issue{date_filter}"
+        query = f"commenter:{self.profile.username}{date_filter}"
 
         return self._get_comments_from_search(query)
 
     def get_repo_issue_comments(self, repo_name):
-        """Fetches comments made by the user on issues in a specific repository within timeframe."""
+        """Fetches comments made by the user on issues and PRs in a specific repository within timeframe."""
         if not self.profile.user:
             return None
 
         date_filter = self._get_date_filter(self.days)
-        query = f"repo:{repo_name} is:issue commenter:{self.profile.username}{date_filter}"
+        query = f"repo:{repo_name} commenter:{self.profile.username}{date_filter}"
         self.profile.github.get_repo(repo_name)
 
         return self._get_comments_from_search(query)
