@@ -9,6 +9,9 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
@@ -28,7 +31,6 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
         """Build knowledge graph from the input text"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
-        #       As cognify is an async background job the output had to be redirected again.
         with redirect_stdout(sys.stderr):
             logger.info("Cognify process starting.")
             if graph_model_file and graph_model_name:
@@ -55,8 +57,8 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
 
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
-        f"Average completion time is around 4 minutes.\n"
-        f"For current cognify status you can check the log file at: {log_file}"
+        f"To check current cognify status use the cognify_status tool\n"
+        f"or check the log file at: {log_file}"
     )
 
     return [
@@ -72,7 +74,6 @@ async def codify(repo_path: str) -> list:
     async def codify_task(repo_path: str):
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
-        #       As codify is an async background job the output had to be redirected again.
         with redirect_stdout(sys.stderr):
             logger.info("Codify process starting.")
             results = []
@@ -88,8 +89,8 @@ async def codify(repo_path: str) -> list:
 
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
-        f"Average completion time is around 4 minutes.\n"
-        f"For current codify status you can check the log file at: {log_file}"
+        f"To check current codify status use the codify_status tool\n"
+        f"or you can check the log file at: {log_file}"
     )
 
     return [
@@ -136,6 +137,28 @@ async def prune():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
         return [types.TextContent(type="text", text="Pruned")]
+
+
+@mcp.tool()
+async def cognify_status():
+    """Get status of cognify pipeline"""
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        status = await get_pipeline_status(
+            [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
+        )
+        return [types.TextContent(type="text", text=str(status))]
+
+
+@mcp.tool()
+async def codify_status():
+    """Get status of codify pipeline"""
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        status = await get_pipeline_status(
+            [await get_unique_dataset_id("codebase", user)], "cognify_code_pipeline"
+        )
+        return [types.TextContent(type="text", text=str(status))]
 
 
 def node_to_string(node):

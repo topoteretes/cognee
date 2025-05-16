@@ -9,6 +9,6 @@ class CollectionNotFoundError(CriticalError):
         name: str = "CollectionNotFoundError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
         log=True,
-        log_level="ERROR",
+        log_level="DEBUG",
     ):
         super().__init__(message, name, status_code, log, log_level)
