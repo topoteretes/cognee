@@ -31,11 +31,18 @@ async def cognify(
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
     return await cognee_pipeline(
-        tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
+        tasks=tasks,
+        datasets=datasets,
+        user=user,
+        pipeline_name="cognify_pipeline",
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
     )
 
 

@@ -21,6 +21,12 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
+from cognee.infrastructure.databases.graph.get_graph_engine import (
+    graph_db_config as context_graph_db_config,
+)
+from cognee.infrastructure.databases.vector.get_vector_engine import (
+    vector_db_config as context_vector_db_config,
+)
 
 logger = get_logger("cognee.pipeline")
 
@@ -33,7 +39,14 @@ async def cognee_pipeline(
     datasets: Union[str, list[str]] = None,
     user: User = None,
     pipeline_name: str = "custom_pipeline",
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
 ):
+    # Note: These context variables allow different value assignment for databases in Cognee
+    #       per async task, thread, process and etc.
+    context_graph_db_config.set(graph_db_config)
+    context_vector_db_config.set(vector_db_config)
+
     # Create tables for databases
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
