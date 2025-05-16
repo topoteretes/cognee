@@ -1,4 +1,4 @@
-.data
+assets/.data
 .env
 .local.env
 .prod.env

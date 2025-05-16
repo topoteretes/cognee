@@ -1,4 +1,4 @@
-bin
+deployment/bin
 dist
 docs
 evals

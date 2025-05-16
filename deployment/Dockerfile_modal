@@ -21,7 +21,7 @@ WORKDIR /app
 
 ENV PYTHONPATH=/app
 WORKDIR /app
-COPY pyproject.toml poetry.lock /app/
+COPY ../pyproject.toml poetry.lock /app/
 
 
 RUN pip install poetry
