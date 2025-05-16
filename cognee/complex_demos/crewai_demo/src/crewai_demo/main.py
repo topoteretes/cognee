@@ -1,15 +1,6 @@
-#!/usr/bin/env python
-import os
 import warnings
-import cognee
-from cognee.modules.engine.models import NodeSet
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+import os
 from hiring_crew import HiringCrew
-
-# from crewai_demo.cognify_crew import CognifyCrew
-from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.cognee_search import CogneeSearch
-
-from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.cognee_build import CogneeBuild
 from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.github_ingestion import (
     GithubIngestion,
 )
@@ -17,23 +8,37 @@ from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.github_ingest
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 
-def run():
+def print_environment():
+    for key in sorted(os.environ):
+        print(f"{key}={os.environ[key]}")
+
+
+def run_github_ingestion(applicant_1, applicant_2):
+    GithubIngestion().run(applicant_1=applicant_1, applicant_2=applicant_2)
+
+
+def run_hiring_crew(applicants):
+    HiringCrew(inputs=applicants).crew().kickoff()
+
+
+def run(enable_ingestion=True, enable_crew=True):
     try:
-        for key in sorted(os.environ):
-            print(f"{key}={os.environ[key]}")
+        print_environment()
 
-        applicants = {"applicant_1": "hajdul88", "applicant_2": "Vasilije1990"}
+        applicants = {"applicant_1": "hajdul88", "applicant_2": "lxobr"}
 
-        GithubIngestion().run(
-            applicant_1=applicants["applicant_1"], applicant_2=applicants["applicant_2"]
-        )
+        if enable_ingestion:
+            run_github_ingestion(applicants["applicant_1"], applicants["applicant_2"])
 
-        HiringCrew(inputs=applicants).crew().kickoff()
+        if enable_crew:
+            run_hiring_crew(applicants)
 
     except Exception as e:
-        raise Exception(f"An error occurred while running the crew: {e}")
+        raise Exception(f"An error occurred while running the process: {e}")
 
 
 if __name__ == "__main__":
-    # Run the async entry point
-    run()
+    enable_ingestion = True
+    enable_crew = False
+
+    run(enable_ingestion=enable_ingestion, enable_crew=enable_crew)

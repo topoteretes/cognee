@@ -1,20 +1,29 @@
-soft_skills_assessment_task:
+soft_skills_assessment_applicant1_task:
   description: >
-    Ask multiple questions to cognee search (database that contains the user comments) and try to explore the different comments the user made.
-    Evaluate the comments based on the communications clarity, community engagement, and general kindness.
-    Please make the output in a way that it expresses the soft skills of the person.
-    The people to evaluate are:
-      -{applicant_1}
-      -{applicant_2}
-    You can search them by asking comments authored by the 'person', however you are allowed
-    and encouraged to ask multiple questions.
+    Search cognee for comments authored by '{applicant_1}'.
+    Evaluate their communication clarity, community engagement, and kindness.
+    Ask multiple questions if needed to uncover diverse interactions.
+    Return a complete and reasoned assessment of their soft skills.
   expected_output: >
-    results strictly containing:
-      - Name of the person
-      - communication_clarity (0–1),
-      - community_engagement (0–1),
-      - kindness (0-1),
-      - reasoning (string)
+    - Name: {applicant_1}
+    - communication_clarity (0–1)
+    - community_engagement (0–1)
+    - kindness (0–1)
+    - reasoning: (string)
+  agent: soft_skills_expert_agent
+
+soft_skills_assessment_applicant2_task:
+  description: >
+    Search cognee for comments authored by '{applicant_2}'.
+    Evaluate their communication clarity, community engagement, and kindness.
+    Ask multiple questions if needed to uncover diverse interactions.
+    Return a complete and reasoned assessment of their soft skills.
+  expected_output: >
+    - Name: {applicant_2}
+    - communication_clarity (0–1)
+    - community_engagement (0–1)
+    - kindness (0–1)
+    - reasoning: (string)
   agent: soft_skills_expert_agent
 
 technical_assessment_task:

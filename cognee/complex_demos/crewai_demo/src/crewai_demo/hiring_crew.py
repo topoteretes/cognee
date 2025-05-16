@@ -34,11 +34,28 @@ class HiringCrew:
         return Agent(config=self.agents_config["decision_maker_agent"], verbose=True)
 
     @task
-    def soft_skills_assessment_task(self) -> Task:
-        self.tasks_config["soft_skills_assessment_task"]["description"] = self.tasks_config[
-            "soft_skills_assessment_task"
-        ]["description"].format(**self.inputs)
-        return Task(config=self.tasks_config["soft_skills_assessment_task"], async_execution=False)
+    def soft_skills_assessment_applicant1_task(self) -> Task:
+        self.tasks_config["soft_skills_assessment_applicant1_task"]["description"] = (
+            self.tasks_config["soft_skills_assessment_applicant1_task"]["description"].format(
+                **self.inputs
+            )
+        )
+        return Task(
+            config=self.tasks_config["soft_skills_assessment_applicant1_task"],
+            async_execution=False,
+        )
+
+    @task
+    def soft_skills_assessment_applicant2_task(self) -> Task:
+        self.tasks_config["soft_skills_assessment_applicant2_task"]["description"] = (
+            self.tasks_config["soft_skills_assessment_applicant2_task"]["description"].format(
+                **self.inputs
+            )
+        )
+        return Task(
+            config=self.tasks_config["soft_skills_assessment_applicant2_task"],
+            async_execution=False,
+        )
 
     @task
     def technical_assessment_task(self) -> Task:
