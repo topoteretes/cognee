@@ -84,10 +84,7 @@ class IssueCommentsProvider(GitHubCommentBase):
 
     def _build_query(self) -> str:
         """Builds the GraphQL query for issue comments."""
-        return self.QUERY_TEMPLATE.format(
-            username=self.username,
-            limit=self.limit * 2,  # Fetch extra to allow for filtering
-        )
+        return self.QUERY_TEMPLATE.format(username=self.username, limit=self.limit * 2)
 
     def _extract_comments(self, data) -> list:
         """Extracts issue comments from the GraphQL response."""
@@ -95,7 +92,6 @@ class IssueCommentsProvider(GitHubCommentBase):
 
     def _format_comment(self, comment) -> dict:
         """Formats an issue comment from GraphQL."""
-        # Extract comment ID from URL
         comment_id = comment["url"].split("/")[-1] if comment["url"] else None
 
         return {
@@ -103,6 +99,7 @@ class IssueCommentsProvider(GitHubCommentBase):
             "issue_number": comment["issue"]["number"],
             "comment_id": comment_id,
             "body": comment["body"],
+            "text": comment["body"],
             "created_at": comment["createdAt"],
             "updated_at": comment["updatedAt"],
             "html_url": comment["url"],
@@ -172,7 +169,6 @@ class PrReviewsProvider(GitHubCommentBase):
 
     def _format_comment(self, review) -> dict:
         """Formats a PR review from GraphQL."""
-        # Extract review ID from URL
         review_id = review["url"].split("/")[-1] if review["url"] else None
 
         return {
@@ -180,6 +176,7 @@ class PrReviewsProvider(GitHubCommentBase):
             "issue_number": review["pullRequest"]["number"],
             "comment_id": review_id,
             "body": review["body"],
+            "text": review["body"],
             "created_at": review["createdAt"],
             "updated_at": review["updatedAt"],
             "html_url": review["url"],
@@ -200,7 +197,6 @@ class PrReviewsProvider(GitHubCommentBase):
 class PrReviewCommentsProvider(GitHubCommentBase):
     """Provider for GitHub PR review comments (inline code comments)."""
 
-    # Query to get PRs the user has reviewed
     PR_CONTRIBUTIONS_TEMPLATE = """
     {{
       user(login: "{username}") {{
@@ -225,7 +221,6 @@ class PrReviewCommentsProvider(GitHubCommentBase):
     }}
     """
 
-    # Query to get comments for a specific PR in a specific repository
     PR_COMMENTS_TEMPLATE = """
     {{
       repository(owner: "{owner}", name: "{repo}") {{
@@ -312,7 +307,6 @@ class PrReviewCommentsProvider(GitHubCommentBase):
     def _format_comment(self, comment) -> dict:
         """Formats a PR review comment from GraphQL."""
         pr = comment["_pr_data"]
-        # Extract comment ID from URL
         comment_id = comment["url"].split("/")[-1] if comment["url"] else None
 
         return {
@@ -320,6 +314,7 @@ class PrReviewCommentsProvider(GitHubCommentBase):
             "issue_number": pr["number"],
             "comment_id": comment_id,
             "body": comment["body"],
+            "text": comment["body"],
             "created_at": comment["createdAt"],
             "updated_at": comment["updatedAt"],
             "html_url": comment["url"],
@@ -350,7 +345,6 @@ class GitHubDevComments:
         if not self.profile.user:
             return None
 
-        # Initialize providers
         issue_provider = IssueCommentsProvider(
             self.profile.token, self.profile.username, self.limit
         )
@@ -361,12 +355,10 @@ class GitHubDevComments:
             self.profile.token, self.profile.username, self.limit
         )
 
-        # Get comments from all providers
         issue_comments = issue_provider.get_comments()
         pr_reviews = pr_review_provider.get_comments()
         pr_review_comments = pr_comment_provider.get_comments()
 
-        # Combine all comments
         return issue_comments + pr_reviews + pr_review_comments
 
     def set_limit(self, limit=None, include_issue_details=None):
@@ -381,27 +373,21 @@ if __name__ == "__main__":
     import os
     from cognee.complex_demos.crewai_demo.src.crewai_demo.github_dev_profile import GitHubDevProfile
 
-    # Get GitHub token from environment variable
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         print("Please set the GITHUB_TOKEN environment variable")
         exit(1)
 
-    # Replace with the GitHub username you want to test
-    username = "hajdul88"  # Replace with actual username to test
+    username = "hajdul88"
 
-    # Initialize profile and fetch comments
     profile = GitHubDevProfile(username, token)
 
-    # Get comments from both issues and PRs using GraphQL
     comments = profile.get_issue_comments(limit=5)
 
-    # Group by type
     issue_comments = [c for c in comments if c.get("type") == "issue_comment"]
     pr_reviews = [c for c in comments if c.get("type") == "pr_review"]
     pr_review_comments = [c for c in comments if c.get("type") == "pr_review_comment"]
 
-    # Print results
     print(f"Found {len(comments)} comments by {username}:")
     print(f"- {len(issue_comments)} issue comments")
     print(f"- {len(pr_reviews)} PR reviews")
