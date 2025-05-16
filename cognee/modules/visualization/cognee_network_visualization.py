@@ -21,6 +21,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         "TextSummary": "#1077f4",
         "TableRow": "#f47710",
         "TableType": "#6510f4",
+        "ColumnValue": "#13613a",
         "default": "#D3D3D3",
     }
 

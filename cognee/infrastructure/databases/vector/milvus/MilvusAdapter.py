@@ -178,9 +178,17 @@ class MilvusAdapter(VectorDBInterface):
     ):
         from pymilvus import MilvusException, exceptions
 
+        if limit <= 0:
+            return []
         client = self.get_milvus_client()
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
+
+        if not client.has_collection(collection_name=collection_name):
+            logger.warning(
+                f"Collection '{collection_name}' not found in MilvusAdapter.search; returning []."
+            )
+            return []
 
         try:
             query_vector = query_vector or (await self.embed_data([query_text]))[0]
@@ -208,12 +216,19 @@ class MilvusAdapter(VectorDBInterface):
                 )
                 for result in results[0]
             ]
-        except exceptions.CollectionNotExistException as error:
-            raise CollectionNotFoundError(
-                f"Collection '{collection_name}' does not exist!"
-            ) from error
+        except exceptions.CollectionNotExistException:
+            logger.warning(
+                f"Collection '{collection_name}' not found (exception) in MilvusAdapter.search; returning []."
+            )
+            return []
         except MilvusException as e:
-            logger.error(f"Error during search in collection '{collection_name}': {str(e)}")
+            # Catch other Milvus errors that are "collection not found" (paranoid safety)
+            if "collection not found" in str(e).lower() or "schema" in str(e).lower():
+                logger.warning(
+                    f"Collection '{collection_name}' not found (MilvusException) in MilvusAdapter.search; returning []."
+                )
+                return []
+            logger.error(f"Error searching Milvus collection '{collection_name}': {e}")
             raise e
 
     async def batch_search(

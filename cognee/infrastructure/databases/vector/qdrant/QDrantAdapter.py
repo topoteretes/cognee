@@ -159,11 +159,23 @@ class QDrantAdapter(VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: int = 15,
         with_vector: bool = False,
-    ):
+    ) -> List[ScoredResult]:
         from qdrant_client.http.exceptions import UnexpectedResponse
 
         if query_text is None and query_vector is None:
             raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+
+        if limit <= 0:
+            return []
+
+        if not await self.has_collection(collection_name):
+            logger.warning(
+                f"Collection '{collection_name}' not found in QdrantAdapter.search; returning []."
+            )
+            return []
+
+        if query_vector is None:
+            query_vector = (await self.embed_data([query_text]))[0]
 
         try:
             client = self.get_qdrant_client()
