@@ -86,7 +86,7 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
 
     asyncio.create_task(
         cognify_task(
-            text=data,
+            data=data,
             graph_model_file=graph_model_file,
             graph_model_name=graph_model_name,
         )
