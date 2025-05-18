@@ -26,7 +26,7 @@ jobs:
         ENVIRONMENT: dev
         ENV: dev
       run: |
-        docker compose -f docker-compose.yml up -d
+        docker compose -f deployment/docker-compose.yml up -d
 
     - name: Wait for services to be ready
       run: |
@@ -36,4 +36,4 @@ jobs:
     - name: Shut down Docker Compose
       if: always()
       run: |
-        docker compose -f docker-compose.yml down
+        docker compose -f deployment/docker-compose.yml down
