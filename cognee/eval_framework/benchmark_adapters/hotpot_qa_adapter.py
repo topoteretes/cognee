@@ -9,7 +9,7 @@ from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import Base
 class HotpotQAAdapter(BaseBenchmarkAdapter):
     dataset_info = {
         "filename": "hotpot_benchmark.json",
-        "url": "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json",
+        "url": "https://huggingface.co/datasets/vincentkoc/hotpot_qa_archive/datasets/hotpot/hotpot_dev_distractor_v1.json",
         # train: "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_train_v1.1.json" delete file after changing the url
         # distractor test: "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_distractor_v1.json" delete file after changing the url
     }
