@@ -37,8 +37,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY .env* /app/
 
 # Copy Alembic configuration
-COPY tools/alembic.ini /app/tools/alembic.ini
-COPY tools/alembic/ /app/tools/alembic
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching

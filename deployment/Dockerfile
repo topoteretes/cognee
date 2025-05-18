@@ -34,8 +34,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --extra debug --extra api --extra postgres --extra weaviate --extra qdrant --extra neo4j --extra kuzu --extra llama-index --extra gemini --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
 
 # Copy Alembic configuration
-COPY tools/alembic.ini /app/tools/alembic.ini
-COPY tools/alembic /app/tools/alembic
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching

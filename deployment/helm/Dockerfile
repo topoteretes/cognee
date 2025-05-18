@@ -48,8 +48,8 @@ ENV PYTHONPATH=/app
 COPY cognee/ /app/cognee
 
 # Copy Alembic configuration
-COPY tools/alembic.ini /app/tools/alembic.ini
-COPY tools/alembic/ /app/tools/alembic
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
