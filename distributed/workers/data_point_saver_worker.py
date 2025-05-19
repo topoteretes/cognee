@@ -7,7 +7,7 @@ from distributed.queues import save_data_points_queue
 from cognee.infrastructure.databases.graph import get_graph_engine
 
 
-@app.function(image=image, timeout=7200, max_containers=100)
+@app.function(image=image, timeout=86400, max_containers=100)
 async def data_point_saver_worker():
     print("Started processing of nodes and edges; starting graph engine queue.")
     graph_engine = await get_graph_engine()

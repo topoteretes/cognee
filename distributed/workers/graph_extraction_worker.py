@@ -13,7 +13,7 @@ from distributed.tasks.extract_graph_from_data import extract_graph_from_data
 from distributed.tasks.save_data_points import save_data_points
 
 
-@app.function(image=image, timeout=7200, max_containers=100)
+@app.function(image=image, timeout=86400, max_containers=100)
 async def graph_extraction_worker(user, document_name: str, document_chunks: list):
     cognee_config = get_cognify_config()
 

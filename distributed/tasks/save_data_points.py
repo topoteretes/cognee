@@ -35,7 +35,9 @@ async def save_data_points(data_points_and_relationships: tuple[list, list]):
     for nodes, edges in data_points_and_relationships:
         for node in nodes:
             if asizeof.asizeof(node) >= 500000:
-                print(f"Node too large:\n{node.id}\n")
+                try_pushing_nodes_to_queue([node])
+                continue
+                # print(f"Node too large:\n{node.id}\n")
 
             node_batch.append(node)
 

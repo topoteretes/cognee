@@ -133,7 +133,7 @@ async def main():
                     Task(
                         process_chunks_remotely,
                         document=item,
-                        task_config={"batch_size": 50},
+                        task_config={"batch_size": 10},
                     ),
                 ],
                 data=[item],
@@ -155,6 +155,7 @@ async def main():
         print(f"Number of documents processed: {len(results)}")
         results.extend(batch_results)
 
+    # Push empty tuple into the queue to signal the end of data.
     save_data_points_queue.put(())
 
     for consumer_future in consumer_futures:
