@@ -113,7 +113,7 @@ class WeaviateAdapter(VectorDBInterface):
                 #         )
             else:
                 data_point: DataObject = data_points[0]
-                if await collection.data.exists(data_point.uuid):
+                if collection.data.exists(data_point.uuid):
                     return await collection.data.update(
                         uuid=data_point.uuid,
                         vector=data_point.vector,

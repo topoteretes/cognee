@@ -136,27 +136,6 @@ Repository = "https://github.com/topoteretes/cognee"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build]
-exclude = [
-  "/bin",
-  "/dist",
-  "/.data",
-  "/.github",
-  "/alembic",
-  "/distributed",
-  "/deployment",
-  "/cognee-mcp",
-  "/cognee-frontend",
-  "/examples",
-  "/helm",
-  "/licenses",
-  "/logs",
-  "/notebooks",
-  "/profiling",
-  "/tests",
-  "/tools",
-]
-
 [tool.ruff]
 line-length = 100
 exclude = [

@@ -24,46 +24,9 @@ log_file = get_log_file_location()
 
 
 @mcp.tool()
-async def cognify(data: str, graph_model_file: str = None, graph_model_name: str = None) -> list:
-    """
-    Transform data into a structured knowledge graph in Cognee's memory layer.
-
-    This function launches a background task that processes the provided text/file location and
-    generates a knowledge graph representation. The function returns immediately while
-    the processing continues in the background due to MCP timeout constraints.
-
-    Parameters
-    ----------
-    data : str
-        The data to be processed and transformed into structured knowledge.
-        This can include natural language, file location, or any text-based information
-        that should become part of the agent's memory.
-
-    graph_model_file : str, optional
-        Path to a custom schema file that defines the structure of the generated knowledge graph.
-        If provided, this file will be loaded using importlib to create a custom graph model.
-        Default is None, which uses Cognee's built-in KnowledgeGraph model.
-
-    graph_model_name : str, optional
-        Name of the class within the graph_model_file to instantiate as the graph model.
-        Required if graph_model_file is specified.
-        Default is None, which uses the default KnowledgeGraph class.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with information about the
-        background task launch and how to check its status.
-
-    Notes
-    -----
-    - The function launches a background task and returns immediately
-    - The actual cognify process may take significant time depending on text length
-    - Use the cognify_status tool to check the progress of the operation
-    """
-
+async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> list:
     async def cognify_task(
-        data: str, graph_model_file: str = None, graph_model_name: str = None
+        text: str, graph_model_file: str = None, graph_model_name: str = None
     ) -> str:
         """Build knowledge graph from the input text"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
@@ -75,7 +38,7 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
             else:
                 graph_model = KnowledgeGraph
 
-            await cognee.add(data)
+            await cognee.add(text)
 
             try:
                 await cognee.cognify(graph_model=graph_model)
@@ -86,7 +49,7 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
 
     asyncio.create_task(
         cognify_task(
-            data=data,
+            text=text,
             graph_model_file=graph_model_file,
             graph_model_name=graph_model_name,
         )
@@ -108,35 +71,6 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
 
 @mcp.tool()
 async def codify(repo_path: str) -> list:
-    """
-    Analyze and generate a code-specific knowledge graph from a software repository.
-
-    This function launches a background task that processes the provided repository
-    and builds a code knowledge graph. The function returns immediately while
-    the processing continues in the background due to MCP timeout constraints.
-
-    Parameters
-    ----------
-    repo_path : str
-        Path to the code repository to analyze. This can be a local file path or a
-        relative path to a repository. The path should point to the root of the
-        repository or a specific directory within it.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with information about the
-        background task launch and how to check its status.
-
-    Notes
-    -----
-    - The function launches a background task and returns immediately
-    - The code graph generation may take significant time for larger repositories
-    - Use the codify_status tool to check the progress of the operation
-    - Process results are logged to the standard Cognee log file
-    - All stdout is redirected to stderr to maintain MCP communication integrity
-    """
-
     async def codify_task(repo_path: str):
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
@@ -169,46 +103,6 @@ async def codify(repo_path: str) -> list:
 
 @mcp.tool()
 async def search(search_query: str, search_type: str) -> list:
-    """
-    Search the Cognee knowledge graph for information relevant to the query.
-
-    This function executes a search against the Cognee knowledge graph using the
-    specified query and search type. It returns formatted results based on the
-    search type selected.
-
-    Parameters
-    ----------
-    search_query : str
-        The search query in natural language. This can be a question, instruction, or
-        any text that expresses what information is needed from the knowledge graph.
-
-    search_type : str
-        The type of search to perform. Valid options include:
-        - "GRAPH_COMPLETION": Returns an LLM response based on the search query and Cognee's memory
-        - "RAG_COMPLETION": Returns an LLM response based on the search query and standard RAG data
-        - "CODE": Returns code-related knowledge in JSON format
-        - "CHUNKS": Returns raw text chunks from the knowledge graph
-        - "INSIGHTS": Returns relationships between nodes in readable format
-
-        The search_type is case-insensitive and will be converted to uppercase.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with the search results.
-        The format of the result depends on the search_type:
-        - For CODE: JSON-formatted search results
-        - For GRAPH_COMPLETION/RAG_COMPLETION: A single text completion
-        - For CHUNKS: String representation of the raw chunks
-        - For INSIGHTS: Formatted string showing node relationships
-        - For other types: String representation of the search results
-
-    Notes
-    -----
-    - Different search types produce different output formats
-    - The function handles the conversion between Cognee's internal result format and MCP's output format
-    """
-
     async def search_task(search_query: str, search_type: str) -> str:
         """Search the knowledge graph"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
@@ -238,24 +132,7 @@ async def search(search_query: str, search_type: str) -> list:
 
 @mcp.tool()
 async def prune():
-    """
-    Reset the Cognee knowledge graph by removing all stored information.
-
-    This function performs a complete reset of both the data layer and system layer
-    of the Cognee knowledge graph, removing all nodes, edges, and associated metadata.
-    It is typically used during development or when needing to start fresh with a new
-    knowledge base.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with confirmation of the prune operation.
-
-    Notes
-    -----
-    - This operation cannot be undone. All memory data will be permanently deleted.
-    - The function prunes both data content (using prune_data) and system metadata (using prune_system)
-    """
+    """Reset the knowledge graph"""
     with redirect_stdout(sys.stderr):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
@@ -264,25 +141,7 @@ async def prune():
 
 @mcp.tool()
 async def cognify_status():
-    """
-    Get the current status of the cognify pipeline.
-
-    This function retrieves information about current and recently completed cognify operations
-    in the main_dataset. It provides details on progress, success/failure status, and statistics
-    about the processed data.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with the status information as a string.
-        The status includes information about active and completed jobs for the cognify_pipeline.
-
-    Notes
-    -----
-    - The function retrieves pipeline status specifically for the "cognify_pipeline" on the "main_dataset"
-    - Status information includes job progress, execution time, and completion status
-    - The status is returned in string format for easy reading
-    """
+    """Get status of cognify pipeline"""
     with redirect_stdout(sys.stderr):
         user = await get_default_user()
         status = await get_pipeline_status(
@@ -293,25 +152,7 @@ async def cognify_status():
 
 @mcp.tool()
 async def codify_status():
-    """
-    Get the current status of the codify pipeline.
-
-    This function retrieves information about current and recently completed codify operations
-    in the codebase dataset. It provides details on progress, success/failure status, and statistics
-    about the processed code repositories.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with the status information as a string.
-        The status includes information about active and completed jobs for the cognify_code_pipeline.
-
-    Notes
-    -----
-    - The function retrieves pipeline status specifically for the "cognify_code_pipeline" on the "codebase" dataset
-    - Status information includes job progress, execution time, and completion status
-    - The status is returned in string format for easy reading
-    """
+    """Get status of codify pipeline"""
     with redirect_stdout(sys.stderr):
         user = await get_default_user()
         status = await get_pipeline_status(
