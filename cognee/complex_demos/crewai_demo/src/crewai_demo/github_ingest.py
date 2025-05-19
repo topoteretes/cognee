@@ -17,9 +17,7 @@ def get_github_profile_data(
     commits_result = profile.get_user_commits(
         days=days, prs_limit=prs_limit, commits_per_pr=commits_per_pr, include_files=True
     )
-    comments = profile.get_issue_comments(
-        days=days, issues_limit=issues_limit, max_comments=max_comments, include_issue_details=True
-    )
+    comments = profile.get_issue_comments(limit=max_comments, include_issue_details=True)
 
     return {
         "user": profile.get_user_info(),
@@ -72,13 +70,14 @@ def get_github_data_for_cognee(
     if file_changes:
         enriched_file_changes = [item | user_info for item in file_changes]
 
-    comments = profile.get_issue_comments(
-        days=days, issues_limit=issues_limit, max_comments=max_comments, include_issue_details=True
-    )
+    comments = profile.get_issue_comments(limit=max_comments, include_issue_details=True)
 
     enriched_comments = []
     if comments:
-        enriched_comments = [comment | user_info for comment in comments]
+        enriched_comments = []
+        for comment in comments:
+            safe_user_info = {k: v for k, v in user_info.items() if k not in comment}
+            enriched_comments.append(comment | safe_user_info)
 
     return {"user": user_info, "file_changes": enriched_file_changes, "comments": enriched_comments}
 

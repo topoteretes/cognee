@@ -62,37 +62,17 @@ class GitHubDevProfile:
 
         return self.commits.get_user_file_changes()
 
-    def get_issue_comments(
-        self, days=30, issues_limit=10, max_comments=5, include_issue_details=True
-    ):
-        """Fetches comments made by the user on issues across repositories within specified timeframe."""
+    def get_issue_comments(self, limit=10, include_issue_details=True):
+        """Fetches the most recent comments made by the user on issues and PRs across repositories."""
         if not self.comments:
             return None
 
-        self.comments.set_limits(
-            days=days,
-            issues_limit=issues_limit,
-            max_comments=max_comments,
+        self.comments.set_limit(
+            limit=limit,
             include_issue_details=include_issue_details,
         )
 
         return self.comments.get_issue_comments()
-
-    def get_repo_issue_comments(
-        self, repo_name, days=30, issues_limit=10, max_comments=5, include_issue_details=True
-    ):
-        """Fetches comments made by the user on issues in a specific repository within timeframe."""
-        if not self.user or not self.comments:
-            return None
-
-        self.comments.set_limits(
-            days=days,
-            issues_limit=issues_limit,
-            max_comments=max_comments,
-            include_issue_details=include_issue_details,
-        )
-
-        return self.comments.get_repo_issue_comments(repo_name)
 
     def _get_user(self, username):
         """Fetches a GitHub user object."""

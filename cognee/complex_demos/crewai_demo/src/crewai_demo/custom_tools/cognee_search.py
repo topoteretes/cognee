@@ -3,7 +3,6 @@ from typing import Type
 from pydantic import BaseModel, Field, PrivateAttr
 
 from cognee.modules.engine.models import NodeSet
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
 
 class CogneeSearchInput(BaseModel):
@@ -29,8 +28,8 @@ class CogneeSearch(BaseTool):
         self._nodeset_name = nodeset_name
 
     def _run(self, query: str) -> str:
-        import cognee
         import asyncio
+        from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
         async def main():
             try:
