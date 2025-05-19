@@ -21,7 +21,10 @@ depends_on: Union[str, Sequence[str], None] = "8057ae7329c2"
 
 
 def upgrade() -> None:
-    await_only(create_default_user())
+    try:
+        await_only(create_default_user())
+    except Exception:
+        pass
 
 
 def downgrade() -> None:
