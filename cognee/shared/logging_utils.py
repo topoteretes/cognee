@@ -4,6 +4,7 @@ import threading
 import logging
 import structlog
 import traceback
+import platform
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +36,11 @@ LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
 
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
+
+# Version information
+PYTHON_VERSION = platform.python_version()
+STRUCTLOG_VERSION = structlog.__version__
+OS_INFO = f"{platform.system()} {platform.release()} ({platform.version()})"
 
 
 class PlainFileHandler(logging.FileHandler):
@@ -326,8 +332,17 @@ def setup_logging(log_level=None, name=None):
     # Clean up old log files, keeping only the most recent ones
     cleanup_old_logs(LOGS_DIR, MAX_LOG_FILES)
 
-    # Return a configured logger
-    return structlog.get_logger(name if name else __name__)
+    # Get a configured logger and log system information
+    logger = structlog.get_logger(name if name else __name__)
+    logger.info(
+        "Logging initialized",
+        python_version=PYTHON_VERSION,
+        structlog_version=STRUCTLOG_VERSION,
+        os_info=OS_INFO
+    )
+
+    # Return the configured logger
+    return logger
 
 
 def get_log_file_location():
