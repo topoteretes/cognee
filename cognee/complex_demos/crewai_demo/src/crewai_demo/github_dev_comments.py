@@ -23,28 +23,17 @@ class GitHubDevComments:
             logger.warning(f"No user found for profile {self.profile.username}")
             return None
 
-        # Calculate all limits based on the base limit
-        fetch_limit = self.limit * 4
-        reviews_limit = self.limit * 2
-        comments_limit = self.limit * 3
-        pr_limit = self.limit * 2
-
         logger.debug(f"Fetching comments for {self.profile.username} with limit={self.limit}")
 
+        # Create providers with just the basic limit - they will handle their own multipliers
         issue_provider = IssueCommentsProvider(
             self.profile.token, self.profile.username, self.limit
         )
         pr_review_provider = PrReviewsProvider(
-            self.profile.token, self.profile.username, self.limit, fetch_limit=fetch_limit
+            self.profile.token, self.profile.username, self.limit
         )
         pr_comment_provider = PrReviewCommentsProvider(
-            self.profile.token,
-            self.profile.username,
-            self.limit,
-            fetch_limit=fetch_limit,
-            reviews_limit=reviews_limit,
-            comments_limit=comments_limit,
-            pr_limit=pr_limit,
+            self.profile.token, self.profile.username, self.limit
         )
 
         issue_comments = issue_provider.get_comments()
