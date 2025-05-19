@@ -18,7 +18,7 @@ class AnthropicAdapter(LLMInterface):
         import anthropic
 
         self.aclient = instructor.patch(
-            create=anthropic.Anthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
+            create=anthropic.AsyncAnthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
         )
 
         self.model = model
