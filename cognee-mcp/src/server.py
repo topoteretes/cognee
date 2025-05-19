@@ -25,9 +25,7 @@ log_file = get_log_file_location()
 
 @mcp.tool()
 async def cognee_add_developer_rules(
-    base_path: str = ".",
-    graph_model_file: str = None,
-    graph_model_name: str = None
+    base_path: str = ".", graph_model_file: str = None, graph_model_name: str = None
 ) -> list:
     """
     Ingest core developer rule files into Cognee's memory layer.
@@ -70,7 +68,7 @@ async def cognee_add_developer_rules(
         "CLAUDE.md",
         ".sourcegraph/memory.md",
         "AGENT.md",
-        "AGENTS.md"
+        "AGENTS.md",
     ]
 
     async def cognify_task(file_path: str) -> None:
