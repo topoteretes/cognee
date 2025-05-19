@@ -24,6 +24,87 @@ log_file = get_log_file_location()
 
 
 @mcp.tool()
+async def cognee_add_developer_rules(
+    base_path: str = ".", graph_model_file: str = None, graph_model_name: str = None
+) -> list:
+    """
+    Ingest core developer rule files into Cognee's memory layer.
+
+    This function loads a predefined set of developer-related configuration,
+    rule, and documentation files from the base repository and assigns them
+    to the special 'developer_rules' node set in Cognee. It ensures these
+    foundational files are always part of the structured memory graph.
+
+    Parameters
+    ----------
+    base_path : str
+        Root path to resolve relative file paths. Defaults to current directory.
+
+    graph_model_file : str, optional
+        Optional path to a custom schema file for knowledge graph generation.
+
+    graph_model_name : str, optional
+        Optional class name to use from the graph_model_file schema.
+
+    Returns
+    -------
+    list
+        A message indicating how many rule files were scheduled for ingestion,
+        and how to check their processing status.
+
+    Notes
+    -----
+    - Each file is processed asynchronously in the background.
+    - Files are attached to the 'developer_rules' node set.
+    - Missing files are skipped with a logged warning.
+    """
+
+    developer_rule_paths = [
+        ".cursorrules",
+        ".cursor/rules",
+        ".same/todos.md",
+        ".windsurfrules",
+        ".clinerules",
+        "CLAUDE.md",
+        ".sourcegraph/memory.md",
+        "AGENT.md",
+        "AGENTS.md",
+    ]
+
+    async def cognify_task(file_path: str) -> None:
+        with redirect_stdout(sys.stderr):
+            logger.info(f"Starting cognify for: {file_path}")
+            try:
+                await cognee.add(file_path, nodeset="developer_rules")
+                model = KnowledgeGraph
+                if graph_model_file and graph_model_name:
+                    model = load_class(graph_model_file, graph_model_name)
+                await cognee.cognify(graph_model=model)
+                logger.info(f"Cognify finished for: {file_path}")
+            except Exception as e:
+                logger.error(f"Cognify failed for {file_path}: {str(e)}")
+
+    tasks = []
+    for rel_path in developer_rule_paths:
+        abs_path = os.path.join(base_path, rel_path)
+        if os.path.isfile(abs_path):
+            tasks.append(asyncio.create_task(cognify_task(abs_path)))
+        else:
+            logger.warning(f"Skipped missing developer rule file: {abs_path}")
+
+    return [
+        types.TextContent(
+            type="text",
+            text=(
+                f"Started cognify for {len(tasks)} developer rule files in background.\n"
+                f"All are added to the `developer_rules` node set.\n"
+                f"Use `cognify_status` or check logs at {log_file} to monitor progress."
+            ),
+        )
+    ]
+
+
+@mcp.tool()
 async def cognify(data: str, graph_model_file: str = None, graph_model_name: str = None) -> list:
     """
     Transform data into a structured knowledge graph in Cognee's memory layer.
