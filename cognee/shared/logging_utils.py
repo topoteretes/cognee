@@ -338,7 +338,7 @@ def setup_logging(log_level=None, name=None):
         "Logging initialized",
         python_version=PYTHON_VERSION,
         structlog_version=STRUCTLOG_VERSION,
-        os_info=OS_INFO
+        os_info=OS_INFO,
     )
 
     # Return the configured logger
