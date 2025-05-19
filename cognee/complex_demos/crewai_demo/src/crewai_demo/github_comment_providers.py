@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta
-from cognee.complex_demos.crewai_demo.src.crewai_demo.github_comment_base import GitHubCommentBase
+from cognee.complex_demos.crewai_demo.src.crewai_demo.github_comment_base import (
+    GitHubCommentBase,
+    logger,
+)
 
 
 class IssueCommentsProvider(GitHubCommentBase):
@@ -265,7 +268,7 @@ class PrReviewCommentsProvider(GitHubCommentBase):
 
             return pr_comments
         except Exception as e:
-            print(f"Error fetching comments for PR #{pr['number']}: {e}")
+            logger.error(f"Error fetching comments for PR #{pr['number']}: {e}")
             return []
 
     def _format_comment(self, comment) -> dict:

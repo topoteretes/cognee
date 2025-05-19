@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 import requests
+from cognee.shared.logging_utils import get_logger
 
 GITHUB_API_URL = "https://api.github.com/graphql"
+
+logger = get_logger("github_comments")
 
 
 class GitHubCommentBase(ABC):
@@ -28,7 +31,7 @@ class GitHubCommentBase(ABC):
             raw_comments = self._extract_comments(data)
             return [self._format_comment(item) for item in raw_comments[: self.limit]]
         except Exception as e:
-            print(f"Error fetching {self._get_comment_type()} comments: {e}")
+            logger.error(f"Error fetching {self._get_comment_type()} comments: {e}")
             return []
 
     @abstractmethod

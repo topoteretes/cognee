@@ -5,6 +5,7 @@ from cognee.complex_demos.crewai_demo.src.crewai_demo.github_comment_providers i
     PrReviewsProvider,
     PrReviewCommentsProvider,
 )
+from cognee.complex_demos.crewai_demo.src.crewai_demo.github_comment_base import logger
 
 
 class GitHubDevComments:
@@ -19,6 +20,7 @@ class GitHubDevComments:
     def get_issue_comments(self):
         """Fetches the most recent comments made by the user on issues and PRs across repositories."""
         if not self.profile.user:
+            logger.warning(f"No user found for profile {self.profile.username}")
             return None
 
         # Calculate all limits based on the base limit
@@ -26,6 +28,8 @@ class GitHubDevComments:
         reviews_limit = self.limit * 2
         comments_limit = self.limit * 3
         pr_limit = self.limit * 2
+
+        logger.debug(f"Fetching comments for {self.profile.username} with limit={self.limit}")
 
         issue_provider = IssueCommentsProvider(
             self.profile.token, self.profile.username, self.limit
@@ -47,7 +51,14 @@ class GitHubDevComments:
         pr_reviews = pr_review_provider.get_comments()
         pr_review_comments = pr_comment_provider.get_comments()
 
-        return issue_comments + pr_reviews + pr_review_comments
+        total_comments = issue_comments + pr_reviews + pr_review_comments
+        logger.info(
+            f"Retrieved {len(total_comments)} comments for {self.profile.username} "
+            f"({len(issue_comments)} issue, {len(pr_reviews)} PR reviews, "
+            f"{len(pr_review_comments)} PR review comments)"
+        )
+
+        return total_comments
 
     def set_limit(self, limit=None, include_issue_details=None):
         """Sets the limit for comments to retrieve."""
