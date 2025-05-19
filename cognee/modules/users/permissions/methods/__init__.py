@@ -1,5 +1,5 @@
-from .check_permission_on_documents import check_permission_on_documents
-from .give_permission_on_document import give_permission_on_document
+from .check_permission_on_dataset import check_permission_on_dataset
+from .give_permission_on_dataset import give_permission_on_dataset
 from .get_document_ids_for_user import get_document_ids_for_user
 from .give_default_permission_to_tenant import give_default_permission_to_tenant
 from .give_default_permission_to_role import give_default_permission_to_role

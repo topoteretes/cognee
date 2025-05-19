@@ -109,7 +109,12 @@ async def cognee_pipeline(
     for dataset in datasets:
         awaitables.append(
             run_pipeline(
-                dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name
+                dataset=dataset,
+                user=user,
+                tasks=tasks,
+                data=data,
+                pipeline_name=pipeline_name,
+                context={"dataset": dataset},
             )
         )
 
@@ -122,6 +127,7 @@ async def run_pipeline(
     tasks: list[Task],
     data=None,
     pipeline_name: str = "custom_pipeline",
+    context: dict = None,
 ):
     check_dataset_name(dataset.name)
 
@@ -173,7 +179,7 @@ async def run_pipeline(
         if not isinstance(task, Task):
             raise ValueError(f"Task {task} is not an instance of Task")
 
-    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name)
+    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
     pipeline_run_status = None
 
     async for run_status in pipeline_run:

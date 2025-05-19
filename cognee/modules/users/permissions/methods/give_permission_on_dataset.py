@@ -1,11 +1,12 @@
 from sqlalchemy.future import select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ...models import User, ACL, Permission
+from uuid import UUID
 
 
-async def give_permission_on_document(
+async def give_permission_on_dataset(
     user: User,
-    document_id: str,
+    dataset_id: UUID,
     permission_name: str,
 ):
     db_engine = get_relational_engine()
@@ -20,7 +21,7 @@ async def give_permission_on_document(
         if permission is None:
             permission = Permission(name=permission_name)
 
-        acl = ACL(principal_id=user.id, data_id=document_id, permission=permission)
+        acl = ACL(principal_id=user.id, dataset_id=dataset_id, permission=permission)
 
         session.add(acl)
 

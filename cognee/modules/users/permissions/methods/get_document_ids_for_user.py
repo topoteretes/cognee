@@ -13,7 +13,7 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
             document_ids = (
                 await session.scalars(
                     select(Data.id)
-                    .join(ACL.data)
+                    .join(ACL.dataset)
                     .join(ACL.permission)
                     .where(
                         ACL.principal_id == user_id,

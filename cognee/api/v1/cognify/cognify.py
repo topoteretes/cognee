@@ -9,7 +9,7 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.documents import (
-    check_permissions_on_documents,
+    check_permissions_on_dataset,
     classify_documents,
     extract_chunks_from_documents,
 )
@@ -55,7 +55,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 ) -> list[Task]:
     default_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_documents, user=user, permissions=["write"]),
+        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),

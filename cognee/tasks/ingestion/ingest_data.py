@@ -9,7 +9,8 @@ from cognee.modules.data.methods import create_dataset, get_dataset_data, get_da
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods import give_permission_on_document
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
+from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from .get_dlt_destination import get_dlt_destination
 from .save_data_item_to_storage import save_data_item_to_storage
 
@@ -153,8 +154,9 @@ async def ingest_data(
 
                     await session.commit()
 
-                await give_permission_on_document(user, data_id, "read")
-                await give_permission_on_document(user, data_id, "write")
+        dataset_id = await get_unique_dataset_id(dataset_name=dataset_name, user=user)
+        await give_permission_on_dataset(user, dataset_id, "read")
+        await give_permission_on_dataset(user, dataset_id, "write")
 
         return file_paths
 
