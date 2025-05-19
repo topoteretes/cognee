@@ -21,7 +21,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-async def upgrade() -> None:
+def upgrade() -> None:
     db_engine = get_relational_engine()
 
     if db_engine.engine.dialect.name == "postgresql":
