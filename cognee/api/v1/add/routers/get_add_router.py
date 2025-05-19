@@ -1,4 +1,6 @@
 from uuid import UUID
+
+from cognee.api.v1.infrastructure import get_or_create_dataset_database
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
@@ -10,6 +12,11 @@ import requests
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+
+from cognee.context_global_variables import (
+    graph_db_config as context_graph_db_config,
+    vector_db_config as context_vector_db_config,
+)
 
 logger = get_logger()
 
@@ -38,6 +45,21 @@ def get_add_router() -> APIRouter:
                 raise ValueError("No dataset found with the provided datasetName.")
 
         try:
+            dataset_database = await get_or_create_dataset_database(datasetName, user)
+            vector_config = {
+                "vector_db_url": dataset_database.vector_database_name,
+                "vector_db_key": "",
+                "vector_db_provider": "lancedb",
+            }
+
+            graph_config = {
+                "graph_database_provider": "kuzu",
+                "graph_file_path": dataset_database.graph_database_name,
+            }
+
+            context_graph_db_config.set(graph_config)
+            context_vector_db_config.set(vector_config)
+
             if isinstance(data, str) and data.startswith("http"):
                 if "github" in data:
                     # Perform git clone if the URL is from GitHub
@@ -58,6 +80,7 @@ def get_add_router() -> APIRouter:
             else:
                 await cognee_add(data, datasetName, user=user)
         except Exception as error:
+            raise error
             return JSONResponse(status_code=409, content={"error": str(error)})
 
     return router

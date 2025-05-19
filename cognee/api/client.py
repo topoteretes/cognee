@@ -30,10 +30,6 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
 )
-from cognee.context_global_variables import (
-    graph_db_config as context_graph_db_config,
-    vector_db_config as context_vector_db_config,
-)
 from contextlib import asynccontextmanager
 
 logger = get_logger()
@@ -68,46 +64,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
-
-
-@app.middleware("http")
-async def inject_user_env_settings(request: Request, call_next):
-    """
-    Handle all user specific settings like LLM preference, database adapter and similar per http request
-    """
-    if request.headers.get("Authorization"):
-        try:
-            from cognee.modules.users.methods import get_authenticated_user
-
-            user = await get_authenticated_user(request.headers.get("Authorization"))
-            # TODO: Check user info in database if it doesn't exist create it
-            print(user)
-            vector_config = {
-                "vector_db_url": "/Users/<username>/Desktop/cognee.test",
-                "vector_db_key": "",
-                "vector_db_provider": "lancedb",
-            }
-
-            graph_config = {
-                "graph_database_provider": "kuzu",
-                "graph_file_path": "/Users/<username>/Desktop/kuzu_test.db",
-            }
-
-            context_graph_token = context_graph_db_config.set(graph_config)
-            context_vector_token = context_vector_db_config.set(vector_config)
-        except fastapi.exceptions.HTTPException:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "INVALID_AUTH_TOKEN"},
-            )
-
-    response = await call_next(request)
-
-    if request.headers.get("Authorization"):
-        context_graph_db_config.reset(context_graph_token)
-        context_vector_db_config.reset(context_vector_token)
-
-    return response
 
 
 app.add_middleware(
