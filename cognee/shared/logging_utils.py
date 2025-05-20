@@ -7,6 +7,7 @@ import traceback
 import platform
 from datetime import datetime
 from pathlib import Path
+import importlib.metadata
 
 # Export common log levels
 DEBUG = logging.DEBUG
@@ -40,7 +41,13 @@ MAX_LOG_FILES = 10
 # Version information
 PYTHON_VERSION = platform.python_version()
 STRUCTLOG_VERSION = structlog.__version__
-OS_INFO = f"{platform.system()} {platform.release()} ({platform.version()})"
+try:
+    COGNEE_VERSION = importlib.metadata.version("cognee")
+except importlib.metadata.PackageNotFoundError:
+    # Fallback to hardcoded version if package metadata is not available
+    COGNEE_VERSION = "unknown"  #
+
+OS_INFO = f"{platform.system()} {platform.release()} ({platform.version()}) {COGNEE_VERSION}"
 
 
 class PlainFileHandler(logging.FileHandler):
