@@ -1,8 +1,9 @@
 import modal
 import os
-import json
 import asyncio
 import datetime
+import hashlib
+import json
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
@@ -10,8 +11,10 @@ from cognee.eval_framework.answer_generation.run_question_answering_module impor
     run_question_answering,
 )
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
+from cognee.eval_framework.metrics_dashboard import create_dashboard
 
 logger = get_logger()
+vol = modal.Volume.from_name("evaluation_dashboard_results", create_if_missing=True)
 
 
 def read_and_combine_metrics(eval_params: dict) -> dict:
@@ -46,32 +49,54 @@ image = (
             "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
         }
     )
-    .poetry_install_from_file(poetry_pyproject_toml="pyproject.toml")
     .pip_install("protobuf", "h2", "deepeval", "gdown", "plotly")
 )
 
 
-@app.function(image=image, concurrency_limit=2, timeout=1800, retries=1)
+@app.function(image=image, concurrency_limit=10, timeout=86400, volumes={"/data": vol})
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
     if eval_params is None:
         eval_params = EvalConfig().to_dict()
 
+    version_name = "baseline"
+    benchmark_name = os.environ.get("BENCHMARK", eval_params.get("benchmark", "benchmark"))
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+    answers_filename = (
+        f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('answers_path')}"
+    )
+    html_filename = (
+        f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('dashboard_path')}"
+    )
+
     logger.info(f"Running evaluation with params: {eval_params}")
 
     # Run the evaluation pipeline
-    await run_corpus_builder(eval_params)
+    await run_corpus_builder(eval_params, instance_filter=eval_params.get("instance_filter"))
     await run_question_answering(eval_params)
-    await run_evaluation(eval_params)
+    answers = await run_evaluation(eval_params)
 
-    # Early return if metrics calculation wasn't requested
-    if not eval_params.get("evaluating_answers") or not eval_params.get("calculate_metrics"):
-        logger.info(
-            "Skipping metrics collection as either evaluating_answers or calculate_metrics is False"
+    with open("/data/" + answers_filename, "w") as f:
+        json.dump(answers, f, ensure_ascii=False, indent=4)
+    vol.commit()
+
+    if eval_params.get("dashboard"):
+        logger.info("Generating dashboard...")
+        html_output = create_dashboard(
+            metrics_path=eval_params["metrics_path"],
+            aggregate_metrics_path=eval_params["aggregate_metrics_path"],
+            output_file=eval_params["dashboard_path"],
+            benchmark=eval_params["benchmark"],
         )
-        return None
 
-    return read_and_combine_metrics(eval_params)
+    with open("/data/" + html_filename, "w") as f:
+        f.write(html_output)
+    vol.commit()
+
+    logger.info("Evaluation set finished...")
+
+    return True
 
 
 @app.local_entrypoint()
@@ -80,37 +105,39 @@ async def main():
     configs = [
         EvalConfig(
             task_getter_type="Default",
-            number_of_samples_in_corpus=2,
+            number_of_samples_in_corpus=10,
+            benchmark="HotPotQA",
+            qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
             answering_questions=True,
             evaluating_answers=True,
             calculate_metrics=True,
-            dashboard=False,
+            dashboard=True,
         ),
         EvalConfig(
             task_getter_type="Default",
             number_of_samples_in_corpus=10,
+            benchmark="TwoWikiMultiHop",
+            qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
             answering_questions=True,
             evaluating_answers=True,
             calculate_metrics=True,
-            dashboard=False,
+            dashboard=True,
+        ),
+        EvalConfig(
+            task_getter_type="Default",
+            number_of_samples_in_corpus=10,
+            benchmark="Musique",
+            qa_engine="cognee_graph_completion",
+            building_corpus_from_scratch=True,
+            answering_questions=True,
+            evaluating_answers=True,
+            calculate_metrics=True,
+            dashboard=True,
         ),
     ]
 
     # Run evaluations in parallel with different configurations
     modal_tasks = [modal_run_eval.remote.aio(config.to_dict()) for config in configs]
-    results = await asyncio.gather(*modal_tasks)
-
-    # Filter out None results and save combined results
-    results = [r for r in results if r is not None]
-    if results:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"combined_results_{timestamp}.json"
-
-        with open(output_file, "w") as f:
-            json.dump(results, f, indent=2)
-
-        logger.info(f"Completed parallel evaluation runs. Results saved to {output_file}")
-    else:
-        logger.info("No metrics were collected from any of the evaluation runs")
+    await asyncio.gather(*modal_tasks)
