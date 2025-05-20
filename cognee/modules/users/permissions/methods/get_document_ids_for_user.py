@@ -1,7 +1,9 @@
 from uuid import UUID
+
+from cognee.modules.data.methods import get_dataset_data
 from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Dataset, DatasetData, Data
+from cognee.modules.data.models import Dataset, DatasetData
 from ...models import ACL, Permission
 
 
@@ -10,9 +12,9 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
 
     async with db_engine.get_async_session() as session:
         async with session.begin():
-            document_ids = (
+            dataset_ids = (
                 await session.scalars(
-                    select(Data.id)
+                    select(Dataset.id)
                     .join(ACL.dataset)
                     .join(ACL.permission)
                     .where(
@@ -22,9 +24,15 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
                 )
             ).all()
 
+            # Get documents from datasets user has read access for
+            document_ids = []
+            for dataset_id in dataset_ids:
+                data_list = await get_dataset_data(dataset_id)
+                document_ids.extend([str(data.id) for data in data_list])
+
             if datasets:
-                documents_ids_in_dataset = set()
                 # If datasets are specified filter out documents that aren't part of the specified datasets
+                documents_ids_in_dataset = set()
                 for dataset in datasets:
                     # Find dataset id for dataset element
                     dataset_id = (
