@@ -1,6 +1,9 @@
+import asyncio
+import os
 import json
-from typing import Callable
+from typing import Callable, Optional
 
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -19,6 +22,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
+from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from ..operations import log_query, log_result
 
 
@@ -30,6 +34,12 @@ async def search(
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
 ):
+    # Use search function filtered by permissions if access control is enabled
+    if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
+        return await permissions_search(
+            query_text, query_type, user, datasets, system_prompt_path, top_k
+        )
+
     query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
@@ -39,6 +49,7 @@ async def search(
 
     filtered_search_results = []
 
+    # TODO: Is document_id ever not None? Should we remove document handling from here if it's not?
     for search_result in search_results:
         document_id = search_result["document_id"] if "document_id" in search_result else None
         document_id = parse_id(document_id)
@@ -90,3 +101,47 @@ async def specific_search(
     send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
 
     return results
+
+
+async def permissions_search(
+    query_text: str,
+    query_type: SearchType,
+    user: User = None,
+    datasets: Optional[list[str]] = None,
+    system_prompt_path: str = "answer_simple_question.txt",
+    top_k: int = 10,
+) -> list:
+    query = await log_query(query_text, query_type.value, user.id)
+
+    # Find all datasets user has read access for
+    # TODO: get_all_user_permission_datasets needs to be expanded to handle roles and tenants
+    user_read_access_datasets = await get_all_user_permission_datasets(user, "read")
+
+    # if datasets are provided to search filter out non provided datasets
+    # TODO: Make sure dataset comparison is between objects of same type,
+    # user_read_access_datasets will be the Dataset objects and datasets will be strings
+    if datasets:
+        search_datasets = [dataset for dataset in user_read_access_datasets if dataset in datasets]
+    else:
+        search_datasets = user_read_access_datasets
+
+    # Set context for database for each dataset user has access for
+    async def _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k):
+        await set_database_global_context_variables(dataset.id, user)
+        search_results = await specific_search(
+            query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
+        )
+        return search_results
+
+    tasks = []
+    for dataset in search_datasets:
+        tasks.append(
+            _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k)
+        )
+
+    search_results = await asyncio.gather(*tasks)
+
+    # TODO: Aggregate search results from all databases and return top_k relevant results to user
+    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
+
+    return search_results[0]

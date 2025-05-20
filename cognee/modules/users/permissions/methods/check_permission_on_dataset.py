@@ -33,7 +33,7 @@ async def check_permission_on_dataset(user: User, permission_type: str, dataset_
             .where(ACL.permission.has(name=permission_type))
         )
         acls = result.unique().scalars().all()
-        has_permission = all([acl.dataset.id for acl in acls])
+        has_permission = dataset_id in [acl.dataset.id for acl in acls]
 
         if not has_permission:
             raise PermissionDeniedError(
