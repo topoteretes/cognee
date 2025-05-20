@@ -26,3 +26,12 @@ class VectorConfig(BaseSettings):
 @lru_cache
 def get_vectordb_config():
     return VectorConfig()
+
+
+def get_vectordb_context_config():
+    """This function will get the appropriate vector db config based on async context."""
+    from cognee.context_global_variables import vector_db_config
+
+    if vector_db_config.get():
+        return vector_db_config.get()
+    return get_vectordb_config().to_dict()

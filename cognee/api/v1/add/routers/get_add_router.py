@@ -13,10 +13,7 @@ import requests
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-from cognee.context_global_variables import (
-    graph_db_config as context_graph_db_config,
-    vector_db_config as context_vector_db_config,
-)
+from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger()
 
@@ -45,20 +42,8 @@ def get_add_router() -> APIRouter:
                 raise ValueError("No dataset found with the provided datasetName.")
 
         try:
-            dataset_database = await get_or_create_dataset_database(datasetName, user)
-            vector_config = {
-                "vector_db_url": dataset_database.vector_database_name,
-                "vector_db_key": "",
-                "vector_db_provider": "lancedb",
-            }
-
-            graph_config = {
-                "graph_database_provider": "kuzu",
-                "graph_file_path": dataset_database.graph_database_name,
-            }
-
-            context_graph_db_config.set(graph_config)
-            context_vector_db_config.set(vector_config)
+            # Set database information to be used for current cognify async context
+            await set_database_global_context_variables(datasetName, user)
 
             if isinstance(data, str) and data.startswith("http"):
                 if "github" in data:

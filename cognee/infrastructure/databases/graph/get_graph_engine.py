@@ -2,17 +2,14 @@
 
 from functools import lru_cache
 
-from .config import get_graph_config
+from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
-from cognee.context_global_variables import graph_db_config
 
 
 async def get_graph_engine() -> GraphDBInterface:
     """Factory function to get the appropriate graph client based on the graph type."""
-    if graph_db_config.get():
-        config = graph_db_config.get()
-    else:
-        config = get_graph_config().to_hashable_dict()
+    # Get appropriate graph configuration based on current async context
+    config = get_graph_context_config()
 
     graph_client = create_graph_engine(**config)
 
