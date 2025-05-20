@@ -53,7 +53,7 @@ dependencies = [
     "fastapi==0.115.7",
     "python-multipart==0.0.20",
     "fastapi-users[sqlalchemy]==14.0.1",
-    "dlt[sqlalchemy]>=1.9.0",
+    "dlt[sqlalchemy]>=1.9.0,<2",
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
     "onnxruntime<=1.21.1",
