@@ -1,7 +1,6 @@
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.users.permissions.methods import check_permission_on_dataset
 from typing import List
-from uuid import UUID
 
 
 async def check_permissions_on_dataset(

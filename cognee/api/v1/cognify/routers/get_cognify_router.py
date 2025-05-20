@@ -29,6 +29,7 @@ def get_cognify_router() -> APIRouter:
         try:
             # TODO: Make async gather per dataset
             for dataset in payload.datasets:
+                # TODO: Move context setting handler outside of APIs
                 dataset_database = await get_or_create_dataset_database(dataset, user)
                 vector_config = {
                     "vector_db_url": dataset_database.vector_database_name,
