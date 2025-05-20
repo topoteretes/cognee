@@ -12,3 +12,15 @@ class CollectionNotFoundError(CriticalError):
         log_level="DEBUG",
     ):
         super().__init__(message, name, status_code, log, log_level)
+
+
+class VectorEngineInitializationError(CriticalError):
+    def __init__(
+        self,
+        message,
+        name: str = "VectorEngineInitializationError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
+        log=True,
+        log_level="ERROR",
+    ):
+        super().__init__(message, name, status_code, log, log_level)

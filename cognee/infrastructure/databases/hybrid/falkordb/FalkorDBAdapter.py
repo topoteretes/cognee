@@ -24,13 +24,13 @@ class IndexSchema(DataPoint):
 class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
     def __init__(
         self,
-        database_url: str,
-        database_port: int,
+        url: str,
+        port: int,
         embedding_engine=EmbeddingEngine,
     ):
         self.driver = FalkorDB(
-            host=database_url,
-            port=database_port,
+            host=url,
+            port=port,
         )
         self.embedding_engine = embedding_engine
         self.graph_name = "cognee_graph"

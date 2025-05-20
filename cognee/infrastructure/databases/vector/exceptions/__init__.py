@@ -1,1 +1,1 @@
-from .exceptions import CollectionNotFoundError
+from .exceptions import *
