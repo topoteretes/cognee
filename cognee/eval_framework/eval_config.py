@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Optional
 
 
 class EvalConfig(BaseSettings):
@@ -43,6 +43,7 @@ class EvalConfig(BaseSettings):
     dashboard_path: str = "dashboard.html"
     direct_llm_system_prompt: str = "direct_llm_eval_system.txt"
     direct_llm_eval_prompt: str = "direct_llm_eval_prompt.txt"
+    instance_filter: Optional[List[str]] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -68,6 +69,7 @@ class EvalConfig(BaseSettings):
             "task_getter_type": self.task_getter_type,
             "direct_llm_system_prompt": self.direct_llm_system_prompt,
             "direct_llm_eval_prompt": self.direct_llm_eval_prompt,
+            "instance_filter": self.instance_filter,
         }
 
 
