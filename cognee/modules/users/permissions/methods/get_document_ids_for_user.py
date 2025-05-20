@@ -28,7 +28,7 @@ async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -
             document_ids = []
             for dataset_id in dataset_ids:
                 data_list = await get_dataset_data(dataset_id)
-                document_ids.extend([str(data.id) for data in data_list])
+                document_ids.extend([data.id for data in data_list])
 
             if datasets:
                 # If datasets are specified filter out documents that aren't part of the specified datasets
