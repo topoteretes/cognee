@@ -4,6 +4,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 
+# TODO: Add security verification for using these endpoints. We need to check that only users with
+#      Admin access from a Tenant can make changes by using these endpoints for their Tenant.
 def get_permissions_router() -> APIRouter:
     permissions_router = APIRouter()
 

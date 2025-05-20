@@ -3,7 +3,7 @@ from contextvars import ContextVar
 from typing import Union
 from uuid import UUID
 
-from cognee.api.v1.infrastructure import get_or_create_dataset_database
+from cognee.infrastructure.databases.utils import get_or_create_dataset_database
 from cognee.modules.users.models import User
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
@@ -15,7 +15,8 @@ graph_db_config = ContextVar("graph_db_config", default=None)
 async def set_database_global_context_variables(dataset: Union[str, UUID], user: User):
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
-    access to which will be enforced by given permissions. Database name will be determined by dataset_id.
+    access to which will be enforced by given permissions.
+    Database name will be determined by dataset_id and LanceDB and KuzuDB use will be enforced.
 
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres

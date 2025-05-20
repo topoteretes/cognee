@@ -41,9 +41,6 @@ def get_add_router() -> APIRouter:
                 raise ValueError("No dataset found with the provided datasetName.")
 
         try:
-            # Set database information to be used for current cognify async context
-            await set_database_global_context_variables(datasetName, user)
-
             if isinstance(data, str) and data.startswith("http"):
                 if "github" in data:
                     # Perform git clone if the URL is from GitHub

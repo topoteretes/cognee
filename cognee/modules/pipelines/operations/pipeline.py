@@ -14,6 +14,7 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
+from cognee.context_global_variables import set_database_global_context_variables
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -130,6 +131,9 @@ async def run_pipeline(
     context: dict = None,
 ):
     check_dataset_name(dataset.name)
+
+    # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
+    await set_database_global_context_variables(dataset.name, user)
 
     # Ugly hack, but no easier way to do this.
     if pipeline_name == "add_pipeline":
