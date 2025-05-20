@@ -1,6 +1,5 @@
 from uuid import UUID
 
-from cognee.api.v1.infrastructure import get_or_create_dataset_database
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
@@ -65,7 +64,6 @@ def get_add_router() -> APIRouter:
             else:
                 await cognee_add(data, datasetName, user=user)
         except Exception as error:
-            raise error
             return JSONResponse(status_code=409, content={"error": str(error)})
 
     return router

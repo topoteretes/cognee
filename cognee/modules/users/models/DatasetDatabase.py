@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.relational import Base
 
 
 class DatasetDatabase(Base):
-    __tablename__ = "user_database"
+    __tablename__ = "dataset_database"
 
     owner_id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), index=True)
     dataset_id = Column(

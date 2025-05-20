@@ -19,7 +19,6 @@ class Dataset(Base):
 
     owner_id = Column(UUID, index=True)
 
-    # New relationship for ACLs with cascade deletion
     acls = relationship("ACL", back_populates="dataset", cascade="all, delete-orphan")
 
     data: Mapped[List["Data"]] = relationship(
