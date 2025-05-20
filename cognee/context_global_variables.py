@@ -1,3 +1,4 @@
+import os
 from contextvars import ContextVar
 from typing import Union
 from uuid import UUID
@@ -12,8 +13,25 @@ graph_db_config = ContextVar("graph_db_config", default=None)
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user: User):
-    # TODO: Add use of context databases to be optional depending on the need for permissions
-    #      as they don't allow the use of other databases currently
+    """
+    If backend access control is enabled this function will ensure all datasets have their own databases,
+    access to which will be enforced by given permissions. Database name will be determined by dataset_id.
+
+    Note: This is only currently supported by the following databases:
+          Relational: SQLite, Postgres
+          Vector: LanceDB
+          Graph: KuzuDB
+
+    Args:
+        dataset: Cognee dataset name or id
+        user: User object
+
+    Returns:
+
+    """
+
+    if not os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
+        return
 
     # To ensure permissions are enforced properly all datasets will have their own databases
     dataset_database = await get_or_create_dataset_database(dataset, user)
