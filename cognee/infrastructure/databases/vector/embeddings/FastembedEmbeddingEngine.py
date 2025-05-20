@@ -44,7 +44,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 embeddings = self.embedding_model.embed(
                     text,
                     batch_size=len(text),
-                    parallel=0,
+                    parallel=None,
                 )
 
                 return list(embeddings)
