@@ -20,6 +20,7 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
+from cognee.modules.data.models import Dataset
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
@@ -111,14 +112,42 @@ async def permissions_search(
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
 ) -> list:
+    """
+    Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
+    Not to be used outside of active access control mode.
+    """
+
     query = await log_query(query_text, query_type.value, user.id)
 
-    # Find datasets user has read access for (if datasets are provided only return them if user has read access)
+    # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
     search_datasets = await get_specific_user_permission_datasets(user, "read", datasets)
 
     # TODO: If there are no datasets the user has access to do we raise an error? How do we handle informing him?
     if not search_datasets:
         pass
+
+    # Searches all provided datasets and handles setting up of appropriate database context based on permissions
+    search_results = await specific_search_by_context(
+        search_datasets, query_text, query_type, user, system_prompt_path, top_k
+    )
+
+    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
+
+    return search_results
+
+
+async def specific_search_by_context(
+    search_datasets: list[Dataset],
+    query_text: str,
+    query_type: SearchType,
+    user: User,
+    system_prompt_path: str,
+    top_k: int,
+):
+    """
+    Searches all provided datasets and handles setting up of appropriate database context based on permissions.
+    Not to be used outside of active access control mode.
+    """
 
     async def _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k):
         # Set database configuration in async context for each dataset user has access for
@@ -135,8 +164,4 @@ async def permissions_search(
             _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k)
         )
 
-    search_results = await asyncio.gather(*tasks)
-
-    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
-
-    return search_results
+    return await asyncio.gather(*tasks)
