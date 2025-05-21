@@ -128,14 +128,15 @@ async def permissions_search(
     if not search_datasets:
         pass
 
-    # Set context for database for each dataset user has access for
     async def _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k):
+        # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, user)
         search_results = await specific_search(
             query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
         )
-        return search_results
+        return {dataset.name: search_results}
 
+    # Search every dataset async based on query and appropriate database configuration
     tasks = []
     for dataset in search_datasets:
         tasks.append(
@@ -144,7 +145,6 @@ async def permissions_search(
 
     search_results = await asyncio.gather(*tasks)
 
-    # TODO: Aggregate search results from all databases and return top_k relevant results to user
     await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
 
-    return search_results[0]
+    return search_results
