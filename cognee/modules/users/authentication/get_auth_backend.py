@@ -37,7 +37,7 @@ class CustomJWTStrategy(JWTStrategy):
 
 @lru_cache
 def get_auth_backend():
-    bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
+    bearer_transport = BearerTransport(tokenUrl="api/v1/auth/login")
 
     def get_jwt_strategy() -> JWTStrategy[models.UP, models.ID]:
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
