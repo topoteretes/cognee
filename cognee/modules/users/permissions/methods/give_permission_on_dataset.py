@@ -1,11 +1,11 @@
 from sqlalchemy.future import select
 from cognee.infrastructure.databases.relational import get_relational_engine
-from ...models import User, ACL, Permission
+from ...models import Principal, ACL, Permission
 from uuid import UUID
 
 
 async def give_permission_on_dataset(
-    user: User,
+    principal: Principal,
     dataset_id: UUID,
     permission_name: str,
 ):
@@ -20,9 +20,20 @@ async def give_permission_on_dataset(
 
         if permission is None:
             permission = Permission(name=permission_name)
+            existing_acl = None
+        else:
+            # Check if the ACL entry already exists to avoid duplicates
+            existing_acl = await session.execute(
+                select(ACL).filter(
+                    ACL.principal_id == principal.id,
+                    ACL.dataset_id == dataset_id,
+                    ACL.permission_id == permission.id,
+                )
+            )
+            existing_acl = existing_acl.scalars().first()
 
-        acl = ACL(principal_id=user.id, dataset_id=dataset_id, permission=permission)
-
-        session.add(acl)
-
-        await session.commit()
+        # If no existing ACL entry is found, proceed to add a new one
+        if existing_acl is None:
+            acl = ACL(principal_id=principal.id, dataset_id=dataset_id, permission=permission)
+            session.add(acl)
+            await session.commit()

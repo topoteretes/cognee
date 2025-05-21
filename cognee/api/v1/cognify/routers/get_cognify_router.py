@@ -1,5 +1,4 @@
 from typing import List, Optional
-import asyncio
 from pydantic import BaseModel
 from fastapi import Depends
 from fastapi import APIRouter

@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.exceptions import (
     UserNotFoundError,
     RoleNotFoundError,
+    TenantNotFoundError,
 )
 from cognee.modules.users.models import (
     User,
@@ -20,7 +21,7 @@ from cognee.modules.users.models import (
 async def add_user_to_role(user_id: UUID, role_id: UUID):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        # TODO: Add check to verify role tenant and user tenant are the same before adding user to role
+        # TODO: Allow only tenant admin/owner to add users to roles
         user = (await session.execute(select(User).where(User.id == user_id))).scalars().first()
         role = (await session.execute(select(Role).where(Role.id == role_id))).scalars().first()
 
@@ -28,6 +29,10 @@ async def add_user_to_role(user_id: UUID, role_id: UUID):
             raise UserNotFoundError
         elif not role:
             raise RoleNotFoundError
+        elif user.tenant_id != role.tenant_id:
+            raise TenantNotFoundError(
+                message="User tenant does not match role tenant. User cannot be added to role."
+            )
 
         try:
             # Add association directly to the association table
