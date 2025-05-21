@@ -91,16 +91,11 @@ async def cognee_pipeline(
 
         datasets = dataset_instances
 
-    awaitables = []
-
     for dataset in datasets:
-        awaitables.append(
-            run_pipeline(
-                dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name
-            )
-        )
-
-    return await asyncio.gather(*awaitables)
+        async for run_info in run_pipeline(
+            dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name
+        ):
+            yield run_info
 
 
 async def run_pipeline(
@@ -161,12 +156,9 @@ async def run_pipeline(
             raise ValueError(f"Task {task} is not an instance of Task")
 
     pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name)
-    pipeline_run_status = None
 
-    async for run_status in pipeline_run:
-        pipeline_run_status = run_status
-
-    return pipeline_run_status
+    async for pipeline_run_info in pipeline_run:
+        yield pipeline_run_info
 
 
 def check_dataset_name(dataset_name: str) -> str:

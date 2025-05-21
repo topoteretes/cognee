@@ -14,6 +14,11 @@ async def add(
 ):
     tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user, node_set)]
 
-    await cognee_pipeline(
+    pipeline_run_info = None
+
+    async for run_info in cognee_pipeline(
         tasks=tasks, datasets=dataset_name, data=data, user=user, pipeline_name="add_pipeline"
-    )
+    ):
+        pipeline_run_info = run_info
+
+    return pipeline_run_info

@@ -61,4 +61,7 @@ class CorpusBuilderExecutor:
         await cognee.add(self.raw_corpus)
 
         tasks = await self.task_getter(chunk_size=chunk_size, chunker=chunker)
-        await cognee_pipeline(tasks=tasks)
+        pipeline_run = cognee_pipeline(tasks=tasks)
+
+        for run_info in pipeline_run:
+            print(run_info)
