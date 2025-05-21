@@ -64,7 +64,6 @@ def get_cognify_router() -> APIRouter:
                 await asyncio.sleep(2)
                 continue
 
-            print(pipeline_run_info)
             if not isinstance(pipeline_run_info, PipelineRunInfo):
                 continue
 
