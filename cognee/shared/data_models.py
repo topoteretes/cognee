@@ -350,11 +350,3 @@ class ChunkSummaries(BaseModel):
     """Relevant summary and chunk id"""
 
     summaries: List[ChunkSummary]
-
-
-class MonitoringTool(str, Enum):
-    """Monitoring tools"""
-
-    LANGFUSE = "langfuse"
-    LLMLITE = "llmlite"
-    LANGSMITH = "langsmith"

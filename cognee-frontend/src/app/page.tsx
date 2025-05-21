@@ -43,7 +43,7 @@ export default function Home() {
   const onDataAdd = useCallback((dataset: { id: string }, files: File[]) => {
     return addData(dataset, files)
       .then(() => {
-        showNotification("Data added successfully.", 5000);
+        showNotification("Data added successfully. Please run \"Cognify\" when ready.", 5000);
         openDatasetData(dataset);
       });
   }, [showNotification])
@@ -59,6 +59,14 @@ export default function Home() {
         showNotification(`Dataset "${dataset.name}" cognification failed. Please try again.`, 5000);
       });
   }, [showNotification]);
+
+  const onCognify = useCallback(() => {
+    const dataset = datasets.find((dataset) => dataset.id === selectedDataset);
+    return onDatasetCognify({
+      id: dataset!.id,
+      name: dataset!.name,
+    });
+  }, [datasets, onDatasetCognify, selectedDataset]);
 
   const {
     value: isSettingsModalOpen,
@@ -95,6 +103,7 @@ export default function Home() {
                 datasetId={selectedDataset}
                 onClose={closeDatasetData}
                 onDataAdd={onDataAdd}
+                onCognify={onCognify}
               />
             </div>
           )}

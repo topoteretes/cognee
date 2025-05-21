@@ -67,6 +67,18 @@ def create_graph_engine(
 
         return KuzuAdapter(db_path=graph_file_path)
 
+    elif graph_database_provider == "memgraph":
+        if not (graph_database_url and graph_database_username and graph_database_password):
+            raise EnvironmentError("Missing required Memgraph credentials.")
+
+        from .memgraph.memgraph_adapter import MemgraphAdapter
+
+        return MemgraphAdapter(
+            graph_database_url=graph_database_url,
+            graph_database_username=graph_database_username,
+            graph_database_password=graph_database_password,
+        )
+
     from .networkx.adapter import NetworkXAdapter
 
     graph_client = NetworkXAdapter(filename=graph_file_path)

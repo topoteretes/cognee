@@ -24,4 +24,4 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama
+      run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama -E dev
