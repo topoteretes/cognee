@@ -45,6 +45,8 @@ def run():
 # Streamlit Dashboard Application Logic
 # ----------------------------------------------------------------------------
 def main():
+    metrics_volume.reload()
+
     st.set_page_config(page_title="Metrics Dashboard", layout="wide")
     st.title("📊 Cognee Evaluations Dashboard")
 
