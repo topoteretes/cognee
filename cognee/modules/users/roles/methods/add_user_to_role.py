@@ -20,6 +20,7 @@ from cognee.modules.users.models import (
 async def add_user_to_role(user_id: UUID, role_id: UUID):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
+        # TODO: Add check to verify role tenant and user tenant are the same before adding user to role
         user = (await session.execute(select(User).where(User.id == user_id))).scalars().first()
         role = (await session.execute(select(Role).where(Role.id == role_id))).scalars().first()
 

@@ -114,16 +114,19 @@ async def permissions_search(
     query = await log_query(query_text, query_type.value, user.id)
 
     # Find all datasets user has read access for
-    # TODO: get_all_user_permission_datasets needs to be expanded to handle roles and tenants
     user_read_access_datasets = await get_all_user_permission_datasets(user, "read")
 
-    # if datasets are provided to search filter out non provided datasets
-    # TODO: Make sure dataset comparison is between objects of same type,
-    # user_read_access_datasets will be the Dataset objects and datasets will be strings
+    # if specific datasets are provided to search filter out non provided datasets
     if datasets:
-        search_datasets = [dataset for dataset in user_read_access_datasets if dataset in datasets]
+        search_datasets = [
+            dataset for dataset in user_read_access_datasets if dataset.name in datasets
+        ]
     else:
         search_datasets = user_read_access_datasets
+
+    # TODO: If there are no datasets the user has access to do we raise an error? How do we handle informing him?
+    if not search_datasets:
+        pass
 
     # Set context for database for each dataset user has access for
     async def _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k):

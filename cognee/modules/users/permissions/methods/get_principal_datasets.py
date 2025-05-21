@@ -1,4 +1,3 @@
-from cognee.shared.logging_utils import get_logger
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
@@ -7,8 +6,6 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ...models.Principal import Principal
 from cognee.modules.data.models.Dataset import Dataset
 from ...models.ACL import ACL
-
-logger = get_logger()
 
 
 async def get_principal_datasets(principal: Principal, permission_type: str) -> list[Dataset]:
