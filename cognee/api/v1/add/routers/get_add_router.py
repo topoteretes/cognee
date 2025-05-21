@@ -23,6 +23,7 @@ def get_add_router() -> APIRouter:
         url: str = Form(None),
         datasetId: Optional[UUID] = Form(default=None),
         datasetName: Optional[str] = Form(default=None),
+        nodeSets: Optional[List[str]] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -53,7 +54,8 @@ def get_add_router() -> APIRouter:
                     return await cognee_add(
                         text,
                         datasetName,
-                        user=user
+                        user=user,
+                        node_sets=nodeSets
                     )
                 except Exception as e:
                     logger.info(f"Could not decode file as text, falling back to binary. Error: {e}")
@@ -61,7 +63,8 @@ def get_add_router() -> APIRouter:
                     return await cognee_add(
                         file.file,
                         datasetName,
-                        user=user
+                        user=user,
+                        node_sets=nodeSets
                     )
             elif url:
                 logger.info(f"Received url={url} for datasetId={datasetId}")
@@ -74,6 +77,7 @@ def get_add_router() -> APIRouter:
                             "data://.data/",
                             f"{repo_name}",
                             user=user,
+                            node_sets=nodeSets
                         )
                     else:
                         response = requests.get(url)
@@ -85,7 +89,8 @@ def get_add_router() -> APIRouter:
                         return await cognee_add(
                             response.text,
                             datasetName,
-                            user=user
+                            user=user,
+                            node_sets=nodeSets
                         )
                 else:
                     logger.error(f"Invalid URL format: {url}")
