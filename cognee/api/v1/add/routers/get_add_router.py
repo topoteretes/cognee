@@ -55,7 +55,7 @@ def get_add_router() -> APIRouter:
                         text,
                         datasetName,
                         user=user,
-                        node_sets=nodeSets
+                        node_set=nodeSets
                     )
                 except Exception as e:
                     logger.info(f"Could not decode file as text, falling back to binary. Error: {e}")
@@ -64,7 +64,7 @@ def get_add_router() -> APIRouter:
                         file.file,
                         datasetName,
                         user=user,
-                        node_sets=nodeSets
+                        node_set=nodeSets
                     )
             elif url:
                 logger.info(f"Received url={url} for datasetId={datasetId}")
@@ -77,7 +77,7 @@ def get_add_router() -> APIRouter:
                             "data://.data/",
                             f"{repo_name}",
                             user=user,
-                            node_sets=nodeSets
+                            node_set=nodeSets
                         )
                     else:
                         response = requests.get(url)
@@ -90,7 +90,7 @@ def get_add_router() -> APIRouter:
                             response.text,
                             datasetName,
                             user=user,
-                            node_sets=nodeSets
+                            node_set=nodeSets
                         )
                 else:
                     logger.error(f"Invalid URL format: {url}")
