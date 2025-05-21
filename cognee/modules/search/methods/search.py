@@ -22,7 +22,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
-from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from ..operations import log_query, log_result
 
 
@@ -113,16 +113,8 @@ async def permissions_search(
 ) -> list:
     query = await log_query(query_text, query_type.value, user.id)
 
-    # Find all datasets user has read access for
-    user_read_access_datasets = await get_all_user_permission_datasets(user, "read")
-
-    # if specific datasets are provided to search filter out non provided datasets
-    if datasets:
-        search_datasets = [
-            dataset for dataset in user_read_access_datasets if dataset.name in datasets
-        ]
-    else:
-        search_datasets = user_read_access_datasets
+    # Find datasets user has read access for (if datasets are provided only return them if user has read access)
+    search_datasets = await get_specific_user_permission_datasets(user, "read", datasets)
 
     # TODO: If there are no datasets the user has access to do we raise an error? How do we handle informing him?
     if not search_datasets:
