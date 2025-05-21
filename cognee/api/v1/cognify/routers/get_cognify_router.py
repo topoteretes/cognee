@@ -49,7 +49,7 @@ def get_cognify_router() -> APIRouter:
 
         try:
             await get_authenticated_user(auth_message.get("Authorization"))
-        except Exception as error:
+        except Exception:
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
             return
 
