@@ -58,8 +58,8 @@ def get_delete_router() -> APIRouter:
                         )
                         results.append(result)
                 else:
-                    # Handle uploaded file
-                    result = await cognee_delete(file, dataset_name=dataset_name, mode=mode)
+                    # Handle uploaded file by accessing its file attribute
+                    result = await cognee_delete(file.file, dataset_name=dataset_name, mode=mode)
                     results.append(result)
 
             if len(results) == 1:
