@@ -1,0 +1,11 @@
+<QUESTION>
+`{{ query}}`
+</QUESTION>
+
+<ANSWER>
+`{{ answer }}`
+</ANSWER>
+
+<CONTEXT>
+`{{ context }}`
+</CONTEXT>

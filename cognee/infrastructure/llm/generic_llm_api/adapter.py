@@ -40,8 +40,7 @@ class GenericAPIAdapter(LLMInterface):
             messages=[
                 {
                     "role": "user",
-                    "content": f"""Use the given format to
-                extract information from the following input: {text_input}. """,
+                    "content": f"""{text_input}""",
                 },
                 {
                     "role": "system",
