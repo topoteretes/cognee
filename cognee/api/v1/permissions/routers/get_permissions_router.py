@@ -67,7 +67,9 @@ def get_permissions_router() -> APIRouter:
             user.id,
         )
 
-        return JSONResponse(status_code=200, content={"message": "Permission assigned to user"})
+        return JSONResponse(
+            status_code=200, content={"message": "Permission assigned to principal"}
+        )
 
     @permissions_router.post("/roles")
     async def create_role(role_name: str, user: User = Depends(get_authenticated_user)):
