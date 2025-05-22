@@ -16,7 +16,7 @@ environment = os.getenv("AWS_ENV", "dev")
 
 
 def fetch_secret(secret_name: str, region_name: str, env_file_path: str):
-    """Fetch the secret from AWS Secrets Manager and write it to the .env file."""
+    """Fetch the secret from AWS Secrets Manager and load it into environment variables (DO NOT write to disk)."""
     print("Initializing session")
     session = boto3.session.Session()
     print("Session initialized")
@@ -32,18 +32,25 @@ def fetch_secret(secret_name: str, region_name: str, env_file_path: str):
     if "SecretString" in response:
         secret = response["SecretString"]
     else:
-        secret = response["SecretBinary"]
+        print("Binary secrets are not supported and cannot be loaded as environment variables.")
+        return "Error: SecretBinary type is not supported."
 
-    with open(env_file_path, "w") as env_file:
-        env_file.write(secret)
-        print("Secrets are added to the .env file.")
+    # Parse each line as KEY=VALUE, set in os.environ
+    for line in secret.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ[key.strip()] = value.strip()
+    print("Secrets loaded into environment variables (not written to disk).")
 
-    if os.path.exists(env_file_path):
-        print(f"The .env file is located at: {env_file_path}")
-        load_dotenv()
-        print("The .env file is loaded.")
-    else:
-        print(f"The .env file was not found at: {env_file_path}.")
+    # Since we are not writing the file, omit writing and loading from file.
+    # Just confirm via env.
+    for k in os.environ:
+        if k in secret:
+            print(f"Set environment variable: {k}")
 
 
 ENV_FILE_PATH = os.path.abspath("../.env")
@@ -51,7 +58,7 @@ ENV_FILE_PATH = os.path.abspath("../.env")
 if os.path.exists(ENV_FILE_PATH):
     # Load default environment variables (.env)
     load_dotenv()
-    print("Environment variables are already loaded.")
+    print("Environment variables are already loaded from .env file.")
 else:
     fetch_secret(
         f"promethai-{environment}-backend-secretso-promethaijs-dotenv",
