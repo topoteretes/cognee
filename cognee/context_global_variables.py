@@ -1,4 +1,5 @@
 import os
+import pathlib
 from contextvars import ContextVar
 from typing import Union
 from uuid import UUID
@@ -39,16 +40,25 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     # To ensure permissions are enforced properly all datasets will have their own databases
     dataset_database = await get_or_create_dataset_database(dataset, user)
 
+    # TODO: Find better location for database files
+    cognee_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, f".cognee_system/databases/{user.id}")
+        ).resolve()
+    )
+
     # Set vector and graph database configuration based on dataset database information
     vector_config = {
-        "vector_db_url": dataset_database.vector_database_name,
+        "vector_db_url": os.path.join(cognee_directory_path, dataset_database.vector_database_name),
         "vector_db_key": "",
         "vector_db_provider": "lancedb",
     }
 
     graph_config = {
         "graph_database_provider": "kuzu",
-        "graph_file_path": dataset_database.graph_database_name,
+        "graph_file_path": os.path.join(
+            cognee_directory_path, dataset_database.graph_database_name
+        ),
     }
 
     # Use ContextVar to use these graph and vector configurations are used
