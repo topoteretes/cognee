@@ -7,12 +7,14 @@ import cognee
 from cognee.low_level import setup, DataPoint
 from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
 
 
 class TestGraphCompletionRetriever:
     @pytest.mark.asyncio
-    async def test_graph_completion_cot_context_simple(self):
+    async def test_graph_completion_extension_context_simple(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent, ".cognee_system/test_graph_context"
         )
@@ -45,7 +47,7 @@ class TestGraphCompletionRetriever:
 
         await add_data_points(entities)
 
-        retriever = GraphCompletionCotRetriever()
+        retriever = GraphCompletionContextExtensionRetriever()
 
         context = await retriever.get_context("Who works at Canva?")
 
@@ -60,7 +62,7 @@ class TestGraphCompletionRetriever:
         )
 
     @pytest.mark.asyncio
-    async def test_graph_completion_cot_context_complex(self):
+    async def test_graph_completion_extension_context_complex(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
         )
@@ -121,7 +123,7 @@ class TestGraphCompletionRetriever:
 
         await add_data_points(entities)
 
-        retriever = GraphCompletionCotRetriever(top_k=20)
+        retriever = GraphCompletionContextExtensionRetriever(top_k=20)
 
         context = await retriever.get_context("Who works at Figma?")
 
@@ -139,7 +141,7 @@ class TestGraphCompletionRetriever:
         )
 
     @pytest.mark.asyncio
-    async def test_get_graph_completion_cot_context_on_empty_graph(self):
+    async def test_get_graph_completion_extension_context_on_empty_graph(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
         )
@@ -152,7 +154,7 @@ class TestGraphCompletionRetriever:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
-        retriever = GraphCompletionCotRetriever()
+        retriever = GraphCompletionContextExtensionRetriever()
 
         with pytest.raises(DatabaseNotCreatedError):
             await retriever.get_context("Who works at Figma?")
