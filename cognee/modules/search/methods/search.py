@@ -23,8 +23,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
-from ..operations import log_query, log_result
-from ...retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.search.operations import log_query, log_result
 
 
 async def search(
