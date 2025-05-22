@@ -32,7 +32,7 @@ sleep 2
 if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee
+        exec python -m debugpy --wait-for-client --listen 127.0.0.1:5678 -m cognee
     else
         exec cognee
     fi
