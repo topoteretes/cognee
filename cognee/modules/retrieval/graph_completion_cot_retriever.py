@@ -35,7 +35,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         llm_client = get_llm_client()
         followup_question = ""
         triplets = []
-        answer: List[str] = [""]
+        answer = [""]
 
         for round_idx in range(max_iter + 1):
             if round_idx == 0:
