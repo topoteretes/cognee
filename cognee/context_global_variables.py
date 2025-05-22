@@ -4,7 +4,7 @@ from typing import Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
-from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_user
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
@@ -12,7 +12,7 @@ vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 
 
-async def set_database_global_context_variables(dataset: Union[str, UUID], user: User):
+async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
     access to which will be enforced by given permissions.
@@ -25,7 +25,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user:
 
     Args:
         dataset: Cognee dataset name or id
-        user: User object
+        user_id: UUID of user
 
     Returns:
 
@@ -33,6 +33,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user:
 
     if not os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
         return
+
+    user = await get_user(user_id)
 
     # To ensure permissions are enforced properly all datasets will have their own databases
     dataset_database = await get_or_create_dataset_database(dataset, user)
