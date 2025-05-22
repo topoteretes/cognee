@@ -25,7 +25,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     Args:
         dataset: Cognee dataset name or id
-        user_id: UUID of user
+        user_id: UUID of the owner of the dataset
 
     Returns:
 
