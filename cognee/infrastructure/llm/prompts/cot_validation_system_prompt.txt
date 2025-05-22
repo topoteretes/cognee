@@ -1,0 +1,2 @@
+You are a helpful agent who are allowed to use only the provided question answer and context.
+I want to you find reasoning what is missing from the context or why the answer is not answering the question or not correct strictly based on the context.

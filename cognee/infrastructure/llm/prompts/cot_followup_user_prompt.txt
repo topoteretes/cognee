@@ -1,0 +1,14 @@
+Based on the following, ask exactly one question that would directly resolve the gap identified in the validation reasoning and allow a valid answer.
+Think in a way that with the followup question you are exploring a knowledge graph which contains entities, entity types and document chunks
+
+<QUERY>
+`{{ query}}`
+</QUERY>
+
+<ANSWER>
+`{{ answer }}`
+</ANSWER>
+
+<REASONING>
+`{{ reasoning }}`
+</REASONING>
