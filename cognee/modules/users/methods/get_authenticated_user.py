@@ -17,8 +17,15 @@ async def get_authenticated_user(authorization: str = Header(...)) -> SimpleName
         if scheme.lower() != "bearer":
             raise HTTPException(status_code=401, detail="Invalid authentication scheme")
 
+        jwt_secret = os.getenv("FASTAPI_USERS_JWT_SECRET")
+        if not jwt_secret:
+            raise HTTPException(
+                status_code=500,
+                detail="JWT secret missing: FASTAPI_USERS_JWT_SECRET environment variable not set"
+            )
+
         payload = jwt.decode(
-            token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
+            token, jwt_secret, algorithms=["HS256"]
         )
 
         if payload["tenant_id"]:
