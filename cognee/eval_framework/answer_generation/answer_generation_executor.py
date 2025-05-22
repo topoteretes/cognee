@@ -1,5 +1,8 @@
 from typing import List, Dict, Any
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
@@ -12,6 +15,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 retriever_options: Dict[str, Any] = {
     "cognee_graph_completion": GraphCompletionRetriever,
     "cognee_graph_completion_cot": GraphCompletionCotRetriever,
+    "cognee_graph_completion_context_extension": GraphCompletionContextExtensionRetriever,
     "cognee_completion": CompletionRetriever,
     "graph_summary_completion": GraphSummaryCompletionRetriever,
 }
