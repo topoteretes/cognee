@@ -35,11 +35,11 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   <p align="center">
   🌐 Available Languages
   :
-  <a href="community/README.pt.md">🇵🇹 Português</a>
+  <a href="assets/community/README.pt.md">🇵🇹 Português</a>
   ·
-  <a href="community/README.zh.md">🇨🇳 [中文]</a>
+  <a href="assets/community/README.zh.md">🇨🇳 [中文]</a>
   ·
-  <a href="community/README.ru.md">🇷🇺 Русский</a>
+  <a href="assets/community/README.ru.md">🇷🇺 Русский</a>
   </p>
   
 
