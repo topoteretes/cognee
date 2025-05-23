@@ -7,12 +7,22 @@ from cognee.modules.users.models import User
 from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
 
 
-class LLMConfigOutputDTO(OutDTO, LLMConfig):
-    pass
+class LLMConfigOutputDTO(OutDTO):
+    provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"], Literal["gemini"]]
+    model: str
+    # api_key field intentionally omitted for security
 
 
-class VectorDBConfigOutputDTO(OutDTO, VectorDBConfig):
-    pass
+class VectorDBConfigOutputDTO(OutDTO):
+    provider: Union[
+        Literal["lancedb"],
+        Literal["chromadb"],
+        Literal["qdrant"],
+        Literal["weaviate"],
+        Literal["pgvector"],
+    ]
+    url: str
+    # api_key field intentionally omitted for security
 
 
 class SettingsDTO(OutDTO):
@@ -50,7 +60,25 @@ def get_settings_router() -> APIRouter:
     async def get_settings(user: User = Depends(get_authenticated_user)):
         from cognee.modules.settings import get_settings as get_cognee_settings
 
-        return get_cognee_settings()
+        settings = get_cognee_settings()
+
+        # Prepare response excluding sensitive api_key fields
+        llm = settings.llm
+        vector_db = settings.vector_db
+
+        llm_output = LLMConfigOutputDTO(
+            provider=llm.provider,
+            model=llm.model,
+        )
+        vector_db_output = VectorDBConfigOutputDTO(
+            provider=vector_db.provider,
+            url=vector_db.url,
+        )
+
+        return SettingsDTO(
+            llm=llm_output,
+            vector_db=vector_db_output,
+        )
 
     @router.post("/", response_model=None)
     async def save_settings(
