@@ -358,12 +358,31 @@ class MemgraphAdapter(GraphDBInterface):
 
             return [result["successor"] for result in results]
 
-    async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
         predecessors, successors = await asyncio.gather(
             self.get_predecessors(node_id), self.get_successors(node_id)
         )
 
         return predecessors + successors
+
+    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single node by ID."""
+        query = """
+        MATCH (node {id: $node_id})
+        RETURN node
+        """
+        results = await self.query(query, {"node_id": node_id})
+        return results[0]["node"] if results else None
+
+    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get multiple nodes by their IDs."""
+        query = """
+        UNWIND $node_ids AS id
+        MATCH (node {id: id})
+        RETURN node
+        """
+        results = await self.query(query, {"node_ids": node_ids})
+        return [result["node"] for result in results]
 
     async def get_connections(self, node_id: UUID) -> list:
         predecessors_query = """
