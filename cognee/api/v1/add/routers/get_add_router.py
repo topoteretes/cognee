@@ -17,7 +17,7 @@ logger = get_logger()
 def get_add_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("/", response_model=None)
+    @router.post("/", response_model=dict)
     async def add(
         data: List[UploadFile],
         datasetId: Optional[UUID] = Form(default=None),
@@ -56,7 +56,9 @@ def get_add_router() -> APIRouter:
 
                     return await cognee_add(file_data)
             else:
-                await cognee_add(data, datasetName, user=user)
+                add_run = await cognee_add(data, datasetName, user=user)
+
+                return add_run.model_dump()
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

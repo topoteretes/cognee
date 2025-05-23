@@ -11454,7 +11454,7 @@ description = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"chromadb\""
+markers = "extra == \"api\" or extra == \"chromadb\""
 files = [
     {file = "websockets-15.0.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d63efaa0cd96cf0c5fe4d581521d9fa87744540d4bc999ae6e08595a1014b45b"},
     {file = "websockets-15.0.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ac60e3b188ec7574cb761b08d50fcedf9d77f1530352db4eef1707fe9dee7205"},
@@ -11958,7 +11958,7 @@ cffi = ["cffi (>=1.11)"]
 
 [extras]
 anthropic = ["anthropic"]
-api = ["gunicorn", "uvicorn"]
+api = ["gunicorn", "uvicorn", "websockets"]
 chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 debug = ["debugpy"]
@@ -11988,4 +11988,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "15b319ff8dbe5bd88e41ead93f4e9140b2b7d86d57a707682dd3a308e78ef245"
+content-hash = "6cf211e4840a4c7b8eb86e186aa4355e74eb93ee527438c7dafc8a5df52e59bc"

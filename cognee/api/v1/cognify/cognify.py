@@ -1,13 +1,19 @@
 import asyncio
-from cognee.shared.logging_utils import get_logger
-from typing import Union, Optional
 from pydantic import BaseModel
+from typing import Union, Optional
 
-from cognee.infrastructure.llm import get_max_chunk_tokens
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.llm import get_max_chunk_tokens
+
+from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+from cognee.modules.users.models import User
+
 from cognee.tasks.documents import (
     check_permissions_on_documents,
     classify_documents,
@@ -16,8 +22,6 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.pipelines import cognee_pipeline
 
 logger = get_logger("cognify")
 
@@ -31,12 +35,49 @@ async def cognify(
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    run_in_background: bool = False,
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
-    return await cognee_pipeline(
+    if run_in_background:
+        return await run_cognify_as_background_process(tasks, user, datasets)
+    else:
+        return await run_cognify_blocking(tasks, user, datasets)
+
+
+async def run_cognify_blocking(tasks, user, datasets):
+    pipeline_run_info = None
+
+    async for run_info in cognee_pipeline(
         tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
+    ):
+        pipeline_run_info = run_info
+
+    return pipeline_run_info
+
+
+async def run_cognify_as_background_process(tasks, user, datasets):
+    pipeline_run = cognee_pipeline(
+        tasks=tasks, user=user, datasets=datasets, pipeline_name="cognify_pipeline"
     )
+
+    pipeline_run_started_info = await anext(pipeline_run)
+
+    async def handle_rest_of_the_run():
+        while True:
+            try:
+                pipeline_run_info = await anext(pipeline_run)
+
+                push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+
+                if isinstance(pipeline_run_info, PipelineRunCompleted):
+                    break
+            except StopAsyncIteration:
+                break
+
+    asyncio.create_task(handle_rest_of_the_run())
+
+    return pipeline_run_started_info
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
