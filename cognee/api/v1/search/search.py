@@ -1,4 +1,5 @@
 from typing import Union
+from uuid import UUID
 
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchType
@@ -10,13 +11,13 @@ async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
     user: User = None,
-    datasets: Union[list[str], str, None] = None,
+    dataset_ids: Union[list[UUID], UUID, None] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
 ) -> list:
     # We use lists from now on for datasets
-    if isinstance(datasets, str):
-        datasets = [datasets]
+    if isinstance(dataset_ids, UUID):
+        dataset_ids = [dataset_ids]
 
     if user is None:
         user = await get_default_user()
@@ -24,7 +25,7 @@ async def search(
     filtered_search_results = await search_function(
         query_text,
         query_type,
-        datasets,
+        dataset_ids,
         user,
         system_prompt_path=system_prompt_path,
         top_k=top_k,

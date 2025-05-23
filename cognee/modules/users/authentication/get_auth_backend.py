@@ -19,19 +19,8 @@ class CustomJWTStrategy(JWTStrategy):
         # JoinLoad tenant and role information to user object
         user = await get_user(user.id)
 
-        if user.tenant:
-            data = {
-                "user_id": str(user.id),
-                "tenant_id": str(user.tenant.id),
-                "roles": [role.name for role in user.roles],
-            }
-        else:
-            # The default tenant is None
-            data = {
-                "user_id": str(user.id),
-                "tenant_id": None,
-                "roles": [role.name for role in user.roles],
-            }
+        data = {"user_id": str(user.id)}
+
         return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
 

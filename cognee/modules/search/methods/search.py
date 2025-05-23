@@ -1,7 +1,8 @@
 import asyncio
 import os
 import json
-from typing import Callable, Optional
+from uuid import UUID
+from typing import Callable, Optional, Union
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import InvalidValueError
@@ -30,37 +31,41 @@ from ..operations import log_query, log_result
 async def search(
     query_text: str,
     query_type: SearchType,
-    datasets: list[str],
+    dataset_ids: Union[list[UUID], None],
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
 ):
+    """
+
+    Args:
+        query_text:
+        query_type:
+        datasets:
+        user:
+        system_prompt_path:
+        top_k:
+
+    Returns:
+
+    Notes:
+        Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
+    """
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
         return await permissions_search(
-            query_text, query_type, user, datasets, system_prompt_path, top_k
+            query_text, query_type, user, dataset_ids, system_prompt_path, top_k
         )
 
     query = await log_query(query_text, query_type.value, user.id)
 
-    own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(
         query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
     )
 
-    filtered_search_results = []
+    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
 
-    # TODO: Is document_id ever not None? Should we remove document handling from here if it's not?
-    for search_result in search_results:
-        document_id = search_result["document_id"] if "document_id" in search_result else None
-        document_id = parse_id(document_id)
-
-        if document_id is None or document_id in own_document_ids:
-            filtered_search_results.append(search_result)
-
-    await log_result(query.id, json.dumps(filtered_search_results, cls=JSONEncoder), user.id)
-
-    return filtered_search_results
+    return search_results
 
 
 async def specific_search(
@@ -108,7 +113,7 @@ async def permissions_search(
     query_text: str,
     query_type: SearchType,
     user: User = None,
-    datasets: Optional[list[str]] = None,
+    dataset_ids: Optional[list[UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
 ) -> list:
@@ -120,11 +125,7 @@ async def permissions_search(
     query = await log_query(query_text, query_type.value, user.id)
 
     # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
-    search_datasets = await get_specific_user_permission_datasets(user, "read", datasets)
-
-    # TODO: If there are no datasets the user has access to do we raise an error? How do we handle informing him?
-    if not search_datasets:
-        pass
+    search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await specific_search_by_context(

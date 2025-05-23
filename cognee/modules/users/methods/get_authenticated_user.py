@@ -32,11 +32,7 @@ async def get_authenticated_user(
             token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
         )
 
-        auth_data = SimpleNamespace(
-            id=UUID(payload["user_id"]),
-            tenant_id=UUID(payload["tenant_id"]) if payload.get("tenant_id") else None,
-            roles=payload["roles"],
-        )
+        auth_data = SimpleNamespace(id=UUID(payload["user_id"]))
         return auth_data
 
     except jwt.ExpiredSignatureError:
