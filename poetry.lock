@@ -4462,7 +4462,7 @@ description = "Highly scalable, extremely fast, easy-to-use embeddable graph dat
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"kuzu\""
+markers = "extra == \"api\" or extra == \"kuzu\""
 files = [
     {file = "kuzu-0.9.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ec9f216d67c092ea52086c99cf4b1deabe0f8daaf47c80cf1892b3b41c57d58a"},
     {file = "kuzu-0.9.0-cp310-cp310-macosx_11_0_x86_64.whl", hash = "sha256:bda6d845bf1c7da204ffa7730573118f2d43fe6b14b1a5d0d2845ec3d3481362"},
@@ -11958,7 +11958,7 @@ cffi = ["cffi (>=1.11)"]
 
 [extras]
 anthropic = ["anthropic"]
-api = ["gunicorn", "uvicorn"]
+api = ["gunicorn", "kuzu", "uvicorn"]
 chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 debug = ["debugpy"]
@@ -11988,4 +11988,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "7a2b3d1aabca5f1994c435a162f7ab44b3528cd7b9ec366809d9c014adf7e335"
+content-hash = "b120d1a362e9495ca2f6c7e448ba7fa122644763c16dee0ee5c8dcbab6dc3c42"

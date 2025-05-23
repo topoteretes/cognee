@@ -6,7 +6,6 @@ from typing import Callable, Optional, Union
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
@@ -26,7 +25,6 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
-from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.modules.search.operations import log_query, log_result
