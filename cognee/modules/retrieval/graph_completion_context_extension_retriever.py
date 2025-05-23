@@ -1,4 +1,4 @@
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Type
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -14,11 +14,15 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         top_k: Optional[int] = 5,
+        node_type: Optional[Type] = None,
+        node_name: Optional[List[str]] = None,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         )
 
     async def get_completion(

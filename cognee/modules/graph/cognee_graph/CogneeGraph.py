@@ -1,5 +1,5 @@
 from cognee.shared.logging_utils import get_logger
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional, Type
 
 from cognee.exceptions import InvalidValueError
 from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
@@ -61,10 +61,12 @@ class CogneeGraph(CogneeAbstractGraph):
         node_dimension=1,
         edge_dimension=1,
         memory_fragment_filter=[],
+        node_type: Optional[Type] = None,
+        node_name: Optional[List[str]] = None,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidValueError(message="Dimensions must be positive integers")
-
+        # :TODO: NODESET IMPLEMENTATION CONTINUE HERE
         try:
             if len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await adapter.get_graph_data()
