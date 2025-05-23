@@ -80,11 +80,7 @@ class DataPoint(BaseModel):
         """Serialize the instance to pickle-compatible bytes."""
         return pickle.dumps(self.dict())
 
-    @classmethod
-    def from_pickle(self, pickled_data: bytes):
-        """Deserialize the instance from pickled bytes."""
-        data = pickle.loads(pickled_data)
-        return self(**data)
+    # The unsafe from_pickle method is removed due to security concerns (CWE-502).
 
     def to_dict(self, **kwargs) -> Dict[str, Any]:
         """Serialize model to a dictionary."""
