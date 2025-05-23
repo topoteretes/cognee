@@ -37,3 +37,17 @@ class EntityAlreadyExistsError(CogneeApiError):
         status_code=status.HTTP_409_CONFLICT,
     ):
         super().__init__(message, name, status_code)
+
+
+class NodesetFilterNotSupportedError(CogneeApiError):
+    """Nodeset filter is not supported by the current database"""
+
+    def __init__(
+        self,
+        message: str = "The nodeset filter is not supported in the current graph database.",
+        name: str = "NodeSetFilterNotSupportedError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    ):
+        self.message = message
+        self.name = name
+        self.status_code = status_code

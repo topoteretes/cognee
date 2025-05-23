@@ -1,11 +1,12 @@
 """Adapter for Kuzu graph database."""
 
+from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 from cognee.shared.logging_utils import get_logger
 import json
 import os
 import shutil
 import asyncio
-from typing import Dict, Any, List, Union, Optional, Tuple
+from typing import Dict, Any, List, Union, Optional, Tuple, Type
 from datetime import datetime, timezone
 from uuid import UUID
 from contextlib import asynccontextmanager
@@ -727,6 +728,12 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to get graph data: {e}")
             raise
+
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """Get nodeset subgraph"""
+        raise NodesetFilterNotSupportedError
 
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
