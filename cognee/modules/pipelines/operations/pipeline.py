@@ -14,12 +14,17 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
+from cognee.context_global_variables import set_database_global_context_variables
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
 )
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
+)
+from cognee.context_global_variables import (
+    graph_db_config as context_graph_db_config,
+    vector_db_config as context_vector_db_config,
 )
 
 logger = get_logger("cognee.pipeline")
@@ -33,7 +38,16 @@ async def cognee_pipeline(
     datasets: Union[str, list[str]] = None,
     user: User = None,
     pipeline_name: str = "custom_pipeline",
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
 ):
+    # Note: These context variables allow different value assignment for databases in Cognee
+    #       per async task, thread, process and etc.
+    if vector_db_config:
+        context_vector_db_config.set(vector_db_config)
+    if graph_db_config:
+        context_graph_db_config.set(graph_db_config)
+
     # Create tables for databases
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
@@ -96,7 +110,12 @@ async def cognee_pipeline(
     for dataset in datasets:
         awaitables.append(
             run_pipeline(
-                dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name
+                dataset=dataset,
+                user=user,
+                tasks=tasks,
+                data=data,
+                pipeline_name=pipeline_name,
+                context={"dataset": dataset},
             )
         )
 
@@ -109,8 +128,12 @@ async def run_pipeline(
     tasks: list[Task],
     data=None,
     pipeline_name: str = "custom_pipeline",
+    context: dict = None,
 ):
     check_dataset_name(dataset.name)
+
+    # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
+    await set_database_global_context_variables(dataset.name, user.id)
 
     # Ugly hack, but no easier way to do this.
     if pipeline_name == "add_pipeline":
@@ -160,7 +183,7 @@ async def run_pipeline(
         if not isinstance(task, Task):
             raise ValueError(f"Task {task} is not an instance of Task")
 
-    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name)
+    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
     pipeline_run_status = None
 
     async for run_status in pipeline_run:

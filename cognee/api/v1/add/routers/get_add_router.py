@@ -1,4 +1,5 @@
 from uuid import UUID
+
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
@@ -10,6 +11,8 @@ import requests
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+
+from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger()
 
