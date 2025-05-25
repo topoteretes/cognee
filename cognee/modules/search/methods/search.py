@@ -11,6 +11,10 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
@@ -19,7 +23,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_document_ids_for_user
 from cognee.shared.utils import send_telemetry
-from ..operations import log_query, log_result
+from cognee.modules.search.operations import log_query, log_result
 
 
 async def search(
@@ -67,6 +71,14 @@ async def specific_search(
             top_k=top_k,
         ).get_completion,
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
+        ).get_completion,
+        SearchType.GRAPH_COMPLETION_COT: GraphCompletionCotRetriever(
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
+        ).get_completion,
+        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: GraphCompletionContextExtensionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
         ).get_completion,
