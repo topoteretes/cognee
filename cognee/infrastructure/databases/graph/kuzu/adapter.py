@@ -731,9 +731,62 @@ class KuzuAdapter(GraphDBInterface):
 
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
-    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
-        """Get nodeset subgraph"""
-        raise NodesetFilterNotSupportedError
+    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        label = node_type.__name__
+        primary_query = """
+            UNWIND $names AS wantedName
+            MATCH (n:Node)
+            WHERE n.type = $label AND n.name = wantedName
+            RETURN DISTINCT n.id
+        """
+        primary_rows = await self.query(primary_query, {"names": node_name, "label": label})
+        primary_ids = [row[0] for row in primary_rows]
+        if not primary_ids:
+            return [], []
+
+        neighbor_query = """
+            MATCH (n:Node)-[:EDGE]-(nbr:Node)
+            WHERE n.id IN $ids
+            RETURN DISTINCT nbr.id
+        """
+        nbr_rows = await self.query(neighbor_query, {"ids": primary_ids})
+        neighbor_ids = [row[0] for row in nbr_rows]
+
+        all_ids = list({*primary_ids, *neighbor_ids})
+
+        nodes_query = """
+            MATCH (n:Node)
+            WHERE n.id IN $ids
+            RETURN n.id, n.name, n.type, n.properties
+        """
+        node_rows = await self.query(nodes_query, {"ids": all_ids})
+        nodes: List[Tuple[str, dict]] = []
+        for node_id, name, typ, props in node_rows:
+            data = {"id": node_id, "name": name, "type": typ}
+            if props:
+                try:
+                    data.update(json.loads(props))
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse JSON props for node {node_id}")
+            nodes.append((node_id, data))
+
+        edges_query = """
+            MATCH (a:Node)-[r:EDGE]-(b:Node)
+            WHERE a.id IN $ids AND b.id IN $ids
+            RETURN a.id, b.id, r.relationship_name, r.properties
+        """
+        edge_rows = await self.query(edges_query, {"ids": all_ids})
+        edges: List[Tuple[str, str, str, dict]] = []
+        for from_id, to_id, rel_type, props in edge_rows:
+            data = {}
+            if props:
+                try:
+                    data = json.loads(props)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse JSON props for edge {from_id}->{to_id}")
+            edges.append((from_id, to_id, rel_type, data))
+
+        return nodes, edges
 
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
