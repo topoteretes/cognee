@@ -2,7 +2,7 @@ import inspect
 from functools import wraps
 from abc import abstractmethod, ABC
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Protocol, Optional, Dict, Any, List, Type, Tuple
 from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -189,3 +189,6 @@ class GraphDBInterface(ABC):
     ) -> List[Tuple[NodeData, Dict[str, Any], NodeData]]:
         """Get all nodes connected to a given node with their relationships."""
         raise NotImplementedError
+
+    async def get_nodeset_subgraph(self, node_type, node_name):
+        pass

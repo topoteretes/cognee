@@ -1,5 +1,5 @@
 import json
-from typing import Callable
+from typing import Callable, Optional, Type, List
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine.utils import parse_id
@@ -33,12 +33,20 @@ async def search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ):
     query = await log_query(query_text, query_type.value, user.id)
 
     own_document_ids = await get_document_ids_for_user(user.id, datasets)
     search_results = await specific_search(
-        query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
+        query_type,
+        query_text,
+        user,
+        system_prompt_path=system_prompt_path,
+        top_k=top_k,
+        node_type=node_type,
+        node_name=node_name,
     )
 
     filtered_search_results = []
@@ -61,6 +69,8 @@ async def specific_search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: List[Optional[str]] = None,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
@@ -73,6 +83,8 @@ async def specific_search(
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_COT: GraphCompletionCotRetriever(
             system_prompt_path=system_prompt_path,

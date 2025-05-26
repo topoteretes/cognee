@@ -1,0 +1,153 @@
+soft_skills_assessment_applicant1_task:
+  description: >
+    Search cognee for comments authored by '{applicant_1}'.
+    Use the "search_from_cognee" tool to collect information.
+    Evaluate their communication clarity, community engagement, and kindness.
+    Ask multiple questions if needed to uncover diverse interactions.
+    Return a complete and reasoned assessment of their soft skills.
+
+    --- Example Output ---
+        Input:
+          applicant_1: Sarah Jennings
+
+        Output:
+          - Name: Sarah Jennings
+          - communication_clarity: 0.92
+          - community_engagement: 0.88
+          - kindness: 0.95
+          - reasoning: >
+              Sarah consistently communicates with clarity and structure. In several threads, her responses broke down complex issues into actionable steps,
+              showing strong explanatory skills. She uses inclusive language like “let’s”, “we should”, and frequently thanks others for their input,
+              which indicates a high degree of kindness. Sarah also initiates or joins collaborative threads, offering feedback or connecting people with
+              relevant documentation. Her tone is encouraging and non-defensive, even when correcting misunderstandings. These patterns were observed across
+              over 8 threads involving different team members over a 3-week span.
+
+  expected_output: >
+    - Name: {applicant_1}
+    - communication_clarity (0–1)
+    - community_engagement (0–1)
+    - kindness (0–1)
+    - reasoning: (string)
+  agent: soft_skills_expert_agent
+
+soft_skills_assessment_applicant2_task:
+  description: >
+    Search cognee for comments authored by '{applicant_2}'.
+    Use the "search_from_cognee" tool to collect information.
+    Evaluate their communication clarity, community engagement, and kindness.
+    Ask multiple questions if needed to uncover diverse interactions.
+    Return a complete and reasoned assessment of their soft skills.
+
+    --- Example Output ---
+        Input:
+          applicant_1: Sarah Jennings
+
+        Output:
+          - Name: Sarah Jennings
+          - communication_clarity: 0.92
+          - community_engagement: 0.88
+          - kindness: 0.95
+          - reasoning: >
+              Sarah consistently communicates with clarity and structure. In several threads, her responses broke down complex issues into actionable steps,
+              showing strong explanatory skills. She uses inclusive language like “let’s”, “we should”, and frequently thanks others for their input,
+              which indicates a high degree of kindness. Sarah also initiates or joins collaborative threads, offering feedback or connecting people with
+              relevant documentation. Her tone is encouraging and non-defensive, even when correcting misunderstandings. These patterns were observed across
+              over 8 threads involving different team members over a 3-week span.
+
+  expected_output: >
+    - Name: {applicant_2}
+    - communication_clarity (0–1)
+    - community_engagement (0–1)
+    - kindness (0–1)
+    - reasoning: (string)
+  agent: soft_skills_expert_agent
+
+technical_assessment_applicant1_task:
+  description: >
+    Analyze the repository metadata and commit history associated with '{applicant_1}'.
+    Use the "search_from_cognee" tool to collect information.
+    Score their code_diversity, depth_of_contribution, and commit_quality.
+    Base your assessment strictly on technical input—ignore soft skills.
+
+    --- Example Output ---
+        Input:
+          applicant_1: Daniel Murphy
+
+        Output:
+          - Name: Daniel Murphy
+          - code_diversity: 0.87
+          - depth_of_contribution: 0.91
+          - commit_quality: 0.83
+          - reasoning: >
+              Daniel contributed to multiple areas of the codebase including frontend UI components, backend API endpoints, test coverage,
+              and CI/CD configuration. His commit history spans over 6 weeks with consistent activity and includes thoughtful messages
+              (e.g., “refactor auth flow to support multi-tenant login” or “add unit tests for pricing logic edge cases”).
+              His pull requests often include both implementation and tests, showing technical completeness.
+              Several commits show iterative problem-solving and cleanup after peer feedback, indicating thoughtful collaboration
+              and improvement over time.
+  expected_output: >
+    - Name: {applicant_1}
+    - code_diversity (0–1)
+    - depth_of_contribution (0–1)
+    - commit_quality (0–1)
+    - reasoning: (string)
+  agent: technical_expert_agent
+
+technical_assessment_applicant2_task:
+  description: >
+    Analyze the repository metadata and commit history associated with '{applicant_2}'.
+    Use the "search_from_cognee" tool to collect information.
+    Score their code_diversity, depth_of_contribution, and commit_quality.
+    Base your assessment strictly on technical input—ignore soft skills.
+
+    --- Example Output ---
+        Input:
+          applicant_1: Daniel Murphy
+
+        Output:
+          - Name: Daniel Murphy
+          - code_diversity: 0.87
+          - depth_of_contribution: 0.91
+          - commit_quality: 0.83
+          - reasoning: >
+              Daniel contributed to multiple areas of the codebase including frontend UI components, backend API endpoints, test coverage,
+              and CI/CD configuration. His commit history spans over 6 weeks with consistent activity and includes thoughtful messages
+              (e.g., “refactor auth flow to support multi-tenant login” or “add unit tests for pricing logic edge cases”).
+              His pull requests often include both implementation and tests, showing technical completeness.
+              Several commits show iterative problem-solving and cleanup after peer feedback, indicating thoughtful collaboration
+              and improvement over time.
+
+  expected_output: >
+    - Name: {applicant_2}
+    - code_diversity (0–1)
+    - depth_of_contribution (0–1)
+    - commit_quality (0–1)
+    - reasoning: (string)
+  agent: technical_expert_agent
+
+hiring_decision_task:
+  description: >
+    Review the technical and soft skill assessment task outputs for candidates: -{applicant_1} and -{applicant_2},
+    then decide HIRE or NO_HIRE for each candidate with a detailed reasoning.
+    The people to evaluate are:
+      -{applicant_1}
+      -{applicant_2}
+    We have to hire one of them.
+
+    Prepare the final output for the ingest_hiring_decision_task.
+
+
+  expected_output: >
+    A string strictly containing the following for each person:
+      - Person
+      - decision: "HIRE" or "NO_HIRE",
+      - reasoning: (string)
+  agent: decision_maker_agent
+
+ingest_hiring_decision_task:
+  description: >
+    Take the final hiring decision from the hiring_decision_task report and ingest it into Cognee using the "ingest_report_to_cognee" tool.
+    Do not re-evaluate—just save the result using the tool you have.
+  expected_output: >
+    - confirmation: string message confirming successful ingestion into Cognee
+  agent: decision_maker_agent

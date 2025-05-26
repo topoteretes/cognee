@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Type, List
 from collections import Counter
 import string
 
@@ -8,6 +8,9 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class GraphCompletionRetriever(BaseRetriever):
@@ -18,11 +21,15 @@ class GraphCompletionRetriever(BaseRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         top_k: Optional[int] = 5,
+        node_type: Optional[Type] = None,
+        node_name: List[Optional[str]] = None,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 5
+        self.node_type = node_type
+        self.node_name = node_name
 
     def _get_nodes(self, retrieved_edges: list) -> dict:
         """Creates a dictionary of nodes with their names and content."""
@@ -68,7 +75,11 @@ class GraphCompletionRetriever(BaseRetriever):
                             vector_index_collections.append(f"{subclass.__name__}_{field_name}")
 
         found_triplets = await brute_force_triplet_search(
-            query, top_k=self.top_k, collections=vector_index_collections or None
+            query,
+            top_k=self.top_k,
+            collections=vector_index_collections or None,
+            node_type=self.node_type,
+            node_name=self.node_name,
         )
 
         return found_triplets
@@ -78,6 +89,7 @@ class GraphCompletionRetriever(BaseRetriever):
         triplets = await self.get_triplets(query)
 
         if len(triplets) == 0:
+            logger.warning("Empty context was provided to the completion")
             return ""
 
         return await self.resolve_edges_to_text(triplets)

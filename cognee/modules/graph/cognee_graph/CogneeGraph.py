@@ -1,5 +1,5 @@
 from cognee.shared.logging_utils import get_logger
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional, Type
 
 from cognee.exceptions import InvalidValueError
 from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
@@ -61,22 +61,27 @@ class CogneeGraph(CogneeAbstractGraph):
         node_dimension=1,
         edge_dimension=1,
         memory_fragment_filter=[],
+        node_type: Optional[Type] = None,
+        node_name: List[Optional[str]] = None,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidValueError(message="Dimensions must be positive integers")
 
         try:
-            if len(memory_fragment_filter) == 0:
+            if node_type is not None and node_name is not None:
+                nodes_data, edges_data = await adapter.get_nodeset_subgraph(
+                    node_type=node_type, node_name=node_name
+                )
+            elif len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await adapter.get_graph_data()
             else:
                 nodes_data, edges_data = await adapter.get_filtered_graph_data(
                     attribute_filters=memory_fragment_filter
                 )
 
-            if not nodes_data:
-                raise EntityNotFoundError(message="No node data retrieved from the database.")
-            if not edges_data:
-                raise EntityNotFoundError(message="No edge data retrieved from the database.")
+            if not nodes_data or not edges_data:
+                logger.warning("Empty projected graph.")
+                return None
 
             for node_id, properties in nodes_data:
                 node_attributes = {key: properties.get(key) for key in node_properties_to_project}
