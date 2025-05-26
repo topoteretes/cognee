@@ -517,7 +517,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return (nodes, edges)
 
-    async def get_subgraph(
+    async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         label = node_type.__name__

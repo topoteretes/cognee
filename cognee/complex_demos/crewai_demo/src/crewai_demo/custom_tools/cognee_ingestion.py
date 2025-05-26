@@ -8,7 +8,7 @@ import asyncio
 class CogneeIngestionInput(BaseModel):
     text: str = Field(
         "",
-        description="The text of the reportThe format you should follow is {'text': 'your report'}",
+        description="The text of the report The format you should follow is {'text': 'your report'}",
     )
 
 

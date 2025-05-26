@@ -69,7 +69,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         try:
             if node_type is not None and node_name is not None:
-                nodes_data, edges_data = await adapter.get_subgraph(
+                nodes_data, edges_data = await adapter.get_nodeset_subgraph(
                     node_type=node_type, node_name=node_name
                 )
             elif len(memory_fragment_filter) == 0:

@@ -189,3 +189,6 @@ class GraphDBInterface(ABC):
     ) -> List[Tuple[NodeData, Dict[str, Any], NodeData]]:
         """Get all nodes connected to a given node with their relationships."""
         raise NotImplementedError
+
+    async def get_nodeset_subgraph(self, node_type, node_name):
+        pass
