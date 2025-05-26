@@ -12,8 +12,6 @@ import requests
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 
-from cognee.context_global_variables import set_database_global_context_variables
-
 logger = get_logger()
 
 
@@ -23,8 +21,8 @@ def get_add_router() -> APIRouter:
     @router.post("/", response_model=None)
     async def add(
         data: List[UploadFile],
+        datasetName: str,
         datasetId: Optional[UUID] = Form(default=None),
-        datasetName: Optional[str] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):
         """This endpoint is responsible for adding data to the graph."""
@@ -33,10 +31,11 @@ def get_add_router() -> APIRouter:
         if not datasetId and not datasetName:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
-        if datasetId and not datasetName:
+        if datasetId and datasetName:
             dataset = await get_dataset(user_id=user.id, dataset_id=datasetId)
             try:
-                datasetName = dataset.name
+                # Test accessing id value to see if dataset object exists
+                dataset_id = dataset.id  # noqa: F841
             except IndexError:
                 raise ValueError("No dataset found with the provided datasetName.")
 
@@ -59,7 +58,7 @@ def get_add_router() -> APIRouter:
 
                     return await cognee_add(file_data)
             else:
-                await cognee_add(data, datasetName, user=user)
+                await cognee_add(data, dataset_name=datasetName, user=user, dataset_id=datasetId)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

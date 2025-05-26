@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.pipelines import Task
@@ -13,12 +14,16 @@ async def add(
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
+    dataset_id: UUID = None,
 ):
-    tasks = [Task(resolve_data_directories), Task(ingest_data, dataset_name, user, node_set)]
+    tasks = [
+        Task(resolve_data_directories),
+        Task(ingest_data, dataset_name, user, node_set, dataset_id),
+    ]
 
     await cognee_pipeline(
         tasks=tasks,
-        datasets=dataset_name,
+        datasets=dataset_id if dataset_id else dataset_name,
         data=data,
         user=user,
         pipeline_name="add_pipeline",

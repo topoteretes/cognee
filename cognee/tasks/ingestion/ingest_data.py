@@ -2,6 +2,7 @@ import dlt
 import s3fs
 import json
 import inspect
+from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -10,7 +11,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_dataset
-from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from .get_dlt_destination import get_dlt_destination
 from .save_data_item_to_storage import save_data_item_to_storage
 
@@ -19,7 +20,11 @@ from cognee.api.v1.add.config import get_s3_config
 
 
 async def ingest_data(
-    data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None
+    data: Any,
+    dataset_name: str,
+    user: User,
+    dataset_id: UUID = None,
+    node_set: Optional[List[str]] = None,
 ):
     destination = get_dlt_destination()
 
@@ -74,7 +79,11 @@ async def ingest_data(
                 }
 
     async def store_data_to_dataset(
-        data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None
+        data: Any,
+        dataset_name: str,
+        user: User,
+        node_set: Optional[List[str]] = None,
+        dataset_id: UUID = None,
     ):
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -105,7 +114,14 @@ async def ingest_data(
                 db_engine = get_relational_engine()
 
                 async with db_engine.get_async_session() as session:
-                    dataset = await create_dataset(dataset_name, user, session)
+                    if dataset_id:
+                        # Retrieve existing dataset
+                        dataset = await get_specific_user_permission_datasets(
+                            user.id, "write", [dataset_id]
+                        )
+                    else:
+                        # Create new one
+                        dataset = await create_dataset(dataset_name, user, session)
 
                     # Check to see if data should be updated
                     data_point = (
@@ -154,16 +170,15 @@ async def ingest_data(
 
                     await session.commit()
 
-        dataset_id = await get_unique_dataset_id(dataset_name=dataset_name, user=user)
-        await give_permission_on_dataset(user, dataset_id, "read")
-        await give_permission_on_dataset(user, dataset_id, "write")
-        await give_permission_on_dataset(user, dataset_id, "share")
+        await give_permission_on_dataset(user, dataset.id, "read")
+        await give_permission_on_dataset(user, dataset.id, "write")
+        await give_permission_on_dataset(user, dataset.id, "share")
 
         return file_paths
 
     db_engine = get_relational_engine()
 
-    file_paths = await store_data_to_dataset(data, dataset_name, user, node_set)
+    file_paths = await store_data_to_dataset(data, dataset_name, user, node_set, dataset_id)
 
     # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
     # can't be used inside the pipeline

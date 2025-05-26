@@ -1,8 +1,10 @@
 import asyncio
 from typing import Union
-from uuid import NAMESPACE_OID, uuid5
+from uuid import NAMESPACE_OID, uuid5, UUID
 
+from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
@@ -35,7 +37,7 @@ update_status_lock = asyncio.Lock()
 async def cognee_pipeline(
     tasks: list[Task],
     data=None,
-    datasets: Union[str, list[str]] = None,
+    datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     pipeline_name: str = "custom_pipeline",
     vector_db_config: dict = None,
@@ -72,8 +74,21 @@ async def cognee_pipeline(
     if isinstance(datasets, str):
         datasets = [datasets]
 
-    # If no datasets are provided, work with all existing datasets.
-    existing_datasets = await get_datasets(user.id)
+    # Convert list of dataset names to dataset UUID
+    # TODO: ADD FUNCTION CAN"T WORK LIKE THIS JESUS
+    if all(isinstance(dataset, str) for dataset in datasets):
+        # Get all user owned dataset objects
+        user_datasets = await get_datasets(user.id)
+        # Filter out non name mentioned datasets
+        dataset_ids = [dataset.id for dataset in user_datasets if dataset in datasets]
+    # Return list of dataset UUIDs
+    elif all(isinstance(dataset, UUID) for dataset in datasets):
+        dataset_ids = datasets
+    else:
+        raise InvalidValueError(f"Provided datasets value is not supported: f{datasets}")
+
+    # If no datasets are provided, work with all existing datasets user has permission for.
+    existing_datasets = await get_specific_user_permission_datasets(user.id, "write", dataset_ids)
 
     if not datasets:
         # Get datasets from database if none sent.
