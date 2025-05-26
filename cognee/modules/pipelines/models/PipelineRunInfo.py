@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 
 class PipelineRunInfo(BaseModel):
+    status: str
     pipeline_run_id: UUID
     payload: Optional[Any] = None
 

@@ -1,6 +1,6 @@
 import { fetch } from '@/utils';
 
-export default function cognifyDataset(dataset: { id?: string, name?: string }) {
+export default function cognifyDataset(dataset: { id?: string, name?: string }, onUpdate = (data: []) => {}) {
   return fetch('/v1/cognify', {
     method: 'POST',
     headers: {
@@ -24,7 +24,7 @@ export default function cognifyDataset(dataset: { id?: string, name?: string }) 
       
       websocket.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        console.log(data);
+        onUpdate(data);
 
         if (data.status === "PipelineRunCompleted") {
           isCognifyDone = true;

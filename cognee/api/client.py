@@ -2,11 +2,17 @@
 
 import os
 import uvicorn
-from cognee.shared.logging_utils import get_logger
 import sentry_sdk
+from traceback import format_exc
+from contextlib import asynccontextmanager
+from fastapi import Request
 from fastapi import FastAPI, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+
+from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -15,11 +21,8 @@ from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
-from fastapi import Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
+from cognee.api.v1.crewai.routers import get_crewai_router
 from cognee.exceptions import CogneeApiError
-from traceback import format_exc
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -28,7 +31,6 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
 )
-from contextlib import asynccontextmanager
 
 logger = get_logger()
 
@@ -169,6 +171,8 @@ app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["vi
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
 app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
+
+app.include_router(get_crewai_router(), prefix="/api/v1/crewai", tags=["crewai"])
 
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:

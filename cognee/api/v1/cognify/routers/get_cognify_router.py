@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
 
+from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -68,7 +69,11 @@ def get_cognify_router() -> APIRouter:
                 continue
 
             try:
-                await websocket.send_json(jsonable_encoder(pipeline_run_info))
+                await websocket.send_json({
+                    "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
+                    "status": pipeline_run_info.status,
+                    "payload": await get_nodes_and_edges(pipeline_run_info.payload) if pipeline_run_info.payload else None,
+                })
 
                 if isinstance(pipeline_run_info, PipelineRunCompleted):
                     remove_queue(pipeline_run_id)
@@ -79,3 +84,42 @@ def get_cognify_router() -> APIRouter:
                 break
 
     return router
+
+async def get_nodes_and_edges(data_points):
+    nodes = []
+    edges = []
+
+    added_nodes = {}
+    added_edges = {}
+    visited_properties = {}
+
+    results = await asyncio.gather(
+        *[
+            get_graph_from_model(
+                data_point,
+                added_nodes=added_nodes,
+                added_edges=added_edges,
+                visited_properties=visited_properties,
+            )
+            for data_point in data_points
+        ]
+    )
+
+    for result_nodes, result_edges in results:
+        nodes.extend(result_nodes)
+        edges.extend(result_edges)
+
+    nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    return {
+        "nodes": list(map(lambda node: {
+            "id": str(node.id),
+            "label": node.name if hasattr(node, "name") else f"{node.type}_{str(node.id)}",
+            "properties": {},
+        }, nodes)),
+        "edges": list(map(lambda edge: {
+            "source": str(edge[0]),
+            "target": str(edge[1]),
+            "label": edge[2],
+        }, edges)),
+    }
