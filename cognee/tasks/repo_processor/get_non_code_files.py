@@ -2,7 +2,24 @@ import os
 
 
 async def get_non_py_files(repo_path):
-    """Get files that are not .py files and their contents"""
+    """
+    Get files that are not .py files and their contents.
+
+    Check if the specified repository path exists and if so, traverse the directory,
+    collecting the paths of files that do not have a .py extension and meet the
+    criteria set in the allowed and ignored patterns. Return a list of paths to
+    those files.
+
+    Parameters:
+    -----------
+
+        - repo_path: The file system path to the repository to scan for non-Python files.
+
+    Returns:
+    --------
+
+        A list of file paths that are not Python files and meet the specified criteria.
+    """
     if not os.path.exists(repo_path):
         return {}
 
@@ -111,6 +128,22 @@ async def get_non_py_files(repo_path):
     }
 
     def should_process(path):
+        """
+        Determine if a file should be processed based on its extension and path patterns.
+
+        This function checks if the file extension is in the allowed list and ensures that none
+        of the ignored patterns are present in the provided file path.
+
+        Parameters:
+        -----------
+
+            - path: The file path to check for processing eligibility.
+
+        Returns:
+        --------
+
+            Returns True if the file should be processed; otherwise, False.
+        """
         _, ext = os.path.splitext(path)
         return ext in ALLOWED_EXTENSIONS and not any(
             pattern in path for pattern in IGNORED_PATTERNS
