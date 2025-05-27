@@ -2,6 +2,19 @@ from cognee.shared.data_models import SummarizedCode, SummarizedClass, Summarize
 
 
 def get_mock_summarized_code() -> SummarizedCode:
+    """
+    Return a summarized representation of mock code.
+
+    This function constructs and returns a `SummarizedCode` object that includes various
+    components such as file name, high-level summary, key features, imports, constants,
+    classes, and functions, all described with placeholders for mock data.
+
+    Returns:
+    --------
+
+        - SummarizedCode: A `SummarizedCode` object containing mock data for file summary,
+          features, imports, constants, classes, and functions.
+    """
     return SummarizedCode(
         file_name="mock_file.py",
         high_level_summary="This is a mock high-level summary.",
