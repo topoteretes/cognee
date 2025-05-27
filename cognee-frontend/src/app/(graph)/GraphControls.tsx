@@ -19,31 +19,38 @@ interface GraphControlsProps {
 export interface GraphControlsAPI {
   setSelectedNode: (node: NodeObject | null) => void;
   getSelectedNode: () => NodeObject | null;
+  updateActivity: (activities: ActivityLog[]) => void;
 }
 
 type ActivityLog = {
   id: string;
   timestamp: number;
   activity: string;
-}[];
+};
 
-type NodeProperties = {
+type NodeProperty = {
   id: string;
   name: string;
   value: string;
-}[];
+};
+
+const formatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "medium" });
 
 export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, onFitIntoView, ref }: GraphControlsProps) {
   const [selectedNode, setSelectedNode] = useState<NodeObject | null>(null);
-  const [activityLog, setActivityLog] = useState<ActivityLog>([]);
-  const [nodeProperties, setNodeProperties] = useState<NodeProperties>([]);
-  const [newProperty, setNewProperty] = useState<NodeProperties[0]>({
+  const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
+  const [nodeProperties, setNodeProperties] = useState<NodeProperty[]>([]);
+  const [newProperty, setNewProperty] = useState<NodeProperty>({
     id: uuid4(),
     name: "",
     value: "",
   });
 
-  const handlePropertyChange = (property: NodeProperties[0], property_key: string, event: ChangeEvent<HTMLInputElement>) => {
+  const updateActivity = (newActivities: ActivityLog[]) => {
+    setActivityLog((activities) => [...activities, ...newActivities]);
+  };
+
+  const handlePropertyChange = (property: NodeProperty, property_key: string, event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
 
     setNodeProperties(nodeProperties.map((nodeProperty) => (nodeProperty.id === property.id ? {...nodeProperty, [property_key]: value } : nodeProperty)));
@@ -58,11 +65,11 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
     }
   };
 
-  const handlePropertyDelete = (property: NodeProperties[0]) => {
+  const handlePropertyDelete = (property: NodeProperty) => {
     setNodeProperties(nodeProperties.filter((nodeProperty) => nodeProperty.id !== property.id));
   };
 
-  const handleNewPropertyChange = (property: NodeProperties[0], property_key: string, event: ChangeEvent<HTMLInputElement>) => {
+  const handleNewPropertyChange = (property: NodeProperty, property_key: string, event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
 
     setNewProperty({...property, [property_key]: value });
@@ -71,6 +78,7 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
   useImperativeHandle(ref, () => ({
     setSelectedNode,
     getSelectedNode: () => selectedNode,
+    updateActivity,
   }));
 
   const [selectedTab, setSelectedTab] = useState("nodeDetails");
@@ -81,14 +89,14 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
 
   return (
     <>
-      <div className="flex">
-        <button onClick={() => setSelectedTab("nodeDetails")} className={classNames("cursor-pointer pt-4 pb-4 align-center text-gray-300 border-b-2 w-30", { "border-b-indigo-600 text-white": selectedTab === "nodeDetails" })}>
+      <div className="flex w-full">
+        <button onClick={() => setSelectedTab("nodeDetails")} className={classNames("cursor-pointer pt-4 pb-4 align-center text-gray-300 border-b-2 w-30 flex-1/3", { "border-b-indigo-600 text-white": selectedTab === "nodeDetails" })}>
           <span className="whitespace-nowrap">Node Details</span>
         </button>
-        <button onClick={() => setSelectedTab("activityLog")} className={classNames("cursor-pointer pt-4 pb-4 align-center text-gray-300 border-b-2 w-30", { "border-b-indigo-600 text-white": selectedTab === "activityLog" })}>
+        <button onClick={() => setSelectedTab("activityLog")} className={classNames("cursor-pointer pt-4 pb-4 align-center text-gray-300 border-b-2 w-30 flex-1/3", { "border-b-indigo-600 text-white": selectedTab === "activityLog" })}>
           <span className="whitespace-nowrap">Activity Log</span>
         </button>
-        <button onClick={() => setSelectedTab("feedback")} className={classNames("cursor-pointer pt-4 pb-4 align-center text-gray-300 border-b-2 w-30", { "border-b-indigo-600 text-white": selectedTab === "feedback" })}>
+        <button onClick={() => setSelectedTab("feedback")} className={classNames("cursor-pointer pt-4 pb-4 align-center text-gray-300 border-b-2 w-30 flex-1/3", { "border-b-indigo-600 text-white": selectedTab === "feedback" })}>
           <span className="whitespace-nowrap">Feedback</span>
         </button>
       </div>
@@ -97,9 +105,9 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
         {selectedTab === "nodeDetails" && (
           <>
             <div className="w-full flex flex-row gap-2 items-center mb-4">
-              <label className="text-gray-300 whitespace-nowrap">Graph Shape:</label>
-              <Select onChange={handleGraphShapeControl}>
-                <option selected value="none">None</option>
+              <label className="text-gray-300 whitespace-nowrap flex-1/5">Graph Shape:</label>
+              <Select defaultValue="none" onChange={handleGraphShapeControl} className="flex-2/5">
+                <option value="none">None</option>
                 <option value="td">Top-down</option>
                 <option value="bu">Bottom-up</option>
                 <option value="lr">Left-right</option>
@@ -107,9 +115,9 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
                 <option value="radialin">Radial-in</option>
                 <option value="radialout">Radial-out</option>
               </Select>
+              <NeutralButton onClick={onFitIntoView} className="flex-2/5 whitespace-nowrap">Fit Graph into View</NeutralButton>
             </div>
 
-            <NeutralButton onClick={onFitIntoView} className="mb-4">Fit Graph into View</NeutralButton>
 
             {isAddNodeFormOpen ? (
               <form className="flex flex-col gap-4" onSubmit={() => {}}>
@@ -138,21 +146,25 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
             ) : (
               selectedNode ? (
                 <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex gap-2 items-center">
+                  <div className="flex flex-col gap-2 overflow-y-auto max-h-96">
+                    <div className="flex gap-2 items-top">
                       <span className="text-gray-300">ID:</span>
                       <span className="text-white">{selectedNode.id}</span>
                     </div>
+                    <div className="flex gap-2 items-top">
+                      <span className="text-gray-300">Label:</span>
+                      <span className="text-white">{selectedNode.label}</span>
+                    </div>
 
                     {Object.entries(selectedNode.properties).map(([key, value]) => (
-                      <div key={key} className="flex gap-2 items-center">
-                        <span className="text-gray-300">{key}:</span>
-                        <span className="text-white">{typeof value === "object" ? JSON.stringify(value) : value as string}</span>
+                      <div key={key} className="flex gap-2 items-top">
+                        <span className="text-gray-300">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
+                        <span className="text-white truncate">{typeof value === "object" ? JSON.stringify(value) : value as string}</span>
                       </div>
                     ))}
                   </div>
 
-                  <CTAButton type="button" onClick={() => {}}>Edit Node</CTAButton>
+                  {/* <CTAButton type="button" onClick={() => {}}>Edit Node</CTAButton> */}
                 </div>
               ) : (
                 <span className="text-white">No node selected.</span>
@@ -164,9 +176,9 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
         {selectedTab === "activityLog" && (
           <div className="flex flex-col gap-2">
             {activityLog.map((activity) => (
-              <div key={activity.id} className="flex gap-2 items-center">
-                <span className="text-gray-300">{activity.timestamp}</span>
-                <span className="text-white">{activity.activity}</span>
+              <div key={activity.id} className="flex gap-2 items-top">
+                <span className="text-gray-300 whitespace-nowrap">{formatter.format(activity.timestamp)}: </span>
+                <span className="text-white  whitespace-normal">{activity.activity}</span>
               </div>
             ))}
             {!activityLog.length && <span className="text-white">No activity logged.</span>}

@@ -1,7 +1,7 @@
 "use client";
 
 import { forceCollide, forceManyBody } from "d3-force-3d";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ForceGraph, { ForceGraphMethods, LinkObject, NodeObject } from "react-force-graph-2d";
 
 import { TextLogo } from "@/ui/App";
@@ -35,23 +35,24 @@ export default function GraphView() {
 
   const [data, updateData] = useState<GraphData | null>(null);
 
-  const onDataChange = (newData: NodesAndEdges) => {
-    if (data === null) {
-      updateData({
-        nodes: newData.nodes,
-        links: newData.links,
-      });
-    } else {
-      updateData({
-        nodes: [...data.nodes, ...newData.nodes],
-        links: [...data.links, ...newData.links],
-      });
+  const onDataChange = useCallback((newData: NodesAndEdges) => {
+    if (!newData.nodes.length && !newData.links.length) {
+      return;
     }
-  };
+
+    updateData({
+      nodes: newData.nodes,
+      links: newData.links,
+    });
+  }, []);
 
   const graphRef = useRef<ForceGraphMethods>();
 
   const graphControls = useRef<GraphControlsAPI>(null);
+
+  const onActivityChange = (activities: any) => {
+    graphControls.current?.updateActivity(activities);
+  };
 
   const handleNodeClick = (node: NodeObject) => {
     graphControls.current?.setSelectedNode(node);
@@ -63,29 +64,31 @@ export default function GraphView() {
   const addNodeDistanceFromSourceNode = 15;
 
   const handleBackgroundClick = (event: MouseEvent) => {
-    const graphBoundingBox = document.getElementById("graph-container")?.querySelector("canvas")?.getBoundingClientRect();
-    const x = event.clientX - graphBoundingBox!.x;
-    const y = event.clientY - graphBoundingBox!.y;
-
-    const graphClickCoords = graphRef.current!.screen2GraphCoords(x, y);
-
     const selectedNode = graphControls.current?.getSelectedNode();
 
     if (!selectedNode) {
       return;
     }
 
-    const distanceFromAddNode = Math.sqrt(
-      Math.pow(graphClickCoords.x - (selectedNode!.x! + addNodeDistanceFromSourceNode), 2)
-      + Math.pow(graphClickCoords.y - (selectedNode!.y! + addNodeDistanceFromSourceNode), 2)
-    );
+    graphControls.current?.setSelectedNode(null);
 
-    if (distanceFromAddNode <= 10) {
-      enableAddNodeForm();
-    } else {
-      disableAddNodeForm();
-      graphControls.current?.setSelectedNode(null);
-    }
+    // const graphBoundingBox = document.getElementById("graph-container")?.querySelector("canvas")?.getBoundingClientRect();
+    // const x = event.clientX - graphBoundingBox!.x;
+    // const y = event.clientY - graphBoundingBox!.y;
+
+    // const graphClickCoords = graphRef.current!.screen2GraphCoords(x, y);
+
+    // const distanceFromAddNode = Math.sqrt(
+    //   Math.pow(graphClickCoords.x - (selectedNode!.x! + addNodeDistanceFromSourceNode), 2)
+    //   + Math.pow(graphClickCoords.y - (selectedNode!.y! + addNodeDistanceFromSourceNode), 2)
+    // );
+
+    // if (distanceFromAddNode <= 10) {
+    //   enableAddNodeForm();
+    // } else {
+    //   disableAddNodeForm();
+    //   graphControls.current?.setSelectedNode(null);
+    // }
   };
 
   function renderNode(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) {
@@ -93,23 +96,23 @@ export default function GraphView() {
 
     ctx.save();
 
-    if (node.id === selectedNode?.id) {
-      ctx.fillStyle = "gray";
+    // if (node.id === selectedNode?.id) {
+    //   ctx.fillStyle = "gray";
 
-      ctx.beginPath();
-      ctx.arc(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode, 10, 0, 2 * Math.PI);
-      ctx.fill();
+    //   ctx.beginPath();
+    //   ctx.arc(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode, 10, 0, 2 * Math.PI);
+    //   ctx.fill();
 
-      ctx.beginPath();
-      ctx.moveTo(node.x! + addNodeDistanceFromSourceNode - 5, node.y! + addNodeDistanceFromSourceNode)
-      ctx.lineTo(node.x! + addNodeDistanceFromSourceNode - 5 + 10, node.y! + addNodeDistanceFromSourceNode);
-      ctx.stroke();
+    //   ctx.beginPath();
+    //   ctx.moveTo(node.x! + addNodeDistanceFromSourceNode - 5, node.y! + addNodeDistanceFromSourceNode)
+    //   ctx.lineTo(node.x! + addNodeDistanceFromSourceNode - 5 + 10, node.y! + addNodeDistanceFromSourceNode);
+    //   ctx.stroke();
 
-      ctx.beginPath();
-      ctx.moveTo(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode - 5)
-      ctx.lineTo(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode - 5 + 10);
-      ctx.stroke();
-    }
+    //   ctx.beginPath();
+    //   ctx.moveTo(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode - 5)
+    //   ctx.lineTo(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode - 5 + 10);
+    //   ctx.stroke();
+    // }
 
     // ctx.beginPath();
     // ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
@@ -179,9 +182,7 @@ export default function GraphView() {
     ctx.restore();
   }
 
-  function handleDagError(loopNodeIds: (string | number)[]) {
-    console.log(loopNodeIds);
-  }
+  function handleDagError(loopNodeIds: (string | number)[]) {}
 
   useEffect(() => {
     // add collision force
@@ -211,7 +212,7 @@ export default function GraphView() {
               nodeRelSize={nodeSize}
               nodeCanvasObject={renderNode}
               nodeCanvasObjectMode={() => "after"}
-              nodeAutoColorBy="group"
+              nodeAutoColorBy="type"
 
               linkLabel="label"
               linkCanvasObject={renderLink}
@@ -237,7 +238,7 @@ export default function GraphView() {
               nodeRelSize={20}
               nodeCanvasObject={renderNode}
               nodeCanvasObjectMode={() => "after"}
-              nodeAutoColorBy="group"
+              nodeAutoColorBy="type"
 
               linkLabel="label"
               linkCanvasObject={renderLink}
@@ -250,10 +251,10 @@ export default function GraphView() {
 
         <div className="absolute top-2 left-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md max-w-2xl">
           <CogneeAddWidget onData={onDataChange} />
-          <CrewAITrigger />
+          <CrewAITrigger onData={onDataChange} onActivity={onActivityChange} />
         </div>
 
-        <div className="absolute top-2 right-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md">
+        <div className="absolute top-2 right-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-110">
           <GraphControls
             ref={graphControls}
             isAddNodeFormOpen={isAddNodeFormOpen}
@@ -265,10 +266,12 @@ export default function GraphView() {
       <Divider />
       <div className="pl-6 pr-6">
         <Footer>
-          <div className="flex flex-row items-center gap-6">
-            <span>Nodes: {data?.nodes.length}</span>
-            <span>Edges: {data?.links.length}</span>
-          </div>
+          {(data?.nodes.length || data?.links.length) && (
+            <div className="flex flex-row items-center gap-6">
+              <span>Nodes: {data?.nodes.length || 0}</span>
+              <span>Edges: {data?.links.length || 0}</span>
+            </div>
+          )}
         </Footer>
       </div>
     </main>

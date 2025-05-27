@@ -1,6 +1,6 @@
 import warnings
 import os
-from hiring_crew import HiringCrew
+from .hiring_crew import HiringCrew
 from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.github_ingestion import (
     GithubIngestion,
 )
@@ -14,7 +14,7 @@ def print_environment():
 
 
 def run_github_ingestion(applicant_1, applicant_2):
-    GithubIngestion().run(applicant_1=applicant_1, applicant_2=applicant_2)
+    return GithubIngestion().run(applicant_1=applicant_1, applicant_2=applicant_2)
 
 
 def run_hiring_crew(applicants: dict, number_of_rounds: int = 1, llm_client=None):

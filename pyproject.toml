@@ -6,7 +6,7 @@ authors = [
     { name = "Vasilije Markovic" },
     { name = "Boris Arzentar" },
 ]
-requires-python = ">=3.10,<=3.13"
+requires-python = ">=3.10,<3.13"
 readme = "README.md"
 license = "Apache-2.0"
 classifiers = [
@@ -58,6 +58,7 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "onnxruntime<=1.21.1",
     "pylance==0.22.0",
+    "nest-asyncio>=1.6.0",
 ]
 
 [project.optional-dependencies]
@@ -91,10 +92,6 @@ falkordb = ["falkordb==1.0.9"]
 kuzu = ["kuzu==0.8.2"]
 groq = ["groq==0.8.0"]
 milvus = ["pymilvus>=2.5.0,<3"]
-chromadb = [
-    "chromadb>=0.3.0,<0.7",
-    "pypika==0.48.8",
-]
 docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<0.17"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
@@ -128,6 +125,10 @@ dev = [
     "mkdocstrings[python]>=0.26.2,<0.27",
 ]
 debug = ["debugpy==1.8.9"]
+crewai = [
+    "crewai>=0.117.1",
+    "pygithub>=2.6.1",
+]
 
 [project.urls]
 Homepage = "https://www.cognee.ai"

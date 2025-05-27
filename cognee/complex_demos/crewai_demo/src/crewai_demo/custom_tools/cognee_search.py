@@ -1,3 +1,5 @@
+import nest_asyncio
+
 from crewai.tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field, PrivateAttr
@@ -47,10 +49,15 @@ class CogneeSearch(BaseTool):
 
         try:
             loop = asyncio.get_event_loop()
-            if loop.is_running():
+
+            if not loop.is_running():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            search_results = loop.run_until_complete(main())
-            return search_results
+
+            nest_asyncio.apply(loop)
+
+            result = loop.run_until_complete(main())
+
+            return result
         except Exception as e:
             return f"Tool execution error: {str(e)}"

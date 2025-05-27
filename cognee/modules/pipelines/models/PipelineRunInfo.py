@@ -15,19 +15,19 @@ class PipelineRunInfo(BaseModel):
 
 class PipelineRunStarted(PipelineRunInfo):
     status: str = "PipelineRunStarted"
-    pass
 
 
 class PipelineRunYield(PipelineRunInfo):
     status: str = "PipelineRunYield"
-    pass
 
 
 class PipelineRunCompleted(PipelineRunInfo):
     status: str = "PipelineRunCompleted"
-    pass
 
 
 class PipelineRunErrored(PipelineRunInfo):
     status: str = "PipelineRunErrored"
-    pass
+
+
+class PipelineRunActivity(BaseModel):
+    status: str = "PipelineRunActivity"

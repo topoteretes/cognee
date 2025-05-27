@@ -19,7 +19,7 @@ class CogneeBuild(BaseTool):
                     node_set = meta["nodeset"]
                     await cognee.add(text, node_set=node_set)
 
-                await cognee.cognify()
+                await cognee.cognify(is_stream_info_enabled=True)
 
                 return "Knowledge Graph is done."
             except Exception as e:
@@ -27,10 +27,11 @@ class CogneeBuild(BaseTool):
 
         try:
             loop = asyncio.get_event_loop()
-            if loop.is_running():
+
+            if not loop.is_running():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            results = loop.run_until_complete(main())
-            return results
+
+            return loop.create_task(main())
         except Exception as e:
             return f"Tool execution error: {str(e)}"

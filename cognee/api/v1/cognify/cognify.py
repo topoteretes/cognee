@@ -2,17 +2,19 @@ import asyncio
 from pydantic import BaseModel
 from typing import Union, Optional
 
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
-
+from cognee.modules.users.models import User
 from cognee.modules.pipelines import cognee_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunStarted
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
-from cognee.modules.users.models import User
+from cognee.modules.graph.operations import get_formatted_graph_data
+from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 
 from cognee.tasks.documents import (
     check_permissions_on_documents,
@@ -36,22 +38,35 @@ async def cognify(
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
     run_in_background: bool = False,
+    is_stream_info_enabled: bool = False,
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
+
+    if not user:
+        user = await get_default_user()
 
     if run_in_background:
         return await run_cognify_as_background_process(tasks, user, datasets)
     else:
-        return await run_cognify_blocking(tasks, user, datasets)
+        return await run_cognify_blocking(tasks, user, datasets, is_stream_info_enabled)
 
 
-async def run_cognify_blocking(tasks, user, datasets):
+async def run_cognify_blocking(tasks, user, datasets, is_stream_info_enabled=False):
     pipeline_run_info = None
 
     async for run_info in cognee_pipeline(
         tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
     ):
         pipeline_run_info = run_info
+
+        if (
+            is_stream_info_enabled
+            and not isinstance(pipeline_run_info, PipelineRunStarted)
+            and not isinstance(pipeline_run_info, PipelineRunCompleted)
+        ):
+            pipeline_run_id = get_crewai_pipeline_run_id(user.id)
+            pipeline_run_info.payload = await get_formatted_graph_data()
+            push_to_queue(pipeline_run_id, pipeline_run_info)
 
     return pipeline_run_info
 
@@ -67,6 +82,8 @@ async def run_cognify_as_background_process(tasks, user, datasets):
         while True:
             try:
                 pipeline_run_info = await anext(pipeline_run)
+
+                pipeline_run_info.payload = await get_formatted_graph_data()
 
                 push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
 

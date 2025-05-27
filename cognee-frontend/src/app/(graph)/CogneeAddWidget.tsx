@@ -1,5 +1,6 @@
 "use client";
 
+import { v4 as uuid4 } from "uuid";
 import { ChangeEvent, useEffect } from "react";
 import { CTAButton, StatusIndicator } from "@/ui/elements";
 
@@ -30,15 +31,16 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
       .then((datasets) => {
         const dataset = datasets?.[0];
 
-        if (dataset) {
-          getDatasetGraph(dataset)
-            .then((graph) => onData({
-              nodes: graph.nodes,
-              links: graph.edges,
-            }));
-        }
+        // For CrewAI we don't have a dataset.
+        // if (dataset) {
+        getDatasetGraph(dataset || { id: uuid4() })
+          .then((graph) => onData({
+            nodes: graph.nodes,
+            links: graph.edges,
+          }));
+        // }
       });
-  }, [refreshDatasets]);
+  }, [onData, refreshDatasets]);
 
   const handleAddFiles = (dataset: { id?: string, name?: string }, event: ChangeEvent<HTMLInputElement>) => {
     event.stopPropagation();
@@ -51,8 +53,6 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
 
     return addData(dataset, files)
       .then(() => {
-        console.log("Data added successfully.");
-
         const onUpdate = (data: any) => {
           onData({
             nodes: data.payload.nodes,
@@ -60,11 +60,12 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
           });
         };
 
-        return cognifyDataset(dataset, onUpdate)
-          .then((data) => console.log(data));
+        return cognifyDataset(dataset, onUpdate);
       });
   };
-  
+
+  return null;
+
   return (
     <div className="flex flex-col gap-4 mb-4">
       {datasets.length ? datasets.map((dataset) => (

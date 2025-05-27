@@ -2,11 +2,8 @@ import json
 import asyncio
 from uuid import uuid5, NAMESPACE_OID
 from typing import Optional, List, Dict, Any
-from pathlib import Path
-from cognee.api.v1.search import SearchType
 import cognee
-from cognee.low_level import DataPoint, setup as cognee_setup
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.low_level import DataPoint
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
@@ -16,6 +13,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest import (
     get_github_data_for_cognee,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunStarted
+from cognee.modules.graph.operations import get_formatted_graph_data
+from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 
 # Import DataPoint classes from github_datapoints.py
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_datapoints import (
@@ -205,6 +205,27 @@ def build_github_datapoints_from_dict(github_data: Dict[str, Any]):
     return all_datapoints
 
 
+async def run_with_info_stream(tasks, user, data, dataset_id, pipeline_name):
+    from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+
+    pipeline_run = run_tasks(
+        tasks=tasks,
+        data=data,
+        dataset_id=dataset_id,
+        pipeline_name=pipeline_name,
+        user=user,
+    )
+
+    pipeline_run_id = get_crewai_pipeline_run_id(user.id)
+
+    async for pipeline_run_info in pipeline_run:
+        if not isinstance(pipeline_run_info, PipelineRunStarted) and not isinstance(
+            pipeline_run_info, PipelineRunCompleted
+        ):
+            pipeline_run_info.payload = await get_formatted_graph_data()
+            push_to_queue(pipeline_run_id, pipeline_run_info)
+
+
 async def cognify_github_data(github_data: dict):
     """Process GitHub user, file changes, and comments data from a loaded dictionary."""
     all_datapoints = build_github_datapoints_from_dict(github_data)
@@ -216,18 +237,16 @@ async def cognify_github_data(github_data: dict):
 
     cognee_user = await get_default_user()
     tasks = [Task(add_data_points, task_config={"batch_size": 50})]
-    results = run_tasks(
+
+    await run_with_info_stream(
         tasks=tasks,
         data=all_datapoints,
         dataset_id=dataset_id,
         pipeline_name="github_pipeline",
         user=cognee_user,
     )
-    async for result in results:
-        print(result)
 
     logger.info(f"Done processing {len(all_datapoints)} datapoints")
-    return True
 
 
 async def cognify_github_data_from_username(
@@ -262,8 +281,6 @@ async def cognify_github_data_from_username(
     github_data = json.loads(json.dumps(github_data, default=str))
 
     await cognify_github_data(github_data)
-
-    return None
 
 
 async def process_github_from_file(json_file_path: str):

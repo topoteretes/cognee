@@ -7,6 +7,7 @@ class File(DataPoint):
     """File is now a leaf node without any lists of other DataPoints"""
 
     filename: str
+    name: str
     repo: str
     metadata: dict = {"index_fields": ["filename"]}
 
@@ -25,6 +26,7 @@ class GitHubUser(DataPoint):
 
 class FileChange(DataPoint):
     filename: str
+    name: str
     status: str
     additions: int
     deletions: int
@@ -39,6 +41,7 @@ class FileChange(DataPoint):
 
 class Comment(DataPoint):
     comment_id: str
+    name: str
     text: str
     created_at: str
     updated_at: str
@@ -51,6 +54,7 @@ class Comment(DataPoint):
 
 class Issue(DataPoint):
     number: int
+    name: str
     text: str
     state: str
     repository: str
@@ -60,6 +64,7 @@ class Issue(DataPoint):
 
 class Commit(DataPoint):
     commit_sha: str
+    name: str
     text: str
     commit_date: str
     commit_url: str

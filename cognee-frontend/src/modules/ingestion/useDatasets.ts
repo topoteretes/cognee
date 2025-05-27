@@ -42,7 +42,7 @@ function useDatasets() {
 
     statusTimeout.current = setTimeout(() => {
       checkDatasetStatuses(datasets);
-    }, 5000);
+    }, 50000);
   }, [fetchDatasetStatuses]);
   
   useEffect(() => {

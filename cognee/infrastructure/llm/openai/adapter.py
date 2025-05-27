@@ -50,7 +50,7 @@ class OpenAIAdapter(LLMInterface):
         self.max_tokens = max_tokens
         self.streaming = streaming
 
-    @observe(as_type="generation")
+    # @observe(as_type="generation")
     @sleep_and_retry_async()
     @rate_limit_async
     async def acreate_structured_output(
@@ -77,7 +77,7 @@ class OpenAIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
 
-    @observe
+    # @observe
     @sleep_and_retry_sync()
     @rate_limit_sync
     def create_structured_output(

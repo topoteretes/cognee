@@ -47,9 +47,10 @@ app_environment = os.getenv("ENV", "prod")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # from cognee.modules.data.deletion import prune_system, prune_data
-    # await prune_data()
-    # await prune_system(metadata = True)
+    from cognee.modules.data.deletion import prune_system, prune_data
+
+    await prune_data()
+    await prune_system(metadata=True)
     # if app_environment == "local" or app_environment == "dev":
     from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -189,7 +190,7 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        uvicorn.run(app, host=host, port=port)
+        uvicorn.run(app, host=host, port=port, loop="asyncio")
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")
         # Here you could add any cleanup code or error recovery code.

@@ -69,11 +69,15 @@ def get_cognify_router() -> APIRouter:
                 continue
 
             try:
-                await websocket.send_json({
-                    "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
-                    "status": pipeline_run_info.status,
-                    "payload": await get_nodes_and_edges(pipeline_run_info.payload) if pipeline_run_info.payload else None,
-                })
+                await websocket.send_json(
+                    {
+                        "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
+                        "status": pipeline_run_info.status,
+                        "payload": await get_nodes_and_edges(pipeline_run_info.payload)
+                        if pipeline_run_info.payload
+                        else None,
+                    }
+                )
 
                 if isinstance(pipeline_run_info, PipelineRunCompleted):
                     remove_queue(pipeline_run_id)
@@ -84,6 +88,7 @@ def get_cognify_router() -> APIRouter:
                 break
 
     return router
+
 
 async def get_nodes_and_edges(data_points):
     nodes = []
@@ -112,14 +117,24 @@ async def get_nodes_and_edges(data_points):
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
     return {
-        "nodes": list(map(lambda node: {
-            "id": str(node.id),
-            "label": node.name if hasattr(node, "name") else f"{node.type}_{str(node.id)}",
-            "properties": {},
-        }, nodes)),
-        "edges": list(map(lambda edge: {
-            "source": str(edge[0]),
-            "target": str(edge[1]),
-            "label": edge[2],
-        }, edges)),
+        "nodes": list(
+            map(
+                lambda node: {
+                    "id": str(node.id),
+                    "label": node.name if hasattr(node, "name") else f"{node.type}_{str(node.id)}",
+                    "properties": {},
+                },
+                nodes,
+            )
+        ),
+        "edges": list(
+            map(
+                lambda edge: {
+                    "source": str(edge[0]),
+                    "target": str(edge[1]),
+                    "label": edge[2],
+                },
+                edges,
+            )
+        ),
     }

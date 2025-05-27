@@ -1,7 +1,6 @@
 from uuid import uuid5, NAMESPACE_OID
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List
 
-from cognee.low_level import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.shared.logging_utils import get_logger
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_datapoints import (
@@ -60,7 +59,9 @@ def create_file_datapoint(filename: str, repo_name: str, nodesets: List[NodeSet]
     """Creates a File DataPoint with a consistent ID."""
     file_key = f"{repo_name}:{filename}"
     file_id = uuid5(NAMESPACE_OID, file_key)
-    file = File(id=file_id, filename=filename, repo=repo_name, belongs_to_set=nodesets)
+    file = File(
+        id=file_id, name=filename, filename=filename, repo=repo_name, belongs_to_set=nodesets
+    )
     logger.debug(f"Created File with ID: {file_id} for {filename}")
     return file
 
@@ -72,6 +73,7 @@ def create_commit_datapoint(
     commit_id = uuid5(NAMESPACE_OID, commit_data.get("commit_sha", ""))
     commit = Commit(
         id=commit_id,
+        name=commit_data.get("commit_sha", ""),
         commit_sha=commit_data.get("commit_sha", ""),
         text="Commit message:" + (str)(commit_data.get("commit_message", "")),
         commit_date=commit_data.get("commit_date", ""),
@@ -96,6 +98,7 @@ def create_file_change_datapoint(
 
     file_change = FileChange(
         id=fc_id,
+        name=fc_data.get("filename", ""),
         filename=fc_data.get("filename", ""),
         status=fc_data.get("status", ""),
         additions=fc_data.get("additions", 0),
@@ -121,6 +124,7 @@ def create_issue_datapoint(
 
     issue = Issue(
         id=issue_id,
+        name=str(issue_data.get("issue_number", 0)),
         number=issue_data.get("issue_number", 0),
         text=issue_data.get("issue_title", ""),
         state=issue_data.get("issue_state", ""),
@@ -142,6 +146,7 @@ def create_comment_datapoint(
 
     comment = Comment(
         id=comment_id,
+        name=str(comment_data.get("comment_id", "")),
         comment_id=str(comment_data.get("comment_id", "")),
         text=comment_data.get("body", ""),
         created_at=comment_data.get("created_at", ""),

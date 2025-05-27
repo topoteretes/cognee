@@ -1,8 +1,8 @@
-from crewai.tools import BaseTool
-from typing import Type, List
-from pydantic import BaseModel, Field, PrivateAttr
-from cognee.modules.engine.models import NodeSet
 import asyncio
+import nest_asyncio
+from crewai.tools import BaseTool
+from typing import Type
+from pydantic import BaseModel, Field
 
 
 class CogneeIngestionInput(BaseModel):
@@ -24,14 +24,15 @@ class CogneeIngestion(BaseTool):
 
     def _run(self, text: str) -> str:
         import cognee
-        from secrets import choice
-        from string import ascii_letters, digits
+        # from secrets import choice
+        # from string import ascii_letters, digits
 
         async def main():
             try:
-                hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
-                await cognee.add(text, node_set=[self._nodeset_name], dataset_name=hash6)
-                await cognee.cognify(datasets=hash6)
+                # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
+                dataset_name = "final_reports"
+                await cognee.add(text, node_set=[self._nodeset_name], dataset_name=dataset_name)
+                await cognee.cognify(datasets=dataset_name, is_stream_info_enabled=True)
 
                 return "Report ingested successfully into Cognee memory."
             except Exception as e:
@@ -39,9 +40,15 @@ class CogneeIngestion(BaseTool):
 
         try:
             loop = asyncio.get_event_loop()
-            if loop.is_running():
+
+            if not loop.is_running():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            return loop.run_until_complete(main())
+
+            nest_asyncio.apply(loop)
+
+            result = loop.run_until_complete(main())
+
+            return result
         except Exception as e:
             return f"Tool execution error: {str(e)}"

@@ -1,3 +1,4 @@
+from cognee.modules.graph.operations import get_formatted_graph_data
 from cognee.shared.logging_utils import get_logger
 from fastapi import APIRouter
 from datetime import datetime
@@ -44,10 +45,12 @@ class GraphNodeDTO(OutDTO):
     label: str
     properties: dict
 
+
 class GraphEdgeDTO(OutDTO):
     source: UUID
     target: UUID
     label: str
+
 
 class GraphDTO(OutDTO):
     nodes: List[GraphNodeDTO]
@@ -111,26 +114,10 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        from cognee.infrastructure.databases.graph import get_graph_engine
-
         try:
-            graph_client = await get_graph_engine()
-            (nodes, edges) = await graph_client.get_graph_data()
-
             return JSONResponse(
                 status_code=200,
-                content={
-                    "nodes": list(map(lambda node: {
-                        "id": str(node[0]),
-                        "label": node[1]["name"] if hasattr(node[1], "name") else f"{node[1]['type']}_{str(node[0])}",
-                        "properties": {},
-                    }, nodes)),
-                    "edges": list(map(lambda edge: {
-                        "source": str(edge[0]),
-                        "target": str(edge[1]),
-                        "label": edge[2],
-                    }, edges)),
-                },
+                content=await get_formatted_graph_data(),
             )
         except Exception as error:
             print(error)
