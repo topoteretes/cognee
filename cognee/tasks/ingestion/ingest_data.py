@@ -172,6 +172,7 @@ async def ingest_data(
 
         await give_permission_on_dataset(user, dataset.id, "read")
         await give_permission_on_dataset(user, dataset.id, "write")
+        await give_permission_on_dataset(user, dataset.id, "delete")
         await give_permission_on_dataset(user, dataset.id, "share")
 
         return file_paths
