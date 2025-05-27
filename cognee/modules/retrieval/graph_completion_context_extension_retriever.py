@@ -9,6 +9,21 @@ logger = get_logger()
 
 
 class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
+    """
+    Handles graph context completion for question answering tasks, extending context based
+    on retrieved triplets.
+
+    Public methods:
+    - get_completion
+
+    Instance variables:
+    - user_prompt_path
+    - system_prompt_path
+    - top_k
+    - node_type
+    - node_name
+    """
+
     def __init__(
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
@@ -28,6 +43,30 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
     async def get_completion(
         self, query: str, context: Optional[Any] = None, context_extension_rounds=4
     ) -> List[str]:
+        """
+        Extends the context for a given query by retrieving related triplets and generating new
+        completions based on them.
+
+        The method runs for a specified number of rounds to enhance context until no new
+        triplets are found or the maximum rounds are reached. It retrieves triplet suggestions
+        based on a generated completion from previous iterations, logging the process of context
+        extension.
+
+        Parameters:
+        -----------
+
+            - query (str): The input query for which the completion is generated.
+            - context (Optional[Any]): The existing context to use for enhancing the query; if
+              None, it will be initialized from triplets generated for the query. (default None)
+            - context_extension_rounds: The maximum number of rounds to extend the context with
+              new triplets before halting. (default 4)
+
+        Returns:
+        --------
+
+            - List[str]: A list containing the generated answer based on the query and the
+              extended context.
+        """
         triplets = []
 
         if context is None:
