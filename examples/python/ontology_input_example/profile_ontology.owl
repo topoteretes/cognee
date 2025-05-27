@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+    xmlns:user="http://ontology.cognee.ai/user#"
+    xml:base="http://ontology.cognee.ai/user">
+
+    <owl:Ontology rdf:about="http://ontology.cognee.ai/user">
+        <rdfs:label>Cognee-Optimized User Profile Ontology</rdfs:label>
+        <rdfs:comment>User ontology designed for Cognee's Entity/EntityType graph architecture and vector+graph retrieval</rdfs:comment>
+        <owl:versionInfo>1.0</owl:versionInfo>
+    </owl:Ontology>
+
+    <!-- CORE DESIGN PRINCIPLE: 
+         Everything that can be searched/ranked should be an Entity
+         Categories/Classifications should be EntityTypes
+         Relationships should be semantically meaningful for subgraph building
+    -->
+
+    <!-- ====================================== -->
+    <!-- ENTITY TYPES (Cognee's EntityType nodes) -->
+    <!-- ====================================== -->
+
+    <!-- User Categories -->
+    <rdf:Description rdf:about="#User">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>User</rdfs:label>
+        <rdfs:comment>A person using the LLM system</rdfs:comment>
+    </rdf:Description>
+
+    <!-- Communication Style Types -->
+    <rdf:Description rdf:about="#CommunicationStyle">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Communication Style</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#FormalCommunicator">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Formal Communicator</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#CasualCommunicator">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Casual Communicator</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#DetailOrientedCommunicator">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Detail Oriented Communicator</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#HighLevelCommunicator">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>High Level Communicator</rdfs:label>
+    </rdf:Description>
+
+    <!-- Expertise Level Types -->
+    <rdf:Description rdf:about="#ExpertiseLevel">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Expertise Level</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#Beginner">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Beginner</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#Intermediate">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Intermediate</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#Advanced">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Advanced</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#Expert">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Expert</rdfs:label>
+    </rdf:Description>
+
+    <!-- Learning Style Types -->
+    <rdf:Description rdf:about="#LearningStyle">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Learning Style</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#VisualLearner">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Visual Learner</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#HandsOnLearner">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Hands On Learner</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#ConceptualLearner">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Conceptual Learner</rdfs:label>
+    </rdf:Description>
+
+    <!-- Topic/Domain Types -->
+    <rdf:Description rdf:about="#TechnicalTopic">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Technical Topic</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#ProgrammingLanguage">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Programming Language</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#Framework">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Framework</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#Methodology">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Methodology</rdfs:label>
+    </rdf:Description>
+
+    <!-- Goal Types -->
+    <rdf:Description rdf:about="#LearningGoal">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Learning Goal</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#CareerGoal">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Career Goal</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#ProjectGoal">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Project Goal</rdfs:label>
+    </rdf:Description>
+
+    <!-- Context Types -->
+    <rdf:Description rdf:about="#TimeContext">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Time Context</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#WorkContext">
+        <rdf:type rdf:resource="http://example.org/ontology#EntityType"/>
+        <rdfs:label>Work Context</rdfs:label>
+    </rdf:Description>
+
+    <!-- ====================================== -->
+    <!-- ENTITIES (Cognee's Entity nodes) -->
+    <!-- ====================================== -->
+
+    <!-- Sample User Entity -->
+    <rdf:Description rdf:about="#alice">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#User"/>
+        <rdfs:label>Alice</rdfs:label>
+        <user:displayName>Alice Johnson</user:displayName>
+        <user:userId>alice_001</user:userId>
+    </rdf:Description>
+
+    <!-- Communication Style Entities -->
+    <rdf:Description rdf:about="#alice_communication_style">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#DetailOrientedCommunicator"/>
+        <rdfs:label>Alice Detailed Communication</rdfs:label>
+    </rdf:Description>
+
+    <!-- Learning Style Entities -->
+    <rdf:Description rdf:about="#alice_learning_style">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#VisualLearner"/>
+        <rdfs:label>Alice Visual Learning</rdfs:label>
+    </rdf:Description>
+
+    <!-- Topic/Interest Entities -->
+    <rdf:Description rdf:about="#python_programming">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#ProgrammingLanguage"/>
+        <rdfs:label>Python Programming</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#machine_learning">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#TechnicalTopic"/>
+        <rdfs:label>Machine Learning</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#data_science">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#TechnicalTopic"/>
+        <rdfs:label>Data Science</rdfs:label>
+    </rdf:Description>
+
+    <!-- Expertise Level Entities -->
+    <rdf:Description rdf:about="#alice_python_expertise">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#Beginner"/>
+        <rdfs:label>Alice Python Beginner Level</rdfs:label>
+    </rdf:Description>
+
+    <!-- Goal Entities -->
+    <rdf:Description rdf:about="#alice_career_change_goal">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#CareerGoal"/>
+        <rdfs:label>Alice Career Change to Data Science</rdfs:label>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#alice_ml_project_goal">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#ProjectGoal"/>
+        <rdfs:label>Alice Build ML Project</rdfs:label>
+    </rdf:Description>
+
+    <!-- Context Entities -->
+    <rdf:Description rdf:about="#alice_time_constraint">
+        <rdf:type rdf:resource="http://example.org/ontology#Entity"/>
+        <rdf:type rdf:resource="#TimeContext"/>
+        <rdfs:label>Alice Limited Time</rdfs:label>
+    </rdf:Description>
+
+    <!-- ====================================== -->
+    <!-- RELATIONSHIPS (Optimized for Subgraph Building) -->
+    <!-- ====================================== -->
+
+    <!-- User Profile Relationships -->
+    <rdf:Description rdf:about="#alice">
+        <user:hasCommunicationStyle rdf:resource="#alice_communication_style"/>
+        <user:hasLearningStyle rdf:resource="#alice_learning_style"/>
+        <user:hasGoal rdf:resource="#alice_career_change_goal"/>
+        <user:hasGoal rdf:resource="#alice_ml_project_goal"/>
+        <user:hasContext rdf:resource="#alice_time_constraint"/>
+    </rdf:Description>
+
+    <!-- Interest/Knowledge Relationships with Confidence -->
+    <rdf:Description rdf:about="#alice">
+        <user:hasInterest rdf:resource="#python_programming"/>
+        <user:hasInterest rdf:resource="#machine_learning"/>
+        <user:hasInterest rdf:resource="#data_science"/>
+        <user:hasExpertise rdf:resource="#alice_python_expertise"/>
+    </rdf:Description>
+
+    <!-- Topic Relationships (Critical for Subgraph Connectivity) -->
+    <rdf:Description rdf:about="#python_programming">
+        <user:usedFor rdf:resource="#machine_learning"/>
+        <user:usedFor rdf:resource="#data_science"/>
+        <user:suitableFor rdf:resource="#alice_python_expertise"/>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="#machine_learning">
+        <user:partOf rdf:resource="#data_science"/>
+        <user:requiresSkill rdf:resource="#python_programming"/>
+    </rdf:Description>
+
+    <!-- Learning Style Recommendations -->
+    <rdf:Description rdf:about="#alice_learning_style">
+        <user:recommendsApproach>Interactive tutorials with visual examples</user:recommendsApproach>
+        <user:avoidsApproach>Dense text-only documentation</user:avoidsApproach>
+    </rdf:Description>
+
+    <!-- Goal Connections -->
+    <rdf:Description rdf:about="#alice_career_change_goal">
+        <user:requiresSkill rdf:resource="#python_programming"/>
+        <user:requiresSkill rdf:resource="#machine_learning"/>
+        <user:relatedTo rdf:resource="#alice_ml_project_goal"/>
+    </rdf:Description>
+
+    <!-- Context Implications -->
+    <rdf:Description rdf:about="#alice_time_constraint">
+        <user:suggests>Focus on practical applications over theory</user:suggests>
+        <user:suggests>Prefer structured learning paths</user:suggests>
+    </rdf:Description>
+
+    <!-- ====================================== -->
+    <!-- RELATIONSHIP PROPERTIES FOR VECTOR SEARCH -->
+    <!-- ====================================== -->
+
+    <!-- These will be embedded and searchable -->
+    <rdf:Description rdf:about="user:hasCommunicationStyle">
+        <rdfs:label>has communication style</rdfs:label>
+        <rdfs:comment>Links user to their preferred communication approach</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:hasLearningStyle">
+        <rdfs:label>has learning style</rdfs:label>
+        <rdfs:comment>Links user to their preferred learning method</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:hasInterest">
+        <rdfs:label>has interest in</rdfs:label>
+        <rdfs:comment>User shows interest in this topic or area</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:hasExpertise">
+        <rdfs:label>has expertise level</rdfs:label>
+        <rdfs:comment>User's current skill level in a domain</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:hasGoal">
+        <rdfs:label>has goal</rdfs:label>
+        <rdfs:comment>User is working toward this objective</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:usedFor">
+        <rdfs:label>used for</rdfs:label>
+        <rdfs:comment>This tool/skill is used for this purpose</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:requiresSkill">
+        <rdfs:label>requires skill</rdfs:label>
+        <rdfs:comment>This goal/project requires this specific skill</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:suitableFor">
+        <rdfs:label>suitable for</rdfs:label>
+        <rdfs:comment>This resource/approach is appropriate for this level</rdfs:comment>
+    </rdf:Description>
+
+    <rdf:Description rdf:about="user:recommendsApproach">
+        <rdfs:label>recommends approach</rdfs:label>
+        <rdfs:comment>Based on learning style, this approach is recommended</rdfs:comment>
+    </rdf:Description>
+
+</rdf:RDF>
