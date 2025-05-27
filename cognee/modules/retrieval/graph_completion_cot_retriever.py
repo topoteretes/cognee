@@ -9,6 +9,21 @@ logger = get_logger()
 
 
 class GraphCompletionCotRetriever(GraphCompletionRetriever):
+    """
+    Handles graph completion by generating responses based on a series of interactions with
+    a language model. This class extends from GraphCompletionRetriever and is designed to
+    manage the retrieval and validation process for user queries, integrating follow-up
+    questions based on reasoning. The public methods are:
+
+    - get_completion
+
+    Instance variables include:
+    - validation_system_prompt_path
+    - validation_user_prompt_path
+    - followup_system_prompt_path
+    - followup_user_prompt_path
+    """
+
     def __init__(
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
@@ -36,6 +51,28 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def get_completion(
         self, query: str, context: Optional[Any] = None, max_iter=4
     ) -> List[str]:
+        """
+        Generate completion responses based on a user query and contextual information.
+
+        This method interacts with a language model client to retrieve a structured response,
+        using a series of iterations to refine the answers and generate follow-up questions
+        based on reasoning derived from previous outputs. It raises exceptions if the context
+        retrieval fails or if the model encounters issues in generating outputs.
+
+        Parameters:
+        -----------
+
+            - query (str): The user's query to be processed and answered.
+            - context (Optional[Any]): Optional context that may assist in answering the query.
+              If not provided, it will be fetched based on the query. (default None)
+            - max_iter: The maximum number of iterations to refine the answer and generate
+              follow-up questions. (default 4)
+
+        Returns:
+        --------
+
+            - List[str]: A list containing the generated answer to the user's query.
+        """
         llm_client = get_llm_client()
         followup_question = ""
         triplets = []
