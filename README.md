@@ -156,6 +156,15 @@ Try cognee UI out locally [here](https://docs.cognee.ai/how-to-guides/cognee-ui)
 </div>
 
 
+## CrewAI
+
+Note1: After each restart go to `localhost:3000/auth` and login again.
+Note2: Activity is not preserved in the DB, so it will be lost after page refresh.
+
+1. Start FastAPI server by running `client.py` inside `cognee/api` directory
+2. Start NextJS server by running `npm run dev` inside `cognee-frontend` directory.
+3. If you are not logged-in, app will redirect to `/auth` page. Otherwise go there manually and login (if server is restarted).
+
 
 ## Demos
 
