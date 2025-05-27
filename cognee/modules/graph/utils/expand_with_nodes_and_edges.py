@@ -95,6 +95,7 @@ def expand_with_nodes_and_edges(
                                 name=ont_node_name,
                                 description=ont_node_name,
                                 ontology_valid=True,
+                                belongs_to_set=data_chunk.belongs_to_set,
                             )
 
                 for source, relation, target in ontology_entity_type_edges:
@@ -144,6 +145,7 @@ def expand_with_nodes_and_edges(
                     is_a=type_node,
                     description=node.description,
                     ontology_valid=ontology_validated_source_ent,
+                    belongs_to_set=data_chunk.belongs_to_set,
                 )
 
                 added_nodes_map[entity_node_key] = entity_node
@@ -174,6 +176,7 @@ def expand_with_nodes_and_edges(
                                 name=ont_node_name,
                                 description=ont_node_name,
                                 ontology_valid=True,
+                                belongs_to_set=data_chunk.belongs_to_set,
                             )
 
                 for source, relation, target in ontology_entity_edges:

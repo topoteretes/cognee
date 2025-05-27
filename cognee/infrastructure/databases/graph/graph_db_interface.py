@@ -2,7 +2,7 @@ import inspect
 from functools import wraps
 from abc import abstractmethod, ABC
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Type
 from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -181,6 +181,13 @@ class GraphDBInterface(ABC):
     @abstractmethod
     async def get_neighbors(self, node_id: str) -> List[NodeData]:
         """Get all neighboring nodes."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """Get nodeset subgraph"""
         raise NotImplementedError
 
     @abstractmethod

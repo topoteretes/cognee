@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Type, List
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import summarize_text
@@ -13,12 +13,16 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         system_prompt_path: str = "answer_simple_question.txt",
         summarize_prompt_path: str = "summarize_search_results.txt",
         top_k: Optional[int] = 5,
+        node_type: Optional[Type] = None,
+        node_name: Optional[List[str]] = None,
     ):
         """Initialize retriever with default prompt paths and search parameters."""
         super().__init__(
             user_prompt_path=user_prompt_path,
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         )
         self.summarize_prompt_path = summarize_prompt_path
 

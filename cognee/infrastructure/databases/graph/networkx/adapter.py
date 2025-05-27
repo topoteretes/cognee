@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 import os
 import json
 import asyncio
+
+from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 from cognee.shared.logging_utils import get_logger
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List, Union, Type, Tuple
 from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
@@ -395,6 +397,12 @@ class NetworkXAdapter(GraphDBInterface):
         except Exception as error:
             logger.error("Failed to delete graph: %s", error)
             raise error
+
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """Get nodeset subgraph"""
+        raise NodesetFilterNotSupportedError
 
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]

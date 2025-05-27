@@ -4,7 +4,7 @@ import json
 from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Type, Tuple
 from contextlib import asynccontextmanager
 from uuid import UUID
 from neo4j import AsyncSession
@@ -13,6 +13,7 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 
 logger = get_logger("MemgraphAdapter", level=ERROR)
 
@@ -481,6 +482,12 @@ class MemgraphAdapter(GraphDBInterface):
         ]
 
         return (nodes, edges)
+
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """Get nodeset subgraph"""
+        raise NodesetFilterNotSupportedError
 
     async def get_filtered_graph_data(self, attribute_filters):
         """
