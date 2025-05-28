@@ -46,9 +46,6 @@ else:
         name: str
         type: str
         description: str
-        properties: Optional[Dict[str, Any]] = Field(
-            None, description="A dictionary of properties associated with the node."
-        )
 
     class Edge(BaseModel):
         """Edge in a knowledge graph."""
@@ -56,9 +53,16 @@ else:
         source_node_id: str
         target_node_id: str
         relationship_name: str
-        properties: Optional[Dict[str, Any]] = Field(
-            None, description="A dictionary of properties associated with the edge."
-        )
+
+    class NodeList(BaseModel):
+        """Nodes"""
+
+        nodes: List[Node] = Field(..., default_factory=list)
+
+    class EdgeList(BaseModel):
+        """Nodes"""
+
+        edges: List[Edge] = Field(..., default_factory=list)
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""

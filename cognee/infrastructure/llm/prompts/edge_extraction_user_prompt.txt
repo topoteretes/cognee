@@ -1,0 +1,7 @@
+<TEXT>
+`{{text}}`
+</TEXT>
+
+<ENTITIES>
+`{{final_nodes}}`
+</ENTITIES>
