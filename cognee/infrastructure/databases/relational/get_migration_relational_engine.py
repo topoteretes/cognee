@@ -3,6 +3,18 @@ from .create_relational_engine import create_relational_engine
 
 
 def get_migration_relational_engine():
+    """
+    Create and return a relational database engine using the migration configuration.
+
+    This function fetches the migration configuration details and uses them to create a
+    relational database engine. It does not explicitly handle exceptions but may propagate
+    any errors raised in the underlying functions.
+
+    Returns:
+    --------
+
+        A relational database engine instance configured with the migration settings.
+    """
     migration_config = get_migration_config()
 
     return create_relational_engine(

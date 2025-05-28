@@ -8,6 +8,20 @@ logger = get_logger()
 
 
 def get_max_chunk_tokens():
+    """
+    Calculate the maximum number of tokens allowed in a chunk.
+
+    The function determines the maximum chunk size based on the maximum token limit of the
+    embedding engine and half of the LLM maximum context token size. It ensures that the
+    chunk size does not exceed these constraints.
+
+    Returns:
+    --------
+
+        - int: The maximum number of tokens that can be included in a chunk, determined by
+          the smaller value of the embedding engine's max tokens and half of the LLM's
+          maximum tokens.
+    """
     # Calculate max chunk size based on the following formula
     embedding_engine = get_vector_engine().embedding_engine
     llm_client = get_llm_client()
@@ -22,10 +36,21 @@ def get_max_chunk_tokens():
 
 def get_model_max_tokens(model_name: str):
     """
-    Args:
-        model_name: name of LLM or embedding model
+    Retrieve the maximum token limit for a specified model name if it exists.
 
-    Returns: Number of max tokens of model, or None if model is unknown
+    Checks if the provided model name is present in the predefined model cost dictionary. If
+    found, it logs the maximum token count for that model and returns it. If the model name
+    is not recognized, it logs an informational message and returns None.
+
+    Parameters:
+    -----------
+
+        - model_name (str): Name of LLM or embedding model
+
+    Returns:
+    --------
+
+        Number of max tokens of model, or None if model is unknown
     """
     max_tokens = None
 
@@ -39,6 +64,13 @@ def get_model_max_tokens(model_name: str):
 
 
 async def test_llm_connection():
+    """
+    Establish a connection to the LLM and create a structured output.
+
+    Attempt to connect to the LLM client and uses the adapter to create a structured output
+    with a predefined text input and system prompt. Log any exceptions encountered during
+    the connection attempt and re-raise the exception for further handling.
+    """
     try:
         llm_adapter = get_llm_client()
         await llm_adapter.acreate_structured_output(
@@ -54,6 +86,12 @@ async def test_llm_connection():
 
 
 async def test_embedding_connection():
+    """
+    Test the connection to the embedding engine by embedding a sample text.
+
+    Handles exceptions that may occur during the operation, logs the error, and re-raises
+    the exception if the connection to the embedding handler cannot be established.
+    """
     try:
         await get_vector_engine().embedding_engine.embed_text("test")
     except Exception as e:
