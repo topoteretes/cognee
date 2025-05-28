@@ -31,14 +31,6 @@ def get_add_router() -> APIRouter:
         if not datasetId and not datasetName:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
-        if datasetId:
-            dataset = await get_dataset(user_id=user.id, dataset_id=datasetId)
-            try:
-                # Test accessing id value to see if dataset object exists
-                dataset_id = dataset.id  # noqa: F841
-            except IndexError:
-                raise ValueError("No dataset found with the provided datasetName.")
-
         try:
             if isinstance(data, str) and data.startswith("http"):
                 if "github" in data:
