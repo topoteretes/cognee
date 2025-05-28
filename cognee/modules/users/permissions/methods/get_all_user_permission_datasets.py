@@ -19,8 +19,6 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
         datasets.extend(await get_principal_datasets(tenant, permission_type))
         # Get all datasets Users roles have access to
         for role_name in user.roles:
-            # TODO: user.roles in pydantic is mapped to Role objects, but in our backend it's used by role name only
-            #       Make user.roles uniform in usage across cognee lib + backend
             role = await get_role(user.tenant_id, role_name)
             datasets.extend(await get_principal_datasets(role, permission_type))
 
