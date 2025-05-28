@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import Depends
@@ -10,6 +11,7 @@ from cognee.shared.data_models import KnowledgeGraph
 
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
+    dataset_ids: Optional[List[UUID]]
     graph_model: Optional[BaseModel] = KnowledgeGraph
 
 
@@ -22,7 +24,9 @@ def get_cognify_router() -> APIRouter:
         from cognee.api.v1.cognify import cognify as cognee_cognify
 
         try:
-            await cognee_cognify(payload.datasets, user, payload.graph_model)
+            # Send dataset UUIDs if they are given, if not send dataset names
+            datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
+            await cognee_cognify(datasets, user, payload.graph_model)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 
