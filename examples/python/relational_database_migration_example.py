@@ -1,7 +1,6 @@
 import asyncio
 import cognee
 import os
-import logging
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.api.v1.visualize.visualize import visualize_graph
@@ -10,13 +9,12 @@ from cognee.infrastructure.databases.relational import (
 )
 
 from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import get_default_user
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
 )
 from cognee.infrastructure.databases.vector.pgvector import (
-    create_db_and_tables as create_pgvector_db_and_tables,
+    create_db_and_tables as create_vector_db_and_tables,
 )
 
 # Prerequisites:
@@ -25,17 +23,23 @@ from cognee.infrastructure.databases.vector.pgvector import (
 #    LLM_API_KEY = "your_key_here"
 # 3. Fill all relevant MIGRATION_DB information for the database you want to migrate to graph / Cognee
 
+# NOTE: If you don't have a DB you want to migrate you can try it out with our
+#       test database at the following location:
+#           MIGRATION_DB_PATH="/{path_to_your_local_cognee}/cognee/tests/test_data"
+#           MIGRATION_DB_NAME="migration_database.sqlite"
+#           MIGRATION_DB_PROVIDER="sqlite"
+
 
 async def main():
     engine = get_migration_relational_engine()
 
+    # Clean all data stored in Cognee
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # Needed to create principals table
-    # Create tables for databases
+    # Needed to create appropriate tables only on the Cognee side
     await create_relational_db_and_tables()
-    await create_pgvector_db_and_tables()
+    await create_vector_db_and_tables()
 
     print("\nExtracting schema of database to migrate.")
     schema = await engine.extract_schema()
@@ -57,8 +61,11 @@ async def main():
     await visualize_graph(destination_file_path)
     print(f"Visualization can be found at: {destination_file_path}")
 
+    # Make sure to set top_k at a high value for a broader search, the default value is only 10!
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="What kind of data do you contain?"
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What kind of data do you contain?",
+        top_k=1000,
     )
     print(f"Search results: {search_results}")
 
