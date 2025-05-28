@@ -61,6 +61,7 @@ async def main():
     await visualize_graph(destination_file_path)
     print(f"Visualization can be found at: {destination_file_path}")
 
+    # Make sure to set top_k at a high value for a broader search, the default value is only 10!
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What kind of data do you contain?",
