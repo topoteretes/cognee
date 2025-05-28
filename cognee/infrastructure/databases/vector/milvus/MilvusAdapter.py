@@ -16,12 +16,40 @@ logger = get_logger("MilvusAdapter")
 
 
 class IndexSchema(DataPoint):
+    """
+    Represent a schema for an index that includes text data and associated metadata.
+
+    This class inherits from DataPoint and includes attributes for text and metadata. It
+    defines the structure of the data points used in the index, holding the text as a string
+    and metadata as a dictionary with predefined index fields.
+    """
+
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
 
 
 class MilvusAdapter(VectorDBInterface):
+    """
+    Interface for interacting with a Milvus vector database.
+
+    Public methods:
+
+    - __init__
+    - get_milvus_client
+    - embed_data
+    - has_collection
+    - create_collection
+    - create_data_points
+    - create_vector_index
+    - index_data_points
+    - retrieve
+    - search
+    - batch_search
+    - delete_data_points
+    - prune
+    """
+
     name = "Milvus"
     url: str
     api_key: Optional[str]
@@ -34,6 +62,16 @@ class MilvusAdapter(VectorDBInterface):
         self.embedding_engine = embedding_engine
 
     def get_milvus_client(self):
+        """
+        Retrieve a Milvus client instance.
+
+        Returns a MilvusClient object configured with the provided URL and optional API key.
+
+        Returns:
+        --------
+
+            A MilvusClient instance.
+        """
         from pymilvus import MilvusClient
 
         if self.api_key:
@@ -43,9 +81,40 @@ class MilvusAdapter(VectorDBInterface):
         return client
 
     async def embed_data(self, data: List[str]) -> list[list[float]]:
+        """
+        Embed a list of text data into vectors asynchronously.
+
+        Accepts a list of strings and utilizes the embedding engine to convert them into
+        vectors.
+
+        Parameters:
+        -----------
+
+            - data (List[str]): A list of textual data to be embedded into vectors.
+
+        Returns:
+        --------
+
+            - list[list[float]]: A list of lists containing embedded vectors.
+        """
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
+        """
+        Check if a collection exists in the database asynchronously.
+
+        Returns a boolean indicating whether the specified collection is present.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to check for its existence.
+
+        Returns:
+        --------
+
+            - bool: True if the collection exists, False otherwise.
+        """
         future = asyncio.Future()
         client = self.get_milvus_client()
         future.set_result(client.has_collection(collection_name=collection_name))
@@ -57,6 +126,24 @@ class MilvusAdapter(VectorDBInterface):
         collection_name: str,
         payload_schema=None,
     ):
+        """
+        Create a new collection in the vector database asynchronously.
+
+        Raises a MilvusException if there are issues creating the collection, such as already
+        existing collection.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to be created.
+            - payload_schema: Optional schema for the collection, defaults to None if not
+              provided. (default None)
+
+        Returns:
+        --------
+
+            True if the collection is created successfully, otherwise returns None.
+        """
         from pymilvus import DataType, MilvusException
 
         client = self.get_milvus_client()
@@ -97,6 +184,24 @@ class MilvusAdapter(VectorDBInterface):
             raise e
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        """
+        Insert multiple data points into a specified collection asynchronously.
+
+        Raises CollectionNotFoundError if the specified collection does not exist.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection where data points will be
+              inserted.
+            - data_points (List[DataPoint]): A list of DataPoint objects to be inserted into the
+              collection.
+
+        Returns:
+        --------
+
+            The result of the insert operation, includes count of inserted data points.
+        """
         from pymilvus import MilvusException, exceptions
 
         client = self.get_milvus_client()
@@ -130,11 +235,30 @@ class MilvusAdapter(VectorDBInterface):
             raise e
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
+        """
+        Create a vector index for a given collection asynchronously.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The name of the vector index being created.
+            - index_property_name (str): The property name associated with the index.
+        """
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: List[DataPoint]
     ):
+        """
+        Index the provided data points into the collection based on index names asynchronously.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The name of the index where data points will be indexed.
+            - index_property_name (str): The property name associated with the index.
+            - data_points (List[DataPoint]): A list of DataPoint objects to be indexed.
+        """
         formatted_data_points = [
             IndexSchema(
                 id=data_point.id,
@@ -146,6 +270,24 @@ class MilvusAdapter(VectorDBInterface):
         await self.create_data_points(collection_name, formatted_data_points)
 
     async def retrieve(self, collection_name: str, data_point_ids: list[UUID]):
+        """
+        Retrieve data points from a collection based on their IDs asynchronously.
+
+        Raises CollectionNotFoundError if the specified collection does not exist.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection from which data points will be
+              retrieved.
+            - data_point_ids (list[UUID]): A list of UUIDs representing the IDs of the data
+              points to be retrieved.
+
+        Returns:
+        --------
+
+            The results of the query, including the requested data points.
+        """
         from pymilvus import MilvusException, exceptions
 
         client = self.get_milvus_client()
@@ -176,6 +318,29 @@ class MilvusAdapter(VectorDBInterface):
         limit: int = 15,
         with_vector: bool = False,
     ):
+        """
+        Search for data points in a collection based on a text query or vector asynchronously.
+
+        Raises ValueError if neither query_text nor query_vector is provided. Raises
+        MilvusException for errors during the search process.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to search within.
+            - query_text (Optional[str]): Optional text query used for searching, defaults to
+              None. (default None)
+            - query_vector (Optional[List[float]]): Optional vector query used for searching,
+              defaults to None. (default None)
+            - limit (int): Maximum number of results to return, defaults to 15. (default 15)
+            - with_vector (bool): Flag to indicate if the vector should be included in the
+              results, defaults to False. (default False)
+
+        Returns:
+        --------
+
+            A list of scored results that match the query; may include vector data if requested.
+        """
         from pymilvus import MilvusException, exceptions
 
         if limit <= 0:
@@ -234,6 +399,27 @@ class MilvusAdapter(VectorDBInterface):
     async def batch_search(
         self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
     ):
+        """
+        Perform a batch search in a collection for multiple textual queries asynchronously.
+
+        Utilizes embed_data to convert texts into vectors and returns the search results for
+        each query.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection where the search will be
+              performed.
+            - query_texts (List[str]): A list of texts to search for in the collection.
+            - limit (int): Maximum number of results to return per query.
+            - with_vectors (bool): Specifies if the vectors should be included in the search
+              results, defaults to False. (default False)
+
+        Returns:
+        --------
+
+            A list of search result sets, one for each query input.
+        """
         query_vectors = await self.embed_data(query_texts)
 
         return await asyncio.gather(
@@ -249,6 +435,24 @@ class MilvusAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        """
+        Delete specific data points from a collection based on their IDs asynchronously.
+
+        Raises MilvusException for errors during the deletion process.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection from which data points will be
+              deleted.
+            - data_point_ids (list[UUID]): A list of UUIDs representing the IDs of the data
+              points to be deleted.
+
+        Returns:
+        --------
+
+            The result of the delete operation, indicating success or failure.
+        """
         from pymilvus import MilvusException
 
         client = self.get_milvus_client()
@@ -268,6 +472,9 @@ class MilvusAdapter(VectorDBInterface):
             raise e
 
     async def prune(self):
+        """
+        Remove all collections from the connected Milvus client asynchronously.
+        """
         client = self.get_milvus_client()
         if client:
             collections = client.list_collections()

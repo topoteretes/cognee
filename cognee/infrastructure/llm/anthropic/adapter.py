@@ -9,7 +9,10 @@ from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_r
 
 
 class AnthropicAdapter(LLMInterface):
-    """Adapter for Anthropic API"""
+    """
+    Adapter for interfacing with the Anthropic API, enabling structured output generation
+    and prompt display.
+    """
 
     name = "Anthropic"
     model: str
@@ -29,7 +32,22 @@ class AnthropicAdapter(LLMInterface):
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
-        """Generate a response from a user query."""
+        """
+        Generate a response from a user query.
+
+        Parameters:
+        -----------
+
+            - text_input (str): The input text from the user to be processed.
+            - system_prompt (str): A prompt that sets the context for the query.
+            - response_model (Type[BaseModel]): The model to structure the response according to
+              its format.
+
+        Returns:
+        --------
+
+            - BaseModel: An instance of BaseModel containing the structured response.
+        """
 
         return await self.aclient(
             model=self.model,
@@ -46,7 +64,21 @@ class AnthropicAdapter(LLMInterface):
         )
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """Format and display the prompt for a user query."""
+        """
+        Format and display the prompt for a user query.
+
+        Parameters:
+        -----------
+
+            - text_input (str): The input text from the user, defaults to a placeholder if
+              empty.
+            - system_prompt (str): The path to the system prompt to be read and formatted.
+
+        Returns:
+        --------
+
+            - str: A formatted string displaying the system prompt and user input.
+        """
 
         if not text_input:
             text_input = "No user input provided."
