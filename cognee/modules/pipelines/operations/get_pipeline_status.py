@@ -5,7 +5,7 @@ from ..models import PipelineRun
 from sqlalchemy.orm import aliased
 
 
-async def get_pipeline_status(dataset_ids: list[UUID]):
+async def get_pipeline_status(dataset_ids: list[UUID], pipeline_name: str):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
@@ -20,6 +20,7 @@ async def get_pipeline_status(dataset_ids: list[UUID]):
                 .label("rn"),
             )
             .filter(PipelineRun.dataset_id.in_(dataset_ids))
+            .filter(PipelineRun.pipeline_name == pipeline_name)
             .subquery()
         )
 

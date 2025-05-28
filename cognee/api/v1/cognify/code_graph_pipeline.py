@@ -1,19 +1,19 @@
 import os
 import pathlib
 import asyncio
-from cognee.shared.logging_utils import get_logger
 from uuid import NAMESPACE_OID, uuid5
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability.get_observe import get_observe
 
 from cognee.api.v1.search import SearchType, search
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.base_config import get_base_config
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.data_models import KnowledgeGraph, MonitoringTool
-from cognee.shared.utils import render_graph
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
+from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.ingestion import ingest_data
 from cognee.tasks.repo_processor import get_non_py_files, get_repo_file_dependencies
@@ -22,11 +22,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
-monitoring = get_base_config().monitoring_tool
-
-if monitoring == MonitoringTool.LANGFUSE:
-    from langfuse.decorators import observe
-
+observe = get_observe()
 
 logger = get_logger("code_graph_pipeline")
 
@@ -69,7 +65,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
             ),
         ]
 
-    dataset_id = uuid5(NAMESPACE_OID, "codebase")
+    dataset_id = await get_unique_dataset_id("codebase", user)
 
     if include_docs:
         non_code_pipeline_run = run_tasks(

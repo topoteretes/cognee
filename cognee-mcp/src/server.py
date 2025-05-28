@@ -1,249 +1,164 @@
-import asyncio
 import json
 import os
 import sys
+import argparse
 import cognee
+import asyncio
 from cognee.shared.logging_utils import get_logger, get_log_file_location
 import importlib.util
 from contextlib import redirect_stdout
-
-# from PIL import Image as PILImage
 import mcp.types as types
-from mcp.server import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
+from mcp.server import FastMCP
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
-mcp = Server("cognee")
+mcp = FastMCP("Cognee")
 
 logger = get_logger()
+log_file = get_log_file_location()
 
 
-@mcp.list_tools()
-async def list_tools() -> list[types.Tool]:
-    return [
-        types.Tool(
-            name="cognify",
-            description="Cognifies text into knowledge graph",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "The text to cognify",
-                    },
-                    "graph_model_file": {
-                        "type": "string",
-                        "description": "The path to the graph model file",
-                    },
-                    "graph_model_name": {
-                        "type": "string",
-                        "description": "The name of the graph model",
-                    },
-                },
-                "required": ["text"],
-            },
-        ),
-        types.Tool(
-            name="codify",
-            description="Transforms codebase into knowledge graph",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo_path": {
-                        "type": "string",
-                    },
-                },
-                "required": ["repo_path"],
-            },
-        ),
-        types.Tool(
-            name="search",
-            description="Searches for information in knowledge graph",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "search_query": {
-                        "type": "string",
-                        "description": "The query to search for",
-                    },
-                    "search_type": {
-                        "type": "string",
-                        "description": "The type of search to perform (e.g., INSIGHTS, CODE)",
-                    },
-                },
-                "required": ["search_query"],
-            },
-        ),
-        types.Tool(
-            name="prune",
-            description="Prunes knowledge graph",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-    ]
-
-
-@mcp.call_tool()
-async def call_tools(name: str, arguments: dict) -> list[types.TextContent]:
-    try:
+@mcp.tool()
+async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> list:
+    async def cognify_task(
+        text: str, graph_model_file: str = None, graph_model_name: str = None
+    ) -> str:
+        """Build knowledge graph from the input text"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
-            log_file = get_log_file_location()
+            logger.info("Cognify process starting.")
+            if graph_model_file and graph_model_name:
+                graph_model = load_class(graph_model_file, graph_model_name)
+            else:
+                graph_model = KnowledgeGraph
 
-            if name == "cognify":
-                asyncio.create_task(
-                    cognify(
-                        text=arguments["text"],
-                        graph_model_file=arguments.get("graph_model_file"),
-                        graph_model_name=arguments.get("graph_model_name"),
-                    )
-                )
+            await cognee.add(text)
 
-                text = (
-                    f"Background process launched due to MCP timeout limitations.\n"
-                    f"Average completion time is around 4 minutes.\n"
-                    f"For current cognify status you can check the log file at: {log_file}"
-                )
+            try:
+                await cognee.cognify(graph_model=graph_model)
+                logger.info("Cognify process finished.")
+            except Exception as e:
+                logger.error("Cognify process failed.")
+                raise ValueError(f"Failed to cognify: {str(e)}")
 
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=text,
-                    )
-                ]
-            if name == "codify":
-                asyncio.create_task(codify(arguments.get("repo_path")))
-
-                text = (
-                    f"Background process launched due to MCP timeout limitations.\n"
-                    f"Average completion time is around 4 minutes.\n"
-                    f"For current codify status you can check the log file at: {log_file}"
-                )
-
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=text,
-                    )
-                ]
-            elif name == "search":
-                search_results = await search(arguments["search_query"], arguments["search_type"])
-
-                return [types.TextContent(type="text", text=search_results)]
-            elif name == "prune":
-                await prune()
-
-                return [types.TextContent(type="text", text="Pruned")]
-    except Exception as e:
-        logger.error(f"Error calling tool '{name}': {str(e)}")
-        return [types.TextContent(type="text", text=f"Error calling tool '{name}': {str(e)}")]
-
-
-async def cognify(text: str, graph_model_file: str = None, graph_model_name: str = None) -> str:
-    """Build knowledge graph from the input text"""
-    # NOTE: MCP uses stdout to communicate, we must redirect all output
-    #       going to stdout ( like the print function ) to stderr.
-    #       As cognify is an async background job the output had to be redirected again.
-    with redirect_stdout(sys.stderr):
-        logger.info("Cognify process starting.")
-        if graph_model_file and graph_model_name:
-            graph_model = load_class(graph_model_file, graph_model_name)
-        else:
-            graph_model = KnowledgeGraph
-
-        await cognee.add(text)
-
-        try:
-            await cognee.cognify(graph_model=graph_model)
-            logger.info("Cognify process finished.")
-        except Exception as e:
-            logger.error("Cognify process failed.")
-            raise ValueError(f"Failed to cognify: {str(e)}")
-
-
-async def codify(repo_path: str):
-    # NOTE: MCP uses stdout to communicate, we must redirect all output
-    #       going to stdout ( like the print function ) to stderr.
-    #       As codify is an async background job the output had to be redirected again.
-    with redirect_stdout(sys.stderr):
-        logger.info("Codify process starting.")
-        results = []
-        async for result in run_code_graph_pipeline(repo_path, False):
-            results.append(result)
-            logger.info(result)
-        if all(results):
-            logger.info("Codify process finished succesfully.")
-        else:
-            logger.info("Codify process failed.")
-
-
-async def search(search_query: str, search_type: str) -> str:
-    """Search the knowledge graph"""
-    # NOTE: MCP uses stdout to communicate, we must redirect all output
-    #       going to stdout ( like the print function ) to stderr.
-    with redirect_stdout(sys.stderr):
-        search_results = await cognee.search(
-            query_type=SearchType[search_type.upper()], query_text=search_query
+    asyncio.create_task(
+        cognify_task(
+            text=text,
+            graph_model_file=graph_model_file,
+            graph_model_name=graph_model_name,
         )
+    )
 
-        if search_type.upper() == "CODE":
-            return json.dumps(search_results, cls=JSONEncoder)
-        elif search_type.upper() == "GRAPH_COMPLETION" or search_type.upper() == "RAG_COMPLETION":
-            return search_results[0]
-        else:
-            results = retrieved_edges_to_string(search_results)
-            return results
+    text = (
+        f"Background process launched due to MCP timeout limitations.\n"
+        f"To check current cognify status use the cognify_status tool\n"
+        f"or check the log file at: {log_file}"
+    )
+
+    return [
+        types.TextContent(
+            type="text",
+            text=text,
+        )
+    ]
 
 
-async def prune():
-    """Reset the knowledge graph"""
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+@mcp.tool()
+async def codify(repo_path: str) -> list:
+    async def codify_task(repo_path: str):
+        # NOTE: MCP uses stdout to communicate, we must redirect all output
+        #       going to stdout ( like the print function ) to stderr.
+        with redirect_stdout(sys.stderr):
+            logger.info("Codify process starting.")
+            results = []
+            async for result in run_code_graph_pipeline(repo_path, False):
+                results.append(result)
+                logger.info(result)
+            if all(results):
+                logger.info("Codify process finished succesfully.")
+            else:
+                logger.info("Codify process failed.")
+
+    asyncio.create_task(codify_task(repo_path))
+
+    text = (
+        f"Background process launched due to MCP timeout limitations.\n"
+        f"To check current codify status use the codify_status tool\n"
+        f"or you can check the log file at: {log_file}"
+    )
+
+    return [
+        types.TextContent(
+            type="text",
+            text=text,
+        )
+    ]
 
 
-async def main():
-    try:
-        from mcp.server.stdio import stdio_server
-
-        logger.info("Cognee MCP server started...")
-
-        async with stdio_server() as (read_stream, write_stream):
-            await mcp.run(
-                read_stream=read_stream,
-                write_stream=write_stream,
-                initialization_options=InitializationOptions(
-                    server_name="cognee",
-                    server_version="0.1.0",
-                    capabilities=mcp.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={},
-                    ),
-                ),
-                raise_exceptions=True,
+@mcp.tool()
+async def search(search_query: str, search_type: str) -> list:
+    async def search_task(search_query: str, search_type: str) -> str:
+        """Search the knowledge graph"""
+        # NOTE: MCP uses stdout to communicate, we must redirect all output
+        #       going to stdout ( like the print function ) to stderr.
+        with redirect_stdout(sys.stderr):
+            search_results = await cognee.search(
+                query_type=SearchType[search_type.upper()], query_text=search_query
             )
 
-            logger.info("Cognee MCP server closed.")
+            if search_type.upper() == "CODE":
+                return json.dumps(search_results, cls=JSONEncoder)
+            elif (
+                search_type.upper() == "GRAPH_COMPLETION" or search_type.upper() == "RAG_COMPLETION"
+            ):
+                return search_results[0]
+            elif search_type.upper() == "CHUNKS":
+                return str(search_results)
+            elif search_type.upper() == "INSIGHTS":
+                results = retrieved_edges_to_string(search_results)
+                return results
+            else:
+                return str(search_results)
 
-    except Exception as e:
-        logger.error(f"Server failed to start: {str(e)}", exc_info=True)
-        raise
+    search_results = await search_task(search_query, search_type)
+    return [types.TextContent(type="text", text=search_results)]
 
 
-# async def visualize() -> Image:
-#     """Visualize the knowledge graph"""
-#     try:
-#         image_path = await cognee.visualize_graph()
+@mcp.tool()
+async def prune():
+    """Reset the knowledge graph"""
+    with redirect_stdout(sys.stderr):
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        return [types.TextContent(type="text", text="Pruned")]
 
-#         img = PILImage.open(image_path)
-#         return Image(data=img.tobytes(), format="png")
-#     except (FileNotFoundError, IOError, ValueError) as e:
-#       raise ValueError(f"Failed to create visualization: {str(e)}")
+
+@mcp.tool()
+async def cognify_status():
+    """Get status of cognify pipeline"""
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        status = await get_pipeline_status(
+            [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
+        )
+        return [types.TextContent(type="text", text=str(status))]
+
+
+@mcp.tool()
+async def codify_status():
+    """Get status of codify pipeline"""
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        status = await get_pipeline_status(
+            [await get_unique_dataset_id("codebase", user)], "cognify_code_pipeline"
+        )
+        return [types.TextContent(type="text", text=str(status))]
 
 
 def node_to_string(node):
@@ -261,6 +176,7 @@ def retrieved_edges_to_string(search_results):
         relationship_type = edge["relationship_name"]
         edge_str = f"{node_to_string(node1)} {relationship_type} {node_to_string(node2)}"
         edge_strings.append(edge_str)
+
     return "\n".join(edge_strings)
 
 
@@ -275,32 +191,31 @@ def load_class(model_file, model_name):
     return model_class
 
 
-# def get_freshest_png(directory: str) -> Image:
-#     if not os.path.exists(directory):
-#         raise FileNotFoundError(f"Directory {directory} does not exist")
+async def main():
+    parser = argparse.ArgumentParser()
 
-#     # List all files in 'directory' that end with .png
-#     files = [f for f in os.listdir(directory) if f.endswith(".png")]
-#     if not files:
-#         raise FileNotFoundError("No PNG files found in the given directory.")
+    parser.add_argument(
+        "--transport",
+        choices=["sse", "stdio"],
+        default="stdio",
+        help="Transport to use for communication with the client. (default: stdio)",
+    )
 
-#     # Sort by integer value of the filename (minus the '.png')
-#     # Example filename: 1673185134.png -> integer 1673185134
-#     try:
-#         files_sorted = sorted(files, key=lambda x: int(x.replace(".png", "")))
-#     except ValueError as e:
-#         raise ValueError("Invalid PNG filename format. Expected timestamp format.") from e
+    args = parser.parse_args()
 
-#     # The "freshest" file has the largest timestamp
-#     freshest_filename = files_sorted[-1]
-#     freshest_path = os.path.join(directory, freshest_filename)
+    logger.info(f"Starting MCP server with transport: {args.transport}")
+    if args.transport == "stdio":
+        await mcp.run_stdio_async()
+    elif args.transport == "sse":
+        logger.info(
+            f"Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}"
+        )
+        await mcp.run_sse_async()
 
-#     # Open the image with PIL and return the PIL Image object
-#     try:
-#         return PILImage.open(freshest_path)
-#     except (IOError, OSError) as e:
-#         raise IOError(f"Failed to open PNG file {freshest_path}") from e
 
 if __name__ == "__main__":
-    # Initialize and run the server
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"Error initializing Cognee MCP server: {str(e)}")
+        raise

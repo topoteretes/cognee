@@ -9,9 +9,9 @@ from cognee.infrastructure.databases.vector.exceptions.exceptions import Collect
 class SummariesRetriever(BaseRetriever):
     """Retriever for handling summary-based searches."""
 
-    def __init__(self, limit: int = 5):
+    def __init__(self, top_k: int = 5):
         """Initialize retriever with search parameters."""
-        self.limit = limit
+        self.top_k = top_k
 
     async def get_context(self, query: str) -> Any:
         """Retrieves summary context based on the query."""
@@ -19,7 +19,7 @@ class SummariesRetriever(BaseRetriever):
 
         try:
             summaries_results = await vector_engine.search(
-                "TextSummary_text", query, limit=self.limit
+                "TextSummary_text", query, limit=self.top_k
             )
         except CollectionNotFoundError as error:
             raise NoDataError("No data found in the system, please add data first.") from error

@@ -7,8 +7,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - .:/app
-      - /app/cognee-frontend/ # Ignore frontend code
+      - ./cognee:/app/cognee
+      - .env:/app/.env
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
@@ -16,7 +16,7 @@ services:
       - PYTHONPATH=.
     extra_hosts:
       # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     ports:
       - 8000:8000
     deploy:

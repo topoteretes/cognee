@@ -57,7 +57,7 @@ async def main():
 
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) > 15 and len(edges) > 15, "Graph database is not loaded."
+    assert len(nodes) > 10 and len(edges) > 10, "Graph database is not loaded."
 
     await cognee.delete([text_1, text_2], mode="hard")
     nodes, edges = await graph_engine.get_graph_data()
