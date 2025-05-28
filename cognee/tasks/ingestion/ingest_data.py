@@ -23,8 +23,8 @@ async def ingest_data(
     data: Any,
     dataset_name: str,
     user: User,
-    dataset_id: UUID = None,
     node_set: Optional[List[str]] = None,
+    dataset_id: UUID = None,
 ):
     destination = get_dlt_destination()
 
@@ -119,6 +119,9 @@ async def ingest_data(
                         dataset = await get_specific_user_permission_datasets(
                             user.id, "write", [dataset_id]
                         )
+                        # Convert from list to Dataset element
+                        if isinstance(dataset, list):
+                            dataset = dataset[0]
                     else:
                         # Create new one
                         dataset = await create_dataset(dataset_name, user, session)
@@ -155,6 +158,7 @@ async def ingest_data(
                             node_set=json.dumps(node_set) if node_set else None,
                             token_count=-1,
                         )
+                        session.add(data_point)
 
                     # Check if data is already in dataset
                     dataset_data = (
@@ -167,6 +171,7 @@ async def ingest_data(
                     # If data is not present in dataset add it
                     if dataset_data is None:
                         dataset.data.append(data_point)
+                        await session.merge(dataset)
 
                     await session.commit()
 

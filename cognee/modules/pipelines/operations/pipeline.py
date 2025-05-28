@@ -1,5 +1,5 @@
 import asyncio
-from typing import Union
+from typing import Union, List
 from uuid import NAMESPACE_OID, uuid5, UUID
 
 from cognee.exceptions import InvalidValueError
@@ -71,8 +71,8 @@ async def cognee_pipeline(
     if user is None:
         user = await get_default_user()
 
-    # Convert datasets to list in case it's a string
-    if isinstance(datasets, str):
+    # Convert datasets to list
+    if isinstance(datasets, str) or isinstance(datasets, UUID):
         datasets = [datasets]
 
     # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)
@@ -83,35 +83,11 @@ async def cognee_pipeline(
         # Get datasets from database if none sent.
         datasets = existing_datasets
     else:
-        # If dataset is already in database, use it, otherwise create a new instance.
-        dataset_instances = []
+        # If dataset matches an existing Dataset (by name or id), reuse it. Otherwise, create a new Dataset.
+        datasets = await load_or_create_datasets(datasets, existing_datasets, user)
 
-        for dataset_name in datasets:
-            is_dataset_found = False
-
-            for existing_dataset in existing_datasets:
-                if (
-                    existing_dataset.name == dataset_name
-                    or str(existing_dataset.id) == dataset_name
-                ):
-                    dataset_instances.append(existing_dataset)
-                    is_dataset_found = True
-                    break
-
-            if not is_dataset_found:
-                dataset_instances.append(
-                    Dataset(
-                        id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
-                        name=dataset_name,
-                        owner_id=user.id,
-                    )
-                )
-            else:
-                raise InvalidValueError(
-                    f"Provided dataset is not handled properly: f{dataset_name}"
-                )
-
-        datasets = dataset_instances
+    if not datasets:
+        raise InvalidValueError("There are no datasets to work with.")
 
     awaitables = []
 
@@ -265,3 +241,42 @@ async def get_existing_datasets(
         existing_datasets = await get_all_user_permission_datasets(user, "write")
 
     return existing_datasets
+
+
+async def load_or_create_datasets(
+    dataset_names: List[Union[str, UUID]], existing_datasets: List[Dataset], user
+) -> List[Dataset]:
+    """
+    Given a list of dataset identifiers (names or UUIDs), return Dataset instances:
+      - If an identifier matches an existing Dataset (by name or id), reuse it.
+      - Otherwise, create a new Dataset with a unique id.
+
+    Raises:
+        InvalidValueError: if a UUID is provided but no matching dataset is found.
+    """
+    result: List[Dataset] = []
+
+    for identifier in dataset_names:
+        # Try to find a matching dataset in the existing list
+        # If no matching dataset is found return None
+        match = next(
+            (ds for ds in existing_datasets if ds.name == identifier or ds.id == identifier), None
+        )
+
+        if match:
+            result.append(match)
+            continue
+
+        # If the identifier is a UUID but nothing matched, that's an error
+        if isinstance(identifier, UUID):
+            raise InvalidValueError(f"Dataset with given UUID does not exist: {identifier}")
+
+        # Otherwise, create a new Dataset instance
+        new_dataset = Dataset(
+            id=await get_unique_dataset_id(dataset_name=identifier, user=user),
+            name=identifier,
+            owner_id=user.id,
+        )
+        result.append(new_dataset)
+
+    return result

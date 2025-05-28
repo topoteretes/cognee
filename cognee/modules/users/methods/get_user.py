@@ -20,6 +20,9 @@ async def get_user(user_id: UUID):
                 )
             ).scalar()
 
+            if not user:
+                raise EntityNotFoundError(message=f"Could not find user: {user_id}")
+
             return user
         except sqlalchemy.exc.NoResultFound:
             raise EntityNotFoundError(message=f"Could not find user: {user_id}")

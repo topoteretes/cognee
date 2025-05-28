@@ -2,7 +2,6 @@
 
 import os
 
-import fastapi.exceptions
 import uvicorn
 from cognee.shared.logging_utils import get_logger
 import sentry_sdk

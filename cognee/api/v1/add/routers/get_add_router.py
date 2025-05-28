@@ -31,7 +31,7 @@ def get_add_router() -> APIRouter:
         if not datasetId and not datasetName:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
-        if datasetId and datasetName:
+        if datasetId:
             dataset = await get_dataset(user_id=user.id, dataset_id=datasetId)
             try:
                 # Test accessing id value to see if dataset object exists
@@ -45,6 +45,7 @@ def get_add_router() -> APIRouter:
                     # Perform git clone if the URL is from GitHub
                     repo_name = data.split("/")[-1].replace(".git", "")
                     subprocess.run(["git", "clone", data, f".data/{repo_name}"], check=True)
+                    # TODO: Update add call with dataset info
                     await cognee_add(
                         "data://.data/",
                         f"{repo_name}",
@@ -55,7 +56,7 @@ def get_add_router() -> APIRouter:
                     response.raise_for_status()
 
                     file_data = await response.content()
-
+                    # TODO: Update add call with dataset info
                     return await cognee_add(file_data)
             else:
                 await cognee_add(data, dataset_name=datasetName, user=user, dataset_id=datasetId)
