@@ -224,8 +224,6 @@ async def get_existing_datasets(
         list of Dataset objects
 
     """
-    # TODO: Test 1. add pipeline with: datasetName, datasetName and datasetID
-    #       Test 2. Cognify without dataset info, cognify with datasetIDs user has write and no write access for
     if datasets:
         # Function handles transforming dataset input to dataset IDs (if possible)
         dataset_ids = await get_dataset_ids(datasets, user)
