@@ -1,4 +1,0 @@
-
-<EDGES>
-`{{edges_to_deduplicate}}`
-</EDGES>
