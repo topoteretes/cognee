@@ -58,8 +58,10 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run unit tests
+        shell: bash
         run: poetry run pytest cognee/tests/unit/
         env:
+          PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -74,10 +76,26 @@ jobs:
 
       - name: Run integration tests
         if: ${{ !contains(matrix.os, 'windows') }}
+        shell: bash
         run: poetry run pytest cognee/tests/integration/
+        env:
+          PYTHONUTF8: 1
+          LLM_PROVIDER: openai
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+          EMBEDDING_PROVIDER: openai
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
       - name: Run default basic pipeline
+        shell: bash
         env:
+          PYTHONUTF8: 1
           GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
           GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
 
@@ -95,6 +113,7 @@ jobs:
         run: poetry run python ./cognee/tests/test_library.py
 
       - name: Build with Poetry
+        shell: bash
         run: poetry build
 
       - name: Install Package

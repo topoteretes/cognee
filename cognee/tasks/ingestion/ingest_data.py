@@ -104,7 +104,7 @@ async def ingest_data(
                 db_engine = get_relational_engine()
 
                 async with db_engine.get_async_session() as session:
-                    dataset = await create_dataset(dataset_name, user.id, session)
+                    dataset = await create_dataset(dataset_name, user, session)
 
                     # Check to see if data should be updated
                     data_point = (

@@ -167,6 +167,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
+app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
+
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
     app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])

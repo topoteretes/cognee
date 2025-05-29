@@ -19,10 +19,15 @@ ENV DEBUG=${DEBUG}
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
-    libpq-dev
+    libpq-dev \
+    git \
+    curl \
+    clang \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy pyproject.toml and lockfile first for better caching
-COPY pyproject.toml uv.lock ./
+COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh ./
 
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -31,18 +36,24 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Copy .env file first if it exists (for environment variables)
 COPY .env* /app/
 
+# Copy Alembic configuration
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic
+
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
-COPY . /app
+COPY ./cognee-mcp /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
- 
+
 COPY --from=uv /root/.local /root/.local
 COPY --from=uv /app /app
+
+RUN chmod +x /app/entrypoint.sh
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
@@ -54,4 +65,4 @@ ENV PYTHONPATH=/app
 
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command
-ENTRYPOINT ["cognee"]
+ENTRYPOINT ["/app/entrypoint.sh"]

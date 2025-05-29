@@ -62,6 +62,16 @@ async def extract_graph_from_data(
         *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
 
+    # Note: Filter edges with missing source or target nodes
+    if graph_model == KnowledgeGraph:
+        for graph in chunk_graphs:
+            valid_node_ids = {node.id for node in graph.nodes}
+            graph.edges = [
+                edge
+                for edge in graph.edges
+                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
+            ]
+
     return await integrate_chunk_graphs(
         data_chunks, chunk_graphs, graph_model, ontology_adapter or OntologyResolver()
     )
