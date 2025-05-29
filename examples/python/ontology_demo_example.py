@@ -1,6 +1,5 @@
 import cognee
 import asyncio
-from cognee.modules.metrics.operations import get_pipeline_run_metrics
 from cognee.shared.logging_utils import get_logger
 import os
 
@@ -62,14 +61,10 @@ async def main():
         os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
     )
 
-    pipeline_run = await cognee.cognify(ontology_file_path=ontology_path)
+    await cognee.cognify(ontology_file_path=ontology_path)
     print("Knowledge with ontology created.")
 
-    # Step 4: Calculate descriptive metrics
-    await get_pipeline_run_metrics(pipeline_run, include_optional=True)
-    print("Descriptive graph metrics saved to database.")
-
-    # Step 5: Query insights
+    # Step 4: Query insights
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What are the exact cars and their types produced by Audi?",
