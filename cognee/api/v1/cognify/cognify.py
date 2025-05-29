@@ -18,6 +18,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines import cognee_pipeline
+from cognee.tasks.metrics.calculate_graph_metrics import calculate_graph_metrics
 
 logger = get_logger("cognify")
 
@@ -65,6 +66,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             task_config={"batch_size": 10},
         ),
         Task(add_data_points, task_config={"batch_size": 10}),
+        Task(calculate_graph_metrics),
     ]
 
     return default_tasks
