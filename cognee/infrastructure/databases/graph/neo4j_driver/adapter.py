@@ -31,6 +31,12 @@ logger = get_logger("Neo4jAdapter", level=ERROR)
 
 
 class Neo4jAdapter(GraphDBInterface):
+    """
+    Adapter for interacting with a Neo4j graph database, implementing the GraphDBInterface.
+    This class provides methods for querying, adding, deleting nodes and edges, as well as
+    managing sessions and projecting graphs.
+    """
+
     def __init__(
         self,
         graph_database_url: str,
@@ -46,6 +52,9 @@ class Neo4jAdapter(GraphDBInterface):
 
     @asynccontextmanager
     async def get_session(self) -> AsyncSession:
+        """
+        Get a session for database operations.
+        """
         async with self.driver.session() as session:
             yield session
 
@@ -54,6 +63,22 @@ class Neo4jAdapter(GraphDBInterface):
         query: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Execute a Cypher query against the Neo4j database and return the result.
+
+        Parameters:
+        -----------
+
+            - query (str): A string containing the Cypher query to execute.
+            - params (Optional[Dict[str, Any]]): A dictionary of parameters to be passed to the
+              query. (default None)
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries representing the result of the query
+              execution.
+        """
         try:
             async with self.get_session() as session:
                 result = await session.run(query, parameters=params)
@@ -64,6 +89,19 @@ class Neo4jAdapter(GraphDBInterface):
             raise error
 
     async def has_node(self, node_id: str) -> bool:
+        """
+        Check if a node with the specified ID exists in the database.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to check for existence.
+
+        Returns:
+        --------
+
+            - bool: True if the node exists, otherwise False.
+        """
         results = self.query(
             """
                 MATCH (n)
@@ -75,6 +113,19 @@ class Neo4jAdapter(GraphDBInterface):
         return results[0]["node_exists"] if len(results) > 0 else False
 
     async def add_node(self, node: DataPoint):
+        """
+        Add a new node to the database based on the provided DataPoint object.
+
+        Parameters:
+        -----------
+
+            - node (DataPoint): An instance of DataPoint representing the node to add.
+
+        Returns:
+        --------
+
+            The result of the query execution, typically the ID of the added node.
+        """
         serialized_properties = self.serialize_properties(node.model_dump())
 
         query = dedent(
@@ -96,6 +147,20 @@ class Neo4jAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
+        """
+        Add multiple nodes to the database in a single query.
+
+        Parameters:
+        -----------
+
+            - nodes (list[DataPoint]): A list of DataPoint instances representing the nodes to
+              add.
+
+        Returns:
+        --------
+
+            - None: None
+        """
         query = """
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})
@@ -119,11 +184,37 @@ class Neo4jAdapter(GraphDBInterface):
         return results
 
     async def extract_node(self, node_id: str):
+        """
+        Retrieve a single node from the database by its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to retrieve.
+
+        Returns:
+        --------
+
+            The node represented as a dictionary, or None if it does not exist.
+        """
         results = await self.extract_nodes([node_id])
 
         return results[0] if len(results) > 0 else None
 
     async def extract_nodes(self, node_ids: List[str]):
+        """
+        Retrieve multiple nodes from the database by their IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of IDs for the nodes to retrieve.
+
+        Returns:
+        --------
+
+            A list of nodes represented as dictionaries.
+        """
         query = """
         UNWIND $node_ids AS id
         MATCH (node {id: id})
@@ -136,12 +227,38 @@ class Neo4jAdapter(GraphDBInterface):
         return [result["node"] for result in results]
 
     async def delete_node(self, node_id: str):
+        """
+        Remove a node from the database identified by its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to delete.
+
+        Returns:
+        --------
+
+            The result of the query execution, typically indicating success or failure.
+        """
         query = "MATCH (node {id: $node_id}) DETACH DELETE node"
         params = {"node_id": node_id}
 
         return await self.query(query, params)
 
     async def delete_nodes(self, node_ids: list[str]) -> None:
+        """
+        Delete multiple nodes from the database using their IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): A list of IDs of the nodes to delete.
+
+        Returns:
+        --------
+
+            - None: None
+        """
         query = """
         UNWIND $node_ids AS id
         MATCH (node {id: id})
@@ -152,6 +269,21 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def has_edge(self, from_node: UUID, to_node: UUID, edge_label: str) -> bool:
+        """
+        Check if an edge exists between two nodes with the specified IDs and edge label.
+
+        Parameters:
+        -----------
+
+            - from_node (UUID): The ID of the node from which the edge originates.
+            - to_node (UUID): The ID of the node to which the edge points.
+            - edge_label (str): The label of the edge to check for existence.
+
+        Returns:
+        --------
+
+            - bool: True if the edge exists, otherwise False.
+        """
         query = """
             MATCH (from_node)-[relationship]->(to_node)
             WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id AND type(relationship) = $edge_label
@@ -168,6 +300,19 @@ class Neo4jAdapter(GraphDBInterface):
         return edge_exists
 
     async def has_edges(self, edges):
+        """
+        Check if multiple edges exist based on provided edge criteria.
+
+        Parameters:
+        -----------
+
+            - edges: A list of edge specifications to check for existence.
+
+        Returns:
+        --------
+
+            A list of boolean values indicating the existence of each edge.
+        """
         query = """
             UNWIND $edges AS edge
             MATCH (a)-[r]->(b)
@@ -200,6 +345,23 @@ class Neo4jAdapter(GraphDBInterface):
         relationship_name: str,
         edge_properties: Optional[Dict[str, Any]] = {},
     ):
+        """
+        Create a new edge between two nodes with specified properties.
+
+        Parameters:
+        -----------
+
+            - from_node (UUID): The ID of the source node of the edge.
+            - to_node (UUID): The ID of the target node of the edge.
+            - relationship_name (str): The type/label of the edge to create.
+            - edge_properties (Optional[Dict[str, Any]]): A dictionary of properties to assign
+              to the edge. (default {})
+
+        Returns:
+        --------
+
+            The result of the query execution, typically indicating the created edge.
+        """
         serialized_properties = self.serialize_properties(edge_properties)
 
         query = dedent(
@@ -224,6 +386,20 @@ class Neo4jAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
+        """
+        Add multiple edges between nodes in a single query.
+
+        Parameters:
+        -----------
+
+            - edges (list[tuple[str, str, str, dict[str, Any]]]): A list of tuples where each
+              tuple contains edge details to add.
+
+        Returns:
+        --------
+
+            - None: None
+        """
         query = """
             UNWIND $edges AS edge
             MATCH (from_node {id: edge.from_node})
@@ -262,6 +438,19 @@ class Neo4jAdapter(GraphDBInterface):
             raise error
 
     async def get_edges(self, node_id: str):
+        """
+        Retrieve all edges connected to a specified node.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node for which edges are retrieved.
+
+        Returns:
+        --------
+
+            A list of edges connecting to the specified node, represented as tuples of details.
+        """
         query = """
         MATCH (n {id: $node_id})-[r]-(m)
         RETURN n, r, m
@@ -275,6 +464,14 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
     async def get_disconnected_nodes(self) -> list[str]:
+        """
+        Find and return nodes that are not connected to any other nodes in the graph.
+
+        Returns:
+        --------
+
+            - list[str]: A list of IDs of disconnected nodes.
+        """
         # return await self.query(
         #     "MATCH (node) WHERE NOT (node)<-[:*]-() RETURN node.id as id",
         # )
@@ -313,6 +510,20 @@ class Neo4jAdapter(GraphDBInterface):
         return results[0]["ids"] if len(results) > 0 else []
 
     async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
+        """
+        Retrieve the predecessor nodes of a specified node based on an optional edge label.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node whose predecessors are to be retrieved.
+            - edge_label (str): Optional edge label to filter predecessors. (default None)
+
+        Returns:
+        --------
+
+            - list[str]: A list of predecessor node IDs.
+        """
         if edge_label is not None:
             query = """
             MATCH (node)<-[r]-(predecessor)
@@ -346,6 +557,20 @@ class Neo4jAdapter(GraphDBInterface):
             return [result["predecessor"] for result in results]
 
     async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
+        """
+        Retrieve the successor nodes of a specified node based on an optional edge label.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node whose successors are to be retrieved.
+            - edge_label (str): Optional edge label to filter successors. (default None)
+
+        Returns:
+        --------
+
+            - list[str]: A list of successor node IDs.
+        """
         if edge_label is not None:
             query = """
             MATCH (node)-[r]->(successor)
@@ -379,11 +604,36 @@ class Neo4jAdapter(GraphDBInterface):
             return [result["successor"] for result in results]
 
     async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
-        """Get all neighboring nodes."""
+        """
+        Get all neighbors of a specified node, including all directly connected nodes.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node for which neighbors are retrieved.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of neighboring nodes represented as dictionaries.
+        """
         return await self.get_neighbours(node_id)
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Get a single node by ID."""
+        """
+        Retrieve a single node based on its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to retrieve.
+
+        Returns:
+        --------
+
+            - Optional[Dict[str, Any]]: The requested node as a dictionary, or None if it does
+              not exist.
+        """
         query = """
         MATCH (node {id: $node_id})
         RETURN node
@@ -392,7 +642,19 @@ class Neo4jAdapter(GraphDBInterface):
         return results[0]["node"] if results else None
 
     async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
-        """Get multiple nodes by their IDs."""
+        """
+        Retrieve multiple nodes based on their IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of node IDs to retrieve.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of nodes represented as dictionaries.
+        """
         query = """
         UNWIND $node_ids AS id
         MATCH (node {id: id})
@@ -402,6 +664,19 @@ class Neo4jAdapter(GraphDBInterface):
         return [result["node"] for result in results]
 
     async def get_connections(self, node_id: UUID) -> list:
+        """
+        Retrieve all connections (predecessors and successors) for a specified node.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The ID of the node for which connections are retrieved.
+
+        Returns:
+        --------
+
+            - list: A list of connections represented as tuples of details.
+        """
         predecessors_query = """
         MATCH (node)<-[relation]-(neighbour)
         WHERE node.id = $node_id
@@ -433,6 +708,21 @@ class Neo4jAdapter(GraphDBInterface):
     async def remove_connection_to_predecessors_of(
         self, node_ids: list[str], edge_label: str
     ) -> None:
+        """
+        Remove connections (edges) to all predecessors of specified nodes based on edge label.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): A list of IDs of nodes from which connections are to be
+              removed.
+            - edge_label (str): The label of the edges to remove.
+
+        Returns:
+        --------
+
+            - None: None
+        """
         query = f"""
         UNWIND $node_ids AS id
         MATCH (node:`{id}`)-[r:{edge_label}]->(predecessor)
@@ -446,6 +736,21 @@ class Neo4jAdapter(GraphDBInterface):
     async def remove_connection_to_successors_of(
         self, node_ids: list[str], edge_label: str
     ) -> None:
+        """
+        Remove connections (edges) to all successors of specified nodes based on edge label.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): A list of IDs of nodes from which connections are to be
+              removed.
+            - edge_label (str): The label of the edges to remove.
+
+        Returns:
+        --------
+
+            - None: None
+        """
         query = f"""
         UNWIND $node_ids AS id
         MATCH (node:`{id}`)<-[r:{edge_label}]-(successor)
@@ -457,12 +762,34 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def delete_graph(self):
+        """
+        Delete all nodes and edges from the graph database.
+
+        Returns:
+        --------
+
+            The result of the query execution, typically indicating success or failure.
+        """
         query = """MATCH (node)
                 DETACH DELETE node;"""
 
         return await self.query(query)
 
     def serialize_properties(self, properties=dict()):
+        """
+        Convert properties of a node or edge into a serializable format suitable for storage.
+
+        Parameters:
+        -----------
+
+            - properties: A dictionary of properties to serialize, defaults to an empty
+              dictionary. (default dict())
+
+        Returns:
+        --------
+
+            A dictionary with serialized property values.
+        """
         serialized_properties = {}
 
         for property_key, property_value in properties.items():
@@ -479,6 +806,15 @@ class Neo4jAdapter(GraphDBInterface):
         return serialized_properties
 
     async def get_model_independent_graph_data(self):
+        """
+        Retrieve the basic graph data without considering the model specifics, returning nodes
+        and edges.
+
+        Returns:
+        --------
+
+            A tuple of nodes and edges data.
+        """
         query_nodes = "MATCH (n) RETURN collect(n) AS nodes"
         nodes = await self.query(query_nodes)
 
@@ -488,6 +824,14 @@ class Neo4jAdapter(GraphDBInterface):
         return (nodes, edges)
 
     async def get_graph_data(self):
+        """
+        Retrieve comprehensive data about nodes and relationships within the graph.
+
+        Returns:
+        --------
+
+            A tuple containing two lists: nodes and edges with their properties.
+        """
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
 
         result = await self.query(query)
@@ -520,6 +864,22 @@ class Neo4jAdapter(GraphDBInterface):
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """
+        Retrieve a subgraph based on specified node names and type, including their
+        relationships.
+
+        Parameters:
+        -----------
+
+            - node_type (Type[Any]): The type of nodes to include in the subgraph.
+            - node_name (List[str]): A list of names for nodes to filter the subgraph.
+
+        Returns:
+        --------
+
+            - Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]}: A tuple
+              containing nodes and edges in the requested subgraph.
+        """
         label = node_type.__name__
 
         query = f"""
@@ -567,14 +927,18 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def get_filtered_graph_data(self, attribute_filters):
         """
-        Fetches nodes and relationships filtered by specified attribute values.
+        Fetch nodes and edges filtered by specific attribute criteria.
 
-        Args:
-            attribute_filters (list of dict): A list of dictionaries where keys are attributes and values are lists of values to filter on.
-                                              Example: [{"community": ["1", "2"]}]
+        Parameters:
+        -----------
+
+            - attribute_filters: A list of dictionaries representing attributes and associated
+              values for filtering.
 
         Returns:
-            tuple: A tuple containing two lists: nodes and edges.
+        --------
+
+            A tuple containing filtered nodes and edges based on the specified criteria.
         """
         where_clauses = []
         for attribute, values in attribute_filters[0].items():
@@ -620,12 +984,34 @@ class Neo4jAdapter(GraphDBInterface):
         return (nodes, edges)
 
     async def graph_exists(self, graph_name="myGraph"):
+        """
+        Check if a graph with a given name exists in the database.
+
+        Parameters:
+        -----------
+
+            - graph_name: The name of the graph to check for existence, defaults to 'myGraph'.
+              (default 'myGraph')
+
+        Returns:
+        --------
+
+            True if the graph exists, otherwise False.
+        """
         query = "CALL gds.graph.list() YIELD graphName RETURN collect(graphName) AS graphNames;"
         result = await self.query(query)
         graph_names = result[0]["graphNames"] if result else []
         return graph_name in graph_names
 
     async def get_node_labels_string(self):
+        """
+        Fetch all node labels from the database and return them as a formatted string.
+
+        Returns:
+        --------
+
+            A formatted string of node labels.
+        """
         node_labels_query = "CALL db.labels() YIELD label RETURN collect(label) AS labels;"
         node_labels_result = await self.query(node_labels_query)
         node_labels = node_labels_result[0]["labels"] if node_labels_result else []
@@ -637,6 +1023,14 @@ class Neo4jAdapter(GraphDBInterface):
         return node_labels_str
 
     async def get_relationship_labels_string(self):
+        """
+        Fetch all relationship types from the database and return them as a formatted string.
+
+        Returns:
+        --------
+
+            A formatted string of relationship types.
+        """
         relationship_types_query = "CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) AS relationships;"
         relationship_types_result = await self.query(relationship_types_query)
         relationship_types = (
@@ -655,7 +1049,13 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def project_entire_graph(self, graph_name="myGraph"):
         """
-        Projects all node labels and all relationship types into an undirected in-memory GDS graph.
+        Project all node labels and relationship types into an in-memory graph using GDS.
+
+        Parameters:
+        -----------
+
+            - graph_name: The name of the graph to project, defaults to 'myGraph'. (default
+              'myGraph')
         """
         if await self.graph_exists(graph_name):
             return
@@ -674,13 +1074,36 @@ class Neo4jAdapter(GraphDBInterface):
         await self.query(query)
 
     async def drop_graph(self, graph_name="myGraph"):
+        """
+        Drop an existing graph from the database based on its name.
+
+        Parameters:
+        -----------
+
+            - graph_name: The name of the graph to drop, defaults to 'myGraph'. (default
+              'myGraph')
+        """
         if await self.graph_exists(graph_name):
             drop_query = f"CALL gds.graph.drop('{graph_name}');"
             await self.query(drop_query)
 
     async def get_graph_metrics(self, include_optional=False):
-        """For the definition of these metrics, please refer to
-        https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+        """
+        Retrieve metrics related to the graph such as number of nodes, edges, and connected
+        components.
+
+        Parameters:
+        -----------
+
+            - include_optional: Specify whether to include optional metrics; defaults to False.
+              (default False)
+
+        Returns:
+        --------
+
+            A dictionary containing graph metrics, both mandatory and optional based on the
+            input flag.
+        """
 
         nodes, edges = await self.get_model_independent_graph_data()
         graph_name = "myGraph"
@@ -722,6 +1145,21 @@ class Neo4jAdapter(GraphDBInterface):
         return mandatory_metrics | optional_metrics
 
     async def get_document_subgraph(self, content_hash: str):
+        """
+        Retrieve a subgraph related to a document identified by its content hash, including
+        related entities and chunks.
+
+        Parameters:
+        -----------
+
+            - content_hash (str): The hash identifying the document whose subgraph should be
+              retrieved.
+
+        Returns:
+        --------
+
+            The subgraph data as a dictionary, or None if not found.
+        """
         query = """
         MATCH (doc)
         WHERE (doc:TextDocument OR doc:PdfDocument)
@@ -753,6 +1191,19 @@ class Neo4jAdapter(GraphDBInterface):
         return result[0] if result else None
 
     async def get_degree_one_nodes(self, node_type: str):
+        """
+        Fetch nodes of a specified type that have exactly one connection.
+
+        Parameters:
+        -----------
+
+            - node_type (str): The type of nodes to retrieve, must be 'Entity' or 'EntityType'.
+
+        Returns:
+        --------
+
+            A list of nodes with exactly one connection of the specified type.
+        """
         if not node_type or node_type not in ["Entity", "EntityType"]:
             raise ValueError("node_type must be either 'Entity' or 'EntityType'")
 

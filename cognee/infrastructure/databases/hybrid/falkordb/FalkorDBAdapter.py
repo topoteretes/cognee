@@ -16,12 +16,53 @@ from cognee.infrastructure.engine import DataPoint
 
 
 class IndexSchema(DataPoint):
+    """
+    Define a schema for indexing that includes text data and associated metadata.
+
+    This class inherits from the DataPoint class. It contains a string attribute 'text' and
+    a dictionary 'metadata' that specifies the index fields for this schema.
+    """
+
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
 
 
 class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
+    """
+    Manage and interact with a graph database using vector embeddings.
+
+    Public methods include:
+    - query
+    - embed_data
+    - stringify_properties
+    - create_data_point_query
+    - create_edge_query
+    - create_collection
+    - has_collection
+    - create_data_points
+    - create_vector_index
+    - has_vector_index
+    - index_data_points
+    - add_node
+    - add_nodes
+    - add_edge
+    - add_edges
+    - has_edges
+    - retrieve
+    - extract_node
+    - extract_nodes
+    - get_connections
+    - search
+    - batch_search
+    - get_graph_data
+    - delete_data_points
+    - delete_node
+    - delete_nodes
+    - delete_graph
+    - prune
+    """
+
     def __init__(
         self,
         database_url: str,
@@ -36,6 +77,25 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         self.graph_name = "cognee_graph"
 
     def query(self, query: str, params: dict = {}):
+        """
+        Execute a query against the graph database.
+
+        Handles exceptions during the query execution by logging errors and re-raising the
+        exception.
+
+        The method can be called only if a valid query string and parameters are provided.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string to be executed against the graph database.
+            - params (dict): A dictionary of parameters to be used in the query. (default {})
+
+        Returns:
+        --------
+
+            The result of the query execution, returned by the graph database.
+        """
         graph = self.driver.select_graph(self.graph_name)
 
         try:
@@ -46,10 +106,52 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             raise e
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
+        """
+        Embed a list of text data into vector representations using the embedding engine.
+
+        Parameters:
+        -----------
+
+            - data (list[str]): A list of strings that should be embedded into vectors.
+
+        Returns:
+        --------
+
+            - list[list[float]]: A list of lists, where each inner list contains float values
+              representing the embedded vectors.
+        """
         return await self.embedding_engine.embed_text(data)
 
     async def stringify_properties(self, properties: dict) -> str:
+        """
+        Convert properties dictionary to a string format suitable for database queries.
+
+        Parameters:
+        -----------
+
+            - properties (dict): A dictionary containing properties to be converted to string
+              format.
+
+        Returns:
+        --------
+
+            - str: A string representation of the properties in the appropriate format.
+        """
+
         def parse_value(value):
+            """
+            Convert a value to its string representation based on type for database queries.
+
+            Parameters:
+            -----------
+
+                - value: The value to parse into a string representation.
+
+            Returns:
+            --------
+
+                Returns the string representation of the value in the appropriate format.
+            """
             if type(value) is UUID:
                 return f"'{str(value)}'"
             if type(value) is int or type(value) is float:
@@ -69,6 +171,22 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         return ",".join([f"{key}:{parse_value(value)}" for key, value in properties.items()])
 
     async def create_data_point_query(self, data_point: DataPoint, vectorized_values: dict):
+        """
+        Compose a query to create or update a data point in the database.
+
+        Parameters:
+        -----------
+
+            - data_point (DataPoint): An instance of DataPoint containing information about the
+              entity.
+            - vectorized_values (dict): A dictionary of vectorized values related to the data
+              point.
+
+        Returns:
+        --------
+
+            A string containing the query to be executed for the data point.
+        """
         node_label = type(data_point).__name__
         property_names = DataPoint.get_embeddable_property_names(data_point)
 
@@ -97,6 +215,20 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         ).strip()
 
     async def create_edge_query(self, edge: tuple[str, str, str, dict]) -> str:
+        """
+        Generate a query to create or update an edge between two nodes in the graph.
+
+        Parameters:
+        -----------
+
+            - edge (tuple[str, str, str, dict]): A tuple consisting of source and target node
+              IDs, edge type, and edge properties.
+
+        Returns:
+        --------
+
+            - str: A string containing the query to be executed for creating the edge.
+        """
         properties = await self.stringify_properties(edge[3])
         properties = f"{{{properties}}}"
 
@@ -111,14 +243,46 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         ).strip()
 
     async def create_collection(self, collection_name: str):
+        """
+        Create a collection in the graph database with the specified name.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to be created.
+        """
         pass
 
     async def has_collection(self, collection_name: str) -> bool:
+        """
+        Check if a collection with the specified name exists in the graph database.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to check for existence.
+
+        Returns:
+        --------
+
+            - bool: Returns true if the collection exists, otherwise false.
+        """
         collections = self.driver.list_graphs()
 
         return collection_name in collections
 
     async def create_data_points(self, data_points: list[DataPoint]):
+        """
+        Add a list of data points to the graph database via batching.
+
+        Can raise exceptions if there are issues during the database operations.
+
+        Parameters:
+        -----------
+
+            - data_points (list[DataPoint]): A list of DataPoint instances to be inserted into
+              the database.
+        """
         embeddable_values = []
         vector_map = {}
 
@@ -155,6 +319,17 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             self.query(query)
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
+        """
+        Create a vector index in the specified graph for a given property if it does not already
+        exist.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The name of the vector index to be created.
+            - index_property_name (str): The name of the property on which the vector index will
+              be created.
+        """
         graph = self.driver.select_graph(self.graph_name)
 
         if not self.has_vector_index(graph, index_name, index_property_name):
@@ -163,6 +338,21 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             )
 
     def has_vector_index(self, graph, index_name: str, index_property_name: str) -> bool:
+        """
+        Determine if a vector index exists on the specified property of the given graph.
+
+        Parameters:
+        -----------
+
+            - graph: The graph instance to check for the vector index.
+            - index_name (str): The name of the index to check for existence.
+            - index_property_name (str): The property name associated with the index.
+
+        Returns:
+        --------
+
+            - bool: Returns true if the vector index exists, otherwise false.
+        """
         try:
             indices = graph.list_indices()
 
@@ -179,26 +369,85 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
+        """
+        Index a list of data points in the specified graph database based on properties.
+
+        To be implemented: does not yet have a defined behavior.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The name of the index to be created for the data points.
+            - index_property_name (str): The property name on which to index the data points.
+            - data_points (list[DataPoint]): A list of DataPoint instances to be indexed.
+        """
         pass
 
     async def add_node(self, node: DataPoint):
+        """
+        Add a single data point as a node in the graph.
+
+        Parameters:
+        -----------
+
+            - node (DataPoint): An instance of DataPoint to be added to the graph.
+        """
         await self.create_data_points([node])
 
     async def add_nodes(self, nodes: list[DataPoint]):
+        """
+        Add multiple data points as nodes in the graph.
+
+        Parameters:
+        -----------
+
+            - nodes (list[DataPoint]): A list of DataPoint instances to be added to the graph.
+        """
         await self.create_data_points(nodes)
 
     async def add_edge(self, edge: tuple[str, str, str, dict]):
+        """
+        Add an edge between two existing nodes in the graph based on the provided details.
+
+        Parameters:
+        -----------
+
+            - edge (tuple[str, str, str, dict]): A tuple containing details of the edge to be
+              added.
+        """
         query = await self.create_edge_query(edge)
 
         self.query(query)
 
     async def add_edges(self, edges: list[tuple[str, str, str, dict]]):
+        """
+        Add multiple edges to the graph in a batch operation.
+
+        Parameters:
+        -----------
+
+            - edges (list[tuple[str, str, str, dict]]): A list of tuples, each containing
+              details of the edges to be added.
+        """
         queries = [await self.create_edge_query(edge) for edge in edges]
 
         for query in queries:
             self.query(query)
 
     async def has_edges(self, edges):
+        """
+        Check if the specified edges exist in the graph based on their attributes.
+
+        Parameters:
+        -----------
+
+            - edges: A list of edges to check for existence in the graph.
+
+        Returns:
+        --------
+
+            Returns a list of boolean values indicating the existence of each edge.
+        """
         query = dedent(
             """
             UNWIND $edges AS edge
@@ -224,6 +473,20 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         return [result["edge_exists"] for result in results]
 
     async def retrieve(self, data_point_ids: list[UUID]):
+        """
+        Retrieve data points from the graph based on their IDs.
+
+        Parameters:
+        -----------
+
+            - data_point_ids (list[UUID]): A list of UUIDs representing the data points to
+              retrieve.
+
+        Returns:
+        --------
+
+            Returns the result set containing the retrieved nodes or an empty list if not found.
+        """
         result = self.query(
             "MATCH (node) WHERE node.id IN $node_ids RETURN node",
             {
@@ -233,14 +496,54 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         return result.result_set
 
     async def extract_node(self, data_point_id: UUID):
+        """
+        Extract the properties of a single node identified by its data point ID.
+
+        Parameters:
+        -----------
+
+            - data_point_id (UUID): The UUID of the data point to extract.
+
+        Returns:
+        --------
+
+            Returns the properties of the node if found, otherwise None.
+        """
         result = await self.retrieve([data_point_id])
         result = result[0][0] if len(result[0]) > 0 else None
         return result.properties if result else None
 
     async def extract_nodes(self, data_point_ids: list[UUID]):
+        """
+        Extract properties of multiple nodes identified by their data point IDs.
+
+        Parameters:
+        -----------
+
+            - data_point_ids (list[UUID]): A list of UUIDs representing the data points to
+              extract.
+
+        Returns:
+        --------
+
+            Returns the properties of the nodes in a list.
+        """
         return await self.retrieve(data_point_ids)
 
     async def get_connections(self, node_id: UUID) -> list:
+        """
+        Retrieve connection details (predecessors and successors) for a given node ID.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The UUID of the node whose connections are to be retrieved.
+
+        Returns:
+        --------
+
+            - list: Returns a list of tuples representing the connections of the node.
+        """
         predecessors_query = """
         MATCH (node)<-[relation]-(neighbour)
         WHERE node.id = $node_id
@@ -277,6 +580,27 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         limit: int = 10,
         with_vector: bool = False,
     ):
+        """
+        Search for nodes in a collection based on text or vector query, with optional limitation
+        on results.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection in which to search.
+            - query_text (str): The text to search for (if using text-based query). (default
+              None)
+            - query_vector (list[float]): The vector representation of the query if using
+              vector-based search. (default None)
+            - limit (int): Maximum number of results to return from the search. (default 10)
+            - with_vector (bool): Flag indicating whether to return vectors with the search
+              results. (default False)
+
+        Returns:
+        --------
+
+            Returns the search results as a result set from the graph database.
+        """
         if query_text is None and query_vector is None:
             raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
@@ -307,6 +631,25 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         limit: int = None,
         with_vectors: bool = False,
     ):
+        """
+        Perform batch search across multiple queries based on text inputs and return results
+        asynchronously.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection in which to perform the
+              searches.
+            - query_texts (list[str]): A list of text queries to search for.
+            - limit (int): Optional limit for the search results for each query. (default None)
+            - with_vectors (bool): Flag indicating whether to return vectors with the results.
+              (default False)
+
+        Returns:
+        --------
+
+            Returns a list of results for each search query executed in parallel.
+        """
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
         return await asyncio.gather(
@@ -322,6 +665,14 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         )
 
     async def get_graph_data(self):
+        """
+        Retrieve all nodes and edges from the graph along with their properties.
+
+        Returns:
+        --------
+
+            Returns a tuple containing lists of nodes and edges data retrieved from the graph.
+        """
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
 
         result = self.query(query)
@@ -352,6 +703,22 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         return (nodes, edges)
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        """
+        Remove specified data points from the graph database based on their IDs.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection from which to delete the data
+              points.
+            - data_point_ids (list[UUID]): A list of UUIDs representing the data points to
+              delete.
+
+        Returns:
+        --------
+
+            Returns the result of the deletion operation from the database.
+        """
         return self.query(
             "MATCH (node) WHERE node.id IN $node_ids DETACH DELETE node",
             {
@@ -360,12 +727,41 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         )
 
     async def delete_node(self, collection_name: str, data_point_id: str):
+        """
+        Delete a single node specified by its data point ID from the database.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection containing the node to be
+              deleted.
+            - data_point_id (str): The ID of the data point to delete.
+
+        Returns:
+        --------
+
+            Returns the result of the deletion operation from the database.
+        """
         return await self.delete_data_points([data_point_id])
 
     async def delete_nodes(self, collection_name: str, data_point_ids: list[str]):
+        """
+        Delete multiple nodes specified by their IDs from the database.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection containing the nodes to be
+              deleted.
+            - data_point_ids (list[str]): A list of IDs of the data points to delete from the
+              collection.
+        """
         self.delete_data_points(data_point_ids)
 
     async def delete_graph(self):
+        """
+        Delete the entire graph along with all its indices and nodes.
+        """
         try:
             graph = self.driver.select_graph(self.graph_name)
 
@@ -379,4 +775,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             print(f"Error deleting graph: {e}")
 
     async def prune(self):
+        """
+        Prune the graph by deleting the entire graph structure.
+        """
         await self.delete_graph()
