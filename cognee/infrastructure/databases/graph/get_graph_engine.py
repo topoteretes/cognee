@@ -31,7 +31,35 @@ def create_graph_engine(
     graph_database_password="",
     graph_database_port="",
 ):
-    """Factory function to create the appropriate graph client based on the graph type."""
+    """
+    Create a graph engine based on the specified provider type.
+
+    This factory function initializes and returns the appropriate graph client depending on
+    the database provider specified. It validates required parameters and raises an
+    EnvironmentError if any are missing for the respective provider implementations.
+
+    Parameters:
+    -----------
+
+        - graph_database_provider: The type of graph database provider to use (e.g., neo4j,
+          falkordb, kuzu, memgraph).
+        - graph_database_url: The URL for the graph database instance. Required for neo4j,
+          falkordb, and memgraph providers.
+        - graph_database_username: The username for authentication with the graph database.
+          Required for neo4j and memgraph providers.
+        - graph_database_password: The password for authentication with the graph database.
+          Required for neo4j and memgraph providers.
+        - graph_database_port: The port number for the graph database connection. Required
+          for the falkordb provider.
+        - graph_file_path: The filesystem path to the graph file. Required for the kuzu
+          provider.
+
+    Returns:
+    --------
+
+        Returns an instance of the appropriate graph adapter depending on the provider type
+        specified.
+    """
 
     if graph_database_provider == "neo4j":
         if not (graph_database_url and graph_database_username and graph_database_password):

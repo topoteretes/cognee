@@ -12,6 +12,23 @@ logger = get_logger("FastembedEmbeddingEngine")
 
 
 class FastembedEmbeddingEngine(EmbeddingEngine):
+    """
+    Manages the embedding process using a specified model to generate text embeddings.
+
+    Public methods:
+
+    - embed_text
+    - get_vector_size
+    - get_tokenizer
+
+    Instance variables:
+
+    - model: The name of the embedding model.
+    - dimensions: The dimensionality of the embeddings.
+    - mock: A flag indicating whether to use mocking instead of the actual embedding model.
+    - MAX_RETRIES: The maximum number of retries for embedding operations.
+    """
+
     model: str
     dimensions: int
     mock: bool
@@ -37,6 +54,24 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self.mock = enable_mocking in ("true", "1", "yes")
 
     async def embed_text(self, text: List[str]) -> List[List[float]]:
+        """
+        Embed the given text into numerical vectors.
+
+        This method generates embeddings for a list of text strings. If mocking is enabled, it
+        returns zero vectors instead. It handles exceptions by logging the error and raising an
+        `EmbeddingException` on failure.
+
+        Parameters:
+        -----------
+
+            - text (List[str]): A list of strings to be embedded.
+
+        Returns:
+        --------
+
+            - List[List[float]]: A list of embeddings, where each embedding is a list of floats
+              representing the vector form of the input text.
+        """
         try:
             if self.mock:
                 return [[0.0] * self.dimensions for _ in text]
@@ -54,9 +89,25 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(f"Failed to index data points using model {self.model}")
 
     def get_vector_size(self) -> int:
+        """
+        Return the size of the embedding vector produced by this engine.
+
+        Returns:
+        --------
+
+            - int: The dimensionality of the embedding vectors.
+        """
         return self.dimensions
 
     def get_tokenizer(self):
+        """
+        Instantiate and return the tokenizer used for preparing text for embedding.
+
+        Returns:
+        --------
+
+            A tokenizer object configured for the specified model and maximum token size.
+        """
         logger.debug("Loading tokenizer for FastembedEmbeddingEngine...")
 
         tokenizer = TikTokenTokenizer(model="gpt-4o", max_tokens=self.max_tokens)
