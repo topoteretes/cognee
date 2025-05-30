@@ -1,3 +1,4 @@
+from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 
 from functools import lru_cache
@@ -37,6 +38,15 @@ def create_vector_engine(
         An instance of the corresponding database adapter class for the specified provider.
     """
     embedding_engine = get_embedding_engine()
+
+    if vector_db_provider in supported_databases:
+        adapter = supported_databases[vector_db_provider]
+
+        return adapter(
+            utl=vector_db_url,
+            api_key=vector_db_key,
+            embedding_engine=embedding_engine,
+        )
 
     if vector_db_provider == "weaviate":
         from .weaviate_db import WeaviateAdapter
