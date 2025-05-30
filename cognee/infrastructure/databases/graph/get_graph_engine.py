@@ -2,8 +2,10 @@
 
 from functools import lru_cache
 
+
 from .config import get_graph_config
 from .graph_db_interface import GraphDBInterface
+from .supported_databases import supported_databases
 
 
 async def get_graph_engine() -> GraphDBInterface:
@@ -73,6 +75,15 @@ def create_graph_engine(
         Returns an instance of the appropriate graph adapter depending on the provider type
         specified.
     """
+
+    if graph_database_provider in supported_databases:
+        adapter = supported_databases[graph_database_provider]
+
+        return adapter(
+            graph_database_url=graph_database_url,
+            graph_database_username=graph_database_username,
+            graph_database_password=graph_database_password,
+        )
 
     if graph_database_provider == "neo4j":
         if not (graph_database_url and graph_database_username and graph_database_password):
