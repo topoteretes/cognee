@@ -54,10 +54,11 @@ async def cognify(text: str, graph_model_file: str = None, graph_model_name: str
         )
     )
 
+    log_file = get_log_file_location()
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
         f"To check current cognify status use the cognify_status tool\n"
-        f"or check the log file at: {get_log_file_location()}"
+        f"or check the log file at: {log_file}"
     )
 
     return [
@@ -86,10 +87,11 @@ async def codify(repo_path: str) -> list:
 
     asyncio.create_task(codify_task(repo_path))
 
+    log_file = get_log_file_location()
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
         f"To check current codify status use the codify_status tool\n"
-        f"or you can check the log file at: {get_log_file_location()}"
+        f"or you can check the log file at: {log_file}"
     )
 
     return [
