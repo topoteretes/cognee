@@ -4,7 +4,7 @@ import json
 from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
 from textwrap import dedent
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, Type, Tuple
 from contextlib import asynccontextmanager
 from uuid import UUID
 from neo4j import AsyncSession
@@ -13,11 +13,48 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 
 logger = get_logger("MemgraphAdapter", level=ERROR)
 
 
 class MemgraphAdapter(GraphDBInterface):
+    """
+    Handles interaction with a Memgraph database through various graph operations.
+
+    Public methods include:
+    - get_session
+    - query
+    - has_node
+    - add_node
+    - add_nodes
+    - extract_node
+    - extract_nodes
+    - delete_node
+    - delete_nodes
+    - has_edge
+    - has_edges
+    - add_edge
+    - add_edges
+    - get_edges
+    - get_disconnected_nodes
+    - get_predecessors
+    - get_successors
+    - get_neighbours
+    - get_connections
+    - remove_connection_to_predecessors_of
+    - remove_connection_to_successors_of
+    - delete_graph
+    - serialize_properties
+    - get_model_independent_graph_data
+    - get_graph_data
+    - get_nodeset_subgraph
+    - get_filtered_graph_data
+    - get_node_labels_string
+    - get_relationship_labels_string
+    - get_graph_metrics
+    """
+
     def __init__(
         self,
         graph_database_url: str,
@@ -33,6 +70,9 @@ class MemgraphAdapter(GraphDBInterface):
 
     @asynccontextmanager
     async def get_session(self) -> AsyncSession:
+        """
+        Manage a session with the database, yielding the session for use in operations.
+        """
         async with self.driver.session() as session:
             yield session
 
@@ -41,6 +81,22 @@ class MemgraphAdapter(GraphDBInterface):
         query: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Execute a provided query on the Memgraph database and return the results.
+
+        Parameters:
+        -----------
+
+            - query (str): The Cypher query to be executed against the database.
+            - params (Optional[Dict[str, Any]]): Optional parameters to be used in the query.
+              (default None)
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries representing the result set of the
+              query.
+        """
         try:
             async with self.get_session() as session:
                 result = await session.run(query, params)
@@ -51,6 +107,19 @@ class MemgraphAdapter(GraphDBInterface):
             raise error
 
     async def has_node(self, node_id: str) -> bool:
+        """
+        Determine if a node with the given ID exists in the database.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to check for existence.
+
+        Returns:
+        --------
+
+            - bool: True if the node exists; otherwise, False.
+        """
         results = await self.query(
             """
                 MATCH (n)
@@ -62,6 +131,19 @@ class MemgraphAdapter(GraphDBInterface):
         return results[0]["node_exists"] if len(results) > 0 else False
 
     async def add_node(self, node: DataPoint):
+        """
+        Add a new node to the database with specified properties.
+
+        Parameters:
+        -----------
+
+            - node (DataPoint): The DataPoint object representing the node to add.
+
+        Returns:
+        --------
+
+            The result of the node addition, including its internal ID and node ID.
+        """
         serialized_properties = self.serialize_properties(node.model_dump())
 
         query = """
@@ -79,6 +161,20 @@ class MemgraphAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
+        """
+        Add multiple nodes to the database in a single operation.
+
+        Parameters:
+        -----------
+
+            - nodes (list[DataPoint]): A list of DataPoint objects representing the nodes to
+              add.
+
+        Returns:
+        --------
+
+            - None: None.
+        """
         query = """
         UNWIND $nodes AS node
         MERGE (n {id: node.node_id})
@@ -100,11 +196,37 @@ class MemgraphAdapter(GraphDBInterface):
         return results
 
     async def extract_node(self, node_id: str):
+        """
+        Retrieve a single node based on its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to retrieve.
+
+        Returns:
+        --------
+
+            The node corresponding to the provided ID, or None if not found.
+        """
         results = await self.extract_nodes([node_id])
 
         return results[0] if len(results) > 0 else None
 
     async def extract_nodes(self, node_ids: List[str]):
+        """
+        Retrieve multiple nodes based on their IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of IDs for the nodes to retrieve.
+
+        Returns:
+        --------
+
+            A list of nodes corresponding to the provided IDs.
+        """
         query = """
         UNWIND $node_ids AS id
         MATCH (node {id: id})
@@ -117,6 +239,19 @@ class MemgraphAdapter(GraphDBInterface):
         return [result["node"] for result in results]
 
     async def delete_node(self, node_id: str):
+        """
+        Delete a node from the database based on its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to delete.
+
+        Returns:
+        --------
+
+            None.
+        """
         sanitized_id = node_id.replace(":", "_")
 
         query = "MATCH (node: {{id: $node_id}}) DETACH DELETE node"
@@ -125,6 +260,19 @@ class MemgraphAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def delete_nodes(self, node_ids: list[str]) -> None:
+        """
+        Delete multiple nodes from the database based on their IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): A list of IDs for the nodes to delete.
+
+        Returns:
+        --------
+
+            - None: None.
+        """
         query = """
         UNWIND $node_ids AS id
         MATCH (node {id: id})
@@ -135,6 +283,21 @@ class MemgraphAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def has_edge(self, from_node: UUID, to_node: UUID, edge_label: str) -> bool:
+        """
+        Check if a directed edge exists between two nodes identified by their IDs.
+
+        Parameters:
+        -----------
+
+            - from_node (UUID): The ID of the source node.
+            - to_node (UUID): The ID of the target node.
+            - edge_label (str): The label of the edge to check.
+
+        Returns:
+        --------
+
+            - bool: True if the edge exists; otherwise, False.
+        """
         query = """
             MATCH (from_node)-[relationship]->(to_node)
             WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id AND type(relationship) = $edge_label
@@ -151,6 +314,19 @@ class MemgraphAdapter(GraphDBInterface):
         return records[0]["edge_exists"] if records else False
 
     async def has_edges(self, edges):
+        """
+        Check for the existence of multiple edges based on provided criteria.
+
+        Parameters:
+        -----------
+
+            - edges: A list of edges to verify existence for.
+
+        Returns:
+        --------
+
+            A list of boolean values indicating the existence of each edge.
+        """
         query = """
             UNWIND $edges AS edge
             MATCH (a)-[r]->(b)
@@ -183,6 +359,23 @@ class MemgraphAdapter(GraphDBInterface):
         relationship_name: str,
         edge_properties: Optional[Dict[str, Any]] = None,
     ):
+        """
+        Add a directed edge between two nodes with optional properties.
+
+        Parameters:
+        -----------
+
+            - from_node (UUID): The ID of the source node.
+            - to_node (UUID): The ID of the target node.
+            - relationship_name (str): The type/label of the relationship to create.
+            - edge_properties (Optional[Dict[str, Any]]): Optional properties associated with
+              the edge. (default None)
+
+        Returns:
+        --------
+
+            The result of the edge addition operation, including relationship details.
+        """
         serialized_properties = self.serialize_properties(edge_properties or {})
 
         query = dedent(
@@ -206,6 +399,20 @@ class MemgraphAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
+        """
+        Batch add multiple edges between nodes, enforcing specified relationships.
+
+        Parameters:
+        -----------
+
+            - edges (list[tuple[str, str, str, dict[str, Any]]): A list of tuples containing
+              specifications for each edge to add.
+
+        Returns:
+        --------
+
+            - None: None.
+        """
         query = """
             UNWIND $edges AS edge
             MATCH (from_node {id: edge.from_node})
@@ -245,6 +452,19 @@ class MemgraphAdapter(GraphDBInterface):
             raise error
 
     async def get_edges(self, node_id: str):
+        """
+        Retrieve all edges connected to a specific node identified by its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node for which to retrieve connected edges.
+
+        Returns:
+        --------
+
+            A list of tuples representing the edges connected to the node.
+        """
         query = """
         MATCH (n {id: $node_id})-[r]-(m)
         RETURN n, r, m
@@ -258,6 +478,14 @@ class MemgraphAdapter(GraphDBInterface):
         ]
 
     async def get_disconnected_nodes(self) -> list[str]:
+        """
+        Identify nodes in the graph that do not belong to the largest connected component.
+
+        Returns:
+        --------
+
+            - list[str]: A list of IDs representing the disconnected nodes.
+        """
         query = """
         // Step 1: Collect all nodes
         MATCH (n)
@@ -293,6 +521,20 @@ class MemgraphAdapter(GraphDBInterface):
         return results[0]["ids"] if len(results) > 0 else []
 
     async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
+        """
+        Retrieve all predecessors of a node based on its ID and optional edge label.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to find predecessors for.
+            - edge_label (str): Optional edge label to filter predecessors. (default None)
+
+        Returns:
+        --------
+
+            - list[str]: A list of predecessor node IDs.
+        """
         if edge_label is not None:
             query = """
             MATCH (node)<-[r]-(predecessor)
@@ -326,6 +568,20 @@ class MemgraphAdapter(GraphDBInterface):
             return [result["predecessor"] for result in results]
 
     async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
+        """
+        Retrieve all successors of a node based on its ID and optional edge label.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to find successors for.
+            - edge_label (str): Optional edge label to filter successors. (default None)
+
+        Returns:
+        --------
+
+            - list[str]: A list of successor node IDs.
+        """
         if edge_label is not None:
             query = """
             MATCH (node)-[r]->(successor)
@@ -358,33 +614,40 @@ class MemgraphAdapter(GraphDBInterface):
 
             return [result["successor"] for result in results]
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
+        """
+        Get both predecessors and successors of a node.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to find neighbors for.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A combined list of neighbor node IDs.
+        """
         predecessors, successors = await asyncio.gather(
             self.get_predecessors(node_id), self.get_successors(node_id)
         )
 
         return predecessors + successors
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Get a single node by ID."""
-        query = """
-        MATCH (node {id: $node_id})
-        RETURN node
-        """
-        results = await self.query(query, {"node_id": node_id})
-        return results[0]["node"] if results else None
-
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
-        """Get multiple nodes by their IDs."""
-        query = """
-        UNWIND $node_ids AS id
-        MATCH (node {id: id})
-        RETURN node
-        """
-        results = await self.query(query, {"node_ids": node_ids})
-        return [result["node"] for result in results]
-
     async def get_connections(self, node_id: UUID) -> list:
+        """
+        Retrieve connections for a given node, including both predecessors and successors.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The ID of the node for which to retrieve connections.
+
+        Returns:
+        --------
+
+            - list: A list of connections associated with the node.
+        """
         predecessors_query = """
         MATCH (node)<-[relation]-(neighbour)
         WHERE node.id = $node_id
@@ -416,6 +679,21 @@ class MemgraphAdapter(GraphDBInterface):
     async def remove_connection_to_predecessors_of(
         self, node_ids: list[str], edge_label: str
     ) -> None:
+        """
+        Remove specified connections to the predecessors of the given node IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): A list of node IDs from which to remove predecessor
+              connections.
+            - edge_label (str): The label of the edges to remove.
+
+        Returns:
+        --------
+
+            - None: None.
+        """
         query = f"""
         UNWIND $node_ids AS nid
         MATCH (node {id: nid})-[r]->(predecessor)
@@ -430,6 +708,21 @@ class MemgraphAdapter(GraphDBInterface):
     async def remove_connection_to_successors_of(
         self, node_ids: list[str], edge_label: str
     ) -> None:
+        """
+        Remove specified connections to the successors of the given node IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[str]): A list of node IDs from which to remove successor
+              connections.
+            - edge_label (str): The label of the edges to remove.
+
+        Returns:
+        --------
+
+            - None: None.
+        """
         query = f"""
         UNWIND $node_ids AS id
         MATCH (node:`{id}`)<-[r:{edge_label}]-(successor)
@@ -441,12 +734,33 @@ class MemgraphAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     async def delete_graph(self):
+        """
+        Completely delete the graph from the database, removing all nodes and edges.
+
+        Returns:
+        --------
+
+            None.
+        """
         query = """MATCH (node)
                 DETACH DELETE node;"""
 
         return await self.query(query)
 
     def serialize_properties(self, properties=dict()):
+        """
+        Convert property values to a suitable representation for storage.
+
+        Parameters:
+        -----------
+
+            - properties: A dictionary of properties to serialize. (default dict())
+
+        Returns:
+        --------
+
+            A dictionary of serialized properties.
+        """
         serialized_properties = {}
 
         for property_key, property_value in properties.items():
@@ -463,6 +777,14 @@ class MemgraphAdapter(GraphDBInterface):
         return serialized_properties
 
     async def get_model_independent_graph_data(self):
+        """
+        Fetch nodes and relationships without any specific model filtering.
+
+        Returns:
+        --------
+
+            A tuple containing nodes and edges as collections.
+        """
         query_nodes = "MATCH (n) RETURN collect(n) AS nodes"
         nodes = await self.query(query_nodes)
 
@@ -472,6 +794,14 @@ class MemgraphAdapter(GraphDBInterface):
         return (nodes, edges)
 
     async def get_graph_data(self):
+        """
+        Retrieve all nodes and edges from the graph, including their properties.
+
+        Returns:
+        --------
+
+            A tuple containing lists of nodes and edges.
+        """
         query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
 
         result = await self.query(query)
@@ -501,16 +831,33 @@ class MemgraphAdapter(GraphDBInterface):
 
         return (nodes, edges)
 
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """
+        Throw an error indicating that node set filtering is not supported.
+
+        Parameters:
+        -----------
+
+            - node_type (Type[Any]): The type of nodes to filter.
+            - node_name (List[str]): A list of node names to filter.
+        """
+        raise NodesetFilterNotSupportedError
+
     async def get_filtered_graph_data(self, attribute_filters):
         """
-        Fetches nodes and relationships filtered by specified attribute values.
+        Fetch nodes and relationships based on specified attribute filters.
 
-        Args:
-            attribute_filters (list of dict): A list of dictionaries where keys are attributes and values are lists of values to filter on.
-                                              Example: [{"community": ["1", "2"]}]
+        Parameters:
+        -----------
+
+            - attribute_filters: A list of criteria to filter nodes and relationships.
 
         Returns:
-            tuple: A tuple containing two lists: nodes and edges.
+        --------
+
+            A tuple containing filtered nodes and edges.
         """
         where_clauses = []
         for attribute, values in attribute_filters[0].items():
@@ -556,6 +903,14 @@ class MemgraphAdapter(GraphDBInterface):
         return (nodes, edges)
 
     async def get_node_labels_string(self):
+        """
+        Retrieve a string representation of all unique node labels in the graph.
+
+        Returns:
+        --------
+
+            A string containing unique node labels.
+        """
         node_labels_query = """
         MATCH (n)
         WITH DISTINCT labels(n) AS labelList
@@ -572,6 +927,14 @@ class MemgraphAdapter(GraphDBInterface):
         return node_labels_str
 
     async def get_relationship_labels_string(self):
+        """
+        Retrieve a string representation of all unique relationship types in the graph.
+
+        Returns:
+        --------
+
+            A string containing unique relationship types.
+        """
         relationship_types_query = (
             "MATCH ()-[r]->() RETURN collect(DISTINCT type(r)) AS relationships;"
         )
@@ -591,8 +954,21 @@ class MemgraphAdapter(GraphDBInterface):
         return relationship_types_undirected_str
 
     async def get_graph_metrics(self, include_optional=False):
-        """For the definition of these metrics, please refer to
-        https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+        """
+        Calculate and return various metrics of the graph, including mandatory and optional
+        metrics.
+
+        Parameters:
+        -----------
+
+            - include_optional: Specify whether to include optional metrics in the results.
+              (default False)
+
+        Returns:
+        --------
+
+            A dictionary containing calculated graph metrics.
+        """
 
         try:
             # Basic metrics

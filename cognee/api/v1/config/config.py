@@ -155,7 +155,7 @@ class config:
             if hasattr(graph_db_config, key):
                 object.__setattr__(graph_db_config, key, value)
             else:
-                raise AttributeError(message=f"'{key}' is not a valid attribute of the config.")
+                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
 
     @staticmethod
     def set_vector_db_config(config_dict: dict):

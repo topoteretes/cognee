@@ -5,6 +5,23 @@ from cognee.infrastructure.databases.vector.embeddings import get_embedding_engi
 
 
 def get_word_size(word: str) -> int:
+    """
+    Calculate the size of a given word in terms of tokens.
+
+    If an embedding engine's tokenizer is available, count the tokens for the provided word.
+    If the tokenizer is not available, assume the word counts as one token.
+
+    Parameters:
+    -----------
+
+        - word (str): The word for which the token size is to be calculated.
+
+    Returns:
+    --------
+
+        - int: The number of tokens representing the word, typically an integer, depending
+          on the tokenizer's output.
+    """
     embedding_engine = get_embedding_engine()
     if embedding_engine.tokenizer:
         return embedding_engine.tokenizer.count_tokens(word)
@@ -16,12 +33,22 @@ def chunk_by_sentence(
     data: str, maximum_size: Optional[int] = None
 ) -> Iterator[Tuple[UUID, str, int, Optional[str]]]:
     """
-    Splits the input text into sentences based on word-level processing, with optional sentence length constraints.
+    Splits text into sentences while preserving word and paragraph boundaries.
 
-    Notes:
-        - Relies on the `chunk_by_word` function for word-level tokenization and classification.
-        - Ensures sentences within paragraphs are uniquely identifiable using UUIDs.
-        - Handles cases where the text ends mid-sentence by appending a special "sentence_cut" type.
+    This function processes the input string, dividing it into sentences based on word-level
+    tokenization. Each sentence is identified with a unique UUID, and it handles scenarios
+    where the text may end mid-sentence by tagging it with a specific type. If a maximum
+    sentence length is specified, the function ensures that sentences do not exceed this
+    length, raising a ValueError if an individual word surpasses it. The function utilizes
+    an external word processing function `chunk_by_word` to determine the structure of the
+    text.
+
+    Parameters:
+    -----------
+
+        - data (str): The input text to be split into sentences.
+        - maximum_size (Optional[int]): An optional limit on the maximum size of sentences
+          generated. (default None)
     """
     sentence = ""
     paragraph_id = uuid4()

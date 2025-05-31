@@ -14,7 +14,24 @@ import os
 
 
 class OllamaAPIAdapter(LLMInterface):
-    """Adapter for a Generic API LLM provider using instructor with an OpenAI backend."""
+    """
+    Adapter for a Generic API LLM provider using instructor with an OpenAI backend.
+
+    Public methods:
+
+    - acreate_structured_output
+    - create_transcript
+    - transcribe_image
+
+    Instance variables:
+
+    - name
+    - model
+    - api_key
+    - endpoint
+    - max_tokens
+    - aclient
+    """
 
     def __init__(self, endpoint: str, api_key: str, model: str, name: str, max_tokens: int):
         self.name = name
@@ -32,14 +49,32 @@ class OllamaAPIAdapter(LLMInterface):
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
-        """Generate a structured output from the LLM using the provided text and system prompt."""
+        """
+        Generate a structured output from the LLM using the provided text and system prompt.
+
+        This asynchronous method sends a request to the API with the user's input and the system
+        prompt, and returns a structured response based on the specified model.
+
+        Parameters:
+        -----------
+
+            - text_input (str): The input text provided by the user.
+            - system_prompt (str): The system prompt that guides the response generation.
+            - response_model (Type[BaseModel]): The model type that the response should conform
+              to.
+
+        Returns:
+        --------
+
+            - BaseModel: A structured output that conforms to the specified response model.
+        """
 
         response = self.aclient.chat.completions.create(
             model=self.model,
             messages=[
                 {
                     "role": "user",
-                    "content": f"Use the given format to extract information from the following input: {text_input}",
+                    "content": f"{text_input}",
                 },
                 {
                     "role": "system",
@@ -54,7 +89,23 @@ class OllamaAPIAdapter(LLMInterface):
 
     @rate_limit_sync
     def create_transcript(self, input_file: str) -> str:
-        """Generate an audio transcript from a user query."""
+        """
+        Generate an audio transcript from a user query.
+
+        This synchronous method takes an input audio file and returns its transcription. Raises
+        a FileNotFoundError if the input file does not exist, and raises a ValueError if
+        transcription fails or returns no text.
+
+        Parameters:
+        -----------
+
+            - input_file (str): The path to the audio file to be transcribed.
+
+        Returns:
+        --------
+
+            - str: The transcription of the audio as a string.
+        """
 
         if not os.path.isfile(input_file):
             raise FileNotFoundError(f"The file {input_file} does not exist.")
@@ -74,7 +125,24 @@ class OllamaAPIAdapter(LLMInterface):
 
     @rate_limit_sync
     def transcribe_image(self, input_file: str) -> str:
-        """Transcribe content from an image using base64 encoding."""
+        """
+        Transcribe content from an image using base64 encoding.
+
+        This synchronous method takes an input image file, encodes it as base64, and returns the
+        transcription of its content. Raises a FileNotFoundError if the input file does not
+        exist, and raises a ValueError if the transcription fails or no valid response is
+        received.
+
+        Parameters:
+        -----------
+
+            - input_file (str): The path to the image file to be transcribed.
+
+        Returns:
+        --------
+
+            - str: The transcription of the image's content as a string.
+        """
 
         if not os.path.isfile(input_file):
             raise FileNotFoundError(f"The file {input_file} does not exist.")

@@ -5,6 +5,26 @@ from typing import Union
 
 
 def get_data_from_llama_index(data_point: Union[Document, ImageDocument], dataset_name: str) -> str:
+    """
+    Retrieve the file path based on the data point type.
+
+    Ensure the data point is an instance of either Document or ImageDocument. If the data
+    point has a metadata or image path file path, return it; otherwise, save the data
+    point's text to a file and return the newly created file path.
+
+    Parameters:
+    -----------
+
+        - data_point (Union[Document, ImageDocument]): An instance of Document or
+          ImageDocument to extract data from.
+        - dataset_name (str): The name of the dataset associated with the data point.
+
+    Returns:
+    --------
+
+        - str: The file path as a string where the data is stored or the existing path from
+          the data point.
+    """
     # Specific type checking is used to ensure it's not a child class from Document
     if isinstance(data_point, Document) and type(data_point) is Document:
         file_path = data_point.metadata.get("file_path")
