@@ -97,5 +97,5 @@ if __name__ == "__main__":
         for file in search_results:
             print(file["name"])
 
-    logger = setup_logging("code_graph_pipeline")
+    logger = setup_logging(name="code_graph_pipeline")
     asyncio.run(main())
