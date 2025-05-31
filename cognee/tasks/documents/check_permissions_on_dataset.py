@@ -1,10 +1,10 @@
 from cognee.modules.data.processing.document_types import Document
-from cognee.modules.users.permissions.methods import check_permission_on_documents
+from cognee.modules.users.permissions.methods import check_permission_on_dataset
 from typing import List
 
 
-async def check_permissions_on_documents(
-    documents: list[Document], user, permissions
+async def check_permissions_on_dataset(
+    documents: List[Document], context: dict, user, permissions
 ) -> List[Document]:
     """
     Validates a user's permissions on a list of documents.
@@ -14,13 +14,12 @@ async def check_permissions_on_documents(
         - It is designed to validate multiple permissions in a sequential manner for the same set of documents.
         - Ensure that the `Document` and `user` objects conform to the expected structure and interfaces.
     """
-    document_ids = [document.id for document in documents]
 
     for permission in permissions:
-        await check_permission_on_documents(
+        await check_permission_on_dataset(
             user,
             permission,
-            document_ids,
+            context["dataset"].id,
         )
 
     return documents

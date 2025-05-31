@@ -105,3 +105,14 @@ def get_graph_config():
         - GraphConfig: A GraphConfig instance containing the graph configuration settings.
     """
     return GraphConfig()
+
+
+def get_graph_context_config():
+    """This function will get the appropriate graph db config based on async context.
+    This allows the use of multiple graph databases for different threads, async tasks and parallelization
+    """
+    from cognee.context_global_variables import graph_db_config
+
+    if graph_db_config.get():
+        return graph_db_config.get()
+    return get_graph_config().to_hashable_dict()

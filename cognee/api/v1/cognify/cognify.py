@@ -9,7 +9,7 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.documents import (
-    check_permissions_on_documents,
+    check_permissions_on_dataset,
     classify_documents,
     extract_chunks_from_documents,
 )
@@ -31,11 +31,18 @@ async def cognify(
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
     return await cognee_pipeline(
-        tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
+        tasks=tasks,
+        datasets=datasets,
+        user=user,
+        pipeline_name="cognify_pipeline",
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
     )
 
 
@@ -48,7 +55,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 ) -> list[Task]:
     default_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_documents, user=user, permissions=["write"]),
+        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),

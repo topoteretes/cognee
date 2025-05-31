@@ -11,6 +11,8 @@ class Tenant(Principal):
     id = Column(UUID, ForeignKey("principals.id"), primary_key=True)
     name = Column(String, unique=True, nullable=False, index=True)
 
+    owner_id = Column(UUID, index=True)
+
     # One-to-Many relationship with User; specify the join via User.tenant_id
     users = relationship(
         "User",

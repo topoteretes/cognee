@@ -19,17 +19,14 @@ class CustomJWTStrategy(JWTStrategy):
         # JoinLoad tenant and role information to user object
         user = await get_user(user.id)
 
-        if user.tenant:
-            data = {"user_id": str(user.id), "tenant_id": str(user.tenant.id), "roles": user.roles}
-        else:
-            # The default tenant is None
-            data = {"user_id": str(user.id), "tenant_id": None, "roles": user.roles}
+        data = {"user_id": str(user.id)}
+
         return generate_jwt(data, self.encode_key, self.lifetime_seconds, algorithm=self.algorithm)
 
 
 @lru_cache
 def get_auth_backend():
-    bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
+    bearer_transport = BearerTransport(tokenUrl="api/v1/auth/login")
 
     def get_jwt_strategy() -> JWTStrategy[models.UP, models.ID]:
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
