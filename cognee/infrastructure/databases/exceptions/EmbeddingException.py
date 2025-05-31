@@ -3,7 +3,13 @@ from fastapi import status
 
 
 class EmbeddingException(CogneeApiError):
-    """Custom exception for handling embedding-related errors."""
+    """
+    Custom exception for handling embedding-related errors.
+
+    This exception class is designed to indicate issues specifically related to embeddings
+    within the application. It extends the base exception class CogneeApiError and allows
+    for customization of the error message, name, and status code.
+    """
 
     def __init__(
         self,

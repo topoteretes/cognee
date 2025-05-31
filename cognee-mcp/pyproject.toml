@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 dependencies = [
     # For local cognee repo usage remove comment bellow and add absolute path to cognee
     #"cognee[postgres,codegraph,gemini,huggingface] @ file:/Users/<username>/Desktop/cognee",
-    "cognee[postgres,codegraph,gemini,huggingface]==0.1.40",
+    "cognee[postgres,codegraph,gemini,huggingface,docs,neo4j]==0.1.40",
     "fastmcp>=1.0",
     "mcp==1.5.0",
     "uv>=0.6.3",

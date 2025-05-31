@@ -52,7 +52,21 @@ EXTENSION_TO_DOCUMENT_CLASS = {
 
 
 def update_node_set(document):
-    """Extracts node_set from document's external_metadata."""
+    """
+    Extracts node_set from document's external_metadata.
+
+    Parses the external_metadata of the given document and updates the document's
+    belongs_to_set attribute with NodeSet objects generated from the node_set found in the
+    external_metadata. If the external_metadata is not valid JSON, is not a dictionary, does
+    not contain the 'node_set' key, or if node_set is not a list, the function has no effect
+    and will return early.
+
+    Parameters:
+    -----------
+
+        - document: The document object which contains external_metadata from which the
+          node_set will be extracted.
+    """
     try:
         external_metadata = json.loads(document.external_metadata)
     except json.JSONDecodeError:
@@ -76,11 +90,26 @@ def update_node_set(document):
 
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
     """
-    Classifies a list of data items into specific document types based on file extensions.
+    Classifies a list of data items into specific document types based on their file
+    extensions.
 
-    Notes:
-        - The function relies on `get_metadata` to retrieve metadata information for each data item.
-        - Ensure the `Data` objects and their attributes (e.g., `extension`, `id`) are valid before calling this function.
+    This function processes each item in the provided list of data documents, retrieves
+    relevant metadata, and creates instances of document classes mapped to their extensions.
+    It ensures that the data items are valid before performing the classification and
+    invokes `update_node_set` to extract and set relevant node information from the
+    document's external metadata.
+
+    Parameters:
+    -----------
+
+        - data_documents (list[Data]): A list of Data objects representing the documents to
+          be classified.
+
+    Returns:
+    --------
+
+        - list[Document]: A list of Document objects created based on the classified data
+          documents.
     """
     documents = []
     for data_item in data_documents:

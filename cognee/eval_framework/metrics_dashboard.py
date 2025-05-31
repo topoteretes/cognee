@@ -167,4 +167,4 @@ def create_dashboard(
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(dashboard_html)
 
-    return output_file
+    return dashboard_html

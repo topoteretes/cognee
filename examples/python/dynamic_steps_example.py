@@ -1,9 +1,9 @@
-import cognee
 import asyncio
-from cognee.shared.logging_utils import setup_logging, ERROR
-from cognee.modules.metrics.operations import get_pipeline_run_metrics
 
+import cognee
 from cognee.api.v1.search import SearchType
+from cognee.modules.metrics.operations import get_pipeline_run_metrics
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 job_1 = """
 CV 1: Relevant
@@ -180,15 +180,10 @@ async def main(enable_steps):
 
     # Step 3: Create knowledge graph
     if enable_steps.get("cognify"):
-        pipeline_run = await cognee.cognify()
+        await cognee.cognify()
         print("Knowledge graph created.")
 
-    # Step 4: Calculate descriptive metrics
-    if enable_steps.get("graph_metrics"):
-        await get_pipeline_run_metrics(pipeline_run, include_optional=True)
-        print("Descriptive graph metrics saved to database.")
-
-    # Step 5: Query insights
+    # Step 4: Query insights
     if enable_steps.get("retriever"):
         search_results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
