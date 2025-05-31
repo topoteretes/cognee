@@ -2,7 +2,7 @@
 
 import os
 import uvicorn
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import get_logger, setup_logging
 import sentry_sdk
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response
@@ -190,4 +190,5 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
+    logger = setup_logging()
     start_api_server()

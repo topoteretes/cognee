@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.modules.metrics.operations import get_pipeline_run_metrics
 
 from cognee.api.v1.search import SearchType
@@ -197,7 +197,7 @@ async def main(enable_steps):
 
 
 if __name__ == "__main__":
-    logger = get_logger(level=ERROR)
+    logger = setup_logging(log_level=ERROR)
 
     rebuild_kg = True
     retrieve = True
