@@ -2,8 +2,7 @@ import asyncio
 
 import cognee
 from cognee.api.v1.search import SearchType
-from cognee.modules.metrics.operations import get_pipeline_run_metrics
-from cognee.shared.logging_utils import ERROR, setup_logging
+from cognee.shared.logging_utils import setup_logging, ERROR
 
 job_1 = """
 CV 1: Relevant

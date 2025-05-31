@@ -1,13 +1,15 @@
-import logging
 import os
-import platform
 import sys
+import logging
+import structlog
 import traceback
+import platform
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+import importlib.metadata
 
-import structlog
+from cognee import __version__ as cognee_version
+from typing import Protocol
 
 # Export common log levels
 DEBUG = logging.DEBUG

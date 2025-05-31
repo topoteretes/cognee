@@ -4,7 +4,6 @@ import os
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.modules.metrics.operations import get_pipeline_run_metrics
 from cognee.shared.logging_utils import setup_logging
 
 text_1 = """
