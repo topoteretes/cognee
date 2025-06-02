@@ -20,7 +20,7 @@ async def give_permission_on_dataset(
             .first()
         )
 
-        if permission not in PERMISSION_TYPES:
+        if permission_name not in PERMISSION_TYPES:
             # If permission is not in allowed permission types
             raise PermissionNotFoundError(
                 message=f"{permission_name} not found or not in allowed permission types"
