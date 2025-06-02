@@ -17,9 +17,16 @@ jobs:
     name: test
     runs-on: ubuntu-22.04
 
-    defaults:
-      run:
-        shell: bash
+    services:
+      memgraph:
+        image: memgraph/memgraph:latest
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell --address localhost:7687 --username memgraph --password memgraph --database=system 'SHOW DATABASES;' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out
@@ -51,7 +58,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPH_DATABASE_URL: ${{ secrets.MEMGRAPH_API_URL }}
+          GRAPH_DATABASE_URL: "bolt://localhost:7687"
           GRAPH_DATABASE_PASSWORD: "memgraph"
           GRAPH_DATABASE_USERNAME: "memgraph"
         run: poetry run python ./cognee/tests/test_memgraph.py
