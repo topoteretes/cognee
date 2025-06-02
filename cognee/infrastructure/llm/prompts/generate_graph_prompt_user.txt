@@ -1,0 +1,9 @@
+<TEXT>
+`{{ text }}`
+</TEXT>
+
+and
+
+<KNOWLEDGEGRAPH>
+`{{ graph }}`
+</KNOWLEDGEGRAPH>

@@ -13,6 +13,10 @@ from cognee.modules.data.extraction.knowledge_graph.extract_content_graph import
 from cognee.modules.data.extraction.knowledge_graph.extract_content_graph_multi_parallel import (
     extract_content_graph_multi_parallel,
 )
+
+from cognee.modules.data.extraction.knowledge_graph.extract_content_graph_sequential import (
+    extract_content_graph_sequential,
+)
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,
     retrieve_existing_edges,
@@ -66,10 +70,8 @@ async def extract_graph_from_data(
     """
     chunk_graphs = await asyncio.gather(
         # *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
-        *[
-            extract_content_graph_multi_parallel(chunk.text, graph_model, node_rounds=5)
-            for chunk in data_chunks
-        ]
+        # *[extract_content_graph_multi_parallel(chunk.text, graph_model) for chunk in data_chunks]
+        *[extract_content_graph_sequential(chunk.text, graph_model) for chunk in data_chunks]
     )
 
     # Note: Filter edges with missing source or target nodes
