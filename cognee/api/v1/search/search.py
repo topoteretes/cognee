@@ -6,13 +6,15 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.data.exceptions import DatasetNotFoundError
 
 
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
     user: User = None,
-    datasets: Union[list[UUID], list[str], str, UUID, None] = None,
+    datasets: Optional[Union[list[str], str]] = None,
+    dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
     node_type: Optional[Type] = None,
@@ -29,11 +31,13 @@ async def search(
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
         datasets = await get_authorized_existing_datasets(datasets, "read", user)
         datasets = [dataset.id for dataset in datasets]
+        if not datasets:
+            raise DatasetNotFoundError(message="No datasets found.")
 
     filtered_search_results = await search_function(
         query_text=query_text,
         query_type=query_type,
-        dataset_ids=datasets,
+        dataset_ids=dataset_ids if dataset_ids else datasets,
         user=user,
         system_prompt_path=system_prompt_path,
         top_k=top_k,
