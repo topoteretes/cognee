@@ -44,7 +44,7 @@ def get_search_router() -> APIRouter:
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
-                dataset_ids=payload.dataset_ids,
+                datasets=payload.dataset_ids,
             )
 
             return results

@@ -26,9 +26,7 @@ def mock_user():
 @patch.object(search_module, "log_result")
 @patch.object(search_module, "get_document_ids_for_user")
 @patch.object(search_module, "specific_search")
-@patch.object(search_module, "parse_id")
 async def test_search(
-    mock_parse_id,
     mock_specific_search,
     mock_get_document_ids,
     mock_log_result,
@@ -58,9 +56,6 @@ async def test_search(
         {"document_id": str(doc_id3), "content": "Result 3"},  # Should be filtered out
     ]
     mock_specific_search.return_value = search_results
-
-    # Mock parse_id to return the same UUID
-    mock_parse_id.side_effect = lambda x: uuid.UUID(x) if x else None
 
     # Execute
     results = await search(query_text, query_type, datasets, mock_user)
