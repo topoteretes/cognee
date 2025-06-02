@@ -21,6 +21,16 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
+    """
+    Engine for embedding text using a specific LLM model, supporting mock and actual
+    embedding calls.
+
+    Public methods:
+    - embed_text: Embed a list of strings into vector representations.
+    - get_vector_size: Retrieve the size of the embedding vectors.
+    - get_tokenizer: Load the appropriate tokenizer for the specified model.
+    """
+
     api_key: str
     endpoint: str
     api_version: str
@@ -59,6 +69,24 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     @embedding_sleep_and_retry_async()
     @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
+        """
+        Embed a list of text strings into vector representations.
+
+        If the input exceeds the model's context window, the method will recursively split the
+        input and combine the results. It handles both mock and live embedding scenarios,
+        logging errors for any encountered exceptions, and raising specific exceptions for
+        context window issues and embedding failures.
+
+        Parameters:
+        -----------
+
+            - text (List[str]): A list of strings to be embedded.
+
+        Returns:
+        --------
+
+            - List[List[float]]: A list of vectors representing the embedded texts.
+        """
         try:
             if self.mock:
                 response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
@@ -119,9 +147,25 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise error
 
     def get_vector_size(self) -> int:
+        """
+        Retrieve the dimensionality of the embedding vectors.
+
+        Returns:
+        --------
+
+            - int: The size (dimensionality) of the embedding vectors.
+        """
         return self.dimensions
 
     def get_tokenizer(self):
+        """
+        Load and return the appropriate tokenizer for the specified model based on the provider.
+
+        Returns:
+        --------
+
+            The tokenizer instance compatible with the model.
+        """
         logger.debug(f"Loading tokenizer for model {self.model}...")
         # If model also contains provider information, extract only model information
         model = self.model.split("/")[-1]

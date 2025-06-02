@@ -8,7 +8,13 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 
 
 class CompletionRetriever(BaseRetriever):
-    """Retriever for handling LLM-based completion searches."""
+    """
+    Retriever for handling LLM-based completion searches.
+
+    Public methods:
+    - get_context(query: str) -> str
+    - get_completion(query: str, context: Optional[Any] = None) -> Any
+    """
 
     def __init__(
         self,
@@ -22,7 +28,24 @@ class CompletionRetriever(BaseRetriever):
         self.top_k = top_k if top_k is not None else 1
 
     async def get_context(self, query: str) -> str:
-        """Retrieves relevant document chunks as context."""
+        """
+        Retrieves relevant document chunks as context.
+
+        Fetches document chunks based on a query from a vector engine and combines their text.
+        Returns empty string if no chunks are found. Raises NoDataError if the collection is not
+        found.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string used to search for relevant document chunks.
+
+        Returns:
+        --------
+
+            - str: A string containing the combined text of the retrieved document chunks, or an
+              empty string if none are found.
+        """
         vector_engine = get_vector_engine()
 
         try:
@@ -38,7 +61,24 @@ class CompletionRetriever(BaseRetriever):
             raise NoDataError("No data found in the system, please add data first.") from error
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Generates an LLM completion using the context."""
+        """
+        Generates an LLM completion using the context.
+
+        Retrieves context if not provided and generates a completion based on the query and
+        context using an external completion generator.
+
+        Parameters:
+        -----------
+
+            - query (str): The input query for which the completion is generated.
+            - context (Optional[Any]): Optional context to use for generating the completion; if
+              not provided, it will be retrieved using get_context. (default None)
+
+        Returns:
+        --------
+
+            - Any: A list containing the generated completion from the LLM.
+        """
         if context is None:
             context = await self.get_context(query)
 

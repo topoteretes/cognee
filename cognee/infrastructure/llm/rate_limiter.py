@@ -93,6 +93,20 @@ class llm_rate_limiter:
 
     The rate limiter converts the configured requests/interval to a per-minute
     rate for compatibility with the limits library's built-in rate limit items.
+
+    Public methods:
+    - hit_limit
+    - wait_if_needed
+    - async_wait_if_needed
+
+    Instance variables:
+    - _enabled
+    - _requests
+    - _interval
+    - _storage
+    - _limiter
+    - _rate_per_minute
+    - _initialized
     """
 
     _instance = None
@@ -139,7 +153,12 @@ class llm_rate_limiter:
         returns True.
 
         Returns:
-            bool: True if the request is allowed, False otherwise.
+        bool: True if the request is allowed, False otherwise.
+
+        Returns:
+        --------
+
+            - bool: True if the request is allowed, False otherwise.
         """
         if not self._enabled:
             return True
@@ -158,7 +177,12 @@ class llm_rate_limiter:
         the rate limit. It polls every 0.5 seconds.
 
         Returns:
-            float: Time waited in seconds.
+        float: Time waited in seconds.
+
+        Returns:
+        --------
+
+            - float: Time waited in seconds.
         """
         if not self._enabled:
             return 0
@@ -178,7 +202,12 @@ class llm_rate_limiter:
         exceeding the rate limit. It polls every 0.5 seconds.
 
         Returns:
-            float: Time waited in seconds.
+        float: Time waited in seconds.
+
+        Returns:
+        --------
+
+            - float: Time waited in seconds.
         """
         if not self._enabled:
             return 0
@@ -195,19 +224,38 @@ def rate_limit_sync(func):
     """
     Decorator for rate limiting synchronous functions.
 
-    This decorator ensures that the decorated function respects the
-    configured rate limits. If the rate limit would be exceeded,
-    the decorator blocks until the request can be made.
+    Parameters:
+    -----------
 
-    Args:
-        func: The synchronous function to decorate.
+        - func: The synchronous function to decorate.
 
     Returns:
-        The decorated function.
+    --------
+
+        The decorated function that applies rate limiting to the original function.
     """
 
     @wraps(func)
     def wrapper(*args, **kwargs):
+        """
+        Manage rate limiting for the wrapped function's execution.
+
+        This decorator checks if the rate limit for LLM API calls is exceeded before executing
+        the function. It waits if necessary and logs the time waited. The rate limiter instance
+        is obtained from the llm_rate_limiter class, ensuring consistent access to rate limiting
+        behavior across function calls.
+
+        Parameters:
+        -----------
+
+            - *args: Positional arguments passed to the wrapped function.
+            - **kwargs: Keyword arguments passed to the wrapped function.
+
+        Returns:
+        --------
+
+            The return value of the wrapped function after applying the rate limiting logic.
+        """
         limiter = llm_rate_limiter()
         waited = limiter.wait_if_needed()
         if waited > 0:
@@ -219,21 +267,43 @@ def rate_limit_sync(func):
 
 def rate_limit_async(func):
     """
-    Decorator for rate limiting asynchronous functions.
+    Decorate an asynchronous function for rate limiting.
 
-    This decorator ensures that the decorated async function respects the
-    configured rate limits. If the rate limit would be exceeded,
-    the decorator asynchronously waits until the request can be made.
+    This decorator ensures that the decorated async function respects the configured rate
+    limits. If the rate limit would be exceeded, the decorator asynchronously waits until
+    the request can be made.
 
-    Args:
-        func: The asynchronous function to decorate.
+    Parameters:
+    -----------
+
+        - func: The asynchronous function to decorate.
 
     Returns:
+    --------
+
         The decorated async function.
     """
 
     @wraps(func)
     async def wrapper(*args, **kwargs):
+        """
+        Handle rate limiting for LLM API calls in an asynchronous context.
+
+        This wrapper function first ensures that the LLM rate limiter is utilized before
+        executing the provided function. It waits if necessary to adhere to any configured rate
+        limits and logs the waiting duration if applicable.
+
+        Parameters:
+        -----------
+
+            - *args: Positional arguments passed to the wrapped function.
+            - **kwargs: Keyword arguments passed to the wrapped function.
+
+        Returns:
+        --------
+
+            The return value of the wrapped function, after ensuring rate limiting compliance.
+        """
         limiter = llm_rate_limiter()
         waited = await limiter.async_wait_if_needed()
         if waited > 0:
@@ -247,11 +317,19 @@ def is_rate_limit_error(error):
     """
     Check if an error is related to rate limiting.
 
-    Args:
-        error: The exception to check.
+    Evaluate the provided error to determine if it signifies a rate limiting issue by
+    checking against known patterns. The check is case-insensitive and looks for matches in
+    the string representation of the error.
+
+    Parameters:
+    -----------
+
+        - error: The exception to check for rate limiting indications.
 
     Returns:
-        bool: True if the error is rate-limit related, False otherwise.
+    --------
+
+        - bool: True if the error is rate-limit related, False otherwise.
     """
     error_str = str(error).lower()
     return any(pattern.lower() in error_str for pattern in RATE_LIMIT_ERROR_PATTERNS)
@@ -266,14 +344,21 @@ def calculate_backoff(
     """
     Calculate the backoff time for a retry attempt with jitter.
 
-    Args:
-        attempt: The current retry attempt (0-based).
-        initial_backoff: The initial backoff time in seconds.
-        backoff_factor: The multiplier for exponential backoff.
-        jitter: The jitter factor to avoid thundering herd.
+    Parameters:
+    -----------
+
+        - attempt: The current retry attempt (0-based).
+        - initial_backoff: The initial backoff time in seconds. (default
+          DEFAULT_INITIAL_BACKOFF)
+        - backoff_factor: The multiplier for exponential backoff. (default
+          DEFAULT_BACKOFF_FACTOR)
+        - jitter: The jitter factor to avoid thundering herd. (default DEFAULT_JITTER)
 
     Returns:
-        float: The backoff time in seconds.
+    --------
+
+        The backoff time in seconds, calculated using the exponential backoff formula
+        adjusted by a jitter component.
     """
     backoff = initial_backoff * (backoff_factor**attempt)
     jitter_amount = backoff * jitter
@@ -287,24 +372,68 @@ def sleep_and_retry_sync(
     jitter=DEFAULT_JITTER,
 ):
     """
-    Decorator that automatically retries a synchronous function when rate limit errors occur.
+    Decorate a synchronous function to automatically retry on rate limit errors.
 
-    This decorator implements an exponential backoff strategy with jitter
-    to handle rate limit errors efficiently.
+    This decorator implements an exponential backoff strategy with jitter to handle rate
+    limit errors efficiently. It will retry the decorated function until success or until
+    the maximum number of retries is reached.
 
-    Args:
-        max_retries: Maximum number of retry attempts.
-        initial_backoff: Initial backoff time in seconds.
-        backoff_factor: Multiplier for exponential backoff.
-        jitter: Jitter factor to avoid the thundering herd problem.
+    Parameters:
+    -----------
+
+        - max_retries: Maximum number of retry attempts. (default DEFAULT_MAX_RETRIES)
+        - initial_backoff: Initial backoff time in seconds. (default
+          DEFAULT_INITIAL_BACKOFF)
+        - backoff_factor: Multiplier for exponential backoff. (default
+          DEFAULT_BACKOFF_FACTOR)
+        - jitter: Jitter factor to avoid the thundering herd problem. (default
+          DEFAULT_JITTER)
 
     Returns:
-        The decorated function.
+    --------
+
+        The decorated function that retries on rate limit errors.
     """
 
     def decorator(func):
+        """
+        Apply a retry mechanism to a function, specifically for handling rate limit errors.
+
+        Parameters:
+        -----------
+
+            - func: The function to be wrapped with retry logic.
+
+        Returns:
+        --------
+
+            A wrapped function that retries on rate limit errors until successful or max retries
+            are reached.
+        """
+
         @wraps(func)
         def wrapper(*args, **kwargs):
+            """
+            Handle retries for a function call in case of errors, specifically for rate limit
+            errors.
+
+            This decorator will continually attempt to call the provided function until it either
+            succeeds or the maximum number of retries is reached. If the caught exception is
+            determined to be a rate limit error, it will calculate the appropriate backoff time and
+            wait before retrying.
+
+            Parameters:
+            -----------
+
+                - *args: Positional arguments to be passed to the wrapped function.
+                - **kwargs: Keyword arguments to be passed to the wrapped function.
+
+            Returns:
+            --------
+
+                The return value of the wrapped function if the call succeeds before exceeding
+                max_retries.
+            """
             attempt = 0
             while True:
                 try:
@@ -335,24 +464,61 @@ def sleep_and_retry_async(
     jitter=DEFAULT_JITTER,
 ):
     """
-    Decorator that automatically retries an asynchronous function when rate limit errors occur.
+    Retry an asynchronous function with an exponential backoff strategy upon encountering
+    rate limit errors.
 
-    This decorator implements an exponential backoff strategy with jitter
-    to handle rate limit errors efficiently.
+    This decorator will automatically retry the specified asynchronous function if it raises
+    an error related to rate limiting. It uses a backoff strategy to control the timing of
+    retries, which includes a random jitter to prevent overwhelming the server.
 
     Args:
-        max_retries: Maximum number of retry attempts.
-        initial_backoff: Initial backoff time in seconds.
-        backoff_factor: Multiplier for exponential backoff.
-        jitter: Jitter factor to avoid the thundering herd problem.
+    max_retries: Maximum number of retry attempts.
+    initial_backoff: Initial backoff time in seconds.
+    backoff_factor: Multiplier for exponential backoff.
+    jitter: Jitter factor to avoid the thundering herd problem.
 
     Returns:
-        The decorated async function.
+    The decorated async function that handles retries on rate limit errors, returning the
+    function's original output after successful completion.
     """
 
     def decorator(func):
+        """
+        Wrap an asynchronous function to handle retries with a backoff strategy.
+
+        Parameters:
+        -----------
+
+            - func: The asynchronous function to be wrapped and retried.
+
+        Returns:
+        --------
+
+            The wrapped asynchronous function that handles retries.
+        """
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            """
+            Handle retries for a given async function in case of errors, with rate limit check and
+            backoff strategy.
+
+            Wrap the provided asynchronous function and execute it with retries based on error
+            handling. If a rate limit error occurs, retry the function after calculating an
+            appropriate backoff time, respecting the maximum number of retries allowed. In case of
+            non-rate limit errors or exceeding max retries, re-raise the exception.
+
+            Parameters:
+            -----------
+
+                - *args: Positional arguments to be passed to the wrapped async function.
+                - **kwargs: Keyword arguments to be passed to the wrapped async function.
+
+            Returns:
+            --------
+
+                The result of the wrapped async function upon successful completion after retries.
+            """
             attempt = 0
             while True:
                 try:

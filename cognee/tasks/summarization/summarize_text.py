@@ -11,6 +11,29 @@ from .models import TextSummary
 async def summarize_text(
     data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel] = None
 ):
+    """
+    Summarize the text contained in the provided data chunks.
+
+    If no summarization model is provided, the function retrieves the default model from the
+    configuration. It processes the data chunks asynchronously and returns summaries for
+    each chunk. If the provided list of data chunks is empty, it simply returns the list as
+    is.
+
+    Parameters:
+    -----------
+
+        - data_chunks (list[DocumentChunk]): A list of DocumentChunk objects containing text
+          to be summarized.
+        - summarization_model (Type[BaseModel]): An optional model used for summarizing
+          text. If not provided, the default is fetched from the configuration. (default
+          None)
+
+    Returns:
+    --------
+
+        A list of TextSummary objects, each containing the summary of a corresponding
+        DocumentChunk.
+    """
     if len(data_chunks) == 0:
         return data_chunks
 

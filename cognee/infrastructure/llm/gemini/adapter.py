@@ -18,6 +18,14 @@ observe = get_observe()
 
 
 class GeminiAdapter(LLMInterface):
+    """
+    Handles interactions with a language model API.
+
+    Public methods include:
+    - acreate_structured_output
+    - show_prompt
+    """
+
     MAX_RETRIES = 5
 
     def __init__(
@@ -42,6 +50,28 @@ class GeminiAdapter(LLMInterface):
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
+        """
+        Generate structured output from the language model based on the provided input and
+        system prompt.
+
+        This method handles retries and raises a ValueError if the request fails or the response
+        does not conform to the expected schema, logging errors accordingly.
+
+        Parameters:
+        -----------
+
+            - text_input (str): The user input text to generate a response for.
+            - system_prompt (str): The system's prompt or context to influence the language
+              model's generation.
+            - response_model (Type[BaseModel]): A model type indicating the expected format of
+              the response.
+
+        Returns:
+        --------
+
+            - BaseModel: Returns the generated response as an instance of the specified response
+              model.
+        """
         try:
             if response_model is str:
                 response_schema = {"type": "string"}
@@ -83,7 +113,23 @@ class GeminiAdapter(LLMInterface):
             raise ValueError(f"Response failed schema validation: {str(e)}")
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """Format and display the prompt for a user query."""
+        """
+        Format and display the prompt for a user query.
+
+        Raises an InvalidValueError if no system prompt is provided.
+
+        Parameters:
+        -----------
+
+            - text_input (str): The user input text to display along with the system prompt.
+            - system_prompt (str): The path or content of the system prompt to be read and
+              displayed.
+
+        Returns:
+        --------
+
+            - str: Returns a formatted string containing the system prompt and user input.
+        """
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:

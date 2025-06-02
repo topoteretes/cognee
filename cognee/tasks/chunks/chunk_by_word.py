@@ -8,15 +8,23 @@ PARAGRAPH_ENDINGS = r"[\n\r]"
 
 def is_real_paragraph_end(last_char: str, current_pos: int, text: str) -> bool:
     """
-    Determines if the current position represents a real paragraph ending.
+    Determine if the current position represents a valid paragraph end.
 
-    Args:
-        last_char: The last processed character
-        current_pos: Current position in the text
-        text: The input text
+    The function checks if the last character indicates a possible sentence ending, then
+    verifies if the subsequent characters lead to a valid paragraph end based on specific
+    conditions.
+
+    Parameters:
+    -----------
+
+        - last_char (str): The last processed character
+        - current_pos (int): Current position in the text
+        - text (str): The input text
 
     Returns:
-        bool: True if this is a real paragraph end, False otherwise
+    --------
+
+        - bool: True if this is a real paragraph end, False otherwise
     """
     if re.match(SENTENCE_ENDINGS, last_char):
         return True
@@ -38,9 +46,16 @@ def is_real_paragraph_end(last_char: str, current_pos: int, text: str) -> bool:
 
 def chunk_by_word(data: str) -> Iterator[Tuple[str, str]]:
     """
-    Chunks text into words and endings while preserving whitespace.
-    Whitespace is included with the preceding word.
-    Outputs can be joined with "" to recreate the original input.
+    Chunk text into words and sentence endings, preserving whitespace.
+
+    Whitespace is included with the preceding word. Outputs can be joined with "" to
+    recreate the original input.
+
+    Parameters:
+    -----------
+
+        - data (str): The input string of text to be chunked into words and sentence
+          endings.
     """
     current_chunk = ""
     i = 0
