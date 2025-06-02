@@ -31,8 +31,12 @@ class CogneeIngestion(BaseTool):
             try:
                 # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
                 dataset_name = "final_reports"
-                await cognee.add(text, node_set=[self._nodeset_name], dataset_name=dataset_name)
-                await cognee.cognify(datasets=dataset_name, is_stream_info_enabled=True)
+                data = await cognee.add(
+                    text, node_set=[self._nodeset_name], dataset_name=dataset_name
+                )
+                await cognee.cognify(
+                    datasets=dataset_name, is_stream_info_enabled=True, datapoints=data.packets
+                )
 
                 return "Report ingested successfully into Cognee memory."
             except Exception as e:
