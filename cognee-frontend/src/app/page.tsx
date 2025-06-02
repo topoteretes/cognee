@@ -13,6 +13,7 @@ import getDatasetData from '@/modules/datasets/getDatasetData';
 import { Footer, SettingsModal } from '@/ui/Partials';
 import { TextLogo } from '@/ui/App';
 import { SettingsIcon } from '@/ui/Icons';
+import AuthToken from './auth/token/AuthToken';
 
 export default function Home() {
   const {
@@ -76,6 +77,7 @@ export default function Home() {
 
   return (
     <main className={styles.main}>
+      <AuthToken />
       <Spacer inset vertical="2" horizontal="2">
         <Stack orientation="horizontal" gap="between" align="center">
           <TextLogo width={158} height={44} color="white" />

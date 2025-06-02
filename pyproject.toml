@@ -58,6 +58,7 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "onnxruntime<=1.21.1",
     "pylance==0.22.0",
+    "python-jose[cryptography]>=3.5.0",
 ]
 
 [project.optional-dependencies]

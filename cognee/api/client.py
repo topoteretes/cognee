@@ -3,11 +3,16 @@
 import os
 
 import uvicorn
-from cognee.shared.logging_utils import get_logger
 import sentry_sdk
+from traceback import format_exc
+from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+
+from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -16,11 +21,7 @@ from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
-from fastapi import Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
 from cognee.exceptions import CogneeApiError
-from traceback import format_exc
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -67,7 +68,7 @@ app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://localhost:8000", "https://cognee.eu.auth0.com"],
     allow_credentials=True,
     allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
     allow_headers=["*"],
