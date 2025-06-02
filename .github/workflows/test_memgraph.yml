@@ -38,7 +38,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install -E memgraph --no-interaction
+        run: poetry install -E neo4j
 
       - name: Run default Memgraph
         env:
