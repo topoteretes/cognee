@@ -15,11 +15,14 @@ from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver: OntologyResolver = OntologyResolver(),
+    ontology_resolver: OntologyResolver = None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
         existing_edges_map = {}
+
+    if ontology_resolver is None:
+        ontology_resolver = OntologyResolver()
 
     added_nodes_map = {}
     added_ontology_nodes_map = {}
@@ -95,6 +98,7 @@ def expand_with_nodes_and_edges(
                                 name=ont_node_name,
                                 description=ont_node_name,
                                 ontology_valid=True,
+                                belongs_to_set=data_chunk.belongs_to_set,
                             )
 
                 for source, relation, target in ontology_entity_type_edges:
@@ -175,6 +179,7 @@ def expand_with_nodes_and_edges(
                                 name=ont_node_name,
                                 description=ont_node_name,
                                 ontology_valid=True,
+                                belongs_to_set=data_chunk.belongs_to_set,
                             )
 
                 for source, relation, target in ontology_entity_edges:

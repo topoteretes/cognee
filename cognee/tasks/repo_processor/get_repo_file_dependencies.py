@@ -11,7 +11,24 @@ from cognee.shared.CodeGraphEntities import CodeFile, Repository
 
 
 async def get_source_code_files(repo_path):
-    """Get .py files and their source code"""
+    """
+    Retrieve Python source code files from the specified repository path.
+
+    This function scans the given repository path for files that have the .py extension
+    while excluding test files and files within a virtual environment. It returns a list of
+    absolute paths to the source code files that are not empty.
+
+    Parameters:
+    -----------
+
+        - repo_path: The file path to the repository to search for Python source files.
+
+    Returns:
+    --------
+
+        A list of absolute paths to .py files that contain source code, excluding empty
+        files, test files, and files from a virtual environment.
+    """
     if not os.path.exists(repo_path):
         return {}
 
@@ -40,6 +57,26 @@ async def get_source_code_files(repo_path):
 
 
 def run_coroutine(coroutine_func, *args, **kwargs):
+    """
+    Run a coroutine function until it completes.
+
+    This function creates a new asyncio event loop, sets it as the current loop, and
+    executes the given coroutine function with the provided arguments. Once the coroutine
+    completes, the loop is closed. Intended for use in environments where an existing event
+    loop is not available or desirable.
+
+    Parameters:
+    -----------
+
+        - coroutine_func: The coroutine function to be run.
+        - *args: Positional arguments to pass to the coroutine function.
+        - **kwargs: Keyword arguments to pass to the coroutine function.
+
+    Returns:
+    --------
+
+        The result returned by the coroutine after completion.
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     result = loop.run_until_complete(coroutine_func(*args, **kwargs))
@@ -50,7 +87,21 @@ def run_coroutine(coroutine_func, *args, **kwargs):
 async def get_repo_file_dependencies(
     repo_path: str, detailed_extraction: bool = False
 ) -> AsyncGenerator[DataPoint, None]:
-    """Generate a dependency graph for Python files in the given repository path."""
+    """
+    Generate a dependency graph for Python files in the given repository path.
+
+    Check the validity of the repository path and yield a repository object followed by the
+    dependencies of Python files within that repository. Raise a FileNotFoundError if the
+    provided path does not exist. The extraction of detailed dependencies can be controlled
+    via the `detailed_extraction` argument.
+
+    Parameters:
+    -----------
+
+        - repo_path (str): The file path to the repository where Python files are located.
+        - detailed_extraction (bool): A flag indicating whether to perform a detailed
+          extraction of dependencies (default is False). (default False)
+    """
 
     if not os.path.exists(repo_path):
         raise FileNotFoundError(f"Repository path {repo_path} does not exist.")

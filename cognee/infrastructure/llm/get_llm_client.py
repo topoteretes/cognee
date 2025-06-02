@@ -9,6 +9,17 @@ from cognee.infrastructure.llm.ollama.adapter import OllamaAPIAdapter
 
 # Define an Enum for LLM Providers
 class LLMProvider(Enum):
+    """
+    Define an Enum for identifying different LLM Providers.
+
+    This Enum includes the following members:
+    - OPENAI: Represents the OpenAI provider.
+    - OLLAMA: Represents the Ollama provider.
+    - ANTHROPIC: Represents the Anthropic provider.
+    - CUSTOM: Represents a custom provider option.
+    - GEMINI: Represents the Gemini provider.
+    """
+
     OPENAI = "openai"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
@@ -17,7 +28,20 @@ class LLMProvider(Enum):
 
 
 def get_llm_client():
-    """Get the LLM client based on the configuration using Enums."""
+    """
+    Get the LLM client based on the configuration using Enums.
+
+    This function retrieves the configuration for the LLM provider and model, and
+    initializes the appropriate LLM client adapter accordingly. It raises an
+    InvalidValueError if the LLM API key is not set for certain providers or if the provider
+    is unsupported.
+
+    Returns:
+    --------
+
+        An instance of the appropriate LLM client adapter based on the provider
+        configuration.
+    """
     llm_config = get_llm_config()
 
     provider = LLMProvider(llm_config.llm_provider)

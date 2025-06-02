@@ -1,5 +1,16 @@
+from fastapi import HTTPException, status
 from cognee.exceptions import CogneeApiError
-from fastapi import status
+
+
+class UnauthorizedException(HTTPException):
+    def __init__(self, detail: str, **kwargs):
+        """Returns HTTP 403"""
+        super().__init__(status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+class UnauthenticatedException(HTTPException):
+    def __init__(self):
+        super().__init__(status_code=status.HTTP_401_UNAUTHORIZED, detail="Requires authentication")
 
 
 class RoleNotFoundError(CogneeApiError):
@@ -43,6 +54,16 @@ class PermissionDeniedError(CogneeApiError):
         self,
         message: str = "User does not have permission on documents.",
         name: str = "PermissionDeniedError",
+        status_code=status.HTTP_403_FORBIDDEN,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class PermissionNotFoundError(CogneeApiError):
+    def __init__(
+        self,
+        message: str = "Permission type does not exist.",
+        name: str = "PermissionNotFoundError",
         status_code=status.HTTP_403_FORBIDDEN,
     ):
         super().__init__(message, name, status_code)

@@ -9,6 +9,10 @@ from cognee.shared.data_models import ChunkStrategy
 
 
 class DefaultChunkEngine:
+    """
+    Manage the process of chunking data based on specified strategies.
+    """
+
     def __init__(self, chunk_strategy=None, chunk_size=None, chunk_overlap=None):
         self.chunk_strategy = chunk_strategy
         self.chunk_size = chunk_size
@@ -42,13 +46,17 @@ class DefaultChunkEngine:
         Chunk data based on the specified strategy.
 
         Parameters:
-        - chunk_strategy: The strategy to use for chunking.
-        - source_data: The data to be chunked.
-        - chunk_size: The size of each chunk.
-        - chunk_overlap: The overlap between chunks.
+        -----------
+
+            - chunk_strategy: The strategy to use for chunking the data. (default None)
+            - source_data: The data to be chunked. (default None)
+            - chunk_size: The size of each chunk. (default None)
+            - chunk_overlap: The overlap between chunks. (default None)
 
         Returns:
-        - The chunked data.
+        --------
+
+            Returns the chunked data and the respective chunk numbers.
         """
 
         if self.chunk_strategy == ChunkStrategy.PARAGRAPH:
@@ -69,6 +77,21 @@ class DefaultChunkEngine:
         return chunked_data, chunk_number
 
     def chunk_data_exact(self, data_chunks, chunk_size, chunk_overlap):
+        """
+        Chunk data exactly by specified sizes and overlaps.
+
+        Parameters:
+        -----------
+
+            - data_chunks: The chunks of data to be processed into exact sizes.
+            - chunk_size: The defined size for each chunk to be created.
+            - chunk_overlap: The number of overlapping characters between chunks.
+
+        Returns:
+        --------
+
+            Returns the created chunks and their numbered indices.
+        """
         data = "".join(data_chunks)
         chunks = []
         for i in range(0, len(data), chunk_size - chunk_overlap):
@@ -80,6 +103,21 @@ class DefaultChunkEngine:
         return chunks, numbered_chunks
 
     def chunk_by_sentence(self, data_chunks, chunk_size, chunk_overlap):
+        """
+        Chunk data into sentences based on specified sizes and overlaps.
+
+        Parameters:
+        -----------
+
+            - data_chunks: The chunks of data to be processed into sentences.
+            - chunk_size: The defined size for each chunk to be created.
+            - chunk_overlap: The number of overlapping characters between chunks.
+
+        Returns:
+        --------
+
+            Returns the resulting sentence chunks and their numbered indices.
+        """
         # Split by periods, question marks, exclamation marks, and ellipses
         data = "".join(data_chunks)
 
@@ -104,6 +142,23 @@ class DefaultChunkEngine:
         return sentence_chunks, numbered_chunks
 
     def chunk_data_by_paragraph(self, data_chunks, chunk_size, chunk_overlap, bound=0.75):
+        """
+        Chunk data based on paragraphs while considering overlaps and boundaries.
+
+        Parameters:
+        -----------
+
+            - data_chunks: The chunks of data to be processed into paragraphs.
+            - chunk_size: The defined size for each chunk to be created.
+            - chunk_overlap: The number of overlapping characters between chunks.
+            - bound: A weighting factor to determine splitting within a chunk (default is 0.75).
+              (default 0.75)
+
+        Returns:
+        --------
+
+            Returns the paragraph chunks and their numbered indices.
+        """
         data = "".join(data_chunks)
         total_length = len(data)
         chunks = []

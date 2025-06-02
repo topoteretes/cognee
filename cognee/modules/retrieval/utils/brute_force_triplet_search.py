@@ -56,7 +56,7 @@ def format_triplets(edges):
 async def get_memory_fragment(
     properties_to_project: Optional[List[str]] = None,
     node_type: Optional[Type] = None,
-    node_name: List[Optional[str]] = None,
+    node_name: Optional[List[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     graph_engine = await get_graph_engine()
@@ -87,7 +87,7 @@ async def brute_force_triplet_search(
     properties_to_project: List[str] = None,
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
-    node_name: List[Optional[str]] = None,
+    node_name: Optional[List[str]] = None,
 ) -> list:
     if user is None:
         user = await get_default_user()
@@ -113,7 +113,7 @@ async def brute_force_search(
     properties_to_project: List[str] = None,
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
-    node_name: List[Optional[str]] = None,
+    node_name: Optional[List[str]] = None,
 ) -> list:
     """
     Performs a brute force search to retrieve the top triplets from the graph.

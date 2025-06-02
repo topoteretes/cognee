@@ -1,6 +1,7 @@
-from .config import get_vectordb_config
+from .config import get_vectordb_context_config
 from .create_vector_engine import create_vector_engine
 
 
 def get_vector_engine():
-    return create_vector_engine(**get_vectordb_config().to_dict())
+    # Get appropriate vector db configuration based on current async context
+    return create_vector_engine(**get_vectordb_context_config())

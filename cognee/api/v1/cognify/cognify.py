@@ -17,7 +17,7 @@ from cognee.modules.graph.operations import get_formatted_graph_data
 from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 
 from cognee.tasks.documents import (
-    check_permissions_on_documents,
+    check_permissions_on_dataset,
     classify_documents,
     extract_chunks_from_documents,
 )
@@ -38,6 +38,8 @@ async def cognify(
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
     run_in_background: bool = False,
     is_stream_info_enabled: bool = False,
 ):
@@ -47,15 +49,29 @@ async def cognify(
         user = await get_default_user()
 
     if run_in_background:
-        return await run_cognify_as_background_process(tasks, user, datasets, datapoints=datapoints)
+        return await run_cognify_as_background_process(
+            tasks, user, datasets, datapoints, vector_db_config, graph_db_config
+        )
     else:
         return await run_cognify_blocking(
-            tasks, user, datasets, is_stream_info_enabled, datapoints=datapoints
+            tasks,
+            user,
+            datasets,
+            datapoints,
+            is_stream_info_enabled,
+            vector_db_config,
+            graph_db_config,
         )
 
 
 async def run_cognify_blocking(
-    tasks, user, datasets, is_stream_info_enabled=False, datapoints=None
+    tasks,
+    user,
+    datasets,
+    datapoints=None,
+    is_stream_info_enabled=False,
+    vector_db_config=None,
+    graph_db_config=None,
 ):
     pipeline_run_info = None
 
@@ -65,6 +81,8 @@ async def run_cognify_blocking(
         user=user,
         pipeline_name="cognify_pipeline",
         datapoints=datapoints,
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
     ):
         pipeline_run_info = run_info
 
@@ -80,14 +98,22 @@ async def run_cognify_blocking(
     return pipeline_run_info
 
 
-async def run_cognify_as_background_process(tasks, user, datasets, datapoints=None):
+async def run_cognify_as_background_process(
+    tasks,
+    user,
+    datasets,
+    datapoints,
+    vector_db_config,
+    graph_db_config,
+):
     pipeline_run = cognee_pipeline(
         tasks=tasks,
         user=user,
-        data=None,
         datasets=datasets,
         pipeline_name="cognify_pipeline",
         datapoints=datapoints,
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
     )
 
     pipeline_run_started_info = await anext(pipeline_run)
@@ -120,7 +146,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 ) -> list[Task]:
     default_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_documents, user=user, permissions=["write"]),
+        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
