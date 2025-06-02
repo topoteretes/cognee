@@ -51,7 +51,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPH_DATABASE_URL: "bolt://localhost:7687"
-          GRAPH_DATABASE_PASSWORD: " "
-          GRAPH_DATABASE_USERNAME: " "
+          GRAPH_DATABASE_URL: ${{ secrets.MEMGRAPH_API_URL }}
+          GRAPH_DATABASE_PASSWORD: "memgraph"
+          GRAPH_DATABASE_USERNAME: "memgraph"
         run: poetry run python ./cognee/tests/test_memgraph.py
