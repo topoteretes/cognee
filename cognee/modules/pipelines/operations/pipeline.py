@@ -1,11 +1,12 @@
 import asyncio
-from typing import Union
+from typing import Union, Any
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+from cognee.modules.data.methods.get_data import get_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -33,6 +34,7 @@ async def cognee_pipeline(
     datasets: Union[str, list[str]] = None,
     user: User = None,
     pipeline_name: str = "custom_pipeline",
+    datapoints: dict[str, Any] = None,
 ):
     # Create tables for databases
     await create_relational_db_and_tables()
@@ -92,8 +94,21 @@ async def cognee_pipeline(
         datasets = dataset_instances
 
     for dataset in datasets:
+        if datapoints and datapoints.get(dataset.name, None):
+            data_to_pass = []
+            dataset_specific_datapoints = datapoints.get(dataset.name)
+            for data_id_to_cognify in dataset_specific_datapoints:
+                data_element_to_pass = await get_data(
+                    user_id=dataset.owner_id, data_id=data_id_to_cognify
+                )
+                if data_element_to_pass:
+                    data_to_pass.append(data_element_to_pass)
+
+        else:
+            data_to_pass = data
+
         async for run_info in run_pipeline(
-            dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name
+            dataset=dataset, user=user, tasks=tasks, data=data_to_pass, pipeline_name=pipeline_name
         ):
             yield run_info
 

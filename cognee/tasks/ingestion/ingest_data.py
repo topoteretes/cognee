@@ -20,6 +20,7 @@ from cognee.api.v1.add.config import get_s3_config
 async def ingest_data(
     data: Any, dataset_name: str, user: User, node_set: Optional[List[str]] = None
 ):
+    added_datapoints = []
     destination = get_dlt_destination()
 
     if not user:
@@ -138,6 +139,7 @@ async def ingest_data(
                             node_set=json.dumps(node_set) if node_set else None,
                             token_count=-1,
                         )
+                        added_datapoints.append(data_point)
 
                     # Check if data is already in dataset
                     dataset_data = (
@@ -182,11 +184,4 @@ async def ingest_data(
             write_disposition="merge",
         )
 
-    datasets = await get_datasets_by_name(dataset_name, user.id)
-
-    # In case no files were processed no dataset will be created
-    if datasets:
-        dataset = datasets[0]
-        data_documents = await get_dataset_data(dataset_id=dataset.id)
-        return data_documents
-    return []
+    return added_datapoints

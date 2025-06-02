@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional
+from typing import Union, Optional, Any
 
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -32,6 +32,7 @@ update_status_lock = asyncio.Lock()
 
 async def cognify(
     datasets: Union[str, list[str]] = None,
+    datapoints: dict[str, Any] = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
@@ -46,16 +47,24 @@ async def cognify(
         user = await get_default_user()
 
     if run_in_background:
-        return await run_cognify_as_background_process(tasks, user, datasets)
+        return await run_cognify_as_background_process(tasks, user, datasets, datapoints=datapoints)
     else:
-        return await run_cognify_blocking(tasks, user, datasets, is_stream_info_enabled)
+        return await run_cognify_blocking(
+            tasks, user, datasets, is_stream_info_enabled, datapoints=datapoints
+        )
 
 
-async def run_cognify_blocking(tasks, user, datasets, is_stream_info_enabled=False):
+async def run_cognify_blocking(
+    tasks, user, datasets, is_stream_info_enabled=False, datapoints=None
+):
     pipeline_run_info = None
 
     async for run_info in cognee_pipeline(
-        tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
+        tasks=tasks,
+        datasets=datasets,
+        user=user,
+        pipeline_name="cognify_pipeline",
+        datapoints=datapoints,
     ):
         pipeline_run_info = run_info
 
@@ -71,9 +80,14 @@ async def run_cognify_blocking(tasks, user, datasets, is_stream_info_enabled=Fal
     return pipeline_run_info
 
 
-async def run_cognify_as_background_process(tasks, user, datasets):
+async def run_cognify_as_background_process(tasks, user, datasets, datapoints=None):
     pipeline_run = cognee_pipeline(
-        tasks=tasks, user=user, datasets=datasets, pipeline_name="cognify_pipeline"
+        tasks=tasks,
+        user=user,
+        data=None,
+        datasets=datasets,
+        pipeline_name="cognify_pipeline",
+        datapoints=datapoints,
     )
 
     pipeline_run_started_info = await anext(pipeline_run)

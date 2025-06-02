@@ -16,9 +16,17 @@ async def add(
 
     pipeline_run_info = None
 
+    data_packets = {dataset_name: []}
+
     async for run_info in cognee_pipeline(
         tasks=tasks, datasets=dataset_name, data=data, user=user, pipeline_name="add_pipeline"
     ):
+        if run_info.status == "PipelineRunYield":
+            for data_yielded in run_info.payload:
+                data_packets[dataset_name].append(data_yielded.id)
         pipeline_run_info = run_info
+
+    if hasattr(pipeline_run_info, "packets"):
+        pipeline_run_info.packets = data_packets
 
     return pipeline_run_info

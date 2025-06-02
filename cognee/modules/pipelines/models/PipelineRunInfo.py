@@ -23,6 +23,7 @@ class PipelineRunYield(PipelineRunInfo):
 
 class PipelineRunCompleted(PipelineRunInfo):
     status: str = "PipelineRunCompleted"
+    packets: dict = {}
 
 
 class PipelineRunErrored(PipelineRunInfo):
