@@ -22,11 +22,6 @@ jobs:
         image: memgraph/memgraph:latest
         ports:
           - 7687:7687
-        options: >-
-          --health-cmd "cypher-shell --address localhost:7687 --username memgraph --password memgraph --database=system 'SHOW DATABASES;' || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - name: Check out
