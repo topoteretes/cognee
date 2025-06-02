@@ -19,13 +19,13 @@ jobs:
 
     services:
       memgraph:
-        image: memgraph/memgraph:latest
+        image: memgraph/memgraph-mage:latest
         ports:
           - 7687:7687
 
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -53,7 +53,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPH_DATABASE_URL: "bolt://localhost:7687"
+          GRAPH_DATABASE_URL: "bolt://memgraph:7687"
           GRAPH_DATABASE_PASSWORD: "memgraph"
           GRAPH_DATABASE_USERNAME: "memgraph"
         run: poetry run python ./cognee/tests/test_memgraph.py
