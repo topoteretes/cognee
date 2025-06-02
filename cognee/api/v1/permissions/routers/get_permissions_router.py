@@ -6,13 +6,6 @@ from fastapi.responses import JSONResponse
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.api.DTO import InDTO
-
-
-class DatasetPermissionsPayloadDTO(InDTO):
-    principal_id: UUID
-    permission_name: str
-    dataset_ids: List[UUID]
 
 
 def get_permissions_router() -> APIRouter:
@@ -20,14 +13,17 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/datasets/{principal_id}/")
     async def give_datasets_permission_to_principal(
-        payload: DatasetPermissionsPayloadDTO, user: User = Depends(get_authenticated_user)
+        permission_name: str,
+        dataset_ids: List[UUID],
+        principal_id: UUID,
+        user: User = Depends(get_authenticated_user),
     ):
         from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 
         await authorized_give_permission_on_datasets(
-            payload.principal_id,
-            [dataset_id for dataset_id in payload.dataset_ids],
-            payload.permission_name,
+            principal_id,
+            [dataset_id for dataset_id in dataset_ids],
+            permission_name,
             user.id,
         )
 
