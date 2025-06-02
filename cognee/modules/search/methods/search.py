@@ -1,8 +1,8 @@
-import asyncio
 import os
 import json
+import asyncio
 from uuid import UUID
-from typing import Callable, Optional, Union
+from typing import Callable, List, Optional, Type, Union
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import InvalidValueError
@@ -37,6 +37,8 @@ async def search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: Optional[List[str]] = None,
 ):
     """
 
@@ -62,7 +64,13 @@ async def search(
     query = await log_query(query_text, query_type.value, user.id)
 
     search_results = await specific_search(
-        query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
+        query_type,
+        query_text,
+        user,
+        system_prompt_path=system_prompt_path,
+        top_k=top_k,
+        node_type=node_type,
+        node_name=node_name,
     )
 
     await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
@@ -76,29 +84,39 @@ async def specific_search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = None,
+    node_name: Optional[List[str]] = None,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
         SearchType.INSIGHTS: InsightsRetriever(top_k=top_k).get_completion,
         SearchType.CHUNKS: ChunksRetriever(top_k=top_k).get_completion,
         SearchType.RAG_COMPLETION: CompletionRetriever(
-            system_prompt_path=system_prompt_path,
-            top_k=top_k,
+            system_prompt_path=system_prompt_path, top_k=top_k
         ).get_completion,
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_COT: GraphCompletionCotRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: GraphCompletionContextExtensionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         ).get_completion,
         SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
-            system_prompt_path=system_prompt_path, top_k=top_k
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
         ).get_completion,
         SearchType.CODE: CodeRetriever(top_k=top_k).get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,

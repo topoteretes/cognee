@@ -45,6 +45,10 @@ uv sync --extra debug --extra api --extra postgres --extra weaviate --extra qdra
 
 FROM python:3.12-slim-bookworm
 
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY --from=uv /app /app
@@ -57,5 +61,7 @@ RUN chmod +x /app/entrypoint.sh
 ENV PATH="/app/.venv/bin:$PATH"
 
 ENV PYTHONPATH=/app
+# ENV LOG_LEVEL=ERROR
+ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/app/entrypoint.sh"]

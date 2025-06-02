@@ -33,6 +33,25 @@ logger = get_logger("task:infer_data_ontology")
 
 
 async def extract_ontology(content: str, response_model: Type[BaseModel]):
+    """
+    Extracts structured ontology from the provided content using a pre-defined LLM client.
+
+    This asynchronous function retrieves a system prompt from a file and utilizes an LLM
+    client to create a structured output based on the input content and specified response
+    model.
+
+    Parameters:
+    -----------
+
+        - content (str): The content from which to extract the ontology.
+        - response_model (Type[BaseModel]): The model that defines the structure of the
+          output ontology.
+
+    Returns:
+    --------
+
+        The structured ontology extracted from the content.
+    """
     llm_client = get_llm_client()
 
     system_prompt = read_query_prompt("extract_ontology.txt")
@@ -43,10 +62,38 @@ async def extract_ontology(content: str, response_model: Type[BaseModel]):
 
 
 class OntologyEngine:
+    """
+    Manage ontology data and operations for graph structures, providing methods for data
+    loading, flattening models, and adding ontological relationships to a graph database.
+
+    Public methods:
+
+    - flatten_model
+    - recursive_flatten
+    - load_data
+    - add_graph_ontology
+    """
+
     async def flatten_model(
         self, model: NodeModel, parent_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Flatten the model to a dictionary."""
+        """
+        Flatten the model to a dictionary including optional parent ID and relationship details
+        if available.
+
+        Parameters:
+        -----------
+
+            - model (NodeModel): The NodeModel instance to flatten.
+            - parent_id (Optional[str]): An optional ID of the parent node for hierarchical
+              purposes. (default None)
+
+        Returns:
+        --------
+
+            - Dict[str, Any]: A dictionary representation of the model with flattened
+              attributes.
+        """
         result = model.dict()
         result["parent_id"] = parent_id
         if model.default_relationship:
@@ -62,7 +109,23 @@ class OntologyEngine:
     async def recursive_flatten(
         self, items: Union[List[Dict[str, Any]], Dict[str, Any]], parent_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Recursively flatten the items."""
+        """
+        Recursively flatten a hierarchical structure of models into a flat list of dictionaries.
+
+        Parameters:
+        -----------
+
+            - items (Union[List[Dict[str, Any]], Dict[str, Any]]): A list or dictionary
+              containing models to flatten.
+            - parent_id (Optional[str]): An optional ID of the parent node to maintain hierarchy
+              during flattening. (default None)
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A flat list of dictionaries representing the hierarchical
+              model structure.
+        """
         flat_list = []
 
         if isinstance(items, list):
@@ -76,7 +139,20 @@ class OntologyEngine:
         return flat_list
 
     async def load_data(self, file_path: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
-        """Load data from a JSON or CSV file."""
+        """
+        Load data from a specified JSON or CSV file and return it in a structured format.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The path to the file to load data from.
+
+        Returns:
+        --------
+
+            - Union[List[Dict[str, Any]], Dict[str, Any]]: Parsed data from the file as either a
+              list of dictionaries or a single dictionary depending on content type.
+        """
         try:
             if file_path.endswith(".json"):
                 async with aiofiles.open(file_path, mode="r") as f:
@@ -96,7 +172,18 @@ class OntologyEngine:
             )
 
     async def add_graph_ontology(self, file_path: str = None, documents: list = None):
-        """Add graph ontology from a JSON or CSV file or infer from documents content."""
+        """
+        Add graph ontology from a JSON or CSV file, or infer relationships from provided
+        document content. Raise exceptions for invalid file types or missing entities.
+
+        Parameters:
+        -----------
+
+            - file_path (str): Optional path to a file containing data to be loaded. (default
+              None)
+            - documents (list): Optional list of document objects for content extraction if no
+              file path is provided. (default None)
+        """
         if file_path is None:
             initial_chunks_and_ids = []
 
@@ -202,6 +289,17 @@ class OntologyEngine:
 
 
 async def infer_data_ontology(documents, ontology_model=KnowledgeGraph, root_node_id=None):
+    """
+    Infer data ontology from provided documents and optionally add it to a graph.
+
+    Parameters:
+    -----------
+
+        - documents: The documents from which to infer the ontology.
+        - ontology_model: The ontology model to use for the inference, defaults to
+          KnowledgeGraph. (default KnowledgeGraph)
+        - root_node_id: An optional root node identifier for the ontology. (default None)
+    """
     if ontology_model == KnowledgeGraph:
         ontology_engine = OntologyEngine()
         root_node_id = await ontology_engine.add_graph_ontology(documents=documents)

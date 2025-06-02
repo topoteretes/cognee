@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 import os
 import json
 import asyncio
+
+from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 from cognee.shared.logging_utils import get_logger
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List, Union, Type, Tuple
 from uuid import UUID
 import aiofiles
 import aiofiles.os as aiofiles_os
@@ -23,6 +25,12 @@ logger = get_logger()
 
 
 class NetworkXAdapter(GraphDBInterface):
+    """
+    Manage a singleton instance of a graph database interface, utilizing the NetworkX
+    library. Handles graph data access and manipulation, including nodes and edges
+    management, persistence, and auxiliary functionalities.
+    """
+
     _instance = None
     graph = None  # Class variable to store the singleton instance
 
@@ -36,33 +44,118 @@ class NetworkXAdapter(GraphDBInterface):
         self.filename = filename
 
     async def get_graph_data(self):
+        """
+        Retrieve graph data including nodes and edges.
+
+        Returns:
+        --------
+
+            A tuple containing a list of node data and a list of edge data.
+        """
         await self.load_graph_from_file()
         return (list(self.graph.nodes(data=True)), list(self.graph.edges(data=True, keys=True)))
 
     async def query(self, query: str, params: dict):
+        """
+        Execute a query against the graph data. The specifics of the query execution need to be
+        implemented.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string to run against the graph.
+            - params (dict): Parameters for the query, if necessary.
+        """
         pass
 
     async def has_node(self, node_id: UUID) -> bool:
+        """
+        Determine if a specific node exists in the graph.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node to check.
+
+        Returns:
+        --------
+
+            - bool: True if the node exists, otherwise False.
+        """
         return self.graph.has_node(node_id)
 
     async def add_node(self, node: DataPoint) -> None:
+        """
+        Add a node to the graph and persist the graph state to the file.
+
+        Parameters:
+        -----------
+
+            - node (DataPoint): The node to be added, represented as a DataPoint object.
+        """
         self.graph.add_node(node.id, **node.model_dump())
 
         await self.save_graph_to_file(self.filename)
 
     @record_graph_changes
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
+        """
+        Bulk add multiple nodes to the graph and persist the graph state to the file.
+
+        Parameters:
+        -----------
+
+            - nodes (list[DataPoint]): A list of DataPoint objects defining the nodes to be
+              added.
+        """
         nodes = [(node.id, node.model_dump()) for node in nodes]
         self.graph.add_nodes_from(nodes)
         await self.save_graph_to_file(self.filename)
 
     async def get_graph(self):
+        """
+        Retrieve the current state of the graph.
+
+        Returns:
+        --------
+
+            The current graph instance.
+        """
         return self.graph
 
     async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
+        """
+        Check for the existence of a specific edge in the graph.
+
+        Parameters:
+        -----------
+
+            - from_node (str): The identifier of the source node.
+            - to_node (str): The identifier of the target node.
+            - edge_label (str): The label of the edge to check.
+
+        Returns:
+        --------
+
+            - bool: True if the edge exists, otherwise False.
+        """
         return self.graph.has_edge(from_node, to_node, key=edge_label)
 
     async def has_edges(self, edges):
+        """
+        Check for the existence of multiple edges in the graph.
+
+        Parameters:
+        -----------
+
+            - edges: A list of edges to check, defined as tuples of (from_node, to_node,
+              edge_label).
+
+        Returns:
+        --------
+
+            A list of edges that exist in the graph.
+        """
         result = []
 
         for from_node, to_node, edge_label in edges:
@@ -79,6 +172,18 @@ class NetworkXAdapter(GraphDBInterface):
         relationship_name: str,
         edge_properties: Dict[str, Any] = {},
     ) -> None:
+        """
+        Add a single edge to the graph and persist the graph state to the file.
+
+        Parameters:
+        -----------
+
+            - from_node (str): The identifier of the source node for the edge.
+            - to_node (str): The identifier of the target node for the edge.
+            - relationship_name (str): The label for the relationship as the edge is created.
+            - edge_properties (Dict[str, Any]): Additional properties for the edge, if any.
+              (default {})
+        """
         edge_properties["updated_at"] = datetime.now(timezone.utc)
         self.graph.add_edge(
             from_node,
@@ -91,6 +196,15 @@ class NetworkXAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_edges(self, edges: list[tuple[str, str, str, dict]]) -> None:
+        """
+        Bulk add multiple edges to the graph and persist the graph state to the file.
+
+        Parameters:
+        -----------
+
+            - edges (list[tuple[str, str, str, dict]]): A list of edges defined as tuples
+              containing (from_node, to_node, relationship_name, edge_properties).
+        """
         if not edges:
             logger.debug("No edges to add")
             return
@@ -137,12 +251,32 @@ class NetworkXAdapter(GraphDBInterface):
             raise
 
     async def get_edges(self, node_id: UUID):
+        """
+        Retrieve edges connected to a specific node.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node whose edges are to be retrieved.
+
+        Returns:
+        --------
+
+            A list of edges connected to the specified node.
+        """
         return list(self.graph.in_edges(node_id, data=True)) + list(
             self.graph.out_edges(node_id, data=True)
         )
 
     async def delete_node(self, node_id: UUID) -> None:
-        """Asynchronously delete a node and all its relationships from the graph if it exists."""
+        """
+        Remove a node and its associated edges from the graph, then persist the changes.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node to delete.
+        """
 
         if self.graph.has_node(node_id):
             # First remove all edges connected to the node
@@ -159,10 +293,26 @@ class NetworkXAdapter(GraphDBInterface):
             logger.error(f"Node {node_id} not found in graph")
 
     async def delete_nodes(self, node_ids: List[UUID]) -> None:
+        """
+        Bulk delete nodes from the graph and persist the changes.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[UUID]): A list of node identifiers to delete.
+        """
         self.graph.remove_nodes_from(node_ids)
         await self.save_graph_to_file(self.filename)
 
     async def get_disconnected_nodes(self) -> List[str]:
+        """
+        Identify nodes that are not connected to any other nodes in the graph.
+
+        Returns:
+        --------
+
+            - List[str]: A list of identifiers for disconnected nodes.
+        """
         connected_components = list(nx.weakly_connected_components(self.graph))
 
         disconnected_nodes = []
@@ -175,15 +325,56 @@ class NetworkXAdapter(GraphDBInterface):
         return disconnected_nodes
 
     async def extract_node(self, node_id: UUID) -> dict:
+        """
+        Retrieve data for a specific node based on its identifier.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node to retrieve.
+
+        Returns:
+        --------
+
+            - dict: The data of the specified node, or None if not found.
+        """
         if self.graph.has_node(node_id):
             return self.graph.nodes[node_id]
 
         return None
 
     async def extract_nodes(self, node_ids: List[UUID]) -> List[dict]:
+        """
+        Retrieve data for multiple nodes based on their identifiers.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[UUID]): A list of node identifiers to retrieve data.
+
+        Returns:
+        --------
+
+            - List[dict]: A list of data for each node identified that exists in the graph.
+        """
         return [self.graph.nodes[node_id] for node_id in node_ids if self.graph.has_node(node_id)]
 
     async def get_predecessors(self, node_id: UUID, edge_label: str = None) -> list:
+        """
+        Retrieve the predecessor nodes of a specified node according to a specific edge label.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node for which to find predecessors.
+            - edge_label (str): The label for the edges connecting to predecessors; if None, all
+              predecessors are retrieved. (default None)
+
+        Returns:
+        --------
+
+            - list: A list of predecessor nodes.
+        """
         if self.graph.has_node(node_id):
             if edge_label is None:
                 return [
@@ -200,6 +391,21 @@ class NetworkXAdapter(GraphDBInterface):
             return nodes
 
     async def get_successors(self, node_id: UUID, edge_label: str = None) -> list:
+        """
+        Retrieve the successor nodes of a specified node according to a specific edge label.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node for which to find successors.
+            - edge_label (str): The label for the edges connecting to successors; if None, all
+              successors are retrieved. (default None)
+
+        Returns:
+        --------
+
+            - list: A list of successor nodes.
+        """
         if self.graph.has_node(node_id):
             if edge_label is None:
                 return [
@@ -216,6 +422,20 @@ class NetworkXAdapter(GraphDBInterface):
             return nodes
 
     async def get_neighbors(self, node_id: UUID) -> list:
+        """
+        Get the neighboring nodes of a specified node, including both predecessors and
+        successors.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node whose neighbors are to be retrieved.
+
+        Returns:
+        --------
+
+            - list: A list of neighboring nodes.
+        """
         if not self.graph.has_node(node_id):
             return []
 
@@ -229,6 +449,19 @@ class NetworkXAdapter(GraphDBInterface):
         return neighbors
 
     async def get_connections(self, node_id: UUID) -> list:
+        """
+        Get the connections of a specified node to its neighbors.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node for which to get connections.
+
+        Returns:
+        --------
+
+            - list: A list of connections involving the specified node and its neighbors.
+        """
         if not self.graph.has_node(node_id):
             return []
 
@@ -266,6 +499,17 @@ class NetworkXAdapter(GraphDBInterface):
     async def remove_connection_to_predecessors_of(
         self, node_ids: list[UUID], edge_label: str
     ) -> None:
+        """
+        Remove connections to predecessors of specified nodes based on an edge label and persist
+        changes.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[UUID]): A list of node identifiers whose predecessor connections
+              need to be removed.
+            - edge_label (str): The label of the edges to remove.
+        """
         for node_id in node_ids:
             if self.graph.has_node(node_id):
                 for predecessor_id in list(self.graph.predecessors(node_id)):
@@ -277,6 +521,17 @@ class NetworkXAdapter(GraphDBInterface):
     async def remove_connection_to_successors_of(
         self, node_ids: list[UUID], edge_label: str
     ) -> None:
+        """
+        Remove connections to successors of specified nodes based on an edge label and persist
+        changes.
+
+        Parameters:
+        -----------
+
+            - node_ids (list[UUID]): A list of node identifiers whose successor connections need
+              to be removed.
+            - edge_label (str): The label of the edges to remove.
+        """
         for node_id in node_ids:
             if self.graph.has_node(node_id):
                 for successor_id in list(self.graph.successors(node_id)):
@@ -286,6 +541,14 @@ class NetworkXAdapter(GraphDBInterface):
         await self.save_graph_to_file(self.filename)
 
     async def create_empty_graph(self, file_path: str) -> None:
+        """
+        Initialize an empty graph and save it to a specified file path.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The file path where the empty graph should be saved.
+        """
         self.graph = nx.MultiDiGraph()
 
         # Only create directory if file_path contains a directory
@@ -296,7 +559,15 @@ class NetworkXAdapter(GraphDBInterface):
         await self.save_graph_to_file(file_path)
 
     async def save_graph_to_file(self, file_path: str = None) -> None:
-        """Asynchronously save the graph to a file in JSON format."""
+        """
+        Save the graph data asynchronously to a specified file in JSON format.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The file path to save the graph data; if None, saves to the
+              default filename. (default None)
+        """
         if not file_path:
             file_path = self.filename
 
@@ -307,7 +578,15 @@ class NetworkXAdapter(GraphDBInterface):
             await file.write(json_data)
 
     async def load_graph_from_file(self, file_path: str = None):
-        """Asynchronously load the graph from a file in JSON format."""
+        """
+        Load graph data asynchronously from a specified file in JSON format.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The file path from which to load the graph data; if None, loads
+              from the default filename. (default None)
+        """
         if not file_path:
             file_path = self.filename
         try:
@@ -381,7 +660,15 @@ class NetworkXAdapter(GraphDBInterface):
             await self.create_empty_graph(file_path)
 
     async def delete_graph(self, file_path: str = None):
-        """Asynchronously delete the graph file from the filesystem."""
+        """
+        Delete the graph file from the filesystem asynchronously.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The file path of the graph to delete; if None, deletes the
+              default graph file. (default None)
+        """
         if file_path is None:
             file_path = (
                 self.filename
@@ -396,20 +683,37 @@ class NetworkXAdapter(GraphDBInterface):
             logger.error("Failed to delete graph: %s", error)
             raise error
 
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        """
+        Obtain a subgraph based on specific node types and names. Not supported in this
+        implementation.
+
+        Parameters:
+        -----------
+
+            - node_type (Type[Any]): The type of nodes to include in the subgraph.
+            - node_name (List[str]): A list of node names to filter by.
+        """
+        raise NodesetFilterNotSupportedError
+
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ):
         """
-        Fetches nodes and relationships filtered by specified attribute values.
+        Fetch nodes and relationships filtered by specified attributes.
 
-        Args:
-            attribute_filters (list of dict): A list of dictionaries where keys are attributes and values are lists of values to filter on.
-                                              Example: [{"community": ["1", "2"]}]
+        Parameters:
+        -----------
+
+            - attribute_filters (List[Dict[str, List[Union[str, int]]]]): A list of dictionaries
+              defining attributes to filter on.
 
         Returns:
-            tuple: A tuple containing two lists:
-                - Nodes: List of tuples (node_id, node_properties).
-                - Edges: List of tuples (source_id, target_id, relationship_type, edge_properties).
+        --------
+
+            A tuple containing filtered nodes and edges based on the specified attributes.
         """
         # Create filters for nodes based on the attribute filters
         where_clauses = []
@@ -438,6 +742,20 @@ class NetworkXAdapter(GraphDBInterface):
         return filtered_nodes, filtered_edges
 
     async def get_graph_metrics(self, include_optional=False):
+        """
+        Calculate various metrics related to the graph, optionally including optional metrics.
+
+        Parameters:
+        -----------
+
+            - include_optional: Indicates whether optional metrics should be included in the
+              calculation. (default False)
+
+        Returns:
+        --------
+
+            A dictionary containing the calculated graph metrics.
+        """
         graph = self.graph
 
         def _get_mean_degree(graph):
@@ -501,7 +819,22 @@ class NetworkXAdapter(GraphDBInterface):
         return mandatory_metrics | optional_metrics
 
     async def get_document_subgraph(self, content_hash: str):
-        """Get all nodes that should be deleted when removing a document."""
+        """
+        Retrieve all relevant nodes when a document is being deleted, including chunks and
+        orphaned entities.
+
+        Parameters:
+        -----------
+
+            - content_hash (str): The hash identifying the content of the document to fetch
+              related nodes for.
+
+        Returns:
+        --------
+
+            A dictionary containing the document, its chunks, orphan entities, made from nodes,
+            and orphan types.
+        """
         # Ensure graph is loaded
         if self.graph is None:
             await self.load_graph_from_file()
@@ -608,7 +941,19 @@ class NetworkXAdapter(GraphDBInterface):
         }
 
     async def get_degree_one_nodes(self, node_type: str):
-        """Get all nodes that have only one connection."""
+        """
+        Retrieve nodes that have only a single connection, filtered by node type.
+
+        Parameters:
+        -----------
+
+            - node_type (str): Type of nodes to filter by ('Entity' or 'EntityType').
+
+        Returns:
+        --------
+
+            A list of nodes that have a single connection of the specified type.
+        """
         if not node_type or node_type not in ["Entity", "EntityType"]:
             raise ValueError("node_type must be either 'Entity' or 'EntityType'")
 
@@ -622,11 +967,39 @@ class NetworkXAdapter(GraphDBInterface):
         return nodes
 
     async def get_node(self, node_id: UUID) -> dict:
+        """
+        Retrieve the details of a specific node identified by its identifier.
+
+        Parameters:
+        -----------
+
+            - node_id (UUID): The identifier of the node to retrieval.
+
+        Returns:
+        --------
+
+            - dict: The data of the specified node if found, otherwise None.
+        """
         if self.graph.has_node(node_id):
             return self.graph.nodes[node_id]
         return None
 
     async def get_nodes(self, node_ids: List[UUID] = None) -> List[dict]:
+        """
+        Retrieve data for multiple nodes by their identifiers, or all nodes if no identifiers
+        are provided.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[UUID]): List of node identifiers to fetch data for; if None,
+              retrieves all nodes in the graph. (default None)
+
+        Returns:
+        --------
+
+            - List[dict]: A list of node data for each found node.
+        """
         if node_ids is None:
             return [{"id": node_id, **data} for node_id, data in self.graph.nodes(data=True)]
         return [

@@ -1,5 +1,21 @@
 def is_text_content(content):
-    """Check if the content is text."""
+    """
+    Determine if the content is text-based.
+
+    This function checks for various indicators of text content, including null bytes, byte
+    order marks (BOMs), ASCII character ranges, and common line breaks. If none of these
+    indicators are present, the function defaults to assuming the content is text-based.
+
+    Parameters:
+    -----------
+
+        - content: The byte content to be checked for text characteristics.
+
+    Returns:
+    --------
+
+        - bool: Returns True if the content is determined to be text, False otherwise.
+    """
     # Check for null bytes
     if b"\0" in content:
         return False

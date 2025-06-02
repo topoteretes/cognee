@@ -6,8 +6,8 @@ from ..tokenizer_interface import TokenizerInterface
 
 class TikTokenTokenizer(TokenizerInterface):
     """
-    Tokenizer adapter for OpenAI.
-    Inteded to be used as part of LLM Embedding and LLM Adapters classes
+    Tokenizer adapter for OpenAI. Intended to be used as part of LLM Embedding and LLM
+    Adapters classes.
     """
 
     def __init__(
@@ -21,40 +21,87 @@ class TikTokenTokenizer(TokenizerInterface):
         self.tokenizer = tiktoken.encoding_for_model(self.model)
 
     def extract_tokens(self, text: str) -> List[Any]:
+        """
+        Extract tokens from the given text.
+
+        Parameters:
+        -----------
+
+            - text (str): The text to be tokenized.
+
+        Returns:
+        --------
+
+            - List[Any]: A list of token IDs representing the encoded text.
+        """
         # Using TikToken's method to tokenize text
         token_ids = self.tokenizer.encode(text)
         return token_ids
 
     def decode_token_list(self, tokens: List[Any]) -> List[Any]:
+        """
+        Decode a list of token IDs back into their corresponding text representations.
+
+        Parameters:
+        -----------
+
+            - tokens (List[Any]): A list of token IDs to be decoded.
+
+        Returns:
+        --------
+
+            - List[Any]: A list of decoded text representations of the tokens.
+        """
         if not isinstance(tokens, list):
             tokens = [tokens]
         return [self.tokenizer.decode(i) for i in tokens]
 
     def decode_single_token(self, token: int):
+        """
+        Decode a single token ID into its corresponding text representation.
+
+        Parameters:
+        -----------
+
+            - token (int): A single token ID to be decoded.
+
+        Returns:
+        --------
+
+            The decoded text representation of the token.
+        """
         return self.tokenizer.decode_single_token_bytes(token).decode("utf-8", errors="replace")
 
     def count_tokens(self, text: str) -> int:
         """
-        Returns the number of tokens in the given text.
-        Args:
-            text: str
+        Count the number of tokens in the given text.
+
+        Parameters:
+        -----------
+
+            - text (str): The text for which to count the tokens.
 
         Returns:
-            number of tokens in the given text
+        --------
 
+            - int: The number of tokens in the given text.
         """
         num_tokens = len(self.tokenizer.encode(text))
         return num_tokens
 
     def trim_text_to_max_tokens(self, text: str) -> str:
         """
-        Trims the text so that the number of tokens does not exceed max_tokens.
+        Trim the text so that the number of tokens does not exceed max_tokens.
 
-        Args:
-        text (str): Original text string to be trimmed.
+        Parameters:
+        -----------
+
+            - text (str): Original text string to be trimmed.
 
         Returns:
-        str: Trimmed version of text or original text if under the limit.
+        --------
+
+            - str: Trimmed version of text or original text if under the limit.
         """
         # First check the number of tokens
         num_tokens = self.count_tokens(text)
