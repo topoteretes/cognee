@@ -2,7 +2,7 @@ import asyncio
 from typing import Union, List
 from uuid import NAMESPACE_OID, uuid5, UUID
 
-from cognee.exceptions import InvalidValueError
+from cognee.modules.data.exceptions import DatasetTypeError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.modules.data.methods import get_datasets
@@ -18,6 +18,7 @@ from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.exceptions import DatasetNotFoundError
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -87,7 +88,7 @@ async def cognee_pipeline(
         datasets = await load_or_create_datasets(datasets, existing_datasets, user)
 
     if not datasets:
-        raise InvalidValueError("There are no datasets to work with.")
+        raise DatasetNotFoundError("There are no datasets to work with.")
 
     awaitables = []
 
@@ -205,7 +206,9 @@ async def get_dataset_ids(datasets: Union[list[str], list[UUID]], user):
             # Filter out non name mentioned datasets
             dataset_ids = [dataset.id for dataset in user_datasets if dataset.name in datasets]
         else:
-            raise InvalidValueError(f"Provided datasets value is not handled: f{datasets}")
+            raise DatasetTypeError(
+                f"One or more of the provided dataset types is not handled: f{datasets}"
+            )
 
     return dataset_ids
 
@@ -248,9 +251,6 @@ async def load_or_create_datasets(
     Given a list of dataset identifiers (names or UUIDs), return Dataset instances:
       - If an identifier matches an existing Dataset (by name or id), reuse it.
       - Otherwise, create a new Dataset with a unique id.
-
-    Raises:
-        InvalidValueError: if a UUID is provided but no matching dataset is found.
     """
     result: List[Dataset] = []
 
@@ -267,7 +267,7 @@ async def load_or_create_datasets(
 
         # If the identifier is a UUID but nothing matched, that's an error
         if isinstance(identifier, UUID):
-            raise InvalidValueError(f"Dataset with given UUID does not exist: {identifier}")
+            raise DatasetNotFoundError(f"Dataset with given UUID does not exist: {identifier}")
 
         # Otherwise, create a new Dataset instance
         new_dataset = Dataset(

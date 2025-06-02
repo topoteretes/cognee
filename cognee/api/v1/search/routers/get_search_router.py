@@ -12,7 +12,7 @@ from cognee.modules.users.methods import get_authenticated_user
 
 class SearchPayloadDTO(InDTO):
     search_type: SearchType
-    dataset_ids: Optional[list[str]] = None
+    dataset_ids: Optional[list[UUID]] = None
     query: str
 
 
