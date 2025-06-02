@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
@@ -10,9 +10,12 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
 
 
+# Note: Datasets sent by name will only map to datasets owned by the request sender
+#       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
     search_type: SearchType
-    dataset_ids: Optional[list[str]] = None
+    datasets: Optional[list[str]] = None
+    dataset_ids: Optional[list[UUID]] = None
     query: str
 
 
@@ -44,6 +47,7 @@ def get_search_router() -> APIRouter:
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
+                datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,
             )
 

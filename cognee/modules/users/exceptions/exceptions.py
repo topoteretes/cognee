@@ -57,3 +57,13 @@ class PermissionDeniedError(CogneeApiError):
         status_code=status.HTTP_403_FORBIDDEN,
     ):
         super().__init__(message, name, status_code)
+
+
+class PermissionNotFoundError(CogneeApiError):
+    def __init__(
+        self,
+        message: str = "Permission type does not exist.",
+        name: str = "PermissionNotFoundError",
+        status_code=status.HTTP_403_FORBIDDEN,
+    ):
+        super().__init__(message, name, status_code)

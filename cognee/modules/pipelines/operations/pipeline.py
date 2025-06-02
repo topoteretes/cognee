@@ -1,13 +1,9 @@
 import asyncio
-from typing import Union, List
+from typing import Union
 from uuid import NAMESPACE_OID, uuid5, UUID
 
-from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -16,8 +12,13 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
-from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.modules.data.methods import (
+    get_authorized_existing_datasets,
+    load_or_create_datasets,
+    check_dataset_name,
+)
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -77,7 +78,7 @@ async def cognee_pipeline(
 
     # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)
     # NOTE: If a user wants to write to a dataset he does not own it must be provided through UUID
-    existing_datasets = await get_existing_datasets(datasets, user)
+    existing_datasets = await get_authorized_existing_datasets(datasets, "write", user)
 
     if not datasets:
         # Get datasets from database if none sent.
@@ -87,7 +88,7 @@ async def cognee_pipeline(
         datasets = await load_or_create_datasets(datasets, existing_datasets, user)
 
     if not datasets:
-        raise InvalidValueError("There are no datasets to work with.")
+        raise DatasetNotFoundError("There are no datasets to work with.")
 
     awaitables = []
 
@@ -174,109 +175,3 @@ async def run_pipeline(
         pipeline_run_status = run_status
 
     return pipeline_run_status
-
-
-def check_dataset_name(dataset_name: str) -> str:
-    if "." in dataset_name or " " in dataset_name:
-        raise ValueError("Dataset name cannot contain spaces or underscores")
-
-
-async def get_dataset_ids(datasets: Union[list[str], list[UUID]], user):
-    """
-    Function returns dataset IDs necessary based on provided input.
-    It transforms raw strings into real dataset_ids with keeping write permissions in mind.
-    If a user wants to write to a dataset he is not the owner of it must be provided through UUID.
-    Args:
-        datasets:
-        pipeline_name:
-        user:
-
-    Returns: a list of write access dataset_ids if they exist
-
-    """
-    if all(isinstance(dataset, UUID) for dataset in datasets):
-        # Return list of dataset UUIDs
-        dataset_ids = datasets
-    else:
-        # Convert list of dataset names to dataset UUID
-        if all(isinstance(dataset, str) for dataset in datasets):
-            # Get all user owned dataset objects (If a user wants to write to a dataset he is not the owner of it must be provided through UUID.)
-            user_datasets = await get_datasets(user.id)
-            # Filter out non name mentioned datasets
-            dataset_ids = [dataset.id for dataset in user_datasets if dataset.name in datasets]
-        else:
-            raise InvalidValueError(f"Provided datasets value is not handled: f{datasets}")
-
-    return dataset_ids
-
-
-async def get_existing_datasets(
-    datasets: Union[list[str], list[UUID]], user: User
-) -> list[Dataset]:
-    """
-    Function returns a list of existing dataset objects user has access for based on datasets input.
-
-    Args:
-        datasets:
-        user:
-
-    Returns:
-        list of Dataset objects
-
-    """
-    # TODO: Test 1. add pipeline with: datasetName, datasetName and datasetID
-    #       Test 2. Cognify without dataset info, cognify with datasetIDs user has write and no write access for
-    if datasets:
-        # Function handles transforming dataset input to dataset IDs (if possible)
-        dataset_ids = await get_dataset_ids(datasets, user)
-        # If dataset_ids are provided filter these datasets based on what user has permission for.
-        if dataset_ids:
-            existing_datasets = await get_specific_user_permission_datasets(
-                user.id, "write", dataset_ids
-            )
-        else:
-            existing_datasets = []
-    else:
-        # If no datasets are provided, work with all existing datasets user has permission for.
-        existing_datasets = await get_all_user_permission_datasets(user, "write")
-
-    return existing_datasets
-
-
-async def load_or_create_datasets(
-    dataset_names: List[Union[str, UUID]], existing_datasets: List[Dataset], user
-) -> List[Dataset]:
-    """
-    Given a list of dataset identifiers (names or UUIDs), return Dataset instances:
-      - If an identifier matches an existing Dataset (by name or id), reuse it.
-      - Otherwise, create a new Dataset with a unique id.
-
-    Raises:
-        InvalidValueError: if a UUID is provided but no matching dataset is found.
-    """
-    result: List[Dataset] = []
-
-    for identifier in dataset_names:
-        # Try to find a matching dataset in the existing list
-        # If no matching dataset is found return None
-        match = next(
-            (ds for ds in existing_datasets if ds.name == identifier or ds.id == identifier), None
-        )
-
-        if match:
-            result.append(match)
-            continue
-
-        # If the identifier is a UUID but nothing matched, that's an error
-        if isinstance(identifier, UUID):
-            raise InvalidValueError(f"Dataset with given UUID does not exist: {identifier}")
-
-        # Otherwise, create a new Dataset instance
-        new_dataset = Dataset(
-            id=await get_unique_dataset_id(dataset_name=identifier, user=user),
-            name=identifier,
-            owner_id=user.id,
-        )
-        result.append(new_dataset)
-
-    return result

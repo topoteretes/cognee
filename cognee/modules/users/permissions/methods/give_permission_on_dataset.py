@@ -2,6 +2,8 @@ from sqlalchemy.future import select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ...models import Principal, ACL, Permission
 from uuid import UUID
+from cognee.modules.users.permissions import PERMISSION_TYPES
+from cognee.modules.users.exceptions import PermissionNotFoundError
 
 
 async def give_permission_on_dataset(
@@ -18,7 +20,12 @@ async def give_permission_on_dataset(
             .first()
         )
 
-        if permission is None:
+        if permission_name not in PERMISSION_TYPES:
+            # If permission is not in allowed permission types
+            raise PermissionNotFoundError(
+                message=f"{permission_name} not found or not in allowed permission types"
+            )
+        elif permission is None:
             permission = Permission(name=permission_name)
             existing_acl = None
         else:

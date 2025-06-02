@@ -3,7 +3,7 @@ from sqlalchemy import select
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.modules.users.exceptions import RoleNotFoundError
 
 from ...models.Role import Role
 
@@ -17,6 +17,8 @@ async def get_role(tenant_id: UUID, role_name: str):
                 select(Role).where(Role.name == role_name).where(Role.tenant_id == tenant_id)
             )
             role = result.unique().scalar_one()
+            if not role:
+                raise RoleNotFoundError(message=f"Could not find {role_name} for given tenant")
             return role
         except sqlalchemy.exc.NoResultFound:
-            raise EntityNotFoundError(message=f"Could not find {role_name} for given tenant")
+            raise RoleNotFoundError(message=f"Could not find {role_name} for given tenant")

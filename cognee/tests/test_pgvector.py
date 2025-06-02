@@ -144,7 +144,6 @@ async def main():
     graph_completion = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=random_node_name,
-        datasets=[dataset_name_2],
     )
     assert len(graph_completion) != 0, "Completion result is empty."
     print("Completion result is:")
