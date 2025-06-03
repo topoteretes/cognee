@@ -17,7 +17,7 @@ async def get_formatted_graph_data():
                     "properties": {
                         key: value
                         for key, value in node[1].items()
-                        if key not in ["id", "type", "name"] and value is not None
+                        if key not in ["id", "type", "name", "created_at", "updated_at"] and value is not None
                     },
                 },
                 nodes,

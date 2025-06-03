@@ -7,9 +7,14 @@ from cognee.api.DTO import InDTO
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest_datapoints import (
     cognify_github_data_from_username,
 )
-from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.get_user_db import get_user_db_context
+from cognee.modules.users.get_user_manager import get_user_manager_context
+from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
+from cognee.modules.users.authentication.auth0.auth0_jwt_strategy import Auth0JWTStrategy
+from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 from cognee.modules.pipelines.models import PipelineRunInfo, PipelineRunCompleted
 from cognee.complex_demos.crewai_demo.src.crewai_demo.main import (
     # run_github_ingestion,
@@ -75,11 +80,23 @@ def get_crewai_router() -> APIRouter:
     async def subscribe_to_crewai_info(websocket: WebSocket):
         await websocket.accept()
 
-        auth_message = await websocket.receive_json()
+        access_token = websocket.cookies.get(os.getenv("AUTH_TOKEN_COOKIE_NAME"))
 
         try:
-            user = await get_authenticated_user(auth_message.get("Authorization"))
-        except Exception:
+            secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
+
+            if os.getenv("USE_AUTH0_AUTHORIZATION") == "True":
+                strategy = Auth0JWTStrategy(secret, lifetime_seconds=36000)
+            else:
+                strategy = DefaultJWTStrategy(secret, lifetime_seconds=3600)
+
+            db_engine = get_relational_engine()
+
+            async with db_engine.get_async_session() as session:
+                async with get_user_db_context(session) as user_db:
+                    async with get_user_manager_context(user_db) as user_manager:
+                        user = await get_authenticated_user(cookie=access_token, strategy_cookie=strategy, user_manager=user_manager)
+        except Exception as error:
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
             return
 

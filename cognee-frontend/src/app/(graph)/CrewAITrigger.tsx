@@ -28,12 +28,6 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
 
     const websocket = new WebSocket("ws://localhost:8000/api/v1/crewai/subscribe");
 
-    websocket.onopen = () => {
-      websocket.send(JSON.stringify({
-        "Authorization": `Bearer ${localStorage.getItem("access_token")}`,
-      }));
-    };
-
     let isCrewAIDone = false;
     onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Running CrewAI" }]);
 

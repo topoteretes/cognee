@@ -1,4 +1,3 @@
-import os
 import jwt
 from uuid import UUID
 from fastapi_users.jwt import generate_jwt
@@ -11,7 +10,7 @@ from cognee.modules.users.get_user_manager import UserManager
 class DefaultJWTStrategy(JWTStrategy):
     async def read_token(self, token: str, user_manager: UserManager):
         payload = jwt.decode(
-            token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
+            token, self.secret, algorithms=["HS256"]
         )
 
         user_id = UUID(payload["user_id"])

@@ -68,7 +68,7 @@ function useDatasets() {
   }, []);
 
   const fetchDatasets = useCallback(() => {
-    fetch('/v1/datasets')
+    return fetch('/v1/datasets')
       .then((response) => response.json())
       .then((datasets) => {
         setDatasets(datasets);
