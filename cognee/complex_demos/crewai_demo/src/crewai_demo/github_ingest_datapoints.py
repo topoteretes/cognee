@@ -3,11 +3,14 @@ import asyncio
 from uuid import uuid5, NAMESPACE_OID
 from typing import Optional, List, Dict, Any
 import cognee
+from cognee.modules.users.models import User
 from cognee.low_level import DataPoint
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
-from cognee.modules.users.methods import get_default_user
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.shared.logging_utils import get_logger
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest import (
@@ -16,6 +19,8 @@ from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest import (
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunStarted
 from cognee.modules.graph.operations import get_formatted_graph_data
 from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
+
+from cognee.modules.data.methods import create_dataset
 
 # Import DataPoint classes from github_datapoints.py
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_datapoints import (
@@ -226,24 +231,32 @@ async def run_with_info_stream(tasks, user, data, dataset_id, pipeline_name):
             push_to_queue(pipeline_run_id, pipeline_run_info)
 
 
-async def cognify_github_data(github_data: dict):
+async def cognify_github_data(github_data: dict, user: User):
     """Process GitHub user, file changes, and comments data from a loaded dictionary."""
     all_datapoints = build_github_datapoints_from_dict(github_data)
     if not all_datapoints:
         logger.error("Failed to create datapoints")
         return False
 
-    dataset_id = uuid5(NAMESPACE_OID, "GitHub")
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        # Create Dataset
+        dataset = await create_dataset("Github", user, session)
 
-    cognee_user = await get_default_user()
+    # Give user proper permissions for dataset
+    await give_permission_on_dataset(user, dataset.id, "read")
+    await give_permission_on_dataset(user, dataset.id, "write")
+    await give_permission_on_dataset(user, dataset.id, "delete")
+    await give_permission_on_dataset(user, dataset.id, "share")
+
     tasks = [Task(add_data_points, task_config={"batch_size": 50})]
 
     await run_with_info_stream(
         tasks=tasks,
         data=all_datapoints,
-        dataset_id=dataset_id,
+        dataset_id=dataset.id,
         pipeline_name="github_pipeline",
-        user=cognee_user,
+        user=user,
     )
 
     logger.info(f"Done processing {len(all_datapoints)} datapoints")
