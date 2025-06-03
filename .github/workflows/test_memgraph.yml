@@ -1,9 +1,9 @@
 name: test | memgraph
 
-# on:
-#  workflow_dispatch:
-#  pull_request:
-#    types: [labeled, synchronize]
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -17,13 +17,15 @@ jobs:
     name: test
     runs-on: ubuntu-22.04
 
-    defaults:
-      run:
-        shell: bash
+    services:
+      memgraph:
+        image: memgraph/memgraph-mage:latest
+        ports:
+          - 7687:7687
 
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -38,7 +40,7 @@ jobs:
           installer-parallel: true
 
       - name: Install dependencies
-        run: poetry install -E memgraph --no-interaction
+        run: poetry install -E neo4j
 
       - name: Run default Memgraph
         env:
@@ -51,7 +53,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPH_DATABASE_URL: ${{ secrets.MEMGRAPH_API_URL }}
-          GRAPH_DATABASE_PASSWORD: ${{ secrets.MEMGRAPH_API_KEY }}
-          GRAPH_DATABASE_USERNAME: " "
+          GRAPH_DATABASE_URL: "bolt://localhost:7687"
+          GRAPH_DATABASE_PASSWORD: "memgraph"
+          GRAPH_DATABASE_USERNAME: "memgraph"
         run: poetry run python ./cognee/tests/test_memgraph.py
