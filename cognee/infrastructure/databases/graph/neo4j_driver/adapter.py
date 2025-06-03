@@ -136,7 +136,7 @@ class Neo4jAdapter(GraphDBInterface):
         serialized_properties = self.serialize_properties(node.model_dump())
 
         query = dedent(
-            f"""MERGE (node `{BASE_LABEL}`{{id: $node_id}})
+            f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
                 ON CREATE SET node += $properties, node.updated_at = timestamp()
                 ON MATCH SET node += $properties, node.updated_at = timestamp()
                 WITH node, $node_label AS label
@@ -170,7 +170,7 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         UNWIND $nodes AS node
-        MERGE (n `{BASE_LABEL}`{{id: node.node_id}})
+        MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
         ON CREATE SET n += node.properties, n.updated_at = timestamp()
         ON MATCH SET n += node.properties, n.updated_at = timestamp()
         WITH n, node.label AS label
@@ -224,7 +224,7 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         UNWIND $node_ids AS id
-        MATCH (node `{BASE_LABEL}`{{id: id}})
+        MATCH (node: `{BASE_LABEL}`{{id: id}})
         RETURN node"""
 
         params = {"node_ids": node_ids}
@@ -247,7 +247,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             The result of the query execution, typically indicating success or failure.
         """
-        query = f"MATCH (node `{BASE_LABEL}`{{id: $node_id}}) DETACH DELETE node"
+        query = f"MATCH (node: `{BASE_LABEL}`{{id: $node_id}}) DETACH DELETE node"
         params = {"node_id": node_id}
 
         return await self.query(query, params)
@@ -268,7 +268,7 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         UNWIND $node_ids AS id
-        MATCH (node `{BASE_LABEL}`{{id: id}})
+        MATCH (node: `{BASE_LABEL}`{{id: id}})
         DETACH DELETE node"""
 
         params = {"node_ids": node_ids}
@@ -408,8 +408,8 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
             UNWIND $edges AS edge
-            MATCH (from_node `{BASE_LABEL}`{{id: edge.from_node}})
-            MATCH (to_node `{BASE_LABEL}`{{id: edge.to_node}})
+            MATCH (from_node: `{BASE_LABEL}`{{id: edge.from_node}})
+            MATCH (to_node: `{BASE_LABEL}`{{id: edge.to_node}})
             CALL apoc.merge.relationship(
                 from_node,
                 edge.relationship_name,
@@ -458,7 +458,7 @@ class Neo4jAdapter(GraphDBInterface):
             A list of edges connecting to the specified node, represented as tuples of details.
         """
         query = f"""
-        MATCH (n `{BASE_LABEL}`{{id: $node_id}})-[r]-(m)
+        MATCH (n: `{BASE_LABEL}`{{id: $node_id}})-[r]-(m)
         RETURN n, r, m
         """
 
@@ -640,7 +640,7 @@ class Neo4jAdapter(GraphDBInterface):
               not exist.
         """
         query = f"""
-        MATCH (node `{BASE_LABEL}`{{id: $node_id}})
+        MATCH (node: `{BASE_LABEL}`{{id: $node_id}})
         RETURN node
         """
         results = await self.query(query, {"node_id": node_id})
