@@ -3,7 +3,7 @@
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
 import { NodeObject } from "react-force-graph-2d";
-import { ChangeEvent, useImperativeHandle, useState } from "react";
+import { ChangeEvent, useEffect, useImperativeHandle, useState } from "react";
 
 import { DeleteIcon } from "@/ui/Icons";
 import { FeedbackForm } from "@/ui/Partials";
@@ -35,6 +35,8 @@ type NodeProperty = {
 };
 
 const formatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "medium" });
+
+const DEFAULT_GRAPH_SHAPE = "lr";
 
 export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, onFitIntoView, ref }: GraphControlsProps) {
   const [selectedNode, setSelectedNode] = useState<NodeObject | null>(null);
@@ -87,6 +89,13 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
     onGraphShapeChange(event.target.value);
   };
 
+  useEffect(() => {
+    onGraphShapeChange(DEFAULT_GRAPH_SHAPE);
+    setTimeout(() => {
+      onFitIntoView();
+    }, 500);
+  });
+
   return (
     <>
       <div className="flex w-full">
@@ -106,7 +115,7 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
           <>
             <div className="w-full flex flex-row gap-2 items-center mb-4">
               <label className="text-gray-300 whitespace-nowrap flex-1/5">Graph Shape:</label>
-              <Select defaultValue="none" onChange={handleGraphShapeControl} className="flex-2/5">
+              <Select defaultValue={DEFAULT_GRAPH_SHAPE} onChange={handleGraphShapeControl} className="flex-2/5">
                 <option value="none">None</option>
                 <option value="td">Top-down</option>
                 <option value="bu">Bottom-up</option>
@@ -174,7 +183,7 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
         )}
 
         {selectedTab === "activityLog" && (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 overflow-y-auto max-h-96">
             {activityLog.map((activity) => (
               <div key={activity.id} className="flex gap-2 items-top">
                 <span className="text-gray-300 whitespace-nowrap">{formatter.format(activity.timestamp)}: </span>

@@ -64,8 +64,6 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
       });
   };
 
-  return null;
-
   return (
     <div className="flex flex-col gap-4 mb-4">
       {datasets.length ? datasets.map((dataset) => (

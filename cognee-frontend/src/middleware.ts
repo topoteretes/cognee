@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth0 } from "./modules/auth/auth0";
 
 export async function middleware(request: NextRequest) {
-  if (process.env.USE_AUTH0_AUTHORIZATION === "true") {
+  if (process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true") {
     if (request.nextUrl.pathname === "/auth/token") {
         return NextResponse.next();
     }

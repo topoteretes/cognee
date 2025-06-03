@@ -35,7 +35,7 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
       const data = JSON.parse(event.data);
 
       if (data.status === "PipelineRunActivity") {
-        onActivity(data.payload);
+        onActivity([data.payload]);
         return;
       }
 
@@ -88,11 +88,22 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
   };
 
   return (
-    <form className="w-full flex flex-row gap-2 items-center" onSubmit={handleRunCrewAI}>
-      <Input name="username1" type="text" placeholder="Github Username" required defaultValue="hajdul88" />
-      <Input name="username2" type="text" placeholder="Github Username" required defaultValue="lxobr" />
+    <form className="w-full flex flex-col gap-4" onSubmit={handleRunCrewAI}>
+      <h1 className="text-2xl text-white">Cognee HR Crew Demo</h1>
+      <p className="text-white">
+        Run Agents and let them help you make a hiring decision.
+        Analyze two candidates side by side, and decide based on their GitHub profiles.
+      </p>
+      <div className="flex flex-col w-full">
+        <label className="block mb-1 text-white" htmlFor="username1">First Github username</label>
+        <Input name="username1" type="text" placeholder="Github Username" required defaultValue="hajdul88" />
+      </div>
+      <div className="flex flex-col w-full">
+        <label className="block mb-1 text-white" htmlFor="username2">Second Github username</label>
+        <Input name="username2" type="text" placeholder="Github Username" required defaultValue="lxobr" />
+      </div>
       <CTAButton type="submit" className="whitespace-nowrap">
-        Run CrewAI
+        Start HR Crew Research
         {isCrewAIRunning && <LoadingIndicator />}
       </CTAButton>
     </form>

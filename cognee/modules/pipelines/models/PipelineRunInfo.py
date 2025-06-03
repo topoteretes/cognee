@@ -30,5 +30,5 @@ class PipelineRunErrored(PipelineRunInfo):
     status: str = "PipelineRunErrored"
 
 
-class PipelineRunActivity(BaseModel):
+class PipelineRunActivity(PipelineRunInfo):
     status: str = "PipelineRunActivity"

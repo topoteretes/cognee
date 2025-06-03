@@ -63,9 +63,9 @@ def get_datasets_router() -> APIRouter:
     @router.get("/", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):
         try:
-            from cognee.modules.data.methods import get_datasets
+            from cognee.modules.data.methods import get_authorized_existing_datasets
 
-            datasets = await get_datasets(user.id)
+            datasets = await get_authorized_existing_datasets(user=user, permission_type="read", datasets=None)
 
             return datasets
         except Exception as error:

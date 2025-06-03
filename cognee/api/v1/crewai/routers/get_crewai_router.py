@@ -18,6 +18,7 @@ from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline
 from cognee.modules.pipelines.models import PipelineRunInfo, PipelineRunCompleted
 from cognee.complex_demos.crewai_demo.src.crewai_demo.main import (
     # run_github_ingestion,
+    run_github_ingestion,
     run_hiring_crew,
 )
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
@@ -44,19 +45,14 @@ def get_crewai_router() -> APIRouter:
         payload: CrewAIRunPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
-        # Run CrewAI with the provided usernames
-        # run_future = run_github_ingestion(payload.username1, payload.username2)
-        token = os.getenv("GITHUB_TOKEN")
-
-        await cognify_github_data_from_username(payload.username1, token)
-        await cognify_github_data_from_username(payload.username2, token)
+        await run_github_ingestion(user, payload.username1, payload.username2)
 
         applicants = {
             "applicant_1": payload.username1,
             "applicant_2": payload.username2,
         }
 
-        run_hiring_crew(applicants=applicants, number_of_rounds=2)
+        run_hiring_crew(user, applicants=applicants, number_of_rounds=2)
 
         return True
 

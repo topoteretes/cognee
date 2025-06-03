@@ -1,18 +1,22 @@
 "use client";
 
-import { MutableRefObject, useEffect } from "react";
+import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
 import ForceGraph, { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
 import { GraphControlsAPI } from './GraphControls';
 
 interface GraphVisuzaliationProps {
-  ref: MutableRefObject<ForceGraphMethods>;
-  data: GraphData<NodeObject, LinkObject>;
+  ref: MutableRefObject<GraphVisualizationAPI>;
+  data?: GraphData<NodeObject, LinkObject>;
   graphControls: MutableRefObject<GraphControlsAPI>;
-  graphShape: string;
 }
 
-export default function GraphVisualization({ ref, data, graphControls, graphShape }: GraphVisuzaliationProps) {
+export interface GraphVisualizationAPI {
+  zoomToFit: ForceGraphMethods["zoomToFit"];
+  setGraphShape: (shape: string) => void;
+}
+
+export default function GraphVisualization({ ref, data, graphControls }: GraphVisuzaliationProps) {
   const textSize = 6;
   const nodeSize = 15;
   const addNodeDistanceFromSourceNode = 15;
@@ -143,19 +147,28 @@ export default function GraphVisualization({ ref, data, graphControls, graphShap
 
   function handleDagError(loopNodeIds: (string | number)[]) {}
 
+  const graphRef = useRef<ForceGraphMethods>();
+
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && data && graphRef.current) {
       // add collision force
-      ref.current!.d3Force("collision", forceCollide(nodeSize * 1.5));
-      ref.current!.d3Force("charge", forceManyBody().strength(-1500).distanceMin(300).distanceMax(900));
+      graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5));
+      graphRef.current.d3Force("charge", forceManyBody().strength(-1500).distanceMin(300).distanceMax(900));
     }
-  }, [data, ref]);
+  }, [data, graphRef]);
+
+  const [graphShape, setGraphShape] = useState<string>();
+  
+  useImperativeHandle(ref, () => ({
+    zoomToFit: graphRef.current!.zoomToFit,
+    setGraphShape: setGraphShape,
+  }));
 
   return (
     <div className="w-full h-full" id="graph-container">
       {(data && typeof window !== "undefined") ? (
         <ForceGraph
-          ref={ref}
+          ref={graphRef}
           dagMode={graphShape as unknown as undefined}
           dagLevelDistance={300}
           onDagError={handleDagError}
@@ -179,8 +192,8 @@ export default function GraphVisualization({ ref, data, graphControls, graphShap
         />
       ) : (
         <ForceGraph
-          ref={ref}
-          dagMode="lr"
+          ref={graphRef}
+          dagMode={graphShape as unknown as undefined}
           dagLevelDistance={100}
           graphData={{
             nodes: [{ id: 1, label: "Add" }, { id: 2, label: "Cognify" }, { id: 3, label: "Search" }],
