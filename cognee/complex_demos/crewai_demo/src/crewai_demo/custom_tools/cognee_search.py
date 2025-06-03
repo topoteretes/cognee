@@ -5,6 +5,7 @@ from typing import Type
 from pydantic import BaseModel, Field, PrivateAttr
 
 from cognee.modules.engine.models import NodeSet
+from cognee.modules.users.models import User
 
 
 class CogneeSearchInput(BaseModel):
@@ -23,10 +24,12 @@ class CogneeSearch(BaseTool):
         "such as comments authored or files changes by a specific person."
     )
     args_schema: Type[BaseModel] = CogneeSearchInput
+    _user: User = PrivateAttr()
     _nodeset_name: str = PrivateAttr()
 
-    def __init__(self, nodeset_name: str, **kwargs):
+    def __init__(self, user: User, nodeset_name: str, **kwargs):
         super().__init__(**kwargs)
+        self._user = user
         self._nodeset_name = nodeset_name
 
     def _run(self, query: str) -> str:

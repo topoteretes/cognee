@@ -7,6 +7,7 @@ from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.cognee_ingest
 )
 from cognee.complex_demos.crewai_demo.src.crewai_demo.custom_tools.cognee_search import CogneeSearch
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.modules.users.models import User
 
 
 class AgentConfig(BaseModel):
@@ -19,8 +20,10 @@ class AgentConfig(BaseModel):
 class HiringCrew:
     agents_config = "config/agents.yaml"
     tasks_config = "config/tasks.yaml"
+    user: User
 
-    def __init__(self, inputs):
+    def __init__(self, user, inputs):
+        self.user = user
         self.inputs = inputs
         self
 
@@ -28,7 +31,7 @@ class HiringCrew:
     def soft_skills_expert_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["soft_skills_expert_agent"],
-            tools=[CogneeSearch(nodeset_name="soft")],
+            tools=[CogneeSearch(self.user, nodeset_name="soft")],
             verbose=True,
         )
 
@@ -36,7 +39,7 @@ class HiringCrew:
     def technical_expert_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["technical_expert_agent"],
-            tools=[CogneeSearch(nodeset_name="technical")],
+            tools=[CogneeSearch(self.user, nodeset_name="technical")],
             verbose=True,
         )
 
@@ -44,7 +47,7 @@ class HiringCrew:
     def decision_maker_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["decision_maker_agent"],
-            tools=[CogneeIngestion(nodeset_name="final_report")],
+            tools=[CogneeIngestion(self.user, nodeset_name="final_report")],
             verbose=True,
         )
 

@@ -6,7 +6,6 @@ class Auth0Config(BaseSettings):
     auth0_domain: str
     auth0_api_audience: str
     auth0_algorithms: str
-    auth0_state_secret: str
     auth0_client_secret: str
     auth0_client_id: str
     auth0_issuer: str

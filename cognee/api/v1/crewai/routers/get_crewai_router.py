@@ -4,10 +4,8 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 
 from cognee.api.DTO import InDTO
-from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest_datapoints import (
-    cognify_github_data_from_username,
-)
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.deletion import prune_data, prune_system
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.get_user_db import get_user_db_context
@@ -45,6 +43,9 @@ def get_crewai_router() -> APIRouter:
         payload: CrewAIRunPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
+        prune_data(user)
+        prune_system(user)
+
         await run_github_ingestion(user, payload.username1, payload.username2)
 
         applicants = {

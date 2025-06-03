@@ -2,7 +2,9 @@ import asyncio
 import nest_asyncio
 from crewai.tools import BaseTool
 from typing import Type
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
+
+from cognee.modules.users.models import User
 
 
 class CogneeIngestionInput(BaseModel):
@@ -16,10 +18,12 @@ class CogneeIngestion(BaseTool):
     name: str = "ingest_report_to_cognee"
     description: str = "This tool can be used to ingest the final hiring report into cognee"
     args_schema: Type[BaseModel] = CogneeIngestionInput
-    _nodeset_name: str
+    _user: User = PrivateAttr()
+    _nodeset_name: str = PrivateAttr()
 
-    def __init__(self, nodeset_name: str, **kwargs):
+    def __init__(self, user: User, nodeset_name: str, **kwargs):
         super().__init__(**kwargs)
+        self._user = user
         self._nodeset_name = nodeset_name
 
     def _run(self, text: str) -> str:
@@ -30,12 +34,12 @@ class CogneeIngestion(BaseTool):
         async def main():
             try:
                 # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
-                dataset_name = "final_reports"
+                dataset_name = "GitHub"
                 data = await cognee.add(
-                    text, node_set=[self._nodeset_name], dataset_name=dataset_name
+                    text, node_set=[self._nodeset_name], dataset_name=dataset_name, user=self._user,
                 )
                 await cognee.cognify(
-                    datasets=dataset_name, is_stream_info_enabled=True, datapoints=data.packets
+                    datasets=dataset_name, is_stream_info_enabled=True, datapoints=data.packets, user=self._user, pipeline_name="github_pipeline",
                 )
 
                 return "Report ingested successfully into Cognee memory."

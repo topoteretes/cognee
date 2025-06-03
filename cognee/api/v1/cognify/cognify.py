@@ -42,6 +42,7 @@ async def cognify(
     graph_db_config: dict = None,
     run_in_background: bool = False,
     is_stream_info_enabled: bool = False,
+    pipeline_name: str = "cognify_pipeline",
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
@@ -50,13 +51,14 @@ async def cognify(
 
     if run_in_background:
         return await run_cognify_as_background_process(
-            tasks, user, datasets, datapoints, vector_db_config, graph_db_config
+            tasks, user, datasets, datapoints, pipeline_name, vector_db_config, graph_db_config
         )
     else:
         return await run_cognify_blocking(
             tasks,
             user,
             datasets,
+            pipeline_name,
             datapoints,
             is_stream_info_enabled,
             vector_db_config,
@@ -68,6 +70,7 @@ async def run_cognify_blocking(
     tasks,
     user,
     datasets,
+    pipeline_name,
     datapoints=None,
     is_stream_info_enabled=False,
     vector_db_config=None,
@@ -79,7 +82,7 @@ async def run_cognify_blocking(
         tasks=tasks,
         datasets=datasets,
         user=user,
-        pipeline_name="cognify_pipeline",
+        pipeline_name=pipeline_name,
         datapoints=datapoints,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
@@ -103,6 +106,7 @@ async def run_cognify_as_background_process(
     user,
     datasets,
     datapoints,
+    pipeline_name,
     vector_db_config,
     graph_db_config,
 ):
@@ -110,7 +114,7 @@ async def run_cognify_as_background_process(
         tasks=tasks,
         user=user,
         datasets=datasets,
-        pipeline_name="cognify_pipeline",
+        pipeline_name=pipeline_name,
         datapoints=datapoints,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,

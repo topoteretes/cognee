@@ -7,8 +7,8 @@ Create Date: 2024-10-16 22:17:18.634638
 """
 
 from typing import Sequence, Union
-
 from sqlalchemy.util import await_only
+from fastapi_users.exceptions import UserAlreadyExists
 
 from cognee.modules.users.methods import create_default_user, delete_user
 
@@ -21,8 +21,10 @@ depends_on: Union[str, Sequence[str], None] = "8057ae7329c2"
 
 
 def upgrade() -> None:
-    await_only(create_default_user())
-
+    try:
+        await_only(create_default_user())
+    except UserAlreadyExists:
+        pass # It's fine if the default user already exists
 
 def downgrade() -> None:
     await_only(delete_user("default_user@example.com"))

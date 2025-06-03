@@ -4,10 +4,10 @@ from uuid import uuid5, NAMESPACE_OID
 from typing import Optional, List, Dict, Any
 import cognee
 from cognee.low_level import DataPoint
+from cognee.modules.users.models import User
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
-from cognee.modules.users.methods import get_default_user
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.shared.logging_utils import get_logger
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest import (
@@ -226,7 +226,7 @@ async def run_with_info_stream(tasks, user, data, dataset_id, pipeline_name):
             push_to_queue(pipeline_run_id, pipeline_run_info)
 
 
-async def cognify_github_data(github_data: dict):
+async def cognify_github_data(github_data: dict, user: User):
     """Process GitHub user, file changes, and comments data from a loaded dictionary."""
     all_datapoints = build_github_datapoints_from_dict(github_data)
     if not all_datapoints:
@@ -235,7 +235,6 @@ async def cognify_github_data(github_data: dict):
 
     dataset_id = uuid5(NAMESPACE_OID, "GitHub")
 
-    cognee_user = await get_default_user()
     tasks = [Task(add_data_points, task_config={"batch_size": 50})]
 
     await run_with_info_stream(
@@ -243,13 +242,14 @@ async def cognify_github_data(github_data: dict):
         data=all_datapoints,
         dataset_id=dataset_id,
         pipeline_name="github_pipeline",
-        user=cognee_user,
+        user=user,
     )
 
     logger.info(f"Done processing {len(all_datapoints)} datapoints")
 
 
 async def cognify_github_data_from_username(
+    user: User,
     username: str,
     token: Optional[str] = None,
     days: int = 30,
@@ -280,20 +280,7 @@ async def cognify_github_data_from_username(
 
     github_data = json.loads(json.dumps(github_data, default=str))
 
-    await cognify_github_data(github_data)
-
-
-async def process_github_from_file(json_file_path: str):
-    """Process GitHub data from a JSON file."""
-    logger.info(f"Processing GitHub data from file: {json_file_path}")
-    try:
-        with open(json_file_path, "r") as f:
-            github_data = json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading JSON file: {e}")
-        return False
-
-    return await cognify_github_data(github_data)
+    await cognify_github_data(github_data, user=user)
 
 
 if __name__ == "__main__":

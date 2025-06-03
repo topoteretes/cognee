@@ -32,7 +32,7 @@ async def run_github_ingestion(user, applicant_1, applicant_2):
         }
     ))
 
-    await cognify_github_data_from_username(applicant_1, token)
+    await cognify_github_data_from_username(user, applicant_1, token)
 
     push_to_queue(pipeline_run_id, PipelineRunActivity(
         pipeline_run_id=pipeline_run_id,
@@ -43,7 +43,7 @@ async def run_github_ingestion(user, applicant_1, applicant_2):
         }
     ))
 
-    await cognify_github_data_from_username(applicant_2, token)
+    await cognify_github_data_from_username(user, applicant_2, token)
 
     push_to_queue(pipeline_run_id, PipelineRunActivity(
         pipeline_run_id=pipeline_run_id,
@@ -91,7 +91,7 @@ def run_hiring_crew(user, applicants: dict, number_of_rounds: int = 1):
             }
         ))
 
-        crew = HiringCrew(inputs=applicants)
+        crew = HiringCrew(user=user, inputs=applicants)
         if hiring_round > 0:
             print("Refining agent prompts for this round...")
 
