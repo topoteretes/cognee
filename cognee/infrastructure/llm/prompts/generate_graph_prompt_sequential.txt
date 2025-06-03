@@ -15,7 +15,7 @@ and
 'edges': <list of edges>
 </KNOWLEDGEGRAPH>
 
-Your task is to enrich the knowledge graph with new nodes and edges by extracting new information from the text.
+Your task is to extract additional nodes and edges and return the new knowledge graph including the already identified nodes and edges.
 
 The aim is to achieve simplicity and clarity in the knowledge graph.
 # 1. Labeling Nodes
