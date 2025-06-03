@@ -180,13 +180,8 @@ async def main(enable_steps):
 
     # Step 3: Create knowledge graph
     if enable_steps.get("cognify"):
-        pipeline_run = await cognee.cognify()
+        await cognee.cognify()
         print("Knowledge graph created.")
-
-    # Step 4: Calculate descriptive metrics
-    if enable_steps.get("graph_metrics"):
-        await get_pipeline_run_metrics(pipeline_run, include_optional=True)
-        print("Descriptive graph metrics saved to database.")
 
     # Step 5: Query insights
     if enable_steps.get("retriever"):

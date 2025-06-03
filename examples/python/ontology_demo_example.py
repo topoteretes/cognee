@@ -62,12 +62,8 @@ async def main():
         os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
     )
 
-    pipeline_run = await cognee.cognify(ontology_file_path=ontology_path)
+    await cognee.cognify(ontology_file_path=ontology_path)
     print("Knowledge with ontology created.")
-
-    # Step 4: Calculate descriptive metrics
-    await get_pipeline_run_metrics(pipeline_run, include_optional=True)
-    print("Descriptive graph metrics saved to database.")
 
     # Step 5: Query insights
     search_results = await cognee.search(
