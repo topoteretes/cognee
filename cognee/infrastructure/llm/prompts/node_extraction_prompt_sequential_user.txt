@@ -1,0 +1,10 @@
+Extract distinct entities and concepts from the following text to expand the knowledge graph.
+Build upon previously extracted entities, ensuring completeness and consistency.
+Return all the previously extracted entities **together** with the new ones that you extracted.
+This is round {{ round_number }} of {{ total_rounds }}.
+
+**Text:**
+{{ text }}
+
+**Previously Extracted Entities:**
+{{ nodes }}
