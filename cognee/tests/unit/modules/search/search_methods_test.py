@@ -24,13 +24,9 @@ def mock_user():
 @pytest.mark.asyncio
 @patch.object(search_module, "log_query")
 @patch.object(search_module, "log_result")
-@patch.object(search_module, "get_document_ids_for_user")
 @patch.object(search_module, "specific_search")
-@patch.object(search_module, "parse_id")
 async def test_search(
-    mock_parse_id,
     mock_specific_search,
-    mock_get_document_ids,
     mock_log_result,
     mock_log_query,
     mock_user,
@@ -49,7 +45,6 @@ async def test_search(
     doc_id1 = uuid.uuid4()
     doc_id2 = uuid.uuid4()
     doc_id3 = uuid.uuid4()  # This one will be filtered out
-    mock_get_document_ids.return_value = [doc_id1, doc_id2]
 
     # Mock search results
     search_results = [
@@ -59,15 +54,11 @@ async def test_search(
     ]
     mock_specific_search.return_value = search_results
 
-    # Mock parse_id to return the same UUID
-    mock_parse_id.side_effect = lambda x: uuid.UUID(x) if x else None
-
     # Execute
     results = await search(query_text, query_type, datasets, mock_user)
 
     # Verify
     mock_log_query.assert_called_once_with(query_text, query_type.value, mock_user.id)
-    mock_get_document_ids.assert_called_once_with(mock_user.id, datasets)
     mock_specific_search.assert_called_once_with(
         query_type,
         query_text,

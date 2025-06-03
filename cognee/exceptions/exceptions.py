@@ -31,6 +31,9 @@ class CogneeApiError(Exception):
 
         super().__init__(self.message, self.name)
 
+    def __str__(self):
+        return f"{self.name}: {self.message} (Status code: {self.status_code})"
+
 
 class ServiceError(CogneeApiError):
     """Failures in external services or APIs, like a database or a third-party service"""

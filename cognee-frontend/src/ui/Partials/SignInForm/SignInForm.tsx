@@ -12,7 +12,7 @@ import {
   useBoolean,
 } from 'ohmy-ui';
 import { LoadingIndicator } from '@/ui/App';
-import { fetch, handleServerErrors } from '@/utils';
+import { fetch } from '@/utils';
 import { useState } from 'react';
 
 interface SignInFormPayload extends HTMLFormElement {
@@ -50,10 +50,7 @@ export default function SignInForm({ onSignInSuccess = () => window.location.hre
       method: 'POST',
       body: authCredentials,
     })
-      .then(handleServerErrors)
-      .then(response => response.json())
-      .then((bearer) => {
-        window.localStorage.setItem('access_token', bearer.access_token);
+      .then(() => {
         onSignInSuccess();
       })
       .catch(error => setSignInError(errorsMap[error.detail as keyof typeof errorsMap]))
