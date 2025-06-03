@@ -1,9 +1,6 @@
-import os
 import asyncio
 import json
-from typing import Type, List, Tuple, Dict, Any, Set
-
-from pydantic import BaseModel
+from typing import List, Tuple, Set
 
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -29,9 +26,7 @@ def dedupe_and_normalize_nodes(nodes: List[Node]) -> List[Node]:
     return out
 
 
-async def extract_content_graph_multi_parallel(
-    content: str, response_model: Type[BaseModel], node_rounds: int = 1
-):
+async def extract_content_node_edge_multi_parallel(content: str, node_rounds: int = 1):
     llm_client = get_llm_client()
 
     ###### NODE EXTRACTION
