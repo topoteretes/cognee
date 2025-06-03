@@ -38,6 +38,7 @@ services:
     volumes:
       - ./cognee-frontend/src:/app/src
       - ./cognee-frontend/public:/app/public
+      - ./cognee-frontend/.env:/app/.env
     ports:
       - 3000:3000
       # - 9229:9229 # Debugging

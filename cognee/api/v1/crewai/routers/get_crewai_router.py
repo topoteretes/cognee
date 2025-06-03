@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 
 from cognee.api.DTO import InDTO
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.deletion import prune_data, prune_system
 from cognee.modules.users.models import User
@@ -15,7 +16,6 @@ from cognee.modules.users.authentication.auth0.auth0_jwt_strategy import Auth0JW
 from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 from cognee.modules.pipelines.models import PipelineRunInfo, PipelineRunCompleted
 from cognee.complex_demos.crewai_demo.src.crewai_demo.main import (
-    # run_github_ingestion,
     run_github_ingestion,
     run_hiring_crew,
 )
@@ -45,6 +45,9 @@ def get_crewai_router() -> APIRouter:
     ):
         prune_data(user)
         prune_system(user)
+
+        # Set context based database settings if necessary
+        await set_database_global_context_variables("Github", user.id)
 
         await run_github_ingestion(user, payload.username1, payload.username2)
 
@@ -92,8 +95,10 @@ def get_crewai_router() -> APIRouter:
             async with db_engine.get_async_session() as session:
                 async with get_user_db_context(session) as user_db:
                     async with get_user_manager_context(user_db) as user_manager:
-                        user = await get_authenticated_user(cookie=access_token, strategy_cookie=strategy, user_manager=user_manager)
-        except Exception as error:
+                        user = await get_authenticated_user(
+                            cookie=access_token, strategy_cookie=strategy, user_manager=user_manager
+                        )
+        except Exception:
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
             return
 
