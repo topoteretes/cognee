@@ -51,8 +51,8 @@ app_environment = os.getenv("ENV", "prod")
 async def lifespan(app: FastAPI):
     from cognee.modules.data.deletion import prune_system, prune_data
 
-    await prune_data()
-    await prune_system(metadata=True)
+    # await prune_data()
+    # await prune_system(metadata=True)
     # if app_environment == "local" or app_environment == "dev":
     from cognee.infrastructure.databases.relational import get_relational_engine
 
