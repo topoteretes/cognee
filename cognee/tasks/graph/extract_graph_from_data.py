@@ -10,13 +10,18 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.extraction.knowledge_graph.extract_content_graph import (
     extract_content_graph,
 )
-from cognee.modules.data.extraction.knowledge_graph.extract_content_graph_multi_parallel import (
-    extract_content_graph_multi_parallel,
+from cognee.modules.data.extraction.knowledge_graph.extract_content_node_edge_multi_parallel import (
+    extract_content_node_edge_multi_parallel,
 )
 
 from cognee.modules.data.extraction.knowledge_graph.extract_content_graph_sequential import (
     extract_content_graph_sequential,
 )
+
+from cognee.modules.data.extraction.knowledge_graph.extract_content_node_edge_multi_sequential import (
+    extract_content_node_edge_multi_sequential,
+)
+
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,
     retrieve_existing_edges,
@@ -70,11 +75,16 @@ async def extract_graph_from_data(
     """
     chunk_graphs = await asyncio.gather(
         # *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
-        # *[extract_content_graph_multi_parallel(chunk.text, graph_model) for chunk in data_chunks]
-        *[extract_content_graph_sequential(chunk.text, graph_model) for chunk in data_chunks]
+        # *[extract_content_node_edge_multi_parallel(content=chunk.text, node_rounds=2) for chunk in data_chunks]
+        # *[extract_content_graph_sequential(content=chunk.text, response_model=graph_model, graph_extraction_rounds=2) for chunk in data_chunks]
+        *[
+            extract_content_node_edge_multi_sequential(
+                content=chunk.text, node_rounds=1, edge_rounds=1
+            )
+            for chunk in data_chunks
+        ]
     )
 
-    # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
         for graph in chunk_graphs:
             valid_node_ids = {node.id for node in graph.nodes}

@@ -27,7 +27,7 @@ async def extract_content_graph_sequential(
         edges_json = json.dumps([e.model_dump() for e in current_edges], ensure_ascii=False)
 
         graph_user = render_prompt(
-            graph_user_prompt_path,
+            graph_user_prompt_path,  #:TODO: this could use some formatting due to html #34 codes.
             {
                 "text": content,
                 "graph": f"nodes: {nodes_json}, edges: {edges_json}",
