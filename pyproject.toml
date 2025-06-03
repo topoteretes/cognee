@@ -67,7 +67,7 @@ api = [
     "kuzu==0.9.0",
 ]
 weaviate = ["weaviate-client==4.9.6"]
-qdrant = ["qdrant-client>=1.9.0,<2"]
+qdrant = ["qdrant-client>=1.14.2,<2"]
 neo4j = ["neo4j>=5.20.0,<6"]
 postgres = [
     "psycopg2>=2.9.10,<3",
@@ -95,7 +95,7 @@ chromadb = [
     "chromadb>=0.3.0,<0.7",
     "pypika==0.48.8",
 ]
-docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<0.17"]
+docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<18"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
     "transformers>=4.46.3,<5",
