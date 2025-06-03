@@ -1,9 +1,12 @@
-import handleServerErrors from "./handleServerErrors";
+import handleServerErrors from './handleServerErrors';
 
-export default async function fetch(url: string, options: RequestInit = {}): Promise<Response> {
-  return global.fetch("http://localhost:8000/api" + url, {
+export default function fetch(url: string, options: RequestInit = {}): Promise<Response> {
+  return global.fetch('http://localhost:8000/api' + url, {
     ...options,
-    credentials: "include",
+    headers: {
+      ...options.headers,
+      'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+    },
   })
     .then(handleServerErrors);
 }

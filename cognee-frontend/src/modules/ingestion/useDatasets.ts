@@ -17,6 +17,11 @@ function useDatasets() {
   const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
     fetch(
       `/v1/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`,
+      {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      },
     )
       .then((response) => response.json())
       .then((statuses) => setDatasets(
@@ -68,7 +73,11 @@ function useDatasets() {
   }, []);
 
   const fetchDatasets = useCallback(() => {
-    fetch('/v1/datasets')
+    fetch('/v1/datasets', {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+      },
+    })
       .then((response) => response.json())
       .then((datasets) => {
         setDatasets(datasets);
