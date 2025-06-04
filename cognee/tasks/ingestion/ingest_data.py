@@ -128,14 +128,13 @@ async def ingest_data(
                         existing_datasets = await get_authorized_existing_datasets(
                             user=user, permission_type="write", datasets=[dataset_name]
                         )
-                        datasets = await load_or_create_datasets(
+                        dataset = await load_or_create_datasets(
                             dataset_names=[dataset_name],
                             existing_datasets=existing_datasets,
                             user=user,
                         )
-                        dataset = next(
-                            (dataset for dataset in datasets if dataset.name == "Github")
-                        )
+                        if isinstance(dataset, list):
+                            dataset = dataset[0]
 
                     # Check to see if data should be updated
                     data_point = (
