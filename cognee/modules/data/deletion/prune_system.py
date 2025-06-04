@@ -3,6 +3,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import delete_dataset, get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
+from sqlalchemy import delete
 
 
 async def prune_system(user=None, graph=True, vector=True, metadata=False):
@@ -22,7 +23,15 @@ async def prune_system(user=None, graph=True, vector=True, metadata=False):
             user_datasets = []
 
         for dataset in user_datasets:
-            await delete_dataset(dataset)
+            # Delete ACLs related to dataset
+            from cognee.modules.users.models import ACL
+            from cognee.modules.data.models import Dataset
+
+            engine = get_relational_engine()
+            async with engine.get_async_session() as session:
+                await session.execute(delete(ACL).where(ACL.dataset_id == dataset.id))
+                await session.execute(delete(Dataset).where(Dataset.id == dataset.id))
+                await session.commit()
     else:
         if graph:
             graph_engine = await get_graph_engine()
