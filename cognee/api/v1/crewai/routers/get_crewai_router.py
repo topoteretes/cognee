@@ -47,6 +47,9 @@ def get_crewai_router() -> APIRouter:
         payload: CrewAIRunPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
+        # Set context based database settings if necessary
+        await set_database_global_context_variables("Github", user.id)
+
         await prune_data(user)
         await prune_system(user)
 
@@ -68,9 +71,6 @@ def get_crewai_router() -> APIRouter:
         await give_permission_on_dataset(user, github_dataset.id, "write")
         await give_permission_on_dataset(user, github_dataset.id, "delete")
         await give_permission_on_dataset(user, github_dataset.id, "share")
-
-        # Set context based database settings if necessary
-        await set_database_global_context_variables("Github", user.id)
 
         await run_github_ingestion(user, github_dataset, payload.username1, payload.username2)
 
