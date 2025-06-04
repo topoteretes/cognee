@@ -2,9 +2,10 @@ import colors from "tailwindcss/colors";
 import { formatHex } from "culori";
 
 const NODE_COLORS = {
-  Document: formatHex(colors.blue[500]),
-  Chunk: formatHex(colors.green[500]),
-  Entity: formatHex(colors.yellow[500]),
+  TextDocument: formatHex(colors.blue[500]),
+  DocumentChunk: formatHex(colors.green[500]),
+  TextSummary: formatHex(colors.orange[500]),
+  Entity: formatHex(colors.yellow[300]),
   EntityType: formatHex(colors.purple[800]),
   NodeSet: formatHex(colors.indigo[300]),
   GitHubUser: formatHex(colors.gray[300]),

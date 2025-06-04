@@ -1,4 +1,5 @@
 import os
+import random
 import time
 import warnings
 from uuid import uuid4
@@ -20,8 +21,18 @@ def print_environment():
         print(f"{key}={os.environ[key]}")
 
 
+github_tokens = [
+    os.getenv("GITHUB_TOKEN"),
+    os.getenv("GITHUB_TOKEN_FALLBACK_1"),
+    os.getenv("GITHUB_TOKEN_FALLBACK_2"),
+    os.getenv("GITHUB_TOKEN_FALLBACK_3"),
+    os.getenv("GITHUB_TOKEN_FALLBACK_4"),
+    os.getenv("GITHUB_TOKEN_FALLBACK_5"),
+]
+
+
 async def run_github_ingestion(user, dataset, applicant_1, applicant_2):
-    token = os.getenv("GITHUB_TOKEN")
+    token = random.choice(github_tokens)
 
     pipeline_run_id = get_crewai_pipeline_run_id(user.id)
 

@@ -82,6 +82,7 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
       .then(response => response.json())
       .then(() => {
         onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Hiring crew agents made a decision" }]);
+        onData(null);
       })
       .catch(() => {
         onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Hiring crew agents had problems while executing" }]);
