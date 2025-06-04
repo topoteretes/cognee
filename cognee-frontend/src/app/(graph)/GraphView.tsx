@@ -84,13 +84,13 @@ export default function GraphView() {
         />
 
         <div className="absolute top-2 left-2 flex flex-col gap-2">
-          {/* <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md"> */}
+          {/* <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-xs"> */}
           <CogneeAddWidget onData={onDataChange} />
           {/* </div> */}
-          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-xs">
             <CrewAITrigger onData={onDataChange} onActivity={(activities) => activityLog.current?.updateActivityLog(activities)} />
           </div>
-          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-xs">
             <h2 className="text-xl text-white mb-4">Activity Log</h2>
             <ActivityLog ref={activityLog as MutableRefObject<ActivityLogAPI>} />
           </div>
