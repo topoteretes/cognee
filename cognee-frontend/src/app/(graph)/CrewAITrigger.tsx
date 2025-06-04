@@ -70,6 +70,7 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
       }
     };
 
+    onData(null);
     setIsCrewAIRunning(true);
 
     return fetch("/v1/crewai/run", {
@@ -82,7 +83,6 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
       .then(response => response.json())
       .then(() => {
         onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Hiring crew agents made a decision" }]);
-        onData(null);
       })
       .catch(() => {
         onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Hiring crew agents had problems while executing" }]);
@@ -96,9 +96,6 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
   return (
     <form className="w-full flex flex-col gap-4" onSubmit={handleRunCrewAI}>
       <h1 className="text-2xl text-white">Cognee HR Crew Demo</h1>
-      <p className="text-white mb-4">
-        Cognee can help you build AI memory from any data. Here you can see how AI Agents can use cognee to compare two GitHub contributors.
-      </p>
       <div className="flex flex-row gap-2">
         <div className="flex flex-col w-full flex-1/2">
           <label className="block mb-1 text-white" htmlFor="username1">GitHub username</label>
@@ -109,7 +106,7 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
           <Input name="username2" type="text" placeholder="Github Username" required defaultValue="lxobr" />
         </div>
       </div>
-      <CTAButton type="submit" className="whitespace-nowrap">
+      <CTAButton type="submit" disabled={isCrewAIRunning} className="whitespace-nowrap">
         Start HR Crew Research
         {isCrewAIRunning && <LoadingIndicator />}
       </CTAButton>

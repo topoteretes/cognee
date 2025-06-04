@@ -87,6 +87,7 @@ export default function GraphView() {
         <div className="absolute top-2 right-2 flex flex-col gap-2 items-end">
           <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-110">
             <GraphControls
+              data={data}
               ref={graphControls as MutableRefObject<GraphControlsAPI>}
               isAddNodeFormOpen={isAddNodeFormOpen}
               onFitIntoView={() => graphRef.current!.zoomToFit(1000, 50)}

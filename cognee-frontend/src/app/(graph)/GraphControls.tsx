@@ -2,14 +2,18 @@
 
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
-import { NodeObject } from "react-force-graph-2d";
-import { ChangeEvent, useEffect, useImperativeHandle, useState } from "react";
+import { NodeObject, LinkObject } from "react-force-graph-2d";
+import { ChangeEvent, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { DeleteIcon } from "@/ui/Icons";
 import { FeedbackForm } from "@/ui/Partials";
 import { CTAButton, Input, NeutralButton, Select } from "@/ui/elements";
 
 interface GraphControlsProps {
+  data?: {
+    nodes: NodeObject[];
+    links: LinkObject[];
+  };
   isAddNodeFormOpen: boolean;
   ref: React.RefObject<GraphControlsAPI>;
   onFitIntoView: () => void;
@@ -37,7 +41,30 @@ const formatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeSty
 
 const DEFAULT_GRAPH_SHAPE = "lr";
 
-export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, onFitIntoView, ref }: GraphControlsProps) {
+const GRAPH_SHAPES = [{
+  value: "none",
+  label: "None",
+}, {
+  value: "td",
+  label: "Top-down",
+}, {
+  value: "bu",
+  label: "Bottom-up",
+}, {
+  value: "lr",
+  label: "Left-right",
+}, {
+  value: "rl",
+  label: "Right-left",
+}, {
+  value: "radialin",
+  label: "Radial-in",
+}, {
+  value: "radialout",
+  label: "Radial-out",
+}];
+
+export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeChange, onFitIntoView, ref }: GraphControlsProps) {
   const [selectedNode, setSelectedNode] = useState<NodeObject | null>(null);
   const [nodeProperties, setNodeProperties] = useState<NodeProperty[]>([]);
   const [newProperty, setNewProperty] = useState<NodeProperty>({
@@ -79,15 +106,51 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
   const [selectedTab, setSelectedTab] = useState("nodeDetails");
 
   const handleGraphShapeControl = (event: ChangeEvent<HTMLSelectElement>) => {
+    setIsAuthShapeChangeEnabled(false);
     onGraphShapeChange(event.target.value);
   };
 
+  const [isAuthShapeChangeEnabled, setIsAuthShapeChangeEnabled] = useState(true);
+  const shapeChangeTimeout = useRef<number | null>();
+  
   useEffect(() => {
     onGraphShapeChange(DEFAULT_GRAPH_SHAPE);
+
+    const graphShapesNum = GRAPH_SHAPES.length;
+
+    function switchShape(shapeIndex: number) {
+      if (!isAuthShapeChangeEnabled || !data) {
+        if (shapeChangeTimeout.current) {
+          clearTimeout(shapeChangeTimeout.current);
+          shapeChangeTimeout.current = null;
+        }
+
+        return;
+      }
+
+      shapeChangeTimeout.current = setTimeout(() => {
+        const newValue = GRAPH_SHAPES[shapeIndex].value;
+        onGraphShapeChange(newValue);
+        const graphShapeSelectElement = document.getElementById("graph-shape-select") as HTMLSelectElement;
+        graphShapeSelectElement.value = newValue;
+
+        switchShape((shapeIndex + 1) % graphShapesNum);
+      }, 5000) as unknown as number;
+    };
+
+    switchShape(0);
+
     setTimeout(() => {
       onFitIntoView();
     }, 500);
-  }, [onFitIntoView, onGraphShapeChange]);
+
+    return () => {
+      if (shapeChangeTimeout.current) {
+        clearTimeout(shapeChangeTimeout.current);
+        shapeChangeTimeout.current = null;
+      }
+    };
+  }, [data, isAuthShapeChangeEnabled, onFitIntoView, onGraphShapeChange]);
 
   return (
     <>
@@ -105,14 +168,10 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
           <>
             <div className="w-full flex flex-row gap-2 items-center mb-4">
               <label className="text-gray-300 whitespace-nowrap flex-1/5">Graph Shape:</label>
-              <Select defaultValue={DEFAULT_GRAPH_SHAPE} onChange={handleGraphShapeControl} className="flex-2/5">
-                <option value="none">None</option>
-                <option value="td">Top-down</option>
-                <option value="bu">Bottom-up</option>
-                <option value="lr">Left-right</option>
-                <option value="rl">Right-left</option>
-                <option value="radialin">Radial-in</option>
-                <option value="radialout">Radial-out</option>
+              <Select defaultValue={DEFAULT_GRAPH_SHAPE} onChange={handleGraphShapeControl} id="graph-shape-select" className="flex-2/5">
+                {GRAPH_SHAPES.map((shape) => (
+                  <option key={shape.value} value={shape.value}>{shape.label}</option>
+                ))}
               </Select>
               <NeutralButton onClick={onFitIntoView} className="flex-2/5 whitespace-nowrap">Fit Graph into View</NeutralButton>
             </div>
