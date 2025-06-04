@@ -18,6 +18,7 @@ from cognee.modules.users.authentication.default.default_jwt_strategy import Def
 from cognee.modules.users.authentication.auth0.auth0_jwt_strategy import Auth0JWTStrategy
 from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 from cognee.modules.pipelines.models import PipelineRunInfo, PipelineRunCompleted
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.complex_demos.crewai_demo.src.crewai_demo.main import (
     run_github_ingestion,
     run_hiring_crew,
@@ -49,12 +50,17 @@ def get_crewai_router() -> APIRouter:
         await prune_data(user)
         await prune_system(user)
 
-        existing_datasets = await get_authorized_existing_datasets(
-            user=user, permission_type="write", datasets=["GitHub"]
-        )
-        datasets = await load_or_create_datasets(["GitHub"], existing_datasets, user)
+        try:
+            existing_datasets = await get_authorized_existing_datasets(
+                user=user, permission_type="write", datasets=["Github"]
+            )
+        except PermissionDeniedError:
+            print("No datasets were found")
+            existing_datasets = []
+
+        datasets = await load_or_create_datasets(["Github"], existing_datasets, user)
         github_dataset: Dataset = next(
-            (dataset for dataset in datasets if dataset.name == "GitHub")
+            (dataset for dataset in datasets if dataset.name == "Github")
         )
 
         # Give user proper permissions for dataset

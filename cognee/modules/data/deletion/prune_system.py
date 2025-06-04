@@ -2,6 +2,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import delete_dataset, get_authorized_existing_datasets
+from cognee.modules.users.exceptions import PermissionDeniedError
 
 
 async def prune_system(user=None, graph=True, vector=True, metadata=False):
@@ -12,9 +13,13 @@ async def prune_system(user=None, graph=True, vector=True, metadata=False):
         vector_engine = get_vector_engine()
         await vector_engine.prune()
 
-        user_datasets = await get_authorized_existing_datasets(
-            user=user, permission_type="delete", datasets=None
-        )
+        try:
+            user_datasets = await get_authorized_existing_datasets(
+                user=user, permission_type="delete", datasets=None
+            )
+        # TODO: Add permissions to default datasets so this error won't be raised
+        except PermissionDeniedError:
+            user_datasets = []
 
         for dataset in user_datasets:
             await delete_dataset(dataset)

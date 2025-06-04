@@ -34,7 +34,7 @@ class CogneeIngestion(BaseTool):
         async def main():
             try:
                 # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
-                dataset_name = "GitHub"
+                dataset_name = "Github"
                 data = await cognee.add(
                     text,
                     node_set=[self._nodeset_name],
