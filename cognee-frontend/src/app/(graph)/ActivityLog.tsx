@@ -39,14 +39,16 @@ export default function ActivityLog({ ref }: ActivityLogProps) {
   }));
 
   return (
-    <div className="flex flex-col gap-2 overflow-y-auto max-h-96" id="activityLogContainer">
-      {activityLog.map((activity) => (
-        <div key={activity.id} className="flex gap-2 items-top">
-          <span className="flex-1/3 text-xs text-gray-300 whitespace-nowrap mt-1.5">{formatter.format(activity.timestamp)}: </span>
-          <span className="flex-2/3 text-white  whitespace-normal">{activity.activity}</span>
-        </div>
-      ))}
-      {!activityLog.length && <span className="text-white">No activity logged.</span>}
+    <div className="overflow-y-auto max-h-96" id="activityLogContainer">
+      <div className="flex flex-col-reverse gap-2">
+        {activityLog.map((activity) => (
+          <div key={activity.id} className="flex gap-2 items-top">
+            <span className="flex-1/3 text-xs text-gray-300 whitespace-nowrap mt-1.5">{formatter.format(activity.timestamp)}: </span>
+            <span className="flex-2/3 text-white  whitespace-normal">{activity.activity}</span>
+          </div>
+        ))}
+        {!activityLog.length && <span className="text-white">No activity logged.</span>}
+      </div>
     </div>
   );
 }
