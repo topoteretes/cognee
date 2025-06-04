@@ -79,7 +79,14 @@ def get_crewai_router() -> APIRouter:
             "applicant_2": payload.username2,
         }
 
-        run_hiring_crew(user, applicants=applicants, number_of_rounds=2)
+        def run_crewai_in_thread():
+            run_hiring_crew(user, applicants=applicants, number_of_rounds=2)
+
+        async def run_crewai_async():
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, run_crewai_in_thread)
+
+        await run_crewai_async()
 
         return True
 
@@ -91,13 +98,12 @@ def get_crewai_router() -> APIRouter:
         ),
     ):
         from cognee import add, cognify
-        # from secrets import choice
-        # from string import ascii_letters, digits
-
-        # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
+        # Set context based database settings if necessary
         dataset_name = "Github"
-        await add(payload.feedback, node_set=["final_report"], dataset_name=dataset_name, user=user)
-        await cognify(datasets=dataset_name, is_stream_info_enabled=True, user=user)
+        await set_database_global_context_variables(dataset_name, user.id)
+
+        await add(payload.feedback, node_set=["final_report"], dataset_name=dataset_name)
+        await cognify(datasets=dataset_name, is_stream_info_enabled=True)
 
     @router.websocket("/subscribe")
     async def subscribe_to_crewai_info(websocket: WebSocket):

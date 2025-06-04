@@ -61,10 +61,15 @@ class CogneeSearch(BaseTool):
                 return f"Error: {str(e)}"
 
         try:
-            loop = asyncio.get_event_loop()
+            try:
+                loop = asyncio.get_event_loop()
+
+                if not loop.is_running():
+                    loop = asyncio.new_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
 
             if not loop.is_running():
-                loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
             nest_asyncio.apply(loop)
