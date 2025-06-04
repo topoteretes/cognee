@@ -46,7 +46,7 @@ class CogneeSearch(BaseTool):
                     query_type=SearchType.GRAPH_COMPLETION,
                     user=self._user,
                     datasets=["Github"],
-                    top_k=5,
+                    top_k=30,
                     node_type=NodeSet,
                     node_name=[self._nodeset_name],
                 )
