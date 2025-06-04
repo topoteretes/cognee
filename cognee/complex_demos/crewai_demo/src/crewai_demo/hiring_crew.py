@@ -25,7 +25,6 @@ class HiringCrew:
     def __init__(self, user, inputs):
         self.user = user
         self.inputs = inputs
-        self
 
     @agent
     def soft_skills_expert_agent(self) -> Agent:
