@@ -13,6 +13,7 @@ import GraphLegend from "./GraphLegend";
 import ActivityLog, { ActivityLogAPI } from "./ActivityLog";
 
 import { useBoolean } from "@/utils";
+import Image from 'next/image';
 
 interface GraphNode {
   id: string | number;
@@ -59,8 +60,19 @@ export default function GraphView() {
 
   return (
     <main className="flex flex-col h-full">
-      <div className="pt-6 pr-3 pb-3 pl-6">
+      <div className="flex flex-row justify-between items-center pt-6 pr-3 pb-3 pl-6">
         <TextLogo width={86} height={24} />
+
+        <div className="flex flex-row items-center gap-8">
+          Powered by{" "}
+
+          <span className="flex flex-row gap-8">
+            <Image src="/images/neo4j.png" alt="Neo4j" width={132} height={48} />
+            <Image src="/images/lancedb.svg" alt="LanceDB" width={132} height={48} />
+            <Image src="/images/deepnote.svg" alt="DeepNote" width={132} height={48} />
+            <Image src="/images/crewai.png" alt="CrewAI" width={132} height={48} />
+          </span>
+        </div>
       </div>
       <Divider />
       <div className="w-full h-full relative overflow-hidden">

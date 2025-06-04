@@ -94,8 +94,9 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
   };
 
   return (
-    <form className="w-full flex flex-col gap-4" onSubmit={handleRunCrewAI}>
-      <h1 className="text-2xl text-white">Cognee HR Crew Demo</h1>
+    <form className="w-full flex flex-col gap-2" onSubmit={handleRunCrewAI}>
+      <h1 className="text-2xl text-white">Cognee Dev Mexican Standoff</h1>
+      <span className="text-white">Agents compare GitHub profiles, and make a decision who is a better developer</span>
       <div className="flex flex-row gap-2">
         <div className="flex flex-col w-full flex-1/2">
           <label className="block mb-1 text-white" htmlFor="username1">GitHub username</label>
@@ -107,7 +108,7 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
         </div>
       </div>
       <CTAButton type="submit" disabled={isCrewAIRunning} className="whitespace-nowrap">
-        Start HR Crew Research
+        Start Mexican Standoff
         {isCrewAIRunning && <LoadingIndicator />}
       </CTAButton>
     </form>
