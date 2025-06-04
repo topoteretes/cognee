@@ -145,8 +145,13 @@ async def run_pipeline(
         # Refresh the cognify pipeline status after we add new files.
         # Without this the cognify_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
         await log_pipeline_run_initiated(
-            pipeline_id=uuid5(NAMESPACE_OID, pipeline_name),
-            pipeline_name=pipeline_name,
+            pipeline_id=uuid5(NAMESPACE_OID, "cognify_pipeline"),
+            pipeline_name="cognify_pipeline",
+            dataset_id=dataset_id,
+        )
+        await log_pipeline_run_initiated(
+            pipeline_id=uuid5(NAMESPACE_OID, "github_pipeline"),
+            pipeline_name="github_pipeline",
             dataset_id=dataset_id,
         )
 

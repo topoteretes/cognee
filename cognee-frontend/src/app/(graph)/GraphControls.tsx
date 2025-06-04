@@ -145,7 +145,7 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
             ) : (
               selectedNode ? (
                 <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-2 overflow-y-auto max-h-96">
+                  <div className="flex flex-col gap-2 overflow-y-auto max-h-96 pr-2">
                     <div className="flex gap-2 items-top">
                       <span className="text-gray-300">ID:</span>
                       <span className="text-white">{selectedNode.id}</span>
@@ -158,7 +158,7 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
                     {Object.entries(selectedNode.properties).map(([key, value]) => (
                       <div key={key} className="flex gap-2 items-top">
                         <span className="text-gray-300">{key.charAt(0).toUpperCase() + key.slice(1)}:</span>
-                        <span className="text-white truncate">{typeof value === "object" ? JSON.stringify(value) : value as string}</span>
+                        <span className="text-white">{typeof value === "object" ? JSON.stringify(value) : value as string}</span>
                       </div>
                     ))}
                   </div>
