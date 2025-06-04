@@ -35,6 +35,12 @@ export default function GraphView() {
   const [data, updateData] = useState<GraphData>();
 
   const onDataChange = useCallback((newData: NodesAndEdges) => {
+    if (newData === null) {
+      // Requests for resetting the data
+      updateData(undefined);
+      return;
+    }
+
     if (!newData.nodes.length && !newData.links.length) {
       return;
     }
