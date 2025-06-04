@@ -36,10 +36,17 @@ class CogneeIngestion(BaseTool):
                 # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
                 dataset_name = "GitHub"
                 data = await cognee.add(
-                    text, node_set=[self._nodeset_name], dataset_name=dataset_name, user=self._user,
+                    text,
+                    node_set=[self._nodeset_name],
+                    dataset_name=dataset_name,
+                    user=self._user,
                 )
                 await cognee.cognify(
-                    datasets=dataset_name, is_stream_info_enabled=True, datapoints=data.packets, user=self._user, pipeline_name="github_pipeline",
+                    datasets=dataset_name,
+                    is_stream_info_enabled=True,
+                    datapoints=data.packets,
+                    user=self._user,
+                    pipeline_name="github_pipeline",
                 )
 
                 return "Report ingested successfully into Cognee memory."

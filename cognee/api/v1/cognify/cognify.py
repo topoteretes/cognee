@@ -44,25 +44,37 @@ async def cognify(
     is_stream_info_enabled: bool = False,
     pipeline_name: str = "cognify_pipeline",
 ):
-    tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
+    tasks = await get_default_tasks(
+        user=user,
+        graph_model=graph_model,
+        chunker=chunker,
+        chunk_size=chunk_size,
+        ontology_file_path=ontology_file_path,
+    )
 
     if not user:
         user = await get_default_user()
 
     if run_in_background:
         return await run_cognify_as_background_process(
-            tasks, user, datasets, datapoints, pipeline_name, vector_db_config, graph_db_config
+            tasks=tasks,
+            user=user,
+            datasets=datasets,
+            datapoints=datapoints,
+            pipeline_name=pipeline_name,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
         )
     else:
         return await run_cognify_blocking(
-            tasks,
-            user,
-            datasets,
-            pipeline_name,
-            datapoints,
-            is_stream_info_enabled,
-            vector_db_config,
-            graph_db_config,
+            tasks=tasks,
+            user=user,
+            datasets=datasets,
+            pipeline_name=pipeline_name,
+            datapoints=datapoints,
+            is_stream_info_enabled=is_stream_info_enabled,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
         )
 
 

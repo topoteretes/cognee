@@ -12,7 +12,9 @@ async def prune_system(user=None, graph=True, vector=True, metadata=False):
         vector_engine = get_vector_engine()
         await vector_engine.prune()
 
-        user_datasets = await get_authorized_existing_datasets(user=user, permission_type="write")
+        user_datasets = await get_authorized_existing_datasets(
+            user=user, permission_type="write", datasets=None
+        )
 
         for dataset in user_datasets:
             await delete_dataset(dataset)

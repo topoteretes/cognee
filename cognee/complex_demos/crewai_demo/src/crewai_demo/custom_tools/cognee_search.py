@@ -33,7 +33,7 @@ class CogneeSearch(BaseTool):
         self._user = user
         self._nodeset_name = nodeset_name
 
-    def _run(self, query: str, user: User) -> str:
+    def _run(self, query: str) -> str:
         import asyncio
         # from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
@@ -44,7 +44,7 @@ class CogneeSearch(BaseTool):
                 search_results = await search(
                     query_text=query,
                     query_type=SearchType.GRAPH_COMPLETION,
-                    user=user,
+                    user=self._user,
                     datasets=["Github"],
                     top_k=5,
                     node_type=NodeSet,

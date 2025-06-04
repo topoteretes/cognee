@@ -3,14 +3,13 @@ import asyncio
 from uuid import uuid5, NAMESPACE_OID
 from typing import Optional, List, Dict, Any
 import cognee
+from cognee.modules.data.models import Dataset
 from cognee.modules.users.models import User
 from cognee.low_level import DataPoint
 from cognee.modules.users.models import User
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_tasks
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.permissions.methods import give_permission_on_dataset
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.shared.logging_utils import get_logger
 from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest import (
@@ -231,23 +230,12 @@ async def run_with_info_stream(tasks, user, data, dataset_id, pipeline_name):
             push_to_queue(pipeline_run_id, pipeline_run_info)
 
 
-async def cognify_github_data(github_data: dict, user: User):
+async def cognify_github_data(github_data: dict, user: User, dataset: Dataset):
     """Process GitHub user, file changes, and comments data from a loaded dictionary."""
     all_datapoints = build_github_datapoints_from_dict(github_data)
     if not all_datapoints:
         logger.error("Failed to create datapoints")
         return False
-
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        # Create Dataset
-        dataset = await create_dataset("Github", user, session)
-
-    # Give user proper permissions for dataset
-    await give_permission_on_dataset(user, dataset.id, "read")
-    await give_permission_on_dataset(user, dataset.id, "write")
-    await give_permission_on_dataset(user, dataset.id, "delete")
-    await give_permission_on_dataset(user, dataset.id, "share")
 
     tasks = [Task(add_data_points, task_config={"batch_size": 50})]
 
@@ -264,6 +252,7 @@ async def cognify_github_data(github_data: dict, user: User):
 
 async def cognify_github_data_from_username(
     user: User,
+    dataset: Dataset,
     username: str,
     token: Optional[str] = None,
     days: int = 30,
@@ -294,7 +283,7 @@ async def cognify_github_data_from_username(
 
     github_data = json.loads(json.dumps(github_data, default=str))
 
-    await cognify_github_data(github_data, user=user)
+    await cognify_github_data(github_data, user=user, dataset=dataset)
 
 
 if __name__ == "__main__":

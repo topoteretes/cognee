@@ -6,7 +6,6 @@ import Footer from "@/ui/Partials/Footer/Footer";
 import { auth0 } from "@/modules/auth/auth0";
 
 import { CTAButton } from "@/ui/elements";
-import AuthToken from "./token/AuthToken";
 
 
 export default async function AuthPage() {
@@ -23,7 +22,6 @@ export default async function AuthPage() {
         {session ? (
           <div className="flex flex-col gap-8">
             <span className="text-lg">Hello, {session.user.name}!</span>
-            <AuthToken />
             <Link href="/auth/logout">
               <CTAButton>
                 Log out

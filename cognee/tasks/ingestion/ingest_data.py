@@ -4,19 +4,19 @@ import json
 import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
-import cognee.modules.ingestion as ingestion
+
+from cognee.api.v1.add.config import get_s3_config
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.methods import create_dataset
+import cognee.modules.ingestion as ingestion
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import give_permission_on_dataset
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.modules.data.models.DatasetData import DatasetData
+from cognee.modules.data.methods import get_authorized_existing_datasets, load_or_create_datasets
+
 from .get_dlt_destination import get_dlt_destination
 from .save_data_item_to_storage import save_data_item_to_storage
-
-
-from cognee.api.v1.add.config import get_s3_config
 
 
 async def ingest_data(
@@ -124,8 +124,15 @@ async def ingest_data(
                         if isinstance(dataset, list):
                             dataset = dataset[0]
                     else:
-                        # Create new one
-                        dataset = await create_dataset(dataset_name, user, session)
+                        # Find existing dataset or create a new one
+                        existing_datasets = await get_authorized_existing_datasets(
+                            user=user, permission_type="write", datasets=[dataset_name]
+                        )
+                        dataset = await load_or_create_datasets(
+                            dataset_names=[dataset_name],
+                            existing_datasets=existing_datasets,
+                            user=user,
+                        )
 
                     # Check to see if data should be updated
                     data_point = (

@@ -42,7 +42,7 @@ async def cognee_pipeline(
     data=None,
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
-    pipeline_name: str = "custom_pipeline",
+    pipeline_name: str = "cognify_pipeline",
     datapoints: dict[str, Any] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
@@ -121,8 +121,8 @@ async def run_pipeline(
     dataset: Dataset,
     user: User,
     tasks: list[Task],
+    pipeline_name: str,
     data=None,
-    pipeline_name: str = "custom_pipeline",
     context: dict = None,
 ):
     check_dataset_name(dataset.name)
@@ -145,8 +145,8 @@ async def run_pipeline(
         # Refresh the cognify pipeline status after we add new files.
         # Without this the cognify_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
         await log_pipeline_run_initiated(
-            pipeline_id=uuid5(NAMESPACE_OID, "cognify_pipeline"),
-            pipeline_name="cognify_pipeline",
+            pipeline_id=uuid5(NAMESPACE_OID, pipeline_name),
+            pipeline_name=pipeline_name,
             dataset_id=dataset_id,
         )
 

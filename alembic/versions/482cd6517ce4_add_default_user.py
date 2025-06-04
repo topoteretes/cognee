@@ -24,7 +24,8 @@ def upgrade() -> None:
     try:
         await_only(create_default_user())
     except UserAlreadyExists:
-        pass # It's fine if the default user already exists
+        pass  # It's fine if the default user already exists
+
 
 def downgrade() -> None:
     await_only(delete_user("default_user@example.com"))

@@ -9,9 +9,7 @@ from cognee.modules.users.get_user_manager import UserManager
 
 class DefaultJWTStrategy(JWTStrategy):
     async def read_token(self, token: str, user_manager: UserManager):
-        payload = jwt.decode(
-            token, self.secret, algorithms=["HS256"]
-        )
+        payload = jwt.decode(token, self.secret, algorithms=["HS256"])
 
         user_id = UUID(payload["user_id"])
 

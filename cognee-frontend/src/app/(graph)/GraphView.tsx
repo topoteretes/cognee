@@ -9,6 +9,8 @@ import CrewAITrigger from "./CrewAITrigger";
 import GraphVisualization, { GraphVisualizationAPI } from "./GraphVisualization";
 import CogneeAddWidget, { NodesAndEdges } from "./CogneeAddWidget";
 import GraphControls, { GraphControlsAPI } from "./GraphControls";
+import GraphLegend from "./GraphLegend";
+import ActivityLog, { ActivityLogAPI } from "./ActivityLog";
 
 import { useBoolean } from "@/utils";
 
@@ -47,9 +49,7 @@ export default function GraphView() {
 
   const graphControls = useRef<GraphControlsAPI>();
 
-  const onActivityChange = (activities: any) => {
-    graphControls.current?.updateActivity(activities);
-  };
+  const activityLog = useRef<ActivityLogAPI>();
 
   return (
     <main className="flex flex-col h-full">
@@ -59,23 +59,39 @@ export default function GraphView() {
       <Divider />
       <div className="w-full h-full relative overflow-hidden">
         <GraphVisualization
-          ref={graphRef as unknown as MutableRefObject<GraphVisualizationAPI>}
+          key={data?.nodes.length}
+          ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
           data={data}
-          graphControls={graphControls as unknown as MutableRefObject<GraphControlsAPI>}
+          graphControls={graphControls as MutableRefObject<GraphControlsAPI>}
         />
 
-        <div className="absolute top-2 left-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md">
+        <div className="absolute top-2 left-2 flex flex-col gap-2">
+          {/* <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md"> */}
           <CogneeAddWidget onData={onDataChange} />
-          <CrewAITrigger onData={onDataChange} onActivity={onActivityChange} />
+          {/* </div> */}
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md">
+            <CrewAITrigger onData={onDataChange} onActivity={(activities) => activityLog.current?.updateActivityLog(activities)} />
+          </div>
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-md">
+            <h2 className="text-xl text-white mb-4">Activity Log</h2>
+            <ActivityLog ref={activityLog as MutableRefObject<ActivityLogAPI>} />
+          </div>
         </div>
 
-        <div className="absolute top-2 right-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-110">
-          <GraphControls
-            ref={graphControls as unknown as MutableRefObject<GraphControlsAPI>}
-            isAddNodeFormOpen={isAddNodeFormOpen}
-            onFitIntoView={() => graphRef.current!.zoomToFit(1000, 50)}
-            onGraphShapeChange={(shape) => graphRef.current!.setGraphShape(shape)}
-          />
+        <div className="absolute top-2 right-2 flex flex-col gap-2 items-end">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-110">
+            <GraphControls
+              ref={graphControls as MutableRefObject<GraphControlsAPI>}
+              isAddNodeFormOpen={isAddNodeFormOpen}
+              onFitIntoView={() => graphRef.current!.zoomToFit(1000, 50)}
+              onGraphShapeChange={(shape) => graphRef.current!.setGraphShape(shape)}
+            />
+          </div>
+          {data?.nodes.length && (
+            <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-48">
+              <GraphLegend data={data?.nodes} />
+            </div>
+          )}
         </div>
       </div>
       <Divider />

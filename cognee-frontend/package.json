@@ -11,6 +11,7 @@
   "dependencies": {
     "@auth0/nextjs-auth0": "^4.6.0",
     "classnames": "^2.5.1",
+    "culori": "^4.0.1",
     "d3-force-3d": "^3.0.6",
     "next": "15.3.2",
     "ohmy-ui": "^0.0.6",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.7",
+    "@types/culori": "^4.0.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

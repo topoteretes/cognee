@@ -1,3 +1,4 @@
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.graph.operations import get_formatted_graph_data
 from cognee.shared.logging_utils import get_logger
 from fastapi import APIRouter
@@ -65,7 +66,9 @@ def get_datasets_router() -> APIRouter:
         try:
             from cognee.modules.data.methods import get_authorized_existing_datasets
 
-            datasets = await get_authorized_existing_datasets(user=user, permission_type="read", datasets=None)
+            datasets = await get_authorized_existing_datasets(
+                user=user, permission_type="read", datasets=None
+            )
 
             return datasets
         except Exception as error:
@@ -115,6 +118,8 @@ def get_datasets_router() -> APIRouter:
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
         try:
+            await set_database_global_context_variables("Github", user.id)
+
             return JSONResponse(
                 status_code=200,
                 content=await get_formatted_graph_data(),

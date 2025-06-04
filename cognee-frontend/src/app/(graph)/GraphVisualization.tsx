@@ -3,7 +3,8 @@
 import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
 import ForceGraph, { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
-import { GraphControlsAPI } from './GraphControls';
+import { GraphControlsAPI } from "./GraphControls";
+import getColorForNodeType from "./getColorForNodeType";
 
 interface GraphVisuzaliationProps {
   ref: MutableRefObject<GraphVisualizationAPI>;
@@ -54,7 +55,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
     // }
   };
 
-  function renderNode(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) {
+  function renderNode(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number, renderType: string = "replace") {
     const selectedNode = graphControls.current?.getSelectedNode();
 
     ctx.save();
@@ -77,9 +78,12 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
     //   ctx.stroke();
     // }
 
-    // ctx.beginPath();
-    // ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
-    // ctx.fill();
+    if (renderType === "replace") {
+      ctx.beginPath();
+      ctx.fillStyle = getColorForNodeType(node.type);
+      ctx.arc(node.x!, node.y!, nodeSize, 0, 2 * Math.PI);
+      ctx.fill();
+    }
 
     // draw text label (with background rect)
     const textPos = {
@@ -145,6 +149,10 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
     ctx.restore();
   }
 
+  function renderInitialNode(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) {
+    renderNode(node, ctx, globalScale, "after");
+  }
+
   function handleDagError(loopNodeIds: (string | number)[]) {}
 
   const graphRef = useRef<ForceGraphMethods>();
@@ -177,8 +185,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
           nodeLabel="label"
           nodeRelSize={nodeSize}
           nodeCanvasObject={renderNode}
-          nodeCanvasObjectMode={() => "after"}
-          nodeAutoColorBy="type"
+          nodeCanvasObjectMode={() => "replace"}
 
           linkLabel="label"
           linkCanvasObject={renderLink}
@@ -202,7 +209,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
 
           nodeLabel="label"
           nodeRelSize={20}
-          nodeCanvasObject={renderNode}
+          nodeCanvasObject={renderInitialNode}
           nodeCanvasObjectMode={() => "after"}
           nodeAutoColorBy="type"
 

@@ -4,7 +4,9 @@ import warnings
 from uuid import uuid4
 
 from cognee.complex_demos.crewai_demo.src.crewai_demo.events.crewai_listener import CrewAIListener
-from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest_datapoints import cognify_github_data_from_username
+from cognee.complex_demos.crewai_demo.src.crewai_demo.github_ingest_datapoints import (
+    cognify_github_data_from_username,
+)
 from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunActivity
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
@@ -18,50 +20,62 @@ def print_environment():
         print(f"{key}={os.environ[key]}")
 
 
-async def run_github_ingestion(user, applicant_1, applicant_2):
+async def run_github_ingestion(user, dataset, applicant_1, applicant_2):
     token = os.getenv("GITHUB_TOKEN")
 
     pipeline_run_id = get_crewai_pipeline_run_id(user.id)
 
-    push_to_queue(pipeline_run_id, PipelineRunActivity(
-        pipeline_run_id=pipeline_run_id,
-        payload={
-            "id": str(uuid4()),
-            "timestamp": time.time() * 1000,
-            "activity": "GitHub applicant data ingestion started",
-        }
-    ))
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunActivity(
+            pipeline_run_id=pipeline_run_id,
+            payload={
+                "id": str(uuid4()),
+                "timestamp": time.time() * 1000,
+                "activity": "GitHub applicant data ingestion started",
+            },
+        ),
+    )
 
-    await cognify_github_data_from_username(user, applicant_1, token)
+    await cognify_github_data_from_username(user, dataset, applicant_1, token)
 
-    push_to_queue(pipeline_run_id, PipelineRunActivity(
-        pipeline_run_id=pipeline_run_id,
-        payload={
-            "id": str(uuid4()),
-            "timestamp": time.time() * 1000,
-            "activity": f"Applicant's ({applicant_1}) data ingestion finished",
-        }
-    ))
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunActivity(
+            pipeline_run_id=pipeline_run_id,
+            payload={
+                "id": str(uuid4()),
+                "timestamp": time.time() * 1000,
+                "activity": f"Applicant's ({applicant_1}) data ingestion finished",
+            },
+        ),
+    )
 
-    await cognify_github_data_from_username(user, applicant_2, token)
+    await cognify_github_data_from_username(user, dataset, applicant_2, token)
 
-    push_to_queue(pipeline_run_id, PipelineRunActivity(
-        pipeline_run_id=pipeline_run_id,
-        payload={
-            "id": str(uuid4()),
-            "timestamp": time.time() * 1000,
-            "activity": f"Applicant's ({applicant_2}) data ingestion finished",
-        }
-    ))
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunActivity(
+            pipeline_run_id=pipeline_run_id,
+            payload={
+                "id": str(uuid4()),
+                "timestamp": time.time() * 1000,
+                "activity": f"Applicant's ({applicant_2}) data ingestion finished",
+            },
+        ),
+    )
 
-    push_to_queue(pipeline_run_id, PipelineRunActivity(
-        pipeline_run_id=pipeline_run_id,
-        payload={
-            "id": str(uuid4()),
-            "timestamp": time.time() * 1000,
-            "activity": "GitHub applicant data ingestion finished",
-        }
-    ))
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunActivity(
+            pipeline_run_id=pipeline_run_id,
+            payload={
+                "id": str(uuid4()),
+                "timestamp": time.time() * 1000,
+                "activity": "GitHub applicant data ingestion finished",
+            },
+        ),
+    )
 
 
 def run_hiring_crew(user, applicants: dict, number_of_rounds: int = 1):
@@ -70,39 +84,48 @@ def run_hiring_crew(user, applicants: dict, number_of_rounds: int = 1):
     # Instantiate CrewAI listener to capture pipeline run events
     crewai_listener = CrewAIListener(pipeline_run_id=pipeline_run_id)
 
-    push_to_queue(pipeline_run_id, PipelineRunActivity(
-        pipeline_run_id=pipeline_run_id,
-        payload={
-            "id": str(uuid4()),
-            "timestamp": time.time() * 1000,
-            "activity": "Hiring crew research started",
-        }
-    ))
-
-    for hiring_round in range(number_of_rounds):
-        print(f"\nStarting hiring round {hiring_round + 1}...\n")
-
-        push_to_queue(pipeline_run_id, PipelineRunActivity(
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunActivity(
             pipeline_run_id=pipeline_run_id,
             payload={
                 "id": str(uuid4()),
                 "timestamp": time.time() * 1000,
-                "activity": f"Research round {hiring_round + 1} started",
-            }
-        ))
+                "activity": "Hiring crew research started",
+            },
+        ),
+    )
+
+    for hiring_round in range(number_of_rounds):
+        print(f"\nStarting hiring round {hiring_round + 1}...\n")
+
+        push_to_queue(
+            pipeline_run_id,
+            PipelineRunActivity(
+                pipeline_run_id=pipeline_run_id,
+                payload={
+                    "id": str(uuid4()),
+                    "timestamp": time.time() * 1000,
+                    "activity": f"Research round {hiring_round + 1} started",
+                },
+            ),
+        )
 
         crew = HiringCrew(user=user, inputs=applicants)
         if hiring_round > 0:
             print("Refining agent prompts for this round...")
 
-            push_to_queue(pipeline_run_id, PipelineRunActivity(
-                pipeline_run_id=pipeline_run_id,
-                payload={
-                    "id": str(uuid4()),
-                    "timestamp": time.time() * 1000,
-                    "activity": "Refining agent prompts for the next round",
-                }
-            ))
+            push_to_queue(
+                pipeline_run_id,
+                PipelineRunActivity(
+                    pipeline_run_id=pipeline_run_id,
+                    payload={
+                        "id": str(uuid4()),
+                        "timestamp": time.time() * 1000,
+                        "activity": "Refining agent prompts for the next round",
+                    },
+                ),
+            )
 
             crew.refine_agent_configs(agent_name="soft_skills_expert_agent")
             crew.refine_agent_configs(agent_name="technical_expert_agent")
@@ -110,14 +133,17 @@ def run_hiring_crew(user, applicants: dict, number_of_rounds: int = 1):
 
         crew.crew().kickoff()
 
-    push_to_queue(pipeline_run_id, PipelineRunActivity(
-        pipeline_run_id=pipeline_run_id,
-        payload={
-            "id": str(uuid4()),
-            "timestamp": time.time() * 1000,
-            "activity": "Hiring crew research finished",
-        }
-    ))
+    push_to_queue(
+        pipeline_run_id,
+        PipelineRunActivity(
+            pipeline_run_id=pipeline_run_id,
+            payload={
+                "id": str(uuid4()),
+                "timestamp": time.time() * 1000,
+                "activity": "Hiring crew research finished",
+            },
+        ),
+    )
 
 
 def run(enable_ingestion=True, enable_crew=True):

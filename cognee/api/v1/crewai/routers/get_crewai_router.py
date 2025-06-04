@@ -7,10 +7,13 @@ from cognee.api.DTO import InDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.deletion import prune_data, prune_system
+from cognee.modules.data.methods import get_authorized_existing_datasets, load_or_create_datasets
+from cognee.modules.data.models import Dataset
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.users.get_user_manager import get_user_manager_context
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
 from cognee.modules.users.authentication.auth0.auth0_jwt_strategy import Auth0JWTStrategy
 from cognee.modules.crewai.get_crewai_pipeline_run_id import get_crewai_pipeline_run_id
@@ -43,13 +46,27 @@ def get_crewai_router() -> APIRouter:
         payload: CrewAIRunPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
-        prune_data(user)
-        prune_system(user)
+        await prune_data(user)
+        await prune_system(user)
+
+        existing_datasets = await get_authorized_existing_datasets(
+            user=user, permission_type="write", datasets=["GitHub"]
+        )
+        datasets = await load_or_create_datasets(["GitHub"], existing_datasets, user)
+        github_dataset: Dataset = next(
+            (dataset for dataset in datasets if dataset.name == "GitHub")
+        )
+
+        # Give user proper permissions for dataset
+        await give_permission_on_dataset(user, github_dataset.id, "read")
+        await give_permission_on_dataset(user, github_dataset.id, "write")
+        await give_permission_on_dataset(user, github_dataset.id, "delete")
+        await give_permission_on_dataset(user, github_dataset.id, "share")
 
         # Set context based database settings if necessary
         await set_database_global_context_variables("Github", user.id)
 
-        await run_github_ingestion(user, payload.username1, payload.username2)
+        await run_github_ingestion(user, github_dataset, payload.username1, payload.username2)
 
         applicants = {
             "applicant_1": payload.username1,
