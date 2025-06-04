@@ -95,9 +95,9 @@ def get_crewai_router() -> APIRouter:
         # from string import ascii_letters, digits
 
         # hash6 = "".join(choice(ascii_letters + digits) for _ in range(6))
-        dataset_name = "final_reports"
-        await add(payload.feedback, node_set=["final_report"], dataset_name=dataset_name)
-        await cognify(datasets=dataset_name, is_stream_info_enabled=True)
+        dataset_name = "Github"
+        await add(payload.feedback, node_set=["final_report"], dataset_name=dataset_name, user=user)
+        await cognify(datasets=dataset_name, is_stream_info_enabled=True, user=user)
 
     @router.websocket("/subscribe")
     async def subscribe_to_crewai_info(websocket: WebSocket):

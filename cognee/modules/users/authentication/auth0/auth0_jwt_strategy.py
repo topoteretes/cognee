@@ -28,6 +28,5 @@ class Auth0JWTStrategy(JWTStrategy):
             new_user = BaseUserCreate(email=email, password="NOT IMPORTANT FOR AUTH0")
 
             user = await user_manager.create(new_user)
-            await create_tenant(tenant_name="My organization", user_id=user.id)
 
         return user
