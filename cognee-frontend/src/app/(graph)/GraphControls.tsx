@@ -87,7 +87,7 @@ export default function GraphControls({ isAddNodeFormOpen, onGraphShapeChange, o
     setTimeout(() => {
       onFitIntoView();
     }, 500);
-  });
+  }, [onFitIntoView, onGraphShapeChange]);
 
   return (
     <>
