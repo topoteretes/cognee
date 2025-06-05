@@ -142,11 +142,6 @@ jobs:
           QDRANT__LOG_LEVEL: ERROR
           QDRANT__SERVICE__API_KEY: qdrant_api_key
           QDRANT__SERVICE__ENABLE_TLS: 0
-        options: >-
-          --health-cmd "curl 127.0.0.1:6333 || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
         ports:
           - 6333:6333
 
@@ -162,6 +157,19 @@ jobs:
       - name: Install specific db dependency
         run: |
           poetry install -E qdrant
+
+      - name: Wait for Qdrant to be healthy
+        run: |
+          for i in {1..10}; do
+            if curl -f http://127.0.0.1:6333/healthz; then
+              echo "Qdrant is healthy!"
+              exit 0
+            fi
+            echo "Waiting for Qdrant to be healthy..."
+            sleep 3
+          done
+          echo "Qdrant failed to become healthy in time"
+          exit 1
 
       - name: Run default Qdrant
         env:
