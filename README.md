@@ -48,7 +48,7 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
 </div>
-
+</div>
 
 
 ## Features
