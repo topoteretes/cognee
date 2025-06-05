@@ -161,16 +161,16 @@ async def ingest_data(
                         )
                         session.add(data_point)
 
-                    # Check if data is already in dataset
-                    # dataset_data = (
-                    #     await session.execute(
-                    #         select(DatasetData).filter(
-                    #             DatasetData.data_id == data_id, DatasetData.dataset_id == dataset.id
-                    #         )
-                    #     )
-                    # ).scalar_one_or_none()
-                    # If data is not present in dataset add it
-                    # if dataset_data is None:
+                        # Check if data is already in dataset
+                        # dataset_data = (
+                        #     await session.execute(
+                        #         select(DatasetData).filter(
+                        #             DatasetData.data_id == data_id, DatasetData.dataset_id == dataset.id
+                        #         )
+                        #     )
+                        # ).scalar_one_or_none()
+                        # If data is not present in dataset add it
+                        # if dataset_data is None:
                         dataset.data.append(data_point)
                         session.add(dataset)
 
