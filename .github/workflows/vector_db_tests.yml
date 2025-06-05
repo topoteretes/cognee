@@ -135,6 +135,21 @@ jobs:
       run:
         shell: bash
 
+    services:
+      qdrant:
+        image: qdrant/qdrant:1.14.1
+        env:
+          QDRANT__LOG_LEVEL: ERROR
+          QDRANT__SERVICE__API_KEY: qdrant_api_key
+          QDRANT__SERVICE__ENABLE_TLS: 0
+        options: >-
+          --health-cmd "curl 127.0.0.1:6333 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6333:6333
+
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -159,8 +174,8 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          VECTOR_DB_URL: ${{ secrets.QDRANT_API_URL }}
-          VECTOR_DB_KEY: ${{ secrets.QDRANT_API_KEY }}
+          VECTOR_DB_URL: 127.0.0.1
+          VECTOR_DB_KEY: qdrant_api_key
         run: poetry run python ./cognee/tests/test_qdrant.py
 
   run-postgres-tests:
