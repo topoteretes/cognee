@@ -144,7 +144,8 @@ async def ingest_data(
                         data_point.content_hash = file_metadata["content_hash"]
                         data_point.external_metadata = ext_metadata
                         data_point.node_set = json.dumps(node_set) if node_set else None
-                        await session.merge(data_point)
+
+                        session.add(data_point)
                     else:
                         data_point = Data(
                             id=data_id,
@@ -161,17 +162,17 @@ async def ingest_data(
                         session.add(data_point)
 
                     # Check if data is already in dataset
-                    dataset_data = (
-                        await session.execute(
-                            select(DatasetData).filter(
-                                DatasetData.data_id == data_id, DatasetData.dataset_id == dataset.id
-                            )
-                        )
-                    ).scalar_one_or_none()
+                    # dataset_data = (
+                    #     await session.execute(
+                    #         select(DatasetData).filter(
+                    #             DatasetData.data_id == data_id, DatasetData.dataset_id == dataset.id
+                    #         )
+                    #     )
+                    # ).scalar_one_or_none()
                     # If data is not present in dataset add it
-                    if dataset_data is None:
+                    # if dataset_data is None:
                         dataset.data.append(data_point)
-                        await session.merge(dataset)
+                        session.add(dataset)
 
                     await session.commit()
 
