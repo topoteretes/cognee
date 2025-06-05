@@ -49,12 +49,12 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
 </div>
 
-</br>
+<br />
 
-<a href="https://arxiv.org/abs/2505.24478">Read Our Paper:</a> **Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning**
+Our paper is out! Read <a href="https://arxiv.org/abs/2505.24478" target="_blank" rel="noopener noreferrer">here</a>
 
 <div style="text-align: center">
-  <img src="assets/cognee-paper.png" alt="cognee paper" width="50%" />
+  <img src="assets/cognee-paper.png" alt="cognee paper" width="70%" />
 </div>
 
 </div>
