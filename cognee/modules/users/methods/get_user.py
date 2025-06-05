@@ -1,6 +1,6 @@
 from uuid import UUID
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import selectinload
 import sqlalchemy.exc
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -14,7 +14,7 @@ async def get_user(user_id: UUID):
         user = (
             await session.execute(
                 select(User)
-                .options(joinedload(User.roles), joinedload(User.tenant))
+                .options(selectinload(User.roles), selectinload(User.tenant))
                 .where(User.id == user_id)
             )
         ).scalar()
