@@ -137,7 +137,7 @@ jobs:
 
     services:
       qdrant:
-        image: qdrant/qdrant:1.14.1
+        image: qdrant/qdrant:v1.14.1
         env:
           QDRANT__LOG_LEVEL: ERROR
           QDRANT__SERVICE__API_KEY: qdrant_api_key
