@@ -31,6 +31,7 @@ logger = get_logger("Neo4jAdapter", level=ERROR)
 
 BASE_LABEL = "__Node__"
 
+
 class Neo4jAdapter(GraphDBInterface):
     """
     Adapter for interacting with a Neo4j graph database, implementing the GraphDBInterface.
@@ -53,8 +54,7 @@ class Neo4jAdapter(GraphDBInterface):
         )
         # Create contraint/index
         self.query(
-            ("CREATE CONSTRAINT IF NOT EXISTS FOR " 
-            f"(n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
+            (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
         )
 
     @asynccontextmanager
