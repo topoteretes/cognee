@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 from fastapi import Depends, APIRouter
@@ -12,6 +13,7 @@ from cognee.modules.users.methods import get_authenticated_user
 class SearchPayloadDTO(InDTO):
     search_type: SearchType
     query: str
+    top_k: Optional[int] = 10
 
 
 def get_search_router() -> APIRouter:
@@ -39,7 +41,10 @@ def get_search_router() -> APIRouter:
 
         try:
             results = await cognee_search(
-                query_text=payload.query, query_type=payload.search_type, user=user
+                query_text=payload.query,
+                query_type=payload.search_type,
+                user=user,
+                top_k=payload.top_k,
             )
 
             return results
