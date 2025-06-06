@@ -1,5 +1,7 @@
 # cognee MCP server
 
+Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
+
 ### Installing Manually
 A MCP server project
 =======
@@ -69,6 +71,19 @@ npx -y @smithery/cli install cognee --client claude
 Define cognify tool in server.py
 Restart your Claude desktop.
 
+## Running the Server
+
+### Standard stdio transport:
+```bash
+python src/server.py
+```
+
+### SSE transport:
+```bash
+python src/server.py --transport sse
+```
+
+## Development and Debugging
 
 To use debugger, run:
 ```bash
