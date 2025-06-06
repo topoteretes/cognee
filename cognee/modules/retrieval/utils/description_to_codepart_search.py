@@ -1,5 +1,5 @@
 import asyncio
-from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
 
 from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -144,6 +144,7 @@ async def code_description_to_code_part(
 
 
 if __name__ == "__main__":
+    logger = setup_logging(log_level=ERROR)
 
     async def main():
         query = "I am looking for a class with blue eyes"
