@@ -64,9 +64,9 @@ class RemoteKuzuAdapter(KuzuAdapter):
                 if response.status != 200:
                     error_detail = await response.text()
                     logger.error(
-                        f"API request failed with status {response.status}: {error_detail}"
+                        f"API request failed with status {response.status}: {error_detail}\n"
+                        f"Request data: {data}"
                     )
-                    logger.error(f"Request data: {data}")
                     raise aiohttp.ClientResponseError(
                         response.request_info,
                         response.history,
