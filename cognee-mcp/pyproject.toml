@@ -1,12 +1,15 @@
 [project]
 name = "cognee-mcp"
-version = "0.2.3"
+version = "0.3.0"
 description = "A MCP server project"
 readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
-    "cognee[postgres,codegraph,gemini,huggingface]==0.1.39",
+    # For local cognee repo usage remove comment bellow and add absolute path to cognee
+    #"cognee[postgres,codegraph,gemini,huggingface] @ file:/Users/<username>/Desktop/cognee",
+    "cognee[postgres,codegraph,gemini,huggingface,docs,neo4j]==0.1.40",
+    "fastmcp>=1.0",
     "mcp==1.5.0",
     "uv>=0.6.3",
 ]
@@ -26,6 +29,9 @@ packages = ["src"]
 dev = [
     "debugpy>=1.8.12",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project.scripts]
 cognee = "src:main"

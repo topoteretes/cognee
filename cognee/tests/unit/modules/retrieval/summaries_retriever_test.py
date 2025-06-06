@@ -127,7 +127,7 @@ class TextSummariesRetriever:
 
         await add_data_points(entities)
 
-        retriever = SummariesRetriever(limit=20)
+        retriever = SummariesRetriever(top_k=20)
 
         context = await retriever.get_context("Christina")
 

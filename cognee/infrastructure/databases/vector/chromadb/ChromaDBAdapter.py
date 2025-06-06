@@ -6,8 +6,9 @@ from chromadb import AsyncHttpClient, Settings
 from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.storage.utils import get_own_properties
-from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -18,17 +19,59 @@ logger = get_logger("ChromaDBAdapter")
 
 
 class IndexSchema(DataPoint):
+    """
+    Define a schema for indexing textual data along with metadata.
+
+    Public methods:
+
+    - model_dump: Serialize the instance data into a format suitable for ChromaDB storage.
+
+    Instance variables:
+
+    - text: The text content to be indexed.
+    - metadata: A dictionary containing index-related fields.
+    """
+
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
 
     def model_dump(self):
+        """
+        Serialize the instance data for storage.
+
+        Invoke the superclass method and process the resulting data into a format compatible
+        with ChromaDB.
+
+        Returns:
+        --------
+
+            A dictionary containing serialized data processed for ChromaDB storage.
+        """
         data = super().model_dump()
         return process_data_for_chroma(data)
 
 
 def process_data_for_chroma(data):
-    """Convert complex data types to a format suitable for ChromaDB storage."""
+    """
+    Convert complex data types to a format suitable for ChromaDB storage.
+
+    This function processes various data types from the input dictionary, converting UUIDs
+    to strings, and serializing dictionaries and lists into JSON strings prefixed with the
+    key type. Other supported types (strings, integers, floats, booleans, and None) are
+    stored as-is. Unsupported types are converted to their string representation.
+
+    Parameters:
+    -----------
+
+        - data: A dictionary containing data with various types including potentially
+          complex structures.
+
+    Returns:
+    --------
+
+        A dictionary containing the processed key-value pairs suitable for ChromaDB storage.
+    """
     processed_data = {}
     for key, value in data.items():
         if isinstance(value, UUID):
@@ -47,7 +90,26 @@ def process_data_for_chroma(data):
 
 
 def restore_data_from_chroma(data):
-    """Restore original data structure from ChromaDB storage format."""
+    """
+    Restore original data structure from ChromaDB storage format.
+
+    This function processes a data dictionary, identifies special keys that end with
+    '__dict' and '__list', and attempts to restore the original data structure by converting
+    JSON strings back into Python objects. If restoration fails, it logs an error and
+    retains the original value.
+
+    Parameters:
+    -----------
+
+        - data: A dictionary containing data stored in ChromaDB format, which includes
+          special keys indicating dictionary and list entries.
+
+    Returns:
+    --------
+
+        A dictionary representing the restored original data structure, with JSON strings
+        converted to their appropriate Python types.
+    """
     restored_data = {}
     dict_keys = []
     list_keys = []
@@ -83,6 +145,11 @@ def restore_data_from_chroma(data):
 
 
 class ChromaDBAdapter(VectorDBInterface):
+    """
+    Manage a connection to the ChromaDB and facilitate operations for embedding, searching,
+    and managing collections of data points.
+    """
+
     name = "ChromaDB"
     url: str
     api_key: str
@@ -96,6 +163,15 @@ class ChromaDBAdapter(VectorDBInterface):
         self.api_key = api_key
 
     async def get_connection(self) -> AsyncHttpClient:
+        """
+        Establish and return a connection to the ChromaDB if one doesn't already exist.
+
+        Returns:
+        --------
+
+            - AsyncHttpClient: Returns an instance of AsyncHttpClient for interacting with
+              ChromaDB.
+        """
         if self.connection is None:
             settings = Settings(
                 chroma_client_auth_provider="token", chroma_client_auth_credentials=self.api_key
@@ -105,27 +181,88 @@ class ChromaDBAdapter(VectorDBInterface):
         return self.connection
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
+        """
+        Embed a list of text data into vector representations.
+
+        Parameters:
+        -----------
+
+            - data (list[str]): A list of strings to be embedded.
+
+        Returns:
+        --------
+
+            - list[list[float]]: Returns a list of lists containing the embedded vector
+              representations.
+        """
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
-        client = await self.get_connection()
-        collections = await client.list_collections()
-        # In ChromaDB v0.6.0, list_collections returns collection names directly
+        """
+        Check if a collection with the specified name exists in the ChromaDB.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to check for.
+
+        Returns:
+        --------
+
+            - bool: Returns True if the collection exists, otherwise False.
+        """
+        collections = await self.get_collection_names()
         return collection_name in collections
 
     async def create_collection(self, collection_name: str, payload_schema=None):
+        """
+        Create a new collection in ChromaDB if it does not already exist.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to create.
+            - payload_schema: The schema for the payload; can be None. (default None)
+        """
         client = await self.get_connection()
 
         if not await self.has_collection(collection_name):
             await client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
 
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
-        client = await self.get_connection()
+    async def get_collection(self, collection_name: str) -> AsyncHttpClient:
+        """
+        Retrieve a collection by its name from ChromaDB.
 
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to retrieve.
+
+        Returns:
+        --------
+
+            - AsyncHttpClient: Returns an AsyncHttpClient representing the requested collection.
+        """
         if not await self.has_collection(collection_name):
-            await self.create_collection(collection_name)
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
-        collection = await client.get_collection(collection_name)
+        client = await self.get_connection()
+        return await client.get_collection(collection_name)
+
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+        """
+        Create and upsert data points into the specified collection in ChromaDB.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection where data points will be added.
+            - data_points (list[DataPoint]): A list of DataPoint instances to be added to the
+              collection.
+        """
+        await self.create_collection(collection_name)
+
+        collection = await self.get_collection(collection_name)
 
         texts = [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         embeddings = await self.embed_data(texts)
@@ -141,13 +278,30 @@ class ChromaDBAdapter(VectorDBInterface):
         )
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
-        """Create a vector index as a ChromaDB collection."""
+        """
+        Create a vector index as a ChromaDB collection based on provided names.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The base name for the vector index.
+            - index_property_name (str): The property name associated with the index.
+        """
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
-        """Index data points using the specified index property."""
+        """
+        Index the provided data points based on the specified index property in ChromaDB.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The index name used for the data points.
+            - index_property_name (str): The property name to index data points by.
+            - data_points (list[DataPoint]): A list of DataPoint instances to be indexed.
+        """
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
@@ -160,9 +314,23 @@ class ChromaDBAdapter(VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Retrieve data points by their IDs from a collection."""
-        client = await self.get_connection()
-        collection = await client.get_collection(collection_name)
+        """
+        Retrieve data points by their IDs from a ChromaDB collection.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection from which to retrieve data
+              points.
+            - data_point_ids (list[str]): A list of data point IDs to retrieve.
+
+        Returns:
+        --------
+
+            Returns a list of ScoredResult instances containing the retrieved data points and
+            their metadata.
+        """
+        collection = await self.get_collection(collection_name)
         results = await collection.get(ids=data_point_ids, include=["metadatas"])
 
         return [
@@ -174,66 +342,36 @@ class ChromaDBAdapter(VectorDBInterface):
             for id, metadata in zip(results["ids"], results["metadatas"])
         ]
 
-    async def get_distance_from_collection_elements(
-        self, collection_name: str, query_text: str = None, query_vector: List[float] = None
-    ):
-        """Calculate distance between query and all elements in a collection."""
-        if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
-
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
-
-        client = await self.get_connection()
-        try:
-            collection = await client.get_collection(collection_name)
-
-            collection_count = await collection.count()
-
-            results = await collection.query(
-                query_embeddings=[query_vector],
-                include=["metadatas", "distances"],
-                n_results=collection_count,
-            )
-
-            result_values = []
-            for i, (id, metadata, distance) in enumerate(
-                zip(results["ids"][0], results["metadatas"][0], results["distances"][0])
-            ):
-                result_values.append(
-                    {
-                        "id": parse_id(id),
-                        "payload": restore_data_from_chroma(metadata),
-                        "_distance": distance,
-                    }
-                )
-
-            normalized_values = normalize_distances(result_values)
-
-            scored_results = []
-            for i, result in enumerate(result_values):
-                scored_results.append(
-                    ScoredResult(
-                        id=result["id"],
-                        payload=result["payload"],
-                        score=normalized_values[i],
-                    )
-                )
-
-            return scored_results
-        except Exception:
-            return []
-
     async def search(
         self,
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 5,
+        limit: int = 15,
         with_vector: bool = False,
         normalized: bool = True,
     ):
-        """Search for similar items in a collection using text or vector query."""
+        """
+        Search for items in a collection using either a text or a vector query.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection in which to perform the search.
+            - query_text (str): Text query used for search; can be None if query_vector is
+              provided. (default None)
+            - query_vector (List[float]): Vector query used for search; can be None if
+              query_text is provided. (default None)
+            - limit (int): The maximum number of results to return; defaults to 15. (default 15)
+            - with_vector (bool): Whether to include vectors in the results. (default False)
+            - normalized (bool): Whether to normalize the distance scores before returning them.
+              (default True)
+
+        Returns:
+        --------
+
+            Returns a list of ScoredResult instances representing the search results.
+        """
         if query_text is None and query_vector is None:
             raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
@@ -241,8 +379,10 @@ class ChromaDBAdapter(VectorDBInterface):
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
         try:
-            client = await self.get_connection()
-            collection = await client.get_collection(collection_name)
+            collection = await self.get_collection(collection_name)
+
+            if limit == 0:
+                limit = await collection.count()
 
             results = await collection.query(
                 query_embeddings=[query_vector],
@@ -293,11 +433,29 @@ class ChromaDBAdapter(VectorDBInterface):
         limit: int = 5,
         with_vectors: bool = False,
     ):
-        """Perform multiple searches in a single request for efficiency."""
+        """
+        Perform multiple searches in a single request for efficiency, returning results for each
+        query.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection in which to perform the
+              searches.
+            - query_texts (List[str]): A list of text queries to be searched.
+            - limit (int): The maximum number of results to return for each query; defaults to
+              5. (default 5)
+            - with_vectors (bool): Whether to include vectors in the results for each query.
+              (default False)
+
+        Returns:
+        --------
+
+            Returns a list of lists of ScoredResult instances for each query's results.
+        """
         query_vectors = await self.embed_data(query_texts)
 
-        client = await self.get_connection()
-        collection = await client.get_collection(collection_name)
+        collection = await self.get_collection(collection_name)
 
         results = await collection.query(
             query_embeddings=query_vectors,
@@ -345,21 +503,53 @@ class ChromaDBAdapter(VectorDBInterface):
         return all_results
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        """Remove data points from a collection by their IDs."""
-        client = await self.get_connection()
-        collection = await client.get_collection(collection_name)
+        """
+        Remove data points from a collection based on their IDs.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection from which to delete data
+              points.
+            - data_point_ids (list[str]): A list of data point IDs to remove from the
+              collection.
+
+        Returns:
+        --------
+
+            Returns True upon successful deletion of the data points.
+        """
+        collection = await self.get_collection(collection_name)
         await collection.delete(ids=data_point_ids)
         return True
 
     async def prune(self):
-        """Delete all collections in the ChromaDB database."""
+        """
+        Delete all collections in the ChromaDB database.
+
+        Returns:
+        --------
+
+            Returns True upon successful deletion of all collections.
+        """
         client = await self.get_connection()
-        collections = await client.list_collections()
+        collections = await self.list_collections()
         for collection_name in collections:
             await client.delete_collection(collection_name)
         return True
 
     async def get_collection_names(self):
-        """Get a list of all collection names in the database."""
+        """
+        Retrieve the names of all collections in the ChromaDB database.
+
+        Returns:
+        --------
+
+            Returns a list of collection names.
+        """
         client = await self.get_connection()
-        return await client.list_collections()
+        collections = await client.list_collections()
+        return [
+            collection.name if hasattr(collection, "name") else collection["name"]
+            for collection in collections
+        ]

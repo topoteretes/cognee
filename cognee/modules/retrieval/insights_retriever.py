@@ -9,7 +9,17 @@ from cognee.infrastructure.databases.vector.exceptions.exceptions import Collect
 
 
 class InsightsRetriever(BaseRetriever):
-    """Retriever for handling graph connection-based insights."""
+    """
+    Retriever for handling graph connection-based insights.
+
+    Public methods include:
+    - get_context
+    - get_completion
+
+    Instance variables include:
+    - exploration_levels
+    - top_k
+    """
 
     def __init__(self, exploration_levels: int = 1, top_k: int = 5):
         """Initialize retriever with exploration levels and search parameters."""
@@ -17,7 +27,24 @@ class InsightsRetriever(BaseRetriever):
         self.top_k = top_k
 
     async def get_context(self, query: str) -> list:
-        """Find the neighbours of a given node in the graph."""
+        """
+        Find neighbours of a given node in the graph.
+
+        If the provided query does not correspond to an existing node,
+        search for similar entities and retrieve their connections.
+        Reraises NoDataError if there is no data found in the system.
+
+        Parameters:
+        -----------
+
+            - query (str): A string identifier for the node whose neighbours are to be
+              retrieved.
+
+        Returns:
+        --------
+
+            - list: A list of unique connections found for the queried node.
+        """
         if query is None:
             return []
 
@@ -67,7 +94,24 @@ class InsightsRetriever(BaseRetriever):
         return unique_node_connections
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Returns the graph connections context."""
+        """
+        Returns the graph connections context.
+
+        If a context is not provided, it fetches the context using the query provided.
+
+        Parameters:
+        -----------
+
+            - query (str): A string identifier used to fetch the context.
+            - context (Optional[Any]): An optional context to use for the completion; if None,
+              it fetches the context based on the query. (default None)
+
+        Returns:
+        --------
+
+            - Any: The context used for the completion, which is either provided or fetched
+              based on the query.
+        """
         if context is None:
             context = await self.get_context(query)
         return context

@@ -20,20 +20,23 @@ async def index_and_transform_graphiti_nodes_and_edges():
         logger.error("Failed to initialize engines: %s", e)
         raise RuntimeError("Initialization error") from e
 
-    await graph_engine.query("""MATCH (n) SET n.id = n.uuid RETURN n""")
+    await graph_engine.query("""MATCH (n) SET n.id = n.uuid RETURN n""", params={})
     await graph_engine.query(
         """MATCH (source)-[r]->(target) SET r.source_node_id = source.id,
                              r.target_node_id = target.id,
-                             r.relationship_name = type(r) RETURN r"""
+                             r.relationship_name = type(r) RETURN r""",
+        params={},
     )
-    await graph_engine.query("""MATCH (n) SET n.text = COALESCE(n.summary, n.content) RETURN n""")
+    await graph_engine.query(
+        """MATCH (n) SET n.text = COALESCE(n.summary, n.content) RETURN n""", params={}
+    )
 
-    nodes_data, edges_data = await graph_engine.get_model_independent_graph_data()
+    nodes_data, edges_data = await graph_engine.get_graph_data()
 
-    for node_data in nodes_data[0]["nodes"]:
+    for node_id, node_data in nodes_data:
         graphiti_node = GraphitiNode(
             **{key: node_data[key] for key in ("content", "name", "summary") if key in node_data},
-            id=node_data.get("uuid"),
+            id=node_id,
         )
 
         data_point_type = type(graphiti_node)
@@ -58,9 +61,8 @@ async def index_and_transform_graphiti_nodes_and_edges():
         await vector_engine.index_data_points(index_name, field_name, indexable_points)
 
     edge_types = Counter(
-        edge[1][1]
-        for edge in edges_data[0]["elements"]
-        if isinstance(edge, list) and len(edge) == 3
+        edge[2]  # The edge key (relationship name) is at index 2
+        for edge in edges_data
     )
 
     for text, count in edge_types.items():

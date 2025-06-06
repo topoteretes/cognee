@@ -1,9 +1,8 @@
 import asyncio
-from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
-
 import lancedb
-from lancedb.pydantic import LanceModel, Vector
 from pydantic import BaseModel
+from lancedb.pydantic import LanceModel, Vector
+from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
@@ -17,10 +16,19 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
-from tenacity import retry, stop_after_attempt, wait_exponential
-
 
 class IndexSchema(DataPoint):
+    """
+    Represents a schema for an index data point containing an ID and text.
+
+    Attributes:
+
+    - id: A string representing the unique identifier for the data point.
+    - text: A string representing the content of the data point.
+    - metadata: A dictionary with default index fields for the schema, currently configured
+    to include 'text'.
+    """
+
     id: str
     text: str
 
@@ -44,15 +52,55 @@ class LanceDBAdapter(VectorDBInterface):
         self.embedding_engine = embedding_engine
 
     async def get_connection(self):
+        """
+        Establishes and returns a connection to the LanceDB.
+
+        If a connection already exists, it will return the existing connection.
+
+        Returns:
+        --------
+
+            - lancedb.AsyncConnection: An active connection to the LanceDB.
+        """
         if self.connection is None:
             self.connection = await lancedb.connect_async(self.url, api_key=self.api_key)
 
         return self.connection
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
+        """
+        Embeds the provided textual data into vector representation.
+
+        Uses the embedding engine to convert the list of strings into a list of float vectors.
+
+        Parameters:
+        -----------
+
+            - data (list[str]): A list of strings representing the data to be embedded.
+
+        Returns:
+        --------
+
+            - list[list[float]]: A list of embedded vectors corresponding to the input data.
+        """
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
+        """
+        Checks if the specified collection exists in the LanceDB.
+
+        Returns True if the collection is present, otherwise False.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to check.
+
+        Returns:
+        --------
+
+            - bool: True if the collection exists, otherwise False.
+        """
         connection = await self.get_connection()
         collection_names = await connection.table_names()
         return collection_name in collection_names
@@ -64,6 +112,15 @@ class LanceDBAdapter(VectorDBInterface):
         data_point_types = get_type_hints(payload_schema)
 
         class LanceDataPoint(LanceModel):
+            """
+            Represents a data point in the Lance model with an ID, vector, and associated payload.
+
+            The class inherits from LanceModel and defines the following public attributes:
+            - id: A unique identifier for the data point.
+            - vector: A vector representing the data point in a specified dimensional space.
+            - payload: Additional data or metadata associated with the data point.
+            """
+
             id: data_point_types["id"]
             vector: Vector(vector_size)
             payload: payload_schema
@@ -76,9 +133,14 @@ class LanceDBAdapter(VectorDBInterface):
                 exist_ok=True,
             )
 
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
-        connection = await self.get_connection()
+    async def get_collection(self, collection_name: str):
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
+        connection = await self.get_connection()
+        return await connection.open_table(collection_name)
+
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
@@ -87,7 +149,7 @@ class LanceDBAdapter(VectorDBInterface):
                 payload_schema,
             )
 
-        collection = await connection.open_table(collection_name)
+        collection = await self.get_collection(collection_name)
 
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
@@ -98,6 +160,14 @@ class LanceDBAdapter(VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
 
         class LanceDataPoint(LanceModel, Generic[IdType, PayloadSchema]):
+            """
+            Represents a data point in the Lance model with an ID, vector, and payload.
+
+            This class encapsulates a data point consisting of an identifier, a vector representing
+            the data, and an associated payload, allowing for operations and manipulations specific
+            to the Lance data structure.
+            """
+
             id: IdType
             vector: Vector(vector_size)
             payload: PayloadSchema
@@ -125,8 +195,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        connection = await self.get_connection()
-        collection = await connection.open_table(collection_name)
+        collection = await self.get_collection(collection_name)
 
         if len(data_point_ids) == 1:
             results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
@@ -142,48 +211,12 @@ class LanceDBAdapter(VectorDBInterface):
             for result in results.to_dict("index").values()
         ]
 
-    async def get_distance_from_collection_elements(
-        self, collection_name: str, query_text: str = None, query_vector: List[float] = None
-    ):
-        if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
-
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
-
-        connection = await self.get_connection()
-
-        try:
-            collection = await connection.open_table(collection_name)
-
-            collection_size = await collection.count_rows()
-
-            results = (
-                await collection.vector_search(query_vector).limit(collection_size).to_pandas()
-            )
-
-            result_values = list(results.to_dict("index").values())
-
-            normalized_values = normalize_distances(result_values)
-
-            return [
-                ScoredResult(
-                    id=parse_id(result["id"]),
-                    payload=result["payload"],
-                    score=normalized_values[value_index],
-                )
-                for value_index, result in enumerate(result_values)
-            ]
-        except ValueError:
-            # Ignore if collection doesn't exist
-            return []
-
     async def search(
         self,
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 5,
+        limit: int = 15,
         with_vector: bool = False,
         normalized: bool = True,
     ):
@@ -193,12 +226,10 @@ class LanceDBAdapter(VectorDBInterface):
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
-        connection = await self.get_connection()
+        collection = await self.get_collection(collection_name)
 
-        try:
-            collection = await connection.open_table(collection_name)
-        except ValueError:
-            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
+        if limit == 0:
+            limit = await collection.count_rows()
 
         results = await collection.vector_search(query_vector).limit(limit).to_pandas()
 
@@ -239,30 +270,12 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
-    def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-        async def _delete_data_points():
-            connection = await self.get_connection()
-            collection = await connection.open_table(collection_name)
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        collection = await self.get_collection(collection_name)
 
-            # Delete one at a time to avoid commit conflicts
-            for data_point_id in data_point_ids:
-                await collection.delete(f"id = '{data_point_id}'")
-
-            return True
-
-        # Check if we're in an event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # If we're in a running event loop, create a new task
-            return loop.create_task(_delete_data_points())
-        else:
-            # If we're not in an event loop, run it synchronously
-            return asyncio.run(_delete_data_points())
+        # Delete one at a time to avoid commit conflicts
+        for data_point_id in data_point_ids:
+            await collection.delete(f"id = '{data_point_id}'")
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
@@ -288,7 +301,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
 
         for collection_name in collection_names:
-            collection = await connection.open_table(collection_name)
+            collection = await self.get_collection(collection_name)
             await collection.delete("id IS NOT NULL")
             await connection.drop_table(collection_name)
 

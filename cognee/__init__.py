@@ -1,3 +1,9 @@
+from cognee.version import get_cognee_version
+
+# NOTE: __version__ extraction must be at the top of the __init__.py otherwise
+#       there will be circular import issues
+__version__ = get_cognee_version()
+
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify

@@ -10,11 +10,19 @@ from cognee.infrastructure.databases.relational import get_relational_config
 @lru_cache
 def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
     """
-    Handles propagation of the cognee database configuration to the dlt library
+    Handle the propagation of the cognee database configuration to the dlt library.
+
+    This function determines the appropriate sqlalchemy destination based on the database
+    provider specified in the relational configuration. It constructs the destination
+    credentials for either sqlite or postgres databases accordingly. If the database
+    provider is neither sqlite nor postgres, it returns None.
 
     Returns:
-        sqlachemy: sqlachemy destination used by the dlt library
+    --------
 
+        - Union[type[dlt.destinations.sqlalchemy], None]: An instance of sqlalchemy
+          destination used by the dlt library, or None if the database provider is
+          unsupported.
     """
     relational_config = get_relational_config()
 

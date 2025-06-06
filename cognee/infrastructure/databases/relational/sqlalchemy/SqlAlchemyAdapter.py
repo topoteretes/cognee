@@ -20,6 +20,11 @@ logger = get_logger()
 
 
 class SQLAlchemyAdapter:
+    """
+    Adapt a SQLAlchemy connection for asynchronous operations with database management
+    functions.
+    """
+
     def __init__(self, connection_string: str):
         self.db_path: str = None
         self.db_uri: str = connection_string
@@ -32,6 +37,9 @@ class SQLAlchemyAdapter:
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
+        """
+        Provide an asynchronous context manager for obtaining a database session.
+        """
         async_session_maker = self.sessionmaker
         async with async_session_maker() as session:
             try:
@@ -40,6 +48,9 @@ class SQLAlchemyAdapter:
                 await session.close()  # Ensure the session is closed
 
     def get_session(self):
+        """
+        Provide a context manager for obtaining a database session.
+        """
         session_maker = self.sessionmaker
         with session_maker() as session:
             try:
@@ -48,6 +59,14 @@ class SQLAlchemyAdapter:
                 session.close()  # Ensure the session is closed
 
     async def get_datasets(self):
+        """
+        Retrieve a list of datasets from the database.
+
+        Returns:
+        --------
+
+            A list of datasets retrieved from the database.
+        """
         from cognee.modules.data.models import Dataset
 
         async with self.get_async_session() as session:
@@ -56,6 +75,17 @@ class SQLAlchemyAdapter:
             return datasets
 
     async def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
+        """
+        Create a table with the specified schema and configuration if it does not exist.
+
+        Parameters:
+        -----------
+
+            - schema_name (str): The name of the schema to create the table within.
+            - table_name (str): The name of the table to be created.
+            - table_config (list[dict]): A list of dictionaries representing the table's fields
+              and their types.
+        """
         fields_query_parts = [f"{item['name']} {item['type']}" for item in table_config]
         async with self.engine.begin() as connection:
             await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
@@ -67,6 +97,16 @@ class SQLAlchemyAdapter:
             await connection.close()
 
     async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
+        """
+        Delete a table from the specified schema, if it exists.
+
+        Parameters:
+        -----------
+
+            - table_name (str): The name of the table to delete.
+            - schema_name (Optional[str]): The name of the schema containing the table to
+              delete, defaults to 'public'. (default 'public')
+        """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
                 # SQLite doesn't support schema namespaces and the CASCADE keyword.
@@ -84,19 +124,21 @@ class SQLAlchemyAdapter:
         schema_name: Optional[str] = "public",
     ) -> int:
         """
-        Insert data into specified table using SQLAlchemy Core with batch optimization
-        Returns number of inserted rows
+        Insert data into a specified table, returning the number of rows inserted.
 
-        Usage Example:
-            from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
-            from uuid import UUID
-            db = get_relational_engine()
-            table_name = "groups"
-            data = {
-                "id": UUID("c70a3cec-3309-44df-8ee6-eced820cf438"),
-                "name": "test"
-            }
-            await db.insert_data(table_name, data)
+        Parameters:
+        -----------
+
+            - table_name (str): The name of the table to insert data into.
+            - data (list[dict]): A list of dictionaries representing the rows to add to the
+              table.
+            - schema_name (Optional[str]): The name of the schema containing the table, defaults
+              to 'public'. (default 'public')
+
+        Returns:
+        --------
+
+            - int: The number of rows inserted into the table.
         """
         if not data:
             logger.info("No data provided for insertion")
@@ -125,7 +167,12 @@ class SQLAlchemyAdapter:
 
     async def get_schema_list(self) -> List[str]:
         """
-        Return a list of all schema names in database
+        Return a list of all schema names in the database, excluding system schemas.
+
+        Returns:
+        --------
+
+            - List[str]: A list of schema names in the database.
         """
         if self.engine.dialect.name == "postgresql":
             async with self.engine.begin() as connection:
@@ -144,7 +191,15 @@ class SQLAlchemyAdapter:
         self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"
     ):
         """
-        Delete entity in given table based on id. Table must have an id Column.
+        Delete an entity from the specified table based on its unique ID.
+
+        Parameters:
+        -----------
+
+            - table_name (str): The name of the table from which to delete the entity.
+            - data_id (UUID): The unique identifier of the entity to be deleted.
+            - schema_name (Optional[str]): The name of the schema where the table resides,
+              defaults to 'public'. (default 'public')
         """
         if self.engine.dialect.name == "sqlite":
             async with self.get_async_session() as session:
@@ -164,7 +219,12 @@ class SQLAlchemyAdapter:
 
     async def delete_data_entity(self, data_id: UUID):
         """
-        Delete data and local files related to data if there are no references to it anymore.
+        Delete a data entity along with its local files if no references remain in the database.
+
+        Parameters:
+        -----------
+
+            - data_id (UUID): The unique identifier of the data entity to be deleted.
         """
         async with self.get_async_session() as session:
             if self.engine.dialect.name == "sqlite":
@@ -205,7 +265,19 @@ class SQLAlchemyAdapter:
 
     async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
         """
-        Dynamically loads a table using the given table name and schema name.
+        Load a table dynamically using the specified name and schema information.
+
+        Parameters:
+        -----------
+
+            - table_name (str): The name of the table to load.
+            - schema_name (Optional[str]): The name of the schema containing the table, defaults
+              to 'public'. (default 'public')
+
+        Returns:
+        --------
+
+            - Table: The SQLAlchemy Table object corresponding to the specified table.
         """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
@@ -229,7 +301,12 @@ class SQLAlchemyAdapter:
 
     async def get_table_names(self) -> List[str]:
         """
-        Return a list of all table names in the database, even if they don't have defined SQLAlchemy models.
+        Return a list of all table names in the database, regardless of their model definitions.
+
+        Returns:
+        --------
+
+            - List[str]: A list of all table names in the database.
         """
         table_names = []
         async with self.engine.begin() as connection:
@@ -249,6 +326,21 @@ class SQLAlchemyAdapter:
         return table_names
 
     async def get_data(self, table_name: str, filters: dict = None):
+        """
+        Retrieve data from a specified table using optional filtering conditions.
+
+        Parameters:
+        -----------
+
+            - table_name (str): The name of the table from which to retrieve data.
+            - filters (dict): A dictionary of filtering conditions to apply to the data
+              retrieval, defaults to None for no filters. (default None)
+
+        Returns:
+        --------
+
+            A dictionary of data results keyed by their unique identifiers.
+        """
         async with self.engine.begin() as connection:
             query = f'SELECT * FROM "{table_name}"'
             if filters:
@@ -270,6 +362,20 @@ class SQLAlchemyAdapter:
             return {result["data_id"]: result["status"] for result in results}
 
     async def get_all_data_from_table(self, table_name: str, schema: str = "public"):
+        """
+        Fetch all records from a specified table, validating inputs against SQL injection.
+
+        Parameters:
+        -----------
+
+            - table_name (str): The name of the table to query data from.
+            - schema (str): The schema of the table, defaults to 'public'. (default 'public')
+
+        Returns:
+        --------
+
+            A list of dictionaries representing all rows in the specified table.
+        """
         async with self.get_async_session() as session:
             # Validate inputs to prevent SQL injection
             if not table_name.isidentifier():
@@ -291,11 +397,28 @@ class SQLAlchemyAdapter:
             return rows
 
     async def execute_query(self, query):
+        """
+        Execute a raw SQL query against the database asynchronously.
+
+        Parameters:
+        -----------
+
+            - query: The SQL query string to execute.
+
+        Returns:
+        --------
+
+            The result set as a list of dictionaries, with each dictionary representing a row.
+        """
         async with self.engine.begin() as connection:
             result = await connection.execute(text(query))
             return [dict(row) for row in result]
 
     async def drop_tables(self):
+        """
+        Drop specified tables from the database, if they exist, and handle errors that may occur
+        during the process.
+        """
         async with self.engine.begin() as connection:
             try:
                 await connection.execute(text("DROP TABLE IF EXISTS group_permission CASCADE"))
@@ -307,6 +430,10 @@ class SQLAlchemyAdapter:
                 raise e
 
     async def create_database(self):
+        """
+        Create the database if it does not exist, ensuring necessary directories are in place
+        for SQLite.
+        """
         if self.engine.dialect.name == "sqlite" and not os.path.exists(self.db_path):
             from cognee.infrastructure.files.storage import LocalStorage
 
@@ -318,6 +445,9 @@ class SQLAlchemyAdapter:
                 await connection.run_sync(Base.metadata.create_all)
 
     async def delete_database(self):
+        """
+        Delete the entire database, including all tables and files if applicable.
+        """
         try:
             if self.engine.dialect.name == "sqlite":
                 from cognee.infrastructure.files.storage import LocalStorage
@@ -329,10 +459,10 @@ class SQLAlchemyAdapter:
                     file.write("")
             else:
                 async with self.engine.begin() as connection:
-                    schema_list = await self.get_schema_list()
                     # Create a MetaData instance to load table information
                     metadata = MetaData()
-                    # Drop all tables from all schemas
+                    # Drop all tables from the public schema
+                    schema_list = ["public", "public_staging"]
                     for schema_name in schema_list:
                         # Load the schema information into the MetaData object
                         await connection.run_sync(metadata.reflect, schema=schema_name)
@@ -349,6 +479,15 @@ class SQLAlchemyAdapter:
         logger.info("Database deleted successfully.")
 
     async def extract_schema(self):
+        """
+        Extract the schema information of the database, including tables and their respective
+        columns and constraints.
+
+        Returns:
+        --------
+
+            A dictionary containing the schema details of the database.
+        """
         async with self.engine.begin() as connection:
             tables = await self.get_table_names()
 
@@ -402,6 +541,22 @@ class SQLAlchemyAdapter:
 
                         # Helper function to get table details using the inspector.
                         def get_details(sync_conn, table, schema_name):
+                            """
+                            Retrieve detailed information about a specific table including columns, primary keys,
+                            and foreign keys.
+
+                            Parameters:
+                            -----------
+
+                                - sync_conn: The synchronous connection used to interact with the database.
+                                - table: The name of the table to retrieve details for.
+                                - schema_name: The schema name in which the table resides.
+
+                            Returns:
+                            --------
+
+                                Details about the table's columns, primary keys, and foreign keys.
+                            """
                             insp = inspect(sync_conn)
                             cols = insp.get_columns(table, schema=schema_name)
                             pk = insp.get_pk_constraint(table, schema=schema_name)

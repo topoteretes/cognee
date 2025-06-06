@@ -1,10 +1,10 @@
-import asyncio
-from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 
+from cognee.shared.logging_utils import get_logger
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -14,12 +14,43 @@ logger = get_logger("WeaviateAdapter")
 
 
 class IndexSchema(DataPoint):
+    """
+    Define a schema for indexing data points with textual content.
+
+    The IndexSchema class inherits from DataPoint and includes the following public
+    attributes:
+
+    - text: A string representing the main content of the data point.
+    - metadata: A dictionary containing indexing information, specifically the fields to be
+    indexed (in this case, the 'text' field).
+    """
+
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
 
 
 class WeaviateAdapter(VectorDBInterface):
+    """
+    Adapt the Weaviate vector database to an interface for managing collections and data
+    points.
+
+    Public methods:
+    - get_client
+    - embed_data
+    - has_collection
+    - create_collection
+    - get_collection
+    - create_data_points
+    - create_vector_index
+    - index_data_points
+    - retrieve
+    - search
+    - batch_search
+    - delete_data_points
+    - prune
+    """
+
     name = "Weaviate"
     url: str
     api_key: str
@@ -34,51 +65,144 @@ class WeaviateAdapter(VectorDBInterface):
 
         self.embedding_engine = embedding_engine
 
-        self.client = weaviate.connect_to_wcs(
+        self.client = weaviate.use_async_with_weaviate_cloud(
             cluster_url=url,
             auth_credentials=weaviate.auth.AuthApiKey(api_key),
             additional_config=wvc.init.AdditionalConfig(timeout=wvc.init.Timeout(init=30)),
         )
 
+    async def get_client(self):
+        """
+        Establish a connection to the Weaviate client.
+
+        Return the Weaviate client instance after connecting asynchronously.
+
+        Returns:
+        --------
+
+            The Weaviate client instance.
+        """
+        await self.client.connect()
+
+        return self.client
+
     async def embed_data(self, data: List[str]) -> List[float]:
+        """
+        Embed the given text data into vector representations.
+
+        Given a list of strings, return their vector embeddings using the configured embedding
+        engine.
+
+        Parameters:
+        -----------
+
+            - data (List[str]): A list of strings to be embedded.
+
+        Returns:
+        --------
+
+            - List[float]: A list of float vectors corresponding to the embedded text data.
+        """
         return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
-        future = asyncio.Future()
+        """
+        Check if a collection exists in the Weaviate database.
 
-        future.set_result(self.client.collections.exists(collection_name))
+        Return a boolean indicating the presence of the specified collection.
 
-        return await future
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to check.
+
+        Returns:
+        --------
+
+            - bool: True if the collection exists, otherwise False.
+        """
+        client = await self.get_client()
+        return await client.collections.exists(collection_name)
 
     async def create_collection(
         self,
         collection_name: str,
         payload_schema=None,
     ):
+        """
+        Create a new collection in the Weaviate database if it does not already exist.
+
+        The collection will be initialized with a default schema.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the new collection to be created.
+            - payload_schema: Optional schema definition for the collection payload. (default
+              None)
+
+        Returns:
+        --------
+
+            The created collection's configuration, if a new collection was made, otherwise
+            information about the existing collection.
+        """
         import weaviate.classes.config as wvcc
 
-        future = asyncio.Future()
-
-        if not self.client.collections.exists(collection_name):
-            future.set_result(
-                self.client.collections.create(
-                    name=collection_name,
-                    properties=[
-                        wvcc.Property(
-                            name="text", data_type=wvcc.DataType.TEXT, skip_vectorization=True
-                        )
-                    ],
-                )
+        if not await self.has_collection(collection_name):
+            client = await self.get_client()
+            return await client.collections.create(
+                name=collection_name,
+                properties=[
+                    wvcc.Property(
+                        name="text", data_type=wvcc.DataType.TEXT, skip_vectorization=True
+                    )
+                ],
             )
         else:
-            future.set_result(self.get_collection(collection_name))
+            return await self.get_collection(collection_name)
 
-        return await future
+    async def get_collection(self, collection_name: str):
+        """
+        Retrieve a collection from the Weaviate database by its name.
 
-    def get_collection(self, collection_name: str):
-        return self.client.collections.get(collection_name)
+        Raise a CollectionNotFoundError if the specified collection does not exist.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to be retrieved.
+
+        Returns:
+        --------
+
+            The requested collection object from the database.
+        """
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found.")
+
+        client = await self.get_client()
+        return client.collections.get(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        """
+        Create or update data points in the specified collection in the Weaviate database.
+
+        Process the list of data points, embedding them and either inserting them or updating if
+        they already exist.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to add data points to.
+            - data_points (List[DataPoint]): A list of DataPoint objects to be created or
+              updated in the collection.
+
+        Returns:
+        --------
+
+            Information about the inserted or updated data points in the collection.
+        """
         from weaviate.classes.data import DataObject
 
         data_vectors = await self.embed_data(
@@ -86,6 +210,22 @@ class WeaviateAdapter(VectorDBInterface):
         )
 
         def convert_to_weaviate_data_points(data_point: DataPoint):
+            """
+            Transform a DataPoint object into a Weaviate DataObject format for insertion.
+
+            Return a DataObject ready for use in Weaviate with the properties and vector included.
+
+            Parameters:
+            -----------
+
+                - data_point (DataPoint): The DataPoint to convert into the Weaviate DataObject
+                  format.
+
+            Returns:
+            --------
+
+                The corresponding Weaviate DataObject representing the data point.
+            """
             vector = data_vectors[data_points.index(data_point)]
             properties = data_point.model_dump()
 
@@ -97,29 +237,30 @@ class WeaviateAdapter(VectorDBInterface):
 
         data_points = [convert_to_weaviate_data_points(data_point) for data_point in data_points]
 
-        collection = self.get_collection(collection_name)
+        collection = await self.get_collection(collection_name)
 
         try:
             if len(data_points) > 1:
-                with collection.batch.dynamic() as batch:
-                    for data_point in data_points:
-                        batch.add_object(
-                            uuid=data_point.uuid,
-                            vector=data_point.vector,
-                            properties=data_point.properties,
-                            references=data_point.references,
-                        )
+                return await collection.data.insert_many(data_points)
+                # with collection.batch.dynamic() as batch:
+                #     for data_point in data_points:
+                #         batch.add_object(
+                #             uuid=data_point.uuid,
+                #             vector=data_point.vector,
+                #             properties=data_point.properties,
+                #             references=data_point.references,
+                #         )
             else:
                 data_point: DataObject = data_points[0]
-                if collection.data.exists(data_point.uuid):
-                    return collection.data.update(
+                if await collection.data.exists(data_point.uuid):
+                    return await collection.data.update(
                         uuid=data_point.uuid,
                         vector=data_point.vector,
                         properties=data_point.properties,
                         references=data_point.references,
                     )
                 else:
-                    return collection.data.insert(
+                    return await collection.data.insert(
                         uuid=data_point.uuid,
                         vector=data_point.vector,
                         properties=data_point.properties,
@@ -130,12 +271,44 @@ class WeaviateAdapter(VectorDBInterface):
             raise error
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
-        await self.create_collection(f"{index_name}_{index_property_name}")
+        """
+        Create a vector index based on an index name and property name by creating a
+        corresponding collection.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The name for the vector index.
+            - index_property_name (str): The property name associated with the vector index.
+
+        Returns:
+        --------
+
+            The created collection representing the vector index.
+        """
+        return await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
-        await self.create_data_points(
+        """
+        Index a list of data points by creating an associated vector index collection.
+
+        Data points are transformed into embeddable data before being processed for indexing.
+
+        Parameters:
+        -----------
+
+            - index_name (str): The index name under which to store the data points.
+            - index_property_name (str): The associated property name for the index.
+            - data_points (list[DataPoint]): A list of DataPoint objects to be indexed.
+
+        Returns:
+        --------
+
+            Information about the operation of indexing the data points.
+        """
+        return await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
                 IndexSchema(
@@ -147,11 +320,27 @@ class WeaviateAdapter(VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+        """
+        Fetch data points from a specified collection based on their IDs.
+
+        Return data points wrapped in an object containing their properties after
+        transformation.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to retrieve data points from.
+            - data_point_ids (list[str]): A list of IDs for the data points to retrieve.
+
+        Returns:
+        --------
+
+            A list of objects representing the retrieved data points.
+        """
         from weaviate.classes.query import Filter
 
-        future = asyncio.Future()
-
-        data_points = self.get_collection(collection_name).query.fetch_objects(
+        collection = await self.get_collection(collection_name)
+        data_points = await collection.query.fetch_objects(
             filters=Filter.by_id().contains_any(data_point_ids)
         )
 
@@ -160,30 +349,54 @@ class WeaviateAdapter(VectorDBInterface):
             data_point.id = data_point.uuid
             del data_point.properties
 
-        future.set_result(data_points.objects)
+        return data_points.objects
 
-        return await future
-
-    async def get_distance_from_collection_elements(
+    async def search(
         self,
         collection_name: str,
-        query_text: str = None,
-        query_vector: List[float] = None,
+        query_text: Optional[str] = None,
+        query_vector: Optional[List[float]] = None,
+        limit: int = 15,
         with_vector: bool = False,
-    ) -> List[ScoredResult]:
+    ):
+        """
+        Perform a search on a collection using either a text query or a vector query.
+
+        Return scored results based on the search criteria provided. Raise InvalidValueError if
+        no query is provided.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to search within.
+            - query_text (Optional[str]): Optional plain text query for searching. (default
+              None)
+            - query_vector (Optional[List[float]]): Optional vector representation for
+              searching. (default None)
+            - limit (int): The maximum number of results to return. (default 15)
+            - with_vector (bool): Include vector information in the results. (default False)
+
+        Returns:
+        --------
+
+            A list of scored results matching the search criteria.
+        """
         import weaviate.classes as wvc
         import weaviate.exceptions
 
         if query_text is None and query_vector is None:
-            raise ValueError("One of query_text or query_vector must be provided!")
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
         if query_vector is None:
             query_vector = (await self.embed_data([query_text]))[0]
 
+        collection = await self.get_collection(collection_name)
+
         try:
-            search_result = self.get_collection(collection_name).query.hybrid(
+            search_result = await collection.query.hybrid(
                 query=None,
                 vector=query_vector,
+                limit=limit if limit > 0 else None,
                 include_vector=with_vector,
                 return_metadata=wvc.query.MetadataQuery(score=True),
             )
@@ -196,47 +409,50 @@ class WeaviateAdapter(VectorDBInterface):
                 )
                 for result in search_result.objects
             ]
-        except weaviate.exceptions.UnexpectedStatusCodeError:
+        except weaviate.exceptions.WeaviateInvalidInputError:
             # Ignore if the collection doesn't exist
             return []
-
-    async def search(
-        self,
-        collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: int = None,
-        with_vector: bool = False,
-    ):
-        import weaviate.classes as wvc
-
-        if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
-
-        if query_vector is None:
-            query_vector = (await self.embed_data([query_text]))[0]
-
-        search_result = self.get_collection(collection_name).query.hybrid(
-            query=None,
-            vector=query_vector,
-            limit=limit,
-            include_vector=with_vector,
-            return_metadata=wvc.query.MetadataQuery(score=True),
-        )
-
-        return [
-            ScoredResult(
-                id=parse_id(str(result.uuid)),
-                payload=result.properties,
-                score=1 - float(result.metadata.score),
-            )
-            for result in search_result.objects
-        ]
 
     async def batch_search(
         self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
     ):
+        """
+        Execute a batch search for multiple query texts in the specified collection.
+
+        Return a list of results for each query performed in parallel.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to search within.
+            - query_texts (List[str]): A list of text queries to be processed in a batch.
+            - limit (int): The maximum number of results to return for each query.
+            - with_vectors (bool): Indicate whether to include vector information in the
+              results. (default False)
+
+        Returns:
+        --------
+
+            A list containing results for each search query executed.
+        """
+
         def query_search(query_vector):
+            """
+            Wrap the search operation based on a query vector for fetching results.
+
+            This function coordinates the search call, ensuring the collection name and search
+            parameters are applied.
+
+            Parameters:
+            -----------
+
+                - query_vector: The vector representation of the query for searching.
+
+            Returns:
+            --------
+
+                The results of the search operation on the specified collection.
+            """
             return self.search(
                 collection_name, query_vector=query_vector, limit=limit, with_vector=with_vectors
             )
@@ -246,16 +462,38 @@ class WeaviateAdapter(VectorDBInterface):
         ]
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        """
+        Remove specified data points from a collection based on their IDs.
+
+        Return information about the deletion result, ideally confirming the operation's
+        success.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection from which to delete data
+              points.
+            - data_point_ids (list[str]): A list of IDs for the data points to be deleted.
+
+        Returns:
+        --------
+
+            Confirmation of deletion operation result.
+        """
         from weaviate.classes.query import Filter
 
-        future = asyncio.Future()
-
-        result = self.get_collection(collection_name).data.delete_many(
+        collection = await self.get_collection(collection_name)
+        result = await collection.data.delete_many(
             filters=Filter.by_id().contains_any(data_point_ids)
         )
-        future.set_result(result)
 
-        return await future
+        return result
 
     async def prune(self):
-        self.client.collections.delete_all()
+        """
+        Delete all collections from the Weaviate database.
+
+        This operation will remove all data and cannot be undone.
+        """
+        client = await self.get_client()
+        await client.collections.delete_all()

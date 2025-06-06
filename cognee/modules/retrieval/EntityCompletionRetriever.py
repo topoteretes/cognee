@@ -11,7 +11,21 @@ logger = get_logger("entity_completion_retriever")
 
 
 class EntityCompletionRetriever(BaseRetriever):
-    """Retriever that uses entity-based completion for generating responses."""
+    """
+    Retriever that uses entity-based completion for generating responses.
+
+    Public methods:
+
+    - get_context
+    - get_completion
+
+    Instance variables:
+
+    - extractor
+    - context_provider
+    - user_prompt_path
+    - system_prompt_path
+    """
 
     def __init__(
         self,
@@ -26,7 +40,24 @@ class EntityCompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
 
     async def get_context(self, query: str) -> Any:
-        """Get context using entity extraction and context provider."""
+        """
+        Get context using entity extraction and context provider.
+
+        Logs the processing of the query and retrieves entities. If entities are extracted, it
+        attempts to retrieve the corresponding context using the context provider. Returns None
+        if no entities or context are found, or logs the error if an exception occurs.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string for which context is being retrieved.
+
+        Returns:
+        --------
+
+            - Any: The context retrieved from the context provider or None if not found or an
+              error occurred.
+        """
         try:
             logger.info(f"Processing query: {query[:100]}")
 
@@ -47,7 +78,26 @@ class EntityCompletionRetriever(BaseRetriever):
             return None
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> List[str]:
-        """Generate completion using provided context or fetch new context."""
+        """
+        Generate completion using provided context or fetch new context.
+
+        If context is not provided, it fetches context using the query. If no context is
+        available, it returns an error message. Logs an error if completion generation fails due
+        to an exception.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string for which completion is being generated.
+            - context (Optional[Any]): Optional context to be used for generating completion;
+              fetched if not provided. (default None)
+
+        Returns:
+        --------
+
+            - List[str]: A list containing the generated completion or an error message if no
+              relevant entities were found.
+        """
         try:
             if context is None:
                 context = await self.get_context(query)

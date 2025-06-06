@@ -46,9 +46,6 @@ else:
         name: str
         type: str
         description: str
-        properties: Optional[Dict[str, Any]] = Field(
-            None, description="A dictionary of properties associated with the node."
-        )
 
     class Edge(BaseModel):
         """Edge in a knowledge graph."""
@@ -56,9 +53,6 @@ else:
         source_node_id: str
         target_node_id: str
         relationship_name: str
-        properties: Optional[Dict[str, Any]] = Field(
-            None, description="A dictionary of properties associated with the edge."
-        )
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
@@ -350,11 +344,3 @@ class ChunkSummaries(BaseModel):
     """Relevant summary and chunk id"""
 
     summaries: List[ChunkSummary]
-
-
-class MonitoringTool(str, Enum):
-    """Monitoring tools"""
-
-    LANGFUSE = "langfuse"
-    LLMLITE = "llmlite"
-    LANGSMITH = "langsmith"
