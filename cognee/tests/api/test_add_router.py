@@ -64,13 +64,13 @@ def test_add_file_content(mock_router_cognee_add, mock_get_auth_user, mock_user_
 
     assert mock_router_cognee_add.call_count == 1
     args, kwargs = mock_router_cognee_add.call_args
-
+    
     assert isinstance(args[0], list)
     assert len(args[0]) == 1
-
+    
     assert isinstance(args[0][0], UploadFile)
     assert args[0][0].filename == file_name
-
+    
     assert args[1] == test_dataset_name
     assert kwargs["user"] == mock_user_fixture
 
@@ -105,14 +105,14 @@ def test_add_text_to_new_dataset_auto_creates(
     # Configure mock for get_relational_engine and its session
     mock_engine_instance = AsyncMock()
     mock_db_session = AsyncMock() # This will be the yielded session
-
+    
     # Make get_async_session an async context manager
     # The __aenter__ should return the mock_db_session
     mock_engine_instance.get_async_session.return_value.__aenter__.return_value = mock_db_session
     mock_engine_instance.get_async_session.return_value.__aexit__.return_value = None # for context manager exit
 
     mock_router_get_engine.return_value = mock_engine_instance
-
+    
     # Perform the request
     response = client.post(
         "/api/v1/add/",
@@ -133,7 +133,7 @@ def test_add_text_to_new_dataset_auto_creates(
 
     # 2. get_relational_engine was called to get the engine for creating a session
     mock_router_get_engine.assert_called_once()
-
+    
     # 3. create_dataset was called because dataset was not found
     mock_router_create_dataset.assert_called_once_with(
         dataset_name=new_dataset_name,
