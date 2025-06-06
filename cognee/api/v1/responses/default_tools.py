@@ -17,7 +17,6 @@ DEFAULT_TOOLS = [
                         "INSIGHTS",
                         "CODE",
                         "GRAPH_COMPLETION",
-                        "SEMANTIC",
                         "NATURAL_LANGUAGE",
                     ],
                 },
