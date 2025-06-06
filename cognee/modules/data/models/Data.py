@@ -33,9 +33,6 @@ class Data(Base):
         cascade="all, delete",
     )
 
-    # New relationship for ACLs with cascade deletion
-    acls = relationship("ACL", back_populates="data", cascade="all, delete-orphan")
-
     def to_json(self) -> dict:
         return {
             "id": str(self.id),

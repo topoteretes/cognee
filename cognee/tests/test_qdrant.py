@@ -49,7 +49,11 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("Entity_name", "Quantum computer"))[0]
+    search_results = await vector_engine.search("Entity_name", "Quantum computer")
+
+    assert len(search_results) != 0, "The search results list is empty."
+
+    random_node = search_results[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(

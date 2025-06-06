@@ -6,10 +6,10 @@ from functools import lru_cache
 
 @lru_cache
 def create_vector_engine(
-    vector_db_url: str,
-    vector_db_port: str,
-    vector_db_key: str,
     vector_db_provider: str,
+    vector_db_url: str,
+    vector_db_port: str = "",
+    vector_db_key: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.

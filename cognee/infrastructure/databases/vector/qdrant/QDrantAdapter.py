@@ -1,3 +1,4 @@
+import os
 from typing import Dict, List, Optional
 from qdrant_client import AsyncQdrantClient, models
 
@@ -147,14 +148,15 @@ class QDrantAdapter(VectorDBInterface):
 
         Returns:
         --------
-
             - AsyncQdrantClient: An instance of AsyncQdrantClient configured for database
               operations.
         """
+        is_prod = os.getenv("ENV").lower() == "prod"
+
         if self.qdrant_path is not None:
-            return AsyncQdrantClient(path=self.qdrant_path, port=6333)
+            return AsyncQdrantClient(path=self.qdrant_path, port=6333, https=is_prod)
         elif self.url is not None:
-            return AsyncQdrantClient(url=self.url, api_key=self.api_key, port=6333)
+            return AsyncQdrantClient(url=self.url, api_key=self.api_key, port=6333, https=is_prod)
 
         return AsyncQdrantClient(location=":memory:")
 

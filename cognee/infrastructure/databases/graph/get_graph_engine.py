@@ -2,36 +2,22 @@
 
 from functools import lru_cache
 
-
-from .config import get_graph_config
+from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
 
 
 async def get_graph_engine() -> GraphDBInterface:
-    """
-    Factory function to get the appropriate graph client based on the graph type.
+    """Factory function to get the appropriate graph client based on the graph type."""
+    # Get appropriate graph configuration based on current async context
+    config = get_graph_context_config()
 
-    This function retrieves the graph configuration and creates a graph engine by calling
-    the `create_graph_engine` function. If the configured graph database provider is
-    'networkx', it ensures that the graph is loaded from a file asynchronously if it hasn't
-    been loaded yet. It raises an `EnvironmentError` if the necessary configurations for the
-    selected graph provider are missing.
-
-    Returns:
-    --------
-
-        - GraphDBInterface: Returns an instance of GraphDBInterface which represents the
-          selected graph client.
-    """
-    config = get_graph_config()
-
-    graph_client = create_graph_engine(**get_graph_config().to_hashable_dict())
+    graph_client = create_graph_engine(**config)
 
     # Async functions can't be cached. After creating and caching the graph engine
     # handle all necessary async operations for different graph types bellow.
     # Handle loading of graph for NetworkX
-    if config.graph_database_provider.lower() == "networkx" and graph_client.graph is None:
+    if config["graph_database_provider"].lower() == "networkx" and graph_client.graph is None:
         await graph_client.load_graph_from_file()
 
     return graph_client
@@ -40,11 +26,11 @@ async def get_graph_engine() -> GraphDBInterface:
 @lru_cache
 def create_graph_engine(
     graph_database_provider,
-    graph_database_url,
-    graph_database_username,
-    graph_database_password,
-    graph_database_port,
     graph_file_path,
+    graph_database_url="",
+    graph_database_username="",
+    graph_database_password="",
+    graph_database_port="",
 ):
     """
     Create a graph engine based on the specified provider type.

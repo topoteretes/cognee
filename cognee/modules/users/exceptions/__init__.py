@@ -9,4 +9,5 @@ from .exceptions import (
     UserNotFoundError,
     PermissionDeniedError,
     TenantNotFoundError,
+    PermissionNotFoundError,
 )
