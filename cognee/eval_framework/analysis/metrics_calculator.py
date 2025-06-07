@@ -38,17 +38,19 @@ def extract_metrics_and_details(
     for entry in data:
         for metric, values in entry["metrics"].items():
             score = values["score"]
-            metrics_data[metric].append(score)
-            if "reason" in values:
-                metric_details[metric].append(
-                    {
-                        "question": entry["question"],
-                        "answer": entry["answer"],
-                        "golden_answer": entry["golden_answer"],
-                        "reason": values["reason"],
-                        "score": score,
-                    }
-                )
+            # Skip None scores from failed evaluations
+            if score is not None:
+                metrics_data[metric].append(score)
+                if "reason" in values:
+                    metric_details[metric].append(
+                        {
+                            "question": entry["question"],
+                            "answer": entry["answer"],
+                            "golden_answer": entry["golden_answer"],
+                            "reason": values["reason"],
+                            "score": score,
+                        }
+                    )
 
     return metrics_data, metric_details
 
