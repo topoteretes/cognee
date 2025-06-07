@@ -1,0 +1,52 @@
+[
+  {
+    "name": "John Doe",
+    "company": "TechNova Inc.",
+    "department": "Engineering"
+  },
+  {
+    "name": "Jane Smith",
+    "company": "TechNova Inc.",
+    "department": "Marketing"
+  },
+  {
+    "name": "Alice Johnson",
+    "company": "GreenFuture Solutions",
+    "department": "Sales"
+  },
+  {
+    "name": "Bob Williams",
+    "company": "GreenFuture Solutions",
+    "department": "Customer Support"
+  },
+  {
+    "name": "Michael Brown",
+    "company": "Skyline Financials",
+    "department": "Accounting"
+  },
+  {
+    "name": "Emily Davis",
+    "company": "MediCare Plus",
+    "department": "Healthcare"
+  },
+  {
+    "name": "David Wilson",
+    "company": "MediCare Plus",
+    "department": "Administration"
+  },
+  {
+    "name": "Emma Thompson",
+    "company": "NextGen Robotics",
+    "department": "AI Development"
+  },
+  {
+    "name": "Chris Martin",
+    "company": "NextGen Robotics",
+    "department": "Manufacturing"
+  },
+  {
+    "name": "Sophia White",
+    "company": "NextGen Robotics",
+    "department": "HR"
+  }
+]
