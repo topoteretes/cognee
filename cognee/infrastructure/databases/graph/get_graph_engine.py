@@ -111,6 +111,18 @@ def create_graph_engine(
 
         return KuzuAdapter(db_path=graph_file_path)
 
+    elif graph_database_provider == "kuzu-remote":
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Kuzu remote URL.")
+
+        from .kuzu.remote_kuzu_adapter import RemoteKuzuAdapter
+
+        return RemoteKuzuAdapter(
+            api_url=graph_database_url,
+            username=graph_database_username,
+            password=graph_database_password,
+        )
+
     elif graph_database_provider == "memgraph":
         if not (graph_database_url and graph_database_username and graph_database_password):
             raise EnvironmentError("Missing required Memgraph credentials.")
