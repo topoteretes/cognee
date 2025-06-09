@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 from ..get_fastapi_users import get_fastapi_users
-from fastapi import HTTPException, Header
+from fastapi import HTTPException, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import os
 import jwt
 
@@ -9,28 +10,29 @@ from uuid import UUID
 
 fastapi_users = get_fastapi_users()
 
+# Allows Swagger to understand authorization type and allow single sign on for the Swagger docs to test backend
+bearer_scheme = HTTPBearer(scheme_name="BearerAuth", description="Paste **Bearer &lt;JWT&gt;**")
 
-async def get_authenticated_user(authorization: str = Header(...)) -> SimpleNamespace:
-    """Extract and validate JWT from Authorization header."""
+
+async def get_authenticated_user(
+    creds: HTTPAuthorizationCredentials = Security(bearer_scheme),
+) -> SimpleNamespace:
+    """
+    Extract and validate the JWT presented in the Authorization header.
+    """
+    if creds is None:  # header missing
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if creds.scheme.lower() != "bearer":  # shouldn't happen extra guard
+        raise HTTPException(status_code=401, detail="Invalid authentication scheme")
+
+    token = creds.credentials
     try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise HTTPException(status_code=401, detail="Invalid authentication scheme")
-
         payload = jwt.decode(
             token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
         )
 
-        if payload.get("tenant_id"):
-            # SimpleNamespace lets us access dictionary elements like attributes
-            auth_data = SimpleNamespace(
-                id=UUID(payload["user_id"]),
-                tenant_id=UUID(payload["tenant_id"]),
-                roles=payload["roles"],
-            )
-        else:
-            auth_data = SimpleNamespace(id=UUID(payload["user_id"]), tenant_id=None, roles=[])
-
+        auth_data = SimpleNamespace(id=UUID(payload["user_id"]))
         return auth_data
 
     except jwt.ExpiredSignatureError:

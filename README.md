@@ -13,6 +13,8 @@
   <a href="https://cognee.ai">Learn more</a>
   ·
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
+  ·
+  <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
   </p>
 
 
@@ -46,10 +48,7 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
 </div>
-
 </div>
-
-
 
 
 ## Features
@@ -141,7 +140,15 @@ Example output:
 
 ```
 
-### cognee UI
+## Our paper is out! <a href="https://arxiv.org/abs/2505.24478" target="_blank" rel="noopener noreferrer">Read here</a>
+
+<div style="text-align: center">
+  <img src="assets/cognee-paper.png" alt="cognee paper" width="100%" />
+</div>
+
+</div>
+
+## Cognee UI
 
 You can also cognify your files and query using cognee UI.
 
