@@ -1,5 +1,3 @@
-#
-
 """Neo4j Adapter for Graph Database"""
 
 import json
@@ -52,8 +50,12 @@ class Neo4jAdapter(GraphDBInterface):
             max_connection_lifetime=120,
             notifications_min_severity="OFF",
         )
-        # Create contraint/index
-        self.query(
+
+    async def initialize(self) -> None:
+        """
+        Initializes the database: adds uniqueness constraint on id and performs indexing
+        """
+        await self.query(
             (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
         )
 
