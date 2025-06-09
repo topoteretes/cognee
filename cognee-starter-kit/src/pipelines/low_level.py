@@ -10,6 +10,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 from cognee.modules.users.methods import get_default_user
 
+
 class Person(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"]}
@@ -85,7 +86,6 @@ async def main():
 
     await setup()
 
-
     # Generate a random dataset_id
     dataset_id = uuid.uuid4()
     user = await get_default_user()
@@ -98,7 +98,7 @@ async def main():
         dataset_id,
         None,
         user,
-        "demo_pipeline"
+        "demo_pipeline",
     )
 
     async for status in pipeline:

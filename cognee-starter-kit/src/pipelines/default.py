@@ -4,19 +4,16 @@ import pathlib
 from cognee import config, add, cognify, search, SearchType, prune, visualize_graph
 # from cognee.shared.utils import render_graph
 
+
 async def main():
     data_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage")
-        ).resolve()
+        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage")).resolve()
     )
     # Set up the data directory. Cognee will store files here.
     config.data_root_directory(data_directory_path)
 
     cognee_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system")
-        ).resolve()
+        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system")).resolve()
     )
     # Set up the Cognee system directory. Cognee will store system files and databases here.
     config.system_root_directory(cognee_directory_path)
@@ -46,12 +43,16 @@ async def main():
     await visualize_graph(graph_file_path)
 
     # Completion query that uses graph data to form context.
-    graph_completion = await search(query_text="What is python?", query_type=SearchType.GRAPH_COMPLETION)
+    graph_completion = await search(
+        query_text="What is python?", query_type=SearchType.GRAPH_COMPLETION
+    )
     print("Graph completion result is:")
     print(graph_completion)
 
     # Completion query that uses document chunks to form context.
-    rag_completion = await search(query_text="What is Python?", query_type=SearchType.RAG_COMPLETION)
+    rag_completion = await search(
+        query_text="What is Python?", query_type=SearchType.RAG_COMPLETION
+    )
     print("Completion result is:")
     print(rag_completion)
 
