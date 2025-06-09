@@ -16,6 +16,11 @@ async def get_graph_engine() -> GraphDBInterface:
 
     # Async functions can't be cached. After creating and caching the graph engine
     # handle all necessary async operations for different graph types bellow.
+
+    # Run any adapter‐specific async initialization
+    if hasattr(graph_client, "initialize"):
+        await graph_client.initialize()
+
     # Handle loading of graph for NetworkX
     if config["graph_database_provider"].lower() == "networkx" and graph_client.graph is None:
         await graph_client.load_graph_from_file()
