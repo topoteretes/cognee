@@ -50,7 +50,7 @@ class GraphCompletionRetriever(BaseRetriever):
                         content = text
                     else:
                         name = node.attributes.get("name", "Unnamed Node")
-                        content = name
+                        content = node.attributes.get("description", name)
                     nodes[node.id] = {"node": node, "name": name, "content": content}
         return nodes
 
