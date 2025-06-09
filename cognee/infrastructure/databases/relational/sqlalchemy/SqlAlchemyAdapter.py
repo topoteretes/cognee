@@ -396,23 +396,7 @@ class SQLAlchemyAdapter:
             rows = result.mappings().all()
             return rows
 
-    async def execute_query(self, query):
-        """
-        Execute a raw SQL query against the database asynchronously.
-
-        Parameters:
-        -----------
-
-            - query: The SQL query string to execute.
-
-        Returns:
-        --------
-
-            The result set as a list of dictionaries, with each dictionary representing a row.
-        """
-        async with self.engine.begin() as connection:
-            result = await connection.execute(text(query))
-            return [dict(row) for row in result]
+    # The unsafe execute_query method has been removed due to SQL injection risk.
 
     async def drop_tables(self):
         """
