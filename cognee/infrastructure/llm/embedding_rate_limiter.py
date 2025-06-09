@@ -46,6 +46,20 @@ class EmbeddingRateLimiter:
 
     The rate limiter uses the same configuration as the LLM API rate limiter
     but uses a separate key to track embedding API calls independently.
+
+    Public Methods:
+    - get_instance
+    - reset_instance
+    - hit_limit
+    - wait_if_needed
+    - async_wait_if_needed
+
+    Instance Variables:
+    - enabled
+    - requests_limit
+    - interval_seconds
+    - request_times
+    - lock
     """
 
     _instance = None
@@ -53,6 +67,18 @@ class EmbeddingRateLimiter:
 
     @classmethod
     def get_instance(cls):
+        """
+        Retrieve the singleton instance of the EmbeddingRateLimiter.
+
+        This method ensures that only one instance of the class exists and
+        is thread-safe. It lazily initializes the instance if it doesn't
+        already exist.
+
+        Returns:
+        --------
+
+            The singleton instance of the EmbeddingRateLimiter class.
+        """
         if cls._instance is None:
             with cls.lock:
                 if cls._instance is None:
@@ -61,6 +87,12 @@ class EmbeddingRateLimiter:
 
     @classmethod
     def reset_instance(cls):
+        """
+        Reset the singleton instance of the EmbeddingRateLimiter.
+
+        This method is thread-safe and sets the instance to None, allowing
+        for a new instance to be created when requested again.
+        """
         with cls.lock:
             cls._instance = None
 
@@ -81,8 +113,16 @@ class EmbeddingRateLimiter:
         """
         Check if the current request would exceed the rate limit.
 
+        This method checks if the rate limiter is enabled and evaluates
+        the number of requests made in the elapsed interval.
+
         Returns:
-            bool: True if the rate limit would be exceeded, False otherwise.
+        - bool: True if the rate limit would be exceeded, False otherwise.
+
+        Returns:
+        --------
+
+            - bool: True if the rate limit would be exceeded, otherwise False.
         """
         if not self.enabled:
             return False
@@ -108,8 +148,16 @@ class EmbeddingRateLimiter:
         """
         Block until a request can be made without exceeding the rate limit.
 
+        This method will wait if the current request would exceed the
+        rate limit and returns the time waited in seconds.
+
         Returns:
-            float: Time waited in seconds.
+        - float: Time waited in seconds before a request is allowed.
+
+        Returns:
+        --------
+
+            - float: Time waited in seconds before proceeding.
         """
         if not self.enabled:
             return 0
@@ -131,8 +179,16 @@ class EmbeddingRateLimiter:
         """
         Asynchronously wait until a request can be made without exceeding the rate limit.
 
+        This method will wait if the current request would exceed the
+        rate limit and returns the time waited in seconds.
+
         Returns:
-            float: Time waited in seconds.
+        - float: Time waited in seconds before a request is allowed.
+
+        Returns:
+        --------
+
+            - float: Time waited in seconds before proceeding.
         """
         if not self.enabled:
             return 0
@@ -153,20 +209,39 @@ class EmbeddingRateLimiter:
 
 def embedding_rate_limit_sync(func):
     """
-    Decorator that applies rate limiting to a synchronous embedding function.
+    Apply rate limiting to a synchronous embedding function.
 
-    This decorator checks if the request would exceed the rate limit,
-    and blocks if necessary.
+    Parameters:
+    -----------
 
-    Args:
-        func: Function to decorate.
+        - func: Function to decorate with rate limiting logic.
 
     Returns:
-        Decorated function that applies rate limiting.
+    --------
+
+        Returns the decorated function that applies rate limiting.
     """
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        """
+        Wrap the given function with rate limiting logic to control the embedding API usage.
+
+        Checks if the rate limit has been exceeded before allowing the function to execute. If
+        the limit is hit, it logs a warning and raises an EmbeddingException. Otherwise, it
+        updates the request count and proceeds to call the original function.
+
+        Parameters:
+        -----------
+
+            - *args: Variable length argument list for the wrapped function.
+            - **kwargs: Keyword arguments for the wrapped function.
+
+        Returns:
+        --------
+
+            Returns the result of the wrapped function if rate limiting conditions are met.
+        """
         limiter = EmbeddingRateLimiter.get_instance()
 
         # Check if rate limiting is enabled and if we're at the limit
@@ -192,18 +267,38 @@ def embedding_rate_limit_async(func):
     """
     Decorator that applies rate limiting to an asynchronous embedding function.
 
-    This decorator checks if the request would exceed the rate limit,
-    and waits asynchronously if necessary.
+    Parameters:
+    -----------
 
-    Args:
-        func: Async function to decorate.
+        - func: Async function to decorate.
 
     Returns:
-        Decorated async function that applies rate limiting.
+    --------
+
+        Returns the decorated async function that applies rate limiting.
     """
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
+        """
+        Handle function calls with embedding rate limiting.
+
+        This asynchronous wrapper checks if the embedding API rate limit is exceeded before
+        allowing the function to execute. If the limit is exceeded, it logs a warning and raises
+        an EmbeddingException. If not, it waits as necessary and proceeds with the function
+        call.
+
+        Parameters:
+        -----------
+
+            - *args: Positional arguments passed to the wrapped function.
+            - **kwargs: Keyword arguments passed to the wrapped function.
+
+        Returns:
+        --------
+
+            Returns the result of the wrapped function after handling rate limiting.
+        """
         limiter = EmbeddingRateLimiter.get_instance()
 
         # Check if rate limiting is enabled and if we're at the limit
@@ -227,23 +322,62 @@ def embedding_rate_limit_async(func):
 
 def embedding_sleep_and_retry_sync(max_retries=5, base_backoff=1.0, jitter=0.5):
     """
-    Decorator that adds retry with exponential backoff for synchronous embedding functions.
+    Add retry with exponential backoff for synchronous embedding functions.
 
-    The decorator will retry the function with exponential backoff if it
-    fails due to a rate limit error.
+    Parameters:
+    -----------
 
-    Args:
-        max_retries: Maximum number of retries.
-        base_backoff: Base backoff time in seconds.
-        jitter: Jitter factor to randomize backoff time.
+        - max_retries: Maximum number of retries before giving up. (default 5)
+        - base_backoff: Base backoff time in seconds for retry intervals. (default 1.0)
+        - jitter: Jitter factor to randomize the backoff time to avoid collision. (default
+          0.5)
 
     Returns:
-        Decorated function that retries on rate limit errors.
+    --------
+
+        A decorator that retries the wrapped function on rate limit errors, applying
+        exponential backoff with jitter.
     """
 
     def decorator(func):
+        """
+        Wraps a function to apply retry logic on rate limit errors.
+
+        Parameters:
+        -----------
+
+            - func: The function to be wrapped with retry logic.
+
+        Returns:
+        --------
+
+            Returns the wrapped function with retry logic applied.
+        """
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            """
+            Retry the execution of a function with backoff on failure due to rate limit errors.
+
+            This wrapper function will call the specified function and if it raises an exception, it
+            will handle retries according to defined conditions. It will check the environment for a
+            DISABLE_RETRIES flag to determine whether to retry or propagate errors immediately
+            during tests. If the error is identified as a rate limit error, it will apply an
+            exponential backoff strategy with jitter before retrying, up to a maximum number of
+            retries. If the retries are exhausted, it raises the last encountered error.
+
+            Parameters:
+            -----------
+
+                - *args: Positional arguments passed to the wrapped function.
+                - **kwargs: Keyword arguments passed to the wrapped function.
+
+            Returns:
+            --------
+
+                Returns the result of the wrapped function if successful; otherwise, raises the last
+                error encountered after maximum retries are exhausted.
+            """
             # If DISABLE_RETRIES is set, don't retry for testing purposes
             disable_retries = os.environ.get("DISABLE_RETRIES", "false").lower() in (
                 "true",
@@ -299,23 +433,68 @@ def embedding_sleep_and_retry_sync(max_retries=5, base_backoff=1.0, jitter=0.5):
 
 def embedding_sleep_and_retry_async(max_retries=5, base_backoff=1.0, jitter=0.5):
     """
-    Decorator that adds retry with exponential backoff for asynchronous embedding functions.
+    Add retry logic with exponential backoff for asynchronous embedding functions.
 
-    The decorator will retry the function with exponential backoff if it
-    fails due to a rate limit error.
+    This decorator retries the wrapped asynchronous function upon encountering rate limit
+    errors, utilizing exponential backoff with optional jitter to space out retry attempts.
+    It allows for a maximum number of retries before giving up and raising the last error
+    encountered.
 
-    Args:
-        max_retries: Maximum number of retries.
-        base_backoff: Base backoff time in seconds.
-        jitter: Jitter factor to randomize backoff time.
+    Parameters:
+    -----------
+
+        - max_retries: Maximum number of retries allowed before giving up. (default 5)
+        - base_backoff: Base amount of time in seconds to wait before retrying after a rate
+          limit error. (default 1.0)
+        - jitter: Amount of randomness to add to the backoff duration to help mitigate burst
+          issues on retries. (default 0.5)
 
     Returns:
-        Decorated async function that retries on rate limit errors.
+    --------
+
+        Returns a decorated asynchronous function that implements the retry logic on rate
+        limit errors.
     """
 
     def decorator(func):
+        """
+        Handle retries for an async function with exponential backoff and jitter.
+
+        Parameters:
+        -----------
+
+            - func: An asynchronous function to be wrapped with retry logic.
+
+        Returns:
+        --------
+
+            Returns the wrapper function that manages the retry behavior for the wrapped async
+            function.
+        """
+
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
+            """
+            Handle retries for an async function with exponential backoff and jitter.
+
+            If the environment variable DISABLE_RETRIES is set to true, 1, or yes, the function will
+            not retry on errors.
+            It attempts to call the wrapped function until it succeeds or the maximum number of
+            retries is reached. If an exception occurs, it checks if it's a rate limit error to
+            determine if a retry is needed.
+
+            Parameters:
+            -----------
+
+                - *args: Positional arguments passed to the wrapped function.
+                - **kwargs: Keyword arguments passed to the wrapped function.
+
+            Returns:
+            --------
+
+                Returns the result of the wrapped async function if successful; raises the last
+                encountered error if all retries fail.
+            """
             # If DISABLE_RETRIES is set, don't retry for testing purposes
             disable_retries = os.environ.get("DISABLE_RETRIES", "false").lower() in (
                 "true",

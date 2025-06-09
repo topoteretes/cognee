@@ -18,6 +18,24 @@ logger = get_logger("OllamaEmbeddingEngine")
 
 
 class OllamaEmbeddingEngine(EmbeddingEngine):
+    """
+    Implements an embedding engine using the Ollama embedding model.
+
+    Public methods:
+    - embed_text
+    - get_vector_size
+    - get_tokenizer
+
+    Instance variables:
+    - model
+    - dimensions
+    - max_tokens
+    - endpoint
+    - mock
+    - huggingface_tokenizer_name
+    - tokenizer
+    """
+
     model: str
     dimensions: int
     max_tokens: int
@@ -50,7 +68,19 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
-        Given a list of text prompts, returns a list of embedding vectors.
+        Generate embedding vectors for a list of text prompts.
+
+        If mocking is enabled, returns a list of zero vectors instead of actual embeddings.
+
+        Parameters:
+        -----------
+
+            - text (List[str]): A list of text prompts for which to generate embeddings.
+
+        Returns:
+        --------
+
+            - List[List[float]]: A list of embedding vectors corresponding to the text prompts.
         """
         if self.mock:
             return [[0.0] * self.dimensions for _ in text]
@@ -80,9 +110,25 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 return data["embedding"]
 
     def get_vector_size(self) -> int:
+        """
+        Retrieve the size of the embedding vectors.
+
+        Returns:
+        --------
+
+            - int: The dimension of the embedding vectors.
+        """
         return self.dimensions
 
     def get_tokenizer(self):
+        """
+        Load and return a HuggingFace tokenizer for the embedding engine.
+
+        Returns:
+        --------
+
+            The instantiated HuggingFace tokenizer used by the embedding engine.
+        """
         logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
         tokenizer = HuggingFaceTokenizer(
             model=self.huggingface_tokenizer_name, max_tokens=self.max_tokens

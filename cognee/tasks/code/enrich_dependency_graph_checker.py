@@ -6,6 +6,14 @@ from cognee.tasks.repo_processor.enrich_dependency_graph import enrich_dependenc
 
 
 def main():
+    """
+    Execute the main logic of the dependency graph processor.
+
+    This function sets up argument parsing to retrieve the repository path, checks the
+    existence of the specified path, and processes the repository to produce a dependency
+    graph. If the repository path does not exist, it logs an error message and terminates
+    without further execution.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("repo_path", help="Path to the repository")
     args = parser.parse_args()

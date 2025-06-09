@@ -5,6 +5,14 @@ from cognee.tasks.repo_processor.get_repo_file_dependencies import get_repo_file
 
 
 def main():
+    """
+    Parse the command line arguments and print the repository file dependencies.
+
+    This function sets up an argument parser to retrieve the path of a repository. It checks
+    if the provided path exists and if it doesn’t, it prints an error message and exits. If
+    the path is valid, it calls an asynchronous function to get the dependencies and prints
+    the nodes and their relations in the dependency graph.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("repo_path", help="Path to the repository")
     args = parser.parse_args()

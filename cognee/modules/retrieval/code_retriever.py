@@ -14,7 +14,12 @@ class CodeRetriever(BaseRetriever):
     """Retriever for handling code-based searches."""
 
     class CodeQueryInfo(BaseModel):
-        """Response model for information extraction from the query"""
+        """
+        Model for representing the result of a query related to code files.
+
+        This class holds a list of filenames and the corresponding source code extracted from a
+        query. It is used to encapsulate response data in a structured format.
+        """
 
         filenames: List[str] = []
         sourcecode: str

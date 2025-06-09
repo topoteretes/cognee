@@ -2,6 +2,9 @@ import os
 import shutil
 import cognee
 import pathlib
+
+from cognee.modules.engine.models import NodeSet
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
@@ -83,6 +86,30 @@ async def main():
         user = await get_default_user()
         history = await get_history(user.id)
         assert len(history) == 6, "Search history is not correct."
+
+        nodeset_text = "Neo4j is a graph database that supports cypher."
+
+        await cognee.add([nodeset_text], dataset_name, node_set=["first"])
+
+        await cognee.cognify([dataset_name])
+
+        context_nonempty = await GraphCompletionRetriever(
+            node_type=NodeSet,
+            node_name=["first"],
+        ).get_context("What is in the context?")
+
+        context_empty = await GraphCompletionRetriever(
+            node_type=NodeSet,
+            node_name=["nonexistent"],
+        ).get_context("What is in the context?")
+
+        assert isinstance(context_nonempty, str) and context_nonempty != "", (
+            f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
+        )
+
+        assert context_empty == "", (
+            f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
+        )
 
         await cognee.prune.prune_data()
         assert not os.path.isdir(data_directory_path), "Local data files are not deleted"

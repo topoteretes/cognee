@@ -12,6 +12,8 @@ from sqlalchemy.util import await_only
 
 from cognee.modules.users.methods import create_default_user, delete_user
 
+from fastapi_users.exceptions import UserAlreadyExists
+
 
 # revision identifiers, used by Alembic.
 revision: str = "482cd6517ce4"
@@ -23,8 +25,8 @@ depends_on: Union[str, Sequence[str], None] = "8057ae7329c2"
 def upgrade() -> None:
     try:
         await_only(create_default_user())
-    except Exception:
-        pass
+    except UserAlreadyExists:
+        pass  # It's fine if the default user already exists
 
 
 def downgrade() -> None:
