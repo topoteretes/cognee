@@ -1,11 +1,20 @@
+from enum import Enum
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer
+from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer, Enum as SQLAlchemyEnum
 from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
 
 from .DatasetData import DatasetData
+
+class FileProcessingStatus(Enum):
+    """Enum representing the processing status of a file."""
+
+    UNPROCESSED = "unprocessed"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    ERROR = "error"
 
 
 class Data(Base):
@@ -24,6 +33,12 @@ class Data(Base):
     token_count = Column(Integer)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
+    processing_status = Column(
+        SQLAlchemyEnum(FileProcessingStatus, name="file_processing_status", native_enum=True), 
+        index=True, 
+        default=FileProcessingStatus.UNPROCESSED, 
+        nullable=False)
 
     datasets = relationship(
         "Dataset",
@@ -46,5 +61,6 @@ class Data(Base):
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
             "nodeSet": self.node_set,
+            "processingStatus": self.processing_status.value,
             # "datasets": [dataset.to_json() for dataset in self.datasets]
         }
