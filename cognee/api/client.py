@@ -1,6 +1,7 @@
 """FastAPI server for the Cognee API."""
 
 import os
+
 import uvicorn
 from cognee.shared.logging_utils import get_logger, setup_logging
 import sentry_sdk
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
+
 
 app.add_middleware(
     CORSMiddleware,

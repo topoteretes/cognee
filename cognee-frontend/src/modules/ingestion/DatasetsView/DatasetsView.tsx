@@ -53,7 +53,7 @@ export default function DatasetsView({
     setExplorationDataset(dataset);
     showExplorationWindow();
   }
-  
+
   return (
     <>
       <Stack orientation="vertical" gap="4">
@@ -95,10 +95,10 @@ export default function DatasetsView({
           </DatasetItem>
         ))}
       </Stack>
-      <Modal onClose={hideExplorationWindow} isOpen={isExplorationWindowShown} className={styles.explorerModal}>
+      <Modal closeOnBackdropClick={false} onClose={hideExplorationWindow} isOpen={isExplorationWindowShown} className={styles.explorerModal}>
         <Spacer horizontal="2" vertical="3" wrap>
           <Text>{dataset?.name}</Text>
-        </Spacer> 
+        </Spacer>
         <Explorer dataset={dataset!} />
       </Modal>
     </>
