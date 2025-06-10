@@ -63,7 +63,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "uvicorn==0.34.0",
-    "gunicorn>=20.1.0,<21",
+    "gunicorn>=20.1.0,<24",
 ]
 weaviate = ["weaviate-client==4.9.6"]
 qdrant = ["qdrant-client>=1.9.0,<2"]
