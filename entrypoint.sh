@@ -14,7 +14,7 @@ echo "Environment: $ENVIRONMENT"
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
 
-MIGRATION_OUTPUT=$(alembic upgrade head 2>&1)
+MIGRATION_OUTPUT=$(alembic upgrade head)
 MIGRATION_EXIT_CODE=$?
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
@@ -37,10 +37,10 @@ sleep 2
 if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        debugpy --wait-for-client --listen 0.0.0.0:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
+        debugpy --wait-for-client --listen 127.0.0.1:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
     else
         gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
     fi
 else
-    gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level error cognee.api.client:app 
+    gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level error cognee.api.client:app
 fi

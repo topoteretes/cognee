@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional, Union
+from typing import Optional
 from datetime import datetime
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
@@ -17,6 +17,7 @@ class SearchPayloadDTO(InDTO):
     datasets: Optional[list[str]] = None
     dataset_ids: Optional[list[UUID]] = None
     query: str
+    top_k: Optional[int] = 10
 
 
 def get_search_router() -> APIRouter:
@@ -49,6 +50,7 @@ def get_search_router() -> APIRouter:
                 user=user,
                 datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,
+                top_k=payload.top_k,
             )
 
             return results

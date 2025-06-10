@@ -16,6 +16,11 @@ async def get_graph_engine() -> GraphDBInterface:
 
     # Async functions can't be cached. After creating and caching the graph engine
     # handle all necessary async operations for different graph types bellow.
+
+    # Run any adapter‐specific async initialization
+    if hasattr(graph_client, "initialize"):
+        await graph_client.initialize()
+
     # Handle loading of graph for NetworkX
     if config["graph_database_provider"].lower() == "networkx" and graph_client.graph is None:
         await graph_client.load_graph_from_file()
@@ -105,6 +110,18 @@ def create_graph_engine(
         from .kuzu.adapter import KuzuAdapter
 
         return KuzuAdapter(db_path=graph_file_path)
+
+    elif graph_database_provider == "kuzu-remote":
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Kuzu remote URL.")
+
+        from .kuzu.remote_kuzu_adapter import RemoteKuzuAdapter
+
+        return RemoteKuzuAdapter(
+            api_url=graph_database_url,
+            username=graph_database_username,
+            password=graph_database_password,
+        )
 
     elif graph_database_provider == "memgraph":
         if not (graph_database_url and graph_database_username and graph_database_password):

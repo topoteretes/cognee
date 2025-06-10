@@ -13,6 +13,8 @@
   <a href="https://cognee.ai">Learn more</a>
   ·
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
+  ·
+  <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
   </p>
 
 
@@ -28,7 +30,7 @@
 
 
 
-Build dynamic Agent memory using scalable, modular ECL (Extract, Cognify, Load) pipelines.
+Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
 More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github.com/topoteretes/cognee/tree/main/evals)
 
@@ -46,22 +48,20 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 <div style="text-align: center">
   <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
 </div>
-
 </div>
-
-
 
 
 ## Features
 
 - Interconnect and retrieve your past conversations, documents, images and audio transcriptions
-- Reduce hallucinations, developer effort, and cost.
+- Replaces RAG systems and reduces developer effort, and cost.
 - Load data to graph and vector databases using only Pydantic
 - Manipulate your data while ingesting from 30+ data sources
 
 ## Get Started
 
-Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a>  or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
+Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
+
 
 
 ## Contributing
@@ -141,7 +141,15 @@ Example output:
 
 ```
 
-### cognee UI
+## Our paper is out! <a href="https://arxiv.org/abs/2505.24478" target="_blank" rel="noopener noreferrer">Read here</a>
+
+<div style="text-align: center">
+  <img src="assets/cognee-paper.png" alt="cognee paper" width="100%" />
+</div>
+
+</div>
+
+## Cognee UI
 
 You can also cognify your files and query using cognee UI.
 
