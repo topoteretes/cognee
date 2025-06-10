@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument(
         "--include_docs",
         type=lambda x: x.lower() in ("true", "1"),
-        default=True,
+        default=False,
         help="Whether or not to process non-code files",
     )
     parser.add_argument(
