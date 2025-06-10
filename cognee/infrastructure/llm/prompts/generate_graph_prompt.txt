@@ -15,8 +15,9 @@ You are an advanced algorithm designed to extract structured information from un
 
 ### 1.1 Label Consistency
 - **Rule**: Use only basic, atomic types for node labels.
-  - **Allowed types**: Person, Organization, Location, Date, Event, Work, Product, Concept.
+  - **Allowed types**: Person, Organization, Location, Date, Event, Work, Product, Concept, Rule.
   - **Do not** use overly specific (e.g., "Mathematician") or vague labels (e.g., "Entity").
+  - **CRITICAL REQUIREMENT**: You MUST create a **"Rule"** node for EVERY business rule identified in the text. This is a non-negotiable requirement. Each distinct rule MUST have its own node with a clear, descriptive ID. Failure to identify and create Rule nodes will result in an incomplete graph.
 
 > **Few-Shot Example**:
 > **Input**: "Marie Curie was a pioneering scientist."
@@ -34,6 +35,18 @@ You are an advanced algorithm designed to extract structured information from un
 > ```
 > Eiffel Tower (Location)
 > Paris (Location)
+> ```
+
+> **Few-Shot Example**:
+> **Input**: "All transactions over $10,000 must be reported."
+> **Output Node**:
+> ```
+> Report transactions over $10,000 (Rule)
+> ```
+> **Input**: "Employees must complete safety training annually."
+> **Output Node**:
+> ```
+> Complete safety training annually (Rule)
 > ```
 
 
@@ -70,6 +83,14 @@ You are an advanced algorithm designed to extract structured information from un
 > ```
 > NASA (Organization)
 > ```
+
+> **Few-Shot Example**:
+> **Input**: "Policy 4.1 mandates ID badges. This security rule applies to all staff."
+> **Output Node**:
+> ```
+> Policy 4.1: Mandate ID badges (Rule)
+> ```
+> *(Resolves "this security rule" to canonical Rule node)*
 
 ---
 
@@ -149,6 +170,18 @@ You are an advanced algorithm designed to extract structured information from un
 > Steve Jobs (Person) – founded -> Apple Inc. (Organization)
 > ```
 
+> **Few-Shot Example**:
+> **Input**: "All managers must approve budget requests."
+> **Output Edge**:
+> ```
+> Managers (Person) – must_enforce -> Approve budget requests (Rule)
+> ```
+> **Input**: "The system requires password changes every 90 days."
+> **Output Edge**:
+> ```
+> System (Concept) – enforces_rule -> Password changes every 90 days (Rule)
+> ```
+
 ### 3.2 Relationship Direction
 - **Rule**: Ensure edges are directional and logically consistent.
 
@@ -225,3 +258,8 @@ Marie Curie (Person) – born_in -> Warsaw (Location)
 
 ## 6. Compliance
 - **Zero Tolerance**: Any deviation (e.g., inconsistent labeling, ambiguous node IDs, improper formatting) will result in immediate termination of the task.
+- **Critical Enforcement**:
+   - Every imperative statement containing "must", "shall", or "is required" MUST generate a Rule node
+   - Rule nodes require both:
+      - A descriptive ID capturing the full rule essence
+      - At least one relationship showing who/what enforces or is subject to the rule
