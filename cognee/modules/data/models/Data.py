@@ -38,6 +38,7 @@ class Data(Base):
         SQLAlchemyEnum(FileProcessingStatus, name="file_processing_status", native_enum=True), 
         index=True, 
         default=FileProcessingStatus.UNPROCESSED, 
+        server_default=FileProcessingStatus.UNPROCESSED.value,
         nullable=False)
 
     datasets = relationship(
