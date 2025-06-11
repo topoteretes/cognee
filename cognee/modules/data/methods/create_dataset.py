@@ -1,4 +1,3 @@
-from uuid import UUID, uuid5, NAMESPACE_OID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload

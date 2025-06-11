@@ -20,3 +20,23 @@ class UnauthorizedDataAccessError(CogneeApiError):
         status_code=status.HTTP_401_UNAUTHORIZED,
     ):
         super().__init__(message, name, status_code)
+
+
+class DatasetNotFoundError(CogneeApiError):
+    def __init__(
+        self,
+        message: str = "Dataset not found.",
+        name: str = "DatasetNotFoundError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class DatasetTypeError(CogneeApiError):
+    def __init__(
+        self,
+        message: str = "Dataset type not supported.",
+        name: str = "DatasetTypeError",
+        status_code=status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)

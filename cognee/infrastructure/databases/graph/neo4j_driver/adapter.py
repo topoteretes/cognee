@@ -1,5 +1,3 @@
-#
-
 """Neo4j Adapter for Graph Database"""
 
 import json
@@ -29,6 +27,8 @@ from .neo4j_metrics_utils import (
 
 logger = get_logger("Neo4jAdapter", level=ERROR)
 
+BASE_LABEL = "__Node__"
+
 
 class Neo4jAdapter(GraphDBInterface):
     """
@@ -50,14 +50,21 @@ class Neo4jAdapter(GraphDBInterface):
             auth = (graph_database_username, graph_database_password)
         elif graph_database_username or graph_database_password:
             logger = get_logger(__name__)
-            logger.warning(
-                "Neo4j credentials incomplete – falling back to anonymous connection."
-            )
+            logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
 
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth=auth,
             max_connection_lifetime=120,
+            notifications_min_severity="OFF",
+        )
+
+    async def initialize(self) -> None:
+        """
+        Initializes the database: adds uniqueness constraint on id and performs indexing
+        """
+        await self.query(
+            (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
         )
 
     @asynccontextmanager
@@ -113,8 +120,8 @@ class Neo4jAdapter(GraphDBInterface):
             - bool: True if the node exists, otherwise False.
         """
         results = self.query(
-            """
-                MATCH (n)
+            f"""
+                MATCH (n:`{BASE_LABEL}`)
                 WHERE n.id = $node_id
                 RETURN COUNT(n) > 0 AS node_exists
             """,
@@ -139,7 +146,7 @@ class Neo4jAdapter(GraphDBInterface):
         serialized_properties = self.serialize_properties(node.model_dump())
 
         query = dedent(
-            """MERGE (node {id: $node_id})
+            f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
                 ON CREATE SET node += $properties, node.updated_at = timestamp()
                 ON MATCH SET node += $properties, node.updated_at = timestamp()
                 WITH node, $node_label AS label
@@ -171,9 +178,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
-        query = """
+        query = f"""
         UNWIND $nodes AS node
-        MERGE (n {id: node.node_id})
+        MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
         ON CREATE SET n += node.properties, n.updated_at = timestamp()
         ON MATCH SET n += node.properties, n.updated_at = timestamp()
         WITH n, node.label AS label
@@ -225,9 +232,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             A list of nodes represented as dictionaries.
         """
-        query = """
+        query = f"""
         UNWIND $node_ids AS id
-        MATCH (node {id: id})
+        MATCH (node: `{BASE_LABEL}`{{id: id}})
         RETURN node"""
 
         params = {"node_ids": node_ids}
@@ -250,7 +257,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             The result of the query execution, typically indicating success or failure.
         """
-        query = "MATCH (node {id: $node_id}) DETACH DELETE node"
+        query = f"MATCH (node: `{BASE_LABEL}`{{id: $node_id}}) DETACH DELETE node"
         params = {"node_id": node_id}
 
         return await self.query(query, params)
@@ -269,9 +276,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
-        query = """
+        query = f"""
         UNWIND $node_ids AS id
-        MATCH (node {id: id})
+        MATCH (node: `{BASE_LABEL}`{{id: id}})
         DETACH DELETE node"""
 
         params = {"node_ids": node_ids}
@@ -294,16 +301,15 @@ class Neo4jAdapter(GraphDBInterface):
 
             - bool: True if the edge exists, otherwise False.
         """
-        query = """
-            MATCH (from_node)-[relationship]->(to_node)
-            WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id AND type(relationship) = $edge_label
+        query = f"""
+            MATCH (from_node: `{BASE_LABEL}`)-[:`{edge_label}`]->(to_node: `{BASE_LABEL}`)
+            WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id
             RETURN COUNT(relationship) > 0 AS edge_exists
         """
 
         params = {
             "from_node_id": str(from_node),
             "to_node_id": str(to_node),
-            "edge_label": edge_label,
         }
 
         edge_exists = await self.query(query, params)
@@ -376,9 +382,9 @@ class Neo4jAdapter(GraphDBInterface):
 
         query = dedent(
             f"""\
-            MATCH (from_node {{id: $from_node}}),
-                  (to_node {{id: $to_node}})
-            MERGE (from_node)-[r:{relationship_name}]->(to_node)
+            MATCH (from_node :`{BASE_LABEL}`{{id: $from_node}}),
+                  (to_node :`{BASE_LABEL}`{{id: $to_node}})
+            MERGE (from_node)-[r:`{relationship_name}`]->(to_node)
             ON CREATE SET r += $properties, r.updated_at = timestamp()
             ON MATCH SET r += $properties, r.updated_at = timestamp()
             RETURN r
@@ -410,17 +416,17 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
-        query = """
+        query = f"""
             UNWIND $edges AS edge
-            MATCH (from_node {id: edge.from_node})
-            MATCH (to_node {id: edge.to_node})
+            MATCH (from_node: `{BASE_LABEL}`{{id: edge.from_node}})
+            MATCH (to_node: `{BASE_LABEL}`{{id: edge.to_node}})
             CALL apoc.merge.relationship(
                 from_node,
                 edge.relationship_name,
-                {
+                {{
                     source_node_id: edge.from_node,
                     target_node_id: edge.to_node
-                },
+                }},
                 edge.properties,
                 to_node
             ) YIELD rel
@@ -461,8 +467,8 @@ class Neo4jAdapter(GraphDBInterface):
 
             A list of edges connecting to the specified node, represented as tuples of details.
         """
-        query = """
-        MATCH (n {id: $node_id})-[r]-(m)
+        query = f"""
+        MATCH (n: `{BASE_LABEL}`{{id: $node_id}})-[r]-(m)
         RETURN n, r, m
         """
 
@@ -535,9 +541,9 @@ class Neo4jAdapter(GraphDBInterface):
             - list[str]: A list of predecessor node IDs.
         """
         if edge_label is not None:
-            query = """
-            MATCH (node)<-[r]-(predecessor)
-            WHERE node.id = $node_id AND type(r) = $edge_label
+            query = f"""
+            MATCH (node: `{BASE_LABEL}`)<-[r:`{edge_label}`]-(predecessor)
+            WHERE node.id = $node_id
             RETURN predecessor
             """
 
@@ -545,14 +551,13 @@ class Neo4jAdapter(GraphDBInterface):
                 query,
                 dict(
                     node_id=node_id,
-                    edge_label=edge_label,
                 ),
             )
 
             return [result["predecessor"] for result in results]
         else:
-            query = """
-            MATCH (node)<-[r]-(predecessor)
+            query = f"""
+            MATCH (node: `{BASE_LABEL}`)<-[r]-(predecessor)
             WHERE node.id = $node_id
             RETURN predecessor
             """
@@ -582,9 +587,9 @@ class Neo4jAdapter(GraphDBInterface):
             - list[str]: A list of successor node IDs.
         """
         if edge_label is not None:
-            query = """
-            MATCH (node)-[r]->(successor)
-            WHERE node.id = $node_id AND type(r) = $edge_label
+            query = f"""
+            MATCH (node: `{BASE_LABEL}`)-[r:`{edge_label}`]->(successor)
+            WHERE node.id = $node_id
             RETURN successor
             """
 
@@ -598,8 +603,8 @@ class Neo4jAdapter(GraphDBInterface):
 
             return [result["successor"] for result in results]
         else:
-            query = """
-            MATCH (node)-[r]->(successor)
+            query = f"""
+            MATCH (node: `{BASE_LABEL}`)-[r]->(successor)
             WHERE node.id = $node_id
             RETURN successor
             """
@@ -644,8 +649,8 @@ class Neo4jAdapter(GraphDBInterface):
             - Optional[Dict[str, Any]]: The requested node as a dictionary, or None if it does
               not exist.
         """
-        query = """
-        MATCH (node {id: $node_id})
+        query = f"""
+        MATCH (node: `{BASE_LABEL}`{{id: $node_id}})
         RETURN node
         """
         results = await self.query(query, {"node_id": node_id})
@@ -665,9 +670,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             - List[Dict[str, Any]]: A list of nodes represented as dictionaries.
         """
-        query = """
+        query = f"""
         UNWIND $node_ids AS id
-        MATCH (node {id: id})
+        MATCH (node:`{BASE_LABEL}` {{id: id}})
         RETURN node
         """
         results = await self.query(query, {"node_ids": node_ids})
@@ -687,13 +692,13 @@ class Neo4jAdapter(GraphDBInterface):
 
             - list: A list of connections represented as tuples of details.
         """
-        predecessors_query = """
-        MATCH (node)<-[relation]-(neighbour)
+        predecessors_query = f"""
+        MATCH (node:`{BASE_LABEL}`)<-[relation]-(neighbour)
         WHERE node.id = $node_id
         RETURN neighbour, relation, node
         """
-        successors_query = """
-        MATCH (node)-[relation]->(neighbour)
+        successors_query = f"""
+        MATCH (node:`{BASE_LABEL}`)-[relation]->(neighbour)
         WHERE node.id = $node_id
         RETURN node, relation, neighbour
         """
@@ -733,6 +738,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
+        # Not understanding
         query = f"""
         UNWIND $node_ids AS id
         MATCH (node:`{id}`)-[r:{edge_label}]->(predecessor)
@@ -761,6 +767,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
+        # Not understanding
         query = f"""
         UNWIND $node_ids AS id
         MATCH (node:`{id}`)<-[r:{edge_label}]-(successor)
@@ -1224,4 +1231,3 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
-

@@ -53,7 +53,7 @@ export default function DatasetsView({
     setExplorationDataset(dataset);
     showExplorationWindow();
   }
-  
+
   return (
     <>
       <Stack orientation="vertical" gap="4">
