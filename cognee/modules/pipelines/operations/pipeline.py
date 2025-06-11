@@ -92,7 +92,12 @@ async def cognee_pipeline(
 
     for dataset in datasets:
         async for run_info in run_pipeline(
-            dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name, context={"dataset": dataset},
+            dataset=dataset,
+            user=user,
+            tasks=tasks,
+            data=data,
+            pipeline_name=pipeline_name,
+            context={"dataset": dataset},
         ):
             yield run_info
 

@@ -44,10 +44,12 @@ class GraphNodeDTO(OutDTO):
     label: str
     properties: dict
 
+
 class GraphEdgeDTO(OutDTO):
     source: UUID
     target: UUID
     label: str
+
 
 class GraphDTO(OutDTO):
     nodes: List[GraphNodeDTO]
@@ -120,16 +122,28 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=200,
                 content={
-                    "nodes": list(map(lambda node: {
-                        "id": str(node[0]),
-                        "label": node[1]["name"] if hasattr(node[1], "name") else f"{node[1]['type']}_{str(node[0])}",
-                        "properties": {},
-                    }, nodes)),
-                    "edges": list(map(lambda edge: {
-                        "source": str(edge[0]),
-                        "target": str(edge[1]),
-                        "label": edge[2],
-                    }, edges)),
+                    "nodes": list(
+                        map(
+                            lambda node: {
+                                "id": str(node[0]),
+                                "label": node[1]["name"]
+                                if hasattr(node[1], "name")
+                                else f"{node[1]['type']}_{str(node[0])}",
+                                "properties": {},
+                            },
+                            nodes,
+                        )
+                    ),
+                    "edges": list(
+                        map(
+                            lambda edge: {
+                                "source": str(edge[0]),
+                                "target": str(edge[1]),
+                                "label": edge[2],
+                            },
+                            edges,
+                        )
+                    ),
                 },
             )
         except Exception as error:
