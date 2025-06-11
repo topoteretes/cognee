@@ -10,6 +10,7 @@ from cognee.modules.pipelines.operations import (
 )
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.models import User
+from cognee.modules.data.models import Data
 from cognee.shared.utils import send_telemetry
 from uuid import uuid5, NAMESPACE_OID
 
@@ -20,6 +21,19 @@ from cognee.modules.data.methods.update_data_processing_status import update_dat
 from cognee.modules.data.models import FileProcessingStatus
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
+
+async def handle_data_processing_status(item, status: FileProcessingStatus):
+    """
+    Updates the processing status of a `Data` object in the database.
+
+    Args:
+        item: The data point to check and update.
+        status (FileProcessingStatus): The new processing status to set.
+    """
+
+    # items can be Data or other types, so we check if it's an instance of Data
+    if isinstance(item, Data):
+        await update_data_processing_status(item.id, status)
 
 
 async def run_tasks_with_telemetry(
@@ -71,16 +85,15 @@ async def run_tasks_with_telemetry(
         )
 
         for item in data:
-            await update_data_processing_status(item.id, FileProcessingStatus.PROCESSING)
+            await handle_data_processing_status(item, FileProcessingStatus.PROCESSING)
 
             try:
                 async for result in run_tasks_base(tasks, [item], user, context):
                     yield result
-
-                await update_data_processing_status(item.id, FileProcessingStatus.PROCESSED)
+                await handle_data_processing_status(item, FileProcessingStatus.PROCESSED)
 
             except Exception as error:
-                await update_data_processing_status(item.id, FileProcessingStatus.ERROR)
+                await handle_data_processing_status(item, FileProcessingStatus.ERROR)
                 logger.error(
                     "Error processing data point `%s` in pipeline `%s`: %s",
                     item.id,
