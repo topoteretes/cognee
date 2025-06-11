@@ -1,6 +1,6 @@
 import cognee
 import asyncio
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import setup_logging
 import os
 import textwrap
 from cognee.api.v1.search import SearchType
@@ -92,7 +92,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = get_logger()
+    logger = setup_logging()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

@@ -73,7 +73,12 @@ postgres = [
     "psycopg2>=2.9.10,<3",
     "pgvector>=0.3.5,<0.4",
     "asyncpg==0.30.0",
-    "psycopg2-binary==2.9.10"
+]
+postgres-binary = [
+    "psycopg2>=2.9.10,<3",
+    "pgvector>=0.3.5,<0.4",
+    "asyncpg==0.30.0",
+    "psycopg2-binary==2.9.10",
 ]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
