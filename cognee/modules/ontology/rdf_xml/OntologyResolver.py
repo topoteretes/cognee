@@ -26,7 +26,7 @@ class OntologyResolver:
                 self.ontology: Ontology = get_ontology(ontology_file).load()
                 logger.info("Ontology loaded successfully from file: %s", ontology_file)
             else:
-                logger.warning(
+                logger.info(
                     "Ontology file '%s' not found. Using fallback ontology at %s",
                     ontology_file,
                     fallback_url,
