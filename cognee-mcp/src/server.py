@@ -90,7 +90,7 @@ async def cognee_add_developer_rules(
             tasks.append(asyncio.create_task(cognify_task(abs_path)))
         else:
             logger.warning(f"Skipped missing developer rule file: {abs_path}")
-
+    log_file = get_log_file_location()
     return [
         types.TextContent(
             type="text",

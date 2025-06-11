@@ -4,6 +4,10 @@ from cognee.version import get_cognee_version
 #       there will be circular import issues
 __version__ = get_cognee_version()
 
+# NOTE: Log level can be set with the LOG_LEVEL env variable
+from cognee.shared.logging_utils import setup_logging
+logger = setup_logging() # noqa
+
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
