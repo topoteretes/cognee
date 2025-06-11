@@ -1,17 +1,16 @@
 "use client";
 
-import { v4 as uuid4 } from "uuid";
 import { ChangeEvent, useEffect } from "react";
 
+import { useBoolean } from "@/utils";
 import { LoadingIndicator } from "@/ui/App";
 import { CTAButton, StatusIndicator } from "@/ui/elements";
 
 import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
-import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
-import getDatasetGraph from "@/modules/datasets/getDatasetGraph";
 import createDataset from "@/modules/datasets/createDataset";
-import { useBoolean } from '@/utils';
+import getDatasetGraph from "@/modules/datasets/getDatasetGraph";
+import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
 
 export interface NodesAndEdges {
   nodes: { id: string; label: string }[];
@@ -36,7 +35,7 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
         const dataset = datasets?.[0];
 
         if (dataset) {
-          getDatasetGraph(dataset || { id: uuid4() })
+          getDatasetGraph(dataset)
             .then((graph) => onData({
               nodes: graph.nodes,
               links: graph.edges,

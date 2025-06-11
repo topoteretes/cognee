@@ -1,11 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useRef, useState, MutableRefObject } from "react";
 
 import { TextLogo } from "@/ui/App";
 import { Divider } from "@/ui/Layout";
 import { Footer } from "@/ui/Partials";
-import CrewAITrigger from "./CrewAITrigger";
 import GraphVisualization, { GraphVisualizationAPI } from "./GraphVisualization";
 import CogneeAddWidget, { NodesAndEdges } from "./CogneeAddWidget";
 import GraphControls, { GraphControlsAPI } from "./GraphControls";
@@ -13,7 +13,6 @@ import GraphLegend from "./GraphLegend";
 import ActivityLog, { ActivityLogAPI } from "./ActivityLog";
 
 import { useBoolean } from "@/utils";
-import Image from 'next/image';
 
 interface GraphNode {
   id: string | number;
