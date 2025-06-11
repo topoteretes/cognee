@@ -1232,7 +1232,7 @@ description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "(sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\" or extra == \"codegraph\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\") and (platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"codegraph\") and (python_version < \"3.13\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\")"
+markers = "(sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dev\" or extra == \"chromadb\" or extra == \"codegraph\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"codegraph\") and (python_version == \"3.10\" or python_version == \"3.11\" or python_version == \"3.12\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (python_version < \"3.13\" or platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\")"
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -2600,15 +2600,15 @@ grpcio-gcp = ["grpcio-gcp (>=0.2.2,<1.0.0)"]
 
 [[package]]
 name = "google-api-python-client"
-version = "2.171.0"
+version = "2.172.0"
 description = "Google API Client Library for Python"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
 markers = "extra == \"gemini\""
 files = [
-    {file = "google_api_python_client-2.171.0-py3-none-any.whl", hash = "sha256:c9c9b76f561e9d9ac14e54a9e2c0842876201d5b96e69e48f967373f0784cbe9"},
-    {file = "google_api_python_client-2.171.0.tar.gz", hash = "sha256:057a5c08d28463c6b9eb89746355de5f14b7ed27a65c11fdbf1d06c66bb66b23"},
+    {file = "google_api_python_client-2.172.0-py3-none-any.whl", hash = "sha256:9f1b9a268d5dc1228207d246c673d3a09ee211b41a11521d38d9212aeaa43af7"},
+    {file = "google_api_python_client-2.172.0.tar.gz", hash = "sha256:dcb3b7e067154b2aa41f1776cf86584a5739c0ac74e6ff46fc665790dca0e6a6"},
 ]
 
 [package.dependencies]
@@ -2881,7 +2881,7 @@ description = "HTTP/2-based RPC framework"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"gemini\" or extra == \"deepeval\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"milvus\" or python_version == \"3.10\" and (extra == \"deepeval\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"gemini\" or extra == \"milvus\")"
+markers = "extra == \"gemini\" or extra == \"deepeval\" or extra == \"weaviate\" or extra == \"qdrant\" or extra == \"milvus\""
 files = [
     {file = "grpcio-1.67.1-cp310-cp310-linux_armv7l.whl", hash = "sha256:8b0341d66a57f8a3119b77ab32207072be60c9bf79760fa609c5609f2deb1f3f"},
     {file = "grpcio-1.67.1-cp310-cp310-macosx_12_0_universal2.whl", hash = "sha256:f5a27dddefe0e2357d3e617b9079b4bfdc91341a91565111a21ed6ebbc51b22d"},
@@ -3338,14 +3338,14 @@ files = [
 
 [[package]]
 name = "huggingface-hub"
-version = "0.32.4"
+version = "0.32.6"
 description = "Client library to download and publish models, datasets and other repos on the huggingface.co hub"
 optional = false
 python-versions = ">=3.8.0"
 groups = ["main"]
 files = [
-    {file = "huggingface_hub-0.32.4-py3-none-any.whl", hash = "sha256:37abf8826b38d971f60d3625229221c36e53fe58060286db9baf619cfbf39767"},
-    {file = "huggingface_hub-0.32.4.tar.gz", hash = "sha256:f61d45cd338736f59fb0e97550b74c24ee771bcc92c05ae0766b9116abe720be"},
+    {file = "huggingface_hub-0.32.6-py3-none-any.whl", hash = "sha256:32cde9558c965477556edca72352621def7fbc42e167aaf33f4cdb9af65bb28b"},
+    {file = "huggingface_hub-0.32.6.tar.gz", hash = "sha256:8e960f23dc57519c6c2a0bbc7e9bc030eaa14e7f2d61f8e68fd3d025dabed2fa"},
 ]
 
 [package.dependencies]
@@ -4669,14 +4669,14 @@ valkey = ["valkey (>=6)"]
 
 [[package]]
 name = "litellm"
-version = "1.72.2"
+version = "1.72.4"
 description = "Library to easily interface with LLM API providers"
 optional = false
 python-versions = "!=2.7.*,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,!=3.7.*,>=3.8"
 groups = ["main"]
 files = [
-    {file = "litellm-1.72.2-py3-none-any.whl", hash = "sha256:51e70f5cd98748a603d725ef29ede0ecad3d55e1a89cbbcec8d12d6fff55bff4"},
-    {file = "litellm-1.72.2.tar.gz", hash = "sha256:b50c7f7a0df67117889479264a12b0dea9c566a02173d4c3159540a13760d38b"},
+    {file = "litellm-1.72.4-py3-none-any.whl", hash = "sha256:f98ca994420ed649c466d423655a6e0f2aeecab4564ed372b3378a949e491dc2"},
+    {file = "litellm-1.72.4.tar.gz", hash = "sha256:8855de30f78bcb1f37af244519b37a37faaaf579401b1414400b5b5e5b616d57"},
 ]
 
 [package.dependencies]
@@ -4693,21 +4693,22 @@ tiktoken = ">=0.7.0"
 tokenizers = "*"
 
 [package.extras]
+caching = ["diskcache (>=5.6.1,<6.0.0)"]
 extra-proxy = ["azure-identity (>=1.15.0,<2.0.0)", "azure-keyvault-secrets (>=4.8.0,<5.0.0)", "google-cloud-kms (>=2.21.3,<3.0.0)", "prisma (==0.11.0)", "redisvl (>=0.4.1,<0.5.0) ; python_version >= \"3.9\" and python_version < \"3.14\"", "resend (>=0.8.0,<0.9.0)"]
 proxy = ["PyJWT (>=2.8.0,<3.0.0)", "apscheduler (>=3.10.4,<4.0.0)", "backoff", "boto3 (==1.34.34)", "cryptography (>=43.0.1,<44.0.0)", "fastapi (>=0.115.5,<0.116.0)", "fastapi-sso (>=0.16.0,<0.17.0)", "gunicorn (>=23.0.0,<24.0.0)", "litellm-enterprise (==0.1.7)", "litellm-proxy-extras (==0.2.3)", "mcp (==1.5.0) ; python_version >= \"3.10\"", "orjson (>=3.9.7,<4.0.0)", "pynacl (>=1.5.0,<2.0.0)", "python-multipart (>=0.0.18,<0.0.19)", "pyyaml (>=6.0.1,<7.0.0)", "rich (==13.7.1)", "rq", "uvicorn (>=0.29.0,<0.30.0)", "uvloop (>=0.21.0,<0.22.0) ; sys_platform != \"win32\"", "websockets (>=13.1.0,<14.0.0)"]
 utils = ["numpydoc"]
 
 [[package]]
 name = "llama-cloud"
-version = "0.1.23"
+version = "0.1.26"
 description = ""
 optional = true
 python-versions = "<4,>=3.8"
 groups = ["main"]
 markers = "extra == \"deepeval\""
 files = [
-    {file = "llama_cloud-0.1.23-py3-none-any.whl", hash = "sha256:ce95b0705d85c99b3b27b0af0d16a17d9a81b14c96bf13c1063a1bd13d8d0446"},
-    {file = "llama_cloud-0.1.23.tar.gz", hash = "sha256:3d84a24a860f046d39a106c06742ec0ea39a574ac42bbf91706fe025f44e233e"},
+    {file = "llama_cloud-0.1.26-py3-none-any.whl", hash = "sha256:2c0b2663e619b71c0645885ef622d6443725ab37bdc6ae5fb723e097f3af9459"},
+    {file = "llama_cloud-0.1.26.tar.gz", hash = "sha256:b307f91b1ad97189b5278119ac4ad665931b65f240fb643b3e384d0a1fc81f56"},
 ]
 
 [package.dependencies]
@@ -4717,20 +4718,20 @@ pydantic = ">=1.10"
 
 [[package]]
 name = "llama-cloud-services"
-version = "0.6.30"
+version = "0.6.31"
 description = "Tailored SDK clients for LlamaCloud services."
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 markers = "extra == \"deepeval\""
 files = [
-    {file = "llama_cloud_services-0.6.30-py3-none-any.whl", hash = "sha256:4d5817a9841fc3ba3409865c52d082090f4ef827931f0e5e4a89f5818c0d4e36"},
-    {file = "llama_cloud_services-0.6.30.tar.gz", hash = "sha256:2cb5004d13127aac52888ae9b3d70f899d598633520b2a2542bb62682d08d776"},
+    {file = "llama_cloud_services-0.6.31-py3-none-any.whl", hash = "sha256:2288776734a49dff2ccfbd961f67655b2e77a2962020b722255c47ba5a283b7c"},
+    {file = "llama_cloud_services-0.6.31.tar.gz", hash = "sha256:c6b09d29ec512467ccedb921c5af1d1799abd261668ada706285941aa45587c9"},
 ]
 
 [package.dependencies]
 click = ">=8.1.7,<9.0.0"
-llama-cloud = "0.1.23"
+llama-cloud = "0.1.26"
 llama-index-core = ">=0.12.0"
 platformdirs = ">=4.3.7,<5.0.0"
 pydantic = ">=2.8,<2.10 || >2.10"
@@ -4765,19 +4766,19 @@ nltk = ">3.8.1"
 
 [[package]]
 name = "llama-index-agent-openai"
-version = "0.4.9"
+version = "0.4.10"
 description = "llama-index agent openai integration"
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 markers = "extra == \"deepeval\""
 files = [
-    {file = "llama_index_agent_openai-0.4.9-py3-none-any.whl", hash = "sha256:d696b014ef5652cdae3fe934cc2146fb05ffa978a242d432a2ae895524935c20"},
-    {file = "llama_index_agent_openai-0.4.9.tar.gz", hash = "sha256:153cc0f49dcaa0cc44795e2d3ea20efb7dd1251368c0d7704a6e26aac6611c9d"},
+    {file = "llama_index_agent_openai-0.4.10-py3-none-any.whl", hash = "sha256:a34b4f42c5af3c7edabd1e05cdb2b9be152e0fed906dcf0a687f644bcb776e9a"},
+    {file = "llama_index_agent_openai-0.4.10.tar.gz", hash = "sha256:2226c271fbd317b2ea7189802721d0bc8d58acb8005cebbe7efb16f14cac928e"},
 ]
 
 [package.dependencies]
-llama-index-core = ">=0.12.18,<0.13"
+llama-index-core = ">=0.12.41,<0.13"
 llama-index-llms-openai = ">=0.4.0,<0.5"
 openai = ">=1.14.0"
 
@@ -4857,32 +4858,32 @@ openai = ">=1.1.0"
 
 [[package]]
 name = "llama-index-indices-managed-llama-cloud"
-version = "0.7.4"
+version = "0.7.6"
 description = "llama-index indices llama-cloud integration"
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 markers = "extra == \"deepeval\""
 files = [
-    {file = "llama_index_indices_managed_llama_cloud-0.7.4-py3-none-any.whl", hash = "sha256:1d0ff874250c76615d0563409ebd887c5aac824382447054869a6be6335656bd"},
-    {file = "llama_index_indices_managed_llama_cloud-0.7.4.tar.gz", hash = "sha256:f014ba41b56d4aefe346647770734bc914a1fc8f77bf508d8eaf0e2089189ec8"},
+    {file = "llama_index_indices_managed_llama_cloud-0.7.6-py3-none-any.whl", hash = "sha256:2cab1b4bf800764d226fe24409d2b9c2aa46f9400fd04390fe51147c6f85e4e0"},
+    {file = "llama_index_indices_managed_llama_cloud-0.7.6.tar.gz", hash = "sha256:7548f4c079cf130dd72d78b6ed43f5ab1f87248808152ea67366d8e99e9d8953"},
 ]
 
 [package.dependencies]
-llama-cloud = "0.1.23"
+llama-cloud = "0.1.26"
 llama-index-core = ">=0.12.0,<0.13"
 
 [[package]]
 name = "llama-index-llms-openai"
-version = "0.4.4"
+version = "0.4.5"
 description = "llama-index llms openai integration"
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 markers = "extra == \"deepeval\""
 files = [
-    {file = "llama_index_llms_openai-0.4.4-py3-none-any.whl", hash = "sha256:b3e4505b9c7a7ef1cb02353f9e79465169f00b45f20d882773d8f206f92e8e04"},
-    {file = "llama_index_llms_openai-0.4.4.tar.gz", hash = "sha256:5d3b96e4c9886effb44489a05eb824d7277e98e56e24bfbb8656cd42c4f0aa0a"},
+    {file = "llama_index_llms_openai-0.4.5-py3-none-any.whl", hash = "sha256:4704412b298eec5f6e2c31b12a09512f8883829b5bb398ddc533329078af2af7"},
+    {file = "llama_index_llms_openai-0.4.5.tar.gz", hash = "sha256:c22dd37597826c2c2f91f45e80e2d4313499560525ace3ac7ad1a50a54a67b17"},
 ]
 
 [package.dependencies]
@@ -4984,19 +4985,19 @@ llama-parse = ">=0.5.0"
 
 [[package]]
 name = "llama-parse"
-version = "0.6.30"
+version = "0.6.31"
 description = "Parse files into RAG-Optimized formats."
 optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 markers = "extra == \"deepeval\""
 files = [
-    {file = "llama_parse-0.6.30-py3-none-any.whl", hash = "sha256:f5969510cf01c2fda9832acb32086dac781729bee5768c21ad9b444420173948"},
-    {file = "llama_parse-0.6.30.tar.gz", hash = "sha256:2506802bc7f3974c75d91444387b0ee22c3a91828cd19da0dd9ea327c9f47a79"},
+    {file = "llama_parse-0.6.31-py3-none-any.whl", hash = "sha256:dbf072ace4e7c4ad248d56d9aaddb5dd856a76faa087df6748f3f20ccef9f4fe"},
+    {file = "llama_parse-0.6.31.tar.gz", hash = "sha256:5198060b8b0ebb50eb9e699d03ab667ceeb16a405580ff0d703aabeb6e0a6e41"},
 ]
 
 [package.dependencies]
-llama-cloud-services = ">=0.6.30"
+llama-cloud-services = ">=0.6.31"
 
 [[package]]
 name = "loguru"
@@ -6573,14 +6574,14 @@ sympy = "*"
 
 [[package]]
 name = "openai"
-version = "1.85.0"
+version = "1.86.0"
 description = "The official Python library for the openai API"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "openai-1.85.0-py3-none-any.whl", hash = "sha256:7dc3e839cb8bb8747979a90c63ad4cb25a8e0cbec17b53eec009532c9965cecf"},
-    {file = "openai-1.85.0.tar.gz", hash = "sha256:6ba76e4ebc5725f71f2f6126c7cb5169ca8de60dd5aa61f350f9448ad162c913"},
+    {file = "openai-1.86.0-py3-none-any.whl", hash = "sha256:c8889c39410621fe955c230cc4c21bfe36ec887f4e60a957de05f507d7e1f349"},
+    {file = "openai-1.86.0.tar.gz", hash = "sha256:c64d5b788359a8fdf69bd605ae804ce41c1ce2e78b8dd93e2542e0ee267f1e4b"},
 ]
 
 [package.dependencies]
