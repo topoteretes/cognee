@@ -32,7 +32,9 @@ def get_cognify_router() -> APIRouter:
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for the cognitive processing of the content."""
         if not payload.datasets and not payload.dataset_ids:
-            return JSONResponse(status_code=400, content={"error": "No datasets or dataset_ids provided"})
+            return JSONResponse(
+                status_code=400, content={"error": "No datasets or dataset_ids provided"}
+            )
 
         from cognee.api.v1.cognify import cognify as cognee_cognify
 

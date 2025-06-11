@@ -1,7 +1,9 @@
 import os
+
 # from typing import Optional
 from functools import lru_cache
 from fastapi_users import models
+
 # from fastapi_users.jwt import generate_jwt
 from fastapi_users.authentication import (
     JWTStrategy,
