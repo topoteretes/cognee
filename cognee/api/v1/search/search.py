@@ -1,8 +1,8 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
-from cognee.modules.search.types import SearchType
 from cognee.modules.users.models import User
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
