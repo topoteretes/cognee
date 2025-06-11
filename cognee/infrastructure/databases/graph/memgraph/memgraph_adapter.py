@@ -66,7 +66,7 @@ class MemgraphAdapter(GraphDBInterface):
         auth = None
         if graph_database_username and graph_database_password:
             auth = (graph_database_username, graph_database_password)
-        
+
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth=auth,
