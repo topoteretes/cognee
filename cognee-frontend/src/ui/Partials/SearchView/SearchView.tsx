@@ -3,7 +3,7 @@
 import { v4 } from 'uuid';
 import classNames from 'classnames';
 import { useCallback, useEffect, useState } from 'react';
-import { CTAButton, Stack, Text, DropdownSelect, TextArea, useBoolean } from 'ohmy-ui';
+import { CTAButton, Stack, Text, DropdownSelect, TextArea, useBoolean, Input } from 'ohmy-ui';
 import { fetch } from '@/utils';
 import styles from './SearchView.module.css';
 import getHistory from '@/modules/chat/getHistory';
@@ -33,8 +33,15 @@ export default function SearchView() {
   }, {
     value: 'RAG_COMPLETION',
     label: 'Completion using RAG',
+  }, {
+    value: 'GRAPH_COMPLETION_COT',
+    label: 'Cognee\'s Chain of Thought search',
+  }, {
+    value: 'GRAPH_COMPLETION_CONTEXT_EXTENSION',
+    label: 'Cognee\'s Multi-Hop search',
   }];
   const [searchType, setSearchType] = useState(searchOptions[0]);
+  const [rangeValue, setRangeValue] = useState(10);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -90,6 +97,7 @@ export default function SearchView() {
       body: JSON.stringify({
         query: inputValue.trim(),
         searchType: searchTypeValue,
+        topK: rangeValue,
       }),
     })
       .then((response) => response.json())
@@ -108,7 +116,7 @@ export default function SearchView() {
       .catch(() => {
         setInputValue(inputValue);
       });
-  }, [inputValue, scrollToBottom, searchType.value]);
+  }, [inputValue, rangeValue, scrollToBottom, searchType.value]);
 
   const {
     value: isInputExpanded,
@@ -120,6 +128,10 @@ export default function SearchView() {
     if (event.key === 'Enter' && !event.shiftKey) {
       handleSearchSubmit(event as unknown as React.FormEvent<HTMLFormElement>);
     }
+  };
+
+  const handleRangeValueChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRangeValue(parseInt(event.target.value));
   };
 
   return (
@@ -146,9 +158,15 @@ export default function SearchView() {
         </Stack>
       </div>
       <form onSubmit={handleSearchSubmit}>
-        <Stack orientation="horizontal" align="end/" gap="2">
+        <Stack orientation="vertical" gap="2">
           <TextArea onKeyUp={handleSubmitOnEnter} style={{ transition: 'height 0.3s ease', height: isInputExpanded ? '128px' : '38px' }} onFocus={expandInput} onBlur={contractInput} value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
-          <CTAButton hugContent type="submit">Search</CTAButton>
+          <Stack orientation="horizontal" gap="between">
+            <Stack orientation="horizontal" gap="2" align="center">
+              <label><Text>Search range: </Text></label>
+              <Input style={{ maxWidth: "90px" }} value={rangeValue} onChange={handleRangeValueChange} type="number" />
+            </Stack>
+            <CTAButton hugContent type="submit">Search</CTAButton>
+          </Stack>
         </Stack>
       </form>
     </Stack>
