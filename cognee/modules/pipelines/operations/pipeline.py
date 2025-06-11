@@ -7,7 +7,6 @@ from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.modules.data.models import Data, Dataset, FileProcessingStatus
-from cognee.modules.data.methods.update_data_processing_status import update_data_processing_status
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status

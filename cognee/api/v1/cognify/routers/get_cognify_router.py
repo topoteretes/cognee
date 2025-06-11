@@ -12,7 +12,6 @@ class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
     graph_model: Optional[BaseModel] = KnowledgeGraph
 
-
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
