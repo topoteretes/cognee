@@ -239,9 +239,11 @@ def setup_logging(log_level=None, name=None):
 
         logger = structlog.get_logger()
         logger.error(
-            "Uncaught exception",
+            "Exception",
             exc_info=(exc_type, exc_value, traceback),
         )
+        # Hand back to the original hook → prints traceback and exits
+        sys.__excepthook__(exc_type, exc_value, traceback)
 
     # Install exception handlers
     sys.excepthook = handle_exception
