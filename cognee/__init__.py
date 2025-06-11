@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from cognee.version import get_cognee_version
 
 # NOTE: __version__ extraction must be at the top of the __init__.py otherwise
@@ -6,7 +7,8 @@ __version__ = get_cognee_version()
 
 # NOTE: Log level can be set with the LOG_LEVEL env variable
 from cognee.shared.logging_utils import setup_logging
-logger = setup_logging() 
+
+logger = setup_logging()
 
 from .api.v1.add import add
 from .api.v1.delete import delete
