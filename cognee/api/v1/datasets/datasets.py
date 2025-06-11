@@ -2,6 +2,7 @@ from uuid import UUID
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.data.models import FileProcessingStatus
 
 
 class datasets:
@@ -17,14 +18,40 @@ class datasets:
         return list(discover_directory_datasets(directory_path).keys())
 
     @staticmethod
-    async def list_data(dataset_id: str):
+    async def list_data(
+        dataset_id: str, statuses: list[FileProcessingStatus] | None = None
+    ):
         from cognee.modules.data.methods import get_dataset, get_dataset_data
 
         user = await get_default_user()
 
         dataset = await get_dataset(user.id, dataset_id)
 
-        return await get_dataset_data(dataset.id)
+        return await get_dataset_data(dataset.id, statuses=statuses)
+
+    @staticmethod
+    async def get_file_status(dataset_id: str, data_id: str):
+        from cognee.modules.data.methods import (
+            get_dataset,
+            get_data_processing_status,
+        )
+
+        user = await get_default_user()
+        await get_dataset(user.id, dataset_id)
+
+        return await get_data_processing_status(UUID(data_id))
+
+    @staticmethod
+    async def reset_file_status(dataset_id: str, data_id: str):
+        from cognee.modules.data.methods import (
+            get_dataset,
+            reset_data_processing_status,
+        )
+
+        user = await get_default_user()
+        await get_dataset(user.id, dataset_id)
+
+        await reset_data_processing_status(UUID(data_id))
 
     @staticmethod
     async def get_status(dataset_ids: list[UUID]) -> dict:

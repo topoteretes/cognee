@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.data.models import FileProcessingStatus
 
 logger = get_logger()
 
@@ -37,6 +38,7 @@ class DataDTO(OutDTO):
     extension: str
     mime_type: str
     raw_data_location: str
+    processing_status: FileProcessingStatus
 
 
 def get_datasets_router() -> APIRouter:
@@ -119,7 +121,11 @@ def get_datasets_router() -> APIRouter:
         response_model=list[DataDTO],
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def get_dataset_data(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def get_dataset_data(
+        dataset_id: UUID, 
+        user: User = Depends(get_authenticated_user),
+        statuses: Annotated[List[FileProcessingStatus] | None, Query(alias="status")] = None,
+        ):
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 
         dataset = await get_dataset(user.id, dataset_id)
@@ -130,7 +136,7 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
             )
 
-        dataset_data = await get_dataset_data(dataset_id=dataset.id)
+        dataset_data = await get_dataset_data(dataset_id=dataset.id, statuses=statuses)
 
         if dataset_data is None:
             return []
@@ -186,5 +192,44 @@ def get_datasets_router() -> APIRouter:
             )
 
         return data.raw_data_location
+
+    @router.get("/{dataset_id}/data/{data_id}/status", response_model=FileProcessingStatus)
+    async def get_file_status(
+        dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        from cognee.modules.data.methods import get_dataset, get_data_processing_status
+
+        dataset = await get_dataset(user.id, dataset_id)
+
+        if dataset is None:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"Dataset ({dataset_id}) not found."},
+            )
+
+        try:
+            return await get_data_processing_status(data_id)
+        except ValueError as error:
+            raise EntityNotFoundError(message=str(error))
+
+    @router.post("/{dataset_id}/data/{data_id}/reset", response_model=None)
+    async def reset_file_status(
+        dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        from cognee.modules.data.methods import get_dataset, reset_data_processing_status
+
+        dataset = await get_dataset(user.id, dataset_id)
+
+        if dataset is None:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"Dataset ({dataset_id}) not found."},
+            )
+
+        try:
+            await reset_data_processing_status(data_id)
+            return JSONResponse(status_code=200, content={"message": "status reset"})
+        except ValueError as error:
+            raise EntityNotFoundError(message=str(error))
 
     return router
