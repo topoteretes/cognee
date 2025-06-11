@@ -18,6 +18,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.data.models import FileProcessingStatus
 
 logger = get_logger("cognify")
 
@@ -31,11 +32,16 @@ async def cognify(
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    file_processing_status: list[FileProcessingStatus] | None = None,
 ):
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
     return await cognee_pipeline(
-        tasks=tasks, datasets=datasets, user=user, pipeline_name="cognify_pipeline"
+        tasks=tasks, 
+        datasets=datasets, 
+        user=user, 
+        pipeline_name="cognify_pipeline", 
+        file_processing_status=file_processing_status
     )
 
 
