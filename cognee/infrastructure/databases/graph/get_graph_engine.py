@@ -86,15 +86,16 @@ def create_graph_engine(
         )
 
     if graph_database_provider == "neo4j":
-        if not (graph_database_url and graph_database_username and graph_database_password):
-            raise EnvironmentError("Missing required Neo4j credentials.")
+        # Make credentials optional - only validate URL is present
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Neo4j URL.")
 
         from .neo4j_driver.adapter import Neo4jAdapter
 
         return Neo4jAdapter(
             graph_database_url=graph_database_url,
-            graph_database_username=graph_database_username,
-            graph_database_password=graph_database_password,
+            graph_database_username=graph_database_username or "",
+            graph_database_password=graph_database_password or "",
         )
 
     elif graph_database_provider == "falkordb":
@@ -121,15 +122,16 @@ def create_graph_engine(
         return KuzuAdapter(db_path=graph_file_path)
 
     elif graph_database_provider == "memgraph":
-        if not (graph_database_url and graph_database_username and graph_database_password):
-            raise EnvironmentError("Missing required Memgraph credentials.")
+        # Make credentials optional - only validate URL is present
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Memgraph URL.")
 
         from .memgraph.memgraph_adapter import MemgraphAdapter
 
         return MemgraphAdapter(
             graph_database_url=graph_database_url,
-            graph_database_username=graph_database_username,
-            graph_database_password=graph_database_password,
+            graph_database_username=graph_database_username or "",
+            graph_database_password=graph_database_password or "",
         )
 
     from .networkx.adapter import NetworkXAdapter
