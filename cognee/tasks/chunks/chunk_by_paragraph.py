@@ -10,14 +10,23 @@ def chunk_by_paragraph(
     batch_paragraphs: bool = True,
 ) -> Iterator[Dict[str, Any]]:
     """
-    Chunks text by paragraph while preserving exact text reconstruction capability.
-    When chunks are joined with empty string "", they reproduce the original text exactly.
+    Chunk the input text by paragraph while enabling exact text reconstruction.
 
-    Notes:
-        - Tokenization is handled using our tokenization adapters, ensuring compatibility with the vector engine's embedding model.
-        - If `batch_paragraphs` is False, each paragraph will be yielded as a separate chunk.
-        - Handles cases where paragraphs exceed the specified token or word limits by splitting them as needed.
-        - Remaining text at the end of the input will be yielded as a final chunk.
+    This function divides the given text data into smaller chunks based on the specified
+    maximum chunk size. It ensures that when the generated chunks are concatenated, they
+    reproduce the original text accurately. The tokenization process is handled by adapters
+    compatible with the vector engine's embedding model, and the function can operate in
+    either batch mode or paragraph mode, based on the `batch_paragraphs` flag.
+
+    Parameters:
+    -----------
+
+        - data (str): The input text to be chunked.
+        - max_chunk_size: The maximum allowed size for each chunk, in terms of tokens or
+          words.
+        - batch_paragraphs (bool): Flag indicating whether to yield each paragraph as a
+          separate chunk. If set to False, individual paragraphs are yielded as they are
+          processed. (default True)
     """
     current_chunk = ""
     chunk_index = 0

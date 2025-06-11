@@ -1,6 +1,7 @@
 """FastAPI server for the Cognee API."""
 
 import os
+
 import uvicorn
 import sentry_sdk
 from traceback import format_exc
@@ -12,7 +13,8 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 
-from cognee.shared.logging_utils import get_logger
+from cognee.exceptions import CogneeApiError
+from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -22,7 +24,6 @@ from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.crewai.routers import get_crewai_router
-from cognee.exceptions import CogneeApiError
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -197,4 +199,5 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
+    logger = setup_logging()
     start_api_server()

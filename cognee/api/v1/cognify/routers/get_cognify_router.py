@@ -1,18 +1,17 @@
 import asyncio
 from uuid import UUID
+from typing import List, Optional
 from pydantic import BaseModel
 from typing import List, Optional
-from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
+from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 
-from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
-from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunInfo
+from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     get_from_queue,
     initialize_queue,
@@ -22,6 +21,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
 
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
+    dataset_ids: Optional[List[UUID]] = None
     graph_model: Optional[BaseModel] = KnowledgeGraph
 
 
@@ -34,8 +34,10 @@ def get_cognify_router() -> APIRouter:
         from cognee.api.v1.cognify import cognify as cognee_cognify
 
         try:
+            datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
+
             cognify_run = await cognee_cognify(
-                payload.datasets, user, payload.graph_model, run_in_background=True
+                datasets, user, payload.graph_model, run_in_background=True
             )
 
             return cognify_run.model_dump()

@@ -62,26 +62,32 @@ class CogneeGraph(CogneeAbstractGraph):
         edge_dimension=1,
         memory_fragment_filter=[],
         node_type: Optional[Type] = None,
-        node_name: List[Optional[str]] = None,
+        node_name: Optional[List[str]] = None,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidValueError(message="Dimensions must be positive integers")
-
         try:
             if node_type is not None and node_name is not None:
                 nodes_data, edges_data = await adapter.get_nodeset_subgraph(
                     node_type=node_type, node_name=node_name
                 )
+                if not nodes_data or not edges_data:
+                    raise EntityNotFoundError(
+                        message="Nodeset does not exist, or empty nodetes projected from the database."
+                    )
             elif len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await adapter.get_graph_data()
+                if not nodes_data or not edges_data:
+                    raise EntityNotFoundError(message="Empty graph projected from the database.")
             else:
                 nodes_data, edges_data = await adapter.get_filtered_graph_data(
                     attribute_filters=memory_fragment_filter
                 )
 
-            if not nodes_data or not edges_data:
-                logger.warning("Empty projected graph.")
-                return None
+                if not nodes_data or not edges_data:
+                    raise EntityNotFoundError(
+                        message="Empty filtered graph projected from the database."
+                    )
 
             for node_id, properties in nodes_data:
                 node_attributes = {key: properties.get(key) for key in node_properties_to_project}
