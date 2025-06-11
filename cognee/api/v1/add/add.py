@@ -21,7 +21,9 @@ async def add(
         Task(ingest_data, dataset_name, user, node_set, dataset_id),
     ]
 
-    await cognee_pipeline(
+    pipeline_run_info = None
+
+    async for run_info in cognee_pipeline(
         tasks=tasks,
         datasets=dataset_id if dataset_id else dataset_name,
         data=data,
@@ -29,4 +31,7 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-    )
+    ):
+        pipeline_run_info = run_info
+
+    return pipeline_run_info

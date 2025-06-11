@@ -15,23 +15,16 @@
   --textarea-default-color: #0D051C !important;
 }
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
 html,
 body {
+  height: 100%;
   max-width: 100vw;
   overflow-x: hidden;
-}
-
-body {
-  background: var(--global-background-default);
 }
 
 a {
   color: inherit;
   text-decoration: none;
 }
+
+@import "tailwindcss";

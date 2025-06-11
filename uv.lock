@@ -919,6 +919,7 @@ api = [
     { name = "gunicorn" },
     { name = "kuzu" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 chromadb = [
     { name = "chromadb" },
@@ -1118,6 +1119,7 @@ requires-dist = [
     { name = "unstructured", extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "extra == 'docs'", specifier = ">=0.16.13,<18" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = "==0.34.0" },
     { name = "weaviate-client", marker = "extra == 'weaviate'", specifier = "==4.9.6" },
+    { name = "websockets", marker = "extra == 'api'", specifier = ">=15.0.1" },
 ]
 
 [[package]]

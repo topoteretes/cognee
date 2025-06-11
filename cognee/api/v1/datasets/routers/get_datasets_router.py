@@ -39,6 +39,23 @@ class DataDTO(OutDTO):
     raw_data_location: str
 
 
+class GraphNodeDTO(OutDTO):
+    id: UUID
+    label: str
+    properties: dict
+
+
+class GraphEdgeDTO(OutDTO):
+    source: UUID
+    target: UUID
+    label: str
+
+
+class GraphDTO(OutDTO):
+    nodes: List[GraphNodeDTO]
+    edges: List[GraphEdgeDTO]
+
+
 def get_datasets_router() -> APIRouter:
     router = APIRouter()
 
@@ -94,24 +111,46 @@ def get_datasets_router() -> APIRouter:
 
         await delete_data(data)
 
-    @router.get("/{dataset_id}/graph", response_model=str)
+    @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        from cognee.shared.utils import render_graph
         from cognee.infrastructure.databases.graph import get_graph_engine
 
         try:
             graph_client = await get_graph_engine()
-            graph_url = await render_graph(graph_client.graph)
+            (nodes, edges) = await graph_client.get_graph_data()
 
             return JSONResponse(
                 status_code=200,
-                content=str(graph_url),
+                content={
+                    "nodes": list(
+                        map(
+                            lambda node: {
+                                "id": str(node[0]),
+                                "label": node[1]["name"]
+                                if hasattr(node[1], "name")
+                                else f"{node[1]['type']}_{str(node[0])}",
+                                "properties": {},
+                            },
+                            nodes,
+                        )
+                    ),
+                    "edges": list(
+                        map(
+                            lambda edge: {
+                                "source": str(edge[0]),
+                                "target": str(edge[1]),
+                                "label": edge[2],
+                            },
+                            edges,
+                        )
+                    ),
+                },
             )
         except Exception as error:
             print(error)
             return JSONResponse(
                 status_code=409,
-                content="Graphistry credentials are not set. Please set them in your .env file.",
+                content="Error retrieving dataset graph data.",
             )
 
     @router.get(
