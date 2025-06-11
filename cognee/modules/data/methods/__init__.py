@@ -12,3 +12,6 @@ from .get_unique_dataset_id import get_unique_dataset_id
 # Delete
 from .delete_dataset import delete_dataset
 from .delete_data import delete_data
+
+# Update
+from .update_data_processing_status import update_data_processing_status

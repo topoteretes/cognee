@@ -6,7 +6,8 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
-from cognee.modules.data.models import Data, Dataset
+from cognee.modules.data.models import Data, Dataset, FileProcessingStatus
+from cognee.modules.data.methods.update_data_processing_status import update_data_processing_status
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
@@ -33,7 +34,56 @@ async def cognee_pipeline(
     datasets: Union[str, list[str]] = None,
     user: User = None,
     pipeline_name: str = "custom_pipeline",
+    file_processing_status: list[FileProcessingStatus] | None = None,
 ):
+    """
+    Orchestrates the execution of a pipeline for processing datasets and data.
+
+    This function initializes necessary databases, validates configurations, 
+    and executes a series of tasks on the provided datasets and data. It handles 
+    both existing and new datasets.
+
+    Args:
+        tasks (list[Task]): 
+            A list of Task objects defining the operations to be performed in the pipeline.
+        data (optional): 
+            Data to be processed in the pipeline. If not provided, data is fetched 
+            from the database based on the dataset.
+        datasets (Union[str, list[str]], optional): 
+            A string or list of dataset names/IDs to be processed. If not provided, 
+            all datasets associated with the user are used.
+        user (User, optional): 
+            The user initiating the pipeline. If not provided, the default user is fetched.
+        pipeline_name (str, optional): 
+            The name of the pipeline being executed. Defaults to "custom_pipeline".
+        file_processing_status (list[FileProcessingStatus], optional):
+            A list of file processing statuses to filter the data. If not provided,
+            all data points in the dataset are processed.
+
+    Returns:
+        list: 
+            A list of results from the pipeline execution for each dataset.
+
+    Raises:
+        ValueError: 
+            If tasks are not provided as a list or if any task is not an instance of Task.
+
+    Notes:
+        - On the first run, the function tests LLM and embedding service connections.
+        - If a dataset does not exist in the database, it is created automatically.
+        - The function uses asyncio.gather to execute pipelines for multiple datasets concurrently.
+
+    Example:
+        ```python
+        results = await cognee_pipeline(
+            tasks=[task1, task2],
+            datasets=["dataset1", "dataset2"],
+            user=current_user,
+            pipeline_name="example_pipeline",
+            file_processing_status=[FileProcessingStatus.UNPROCESSED, FileProcessingStatus.ERROR]
+        )
+        ```
+    """
     # Create tables for databases
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
@@ -96,7 +146,12 @@ async def cognee_pipeline(
     for dataset in datasets:
         awaitables.append(
             run_pipeline(
-                dataset=dataset, user=user, tasks=tasks, data=data, pipeline_name=pipeline_name
+                dataset=dataset, 
+                user=user, 
+                tasks=tasks, 
+                data=data, 
+                pipeline_name=pipeline_name, 
+                file_processing_status=file_processing_status
             )
         )
 
@@ -109,6 +164,7 @@ async def run_pipeline(
     tasks: list[Task],
     data=None,
     pipeline_name: str = "custom_pipeline",
+    file_processing_status: list[FileProcessingStatus] | None = None,
 ):
     check_dataset_name(dataset.name)
 
@@ -135,7 +191,10 @@ async def run_pipeline(
     dataset_id = dataset.id
 
     if not data:
-        data: list[Data] = await get_dataset_data(dataset_id=dataset_id)
+        data: list[Data] = await get_dataset_data(
+            dataset_id=dataset_id,
+            statuses=file_processing_status,
+        )
 
     # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
     if isinstance(dataset, Dataset):

@@ -9,13 +9,15 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_error,
 )
 from cognee.modules.settings import get_current_settings
-from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from uuid import uuid5, NAMESPACE_OID
 
 from .run_tasks_base import run_tasks_base
 from ..tasks.task import Task
+
+from cognee.modules.data.methods.update_data_processing_status import update_data_processing_status
+from cognee.modules.data.models import FileProcessingStatus
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
@@ -38,8 +40,25 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        async for result in run_tasks_base(tasks, data, user, context):
-            yield result
+        for item in data:
+            await update_data_processing_status(item.id, FileProcessingStatus.PROCESSING)
+
+            try:
+                async for result in run_tasks_base(tasks, [item], user, context):
+                    yield result
+
+                await update_data_processing_status(item.id, FileProcessingStatus.PROCESSED)
+
+            except Exception as error:
+                await update_data_processing_status(item.id, FileProcessingStatus.ERROR)
+                logger.error(
+                    "Error processing data point `%s` in pipeline `%s`: %s",
+                    item.id,
+                    pipeline_name,
+                    str(error),
+                    exc_info=True,
+                )
+                raise error
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
         send_telemetry(
