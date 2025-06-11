@@ -11,7 +11,7 @@ from cognee.shared.data_models import KnowledgeGraph
 
 class CognifyPayloadDTO(BaseModel):
     datasets: List[str]
-    dataset_ids: Optional[List[UUID]]
+    dataset_ids: Optional[List[UUID]] = None
     graph_model: Optional[BaseModel] = KnowledgeGraph
 
 
