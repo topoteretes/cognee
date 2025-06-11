@@ -5,6 +5,11 @@ from cognee.version import get_cognee_version
 #       there will be circular import issues
 __version__ = get_cognee_version()
 
+# Load environment variable settings has to be before setting up logging for LOG_LEVEL value
+import dotenv
+
+dotenv.load_dotenv(override=True)
+
 # NOTE: Log level can be set with the LOG_LEVEL env variable
 from cognee.shared.logging_utils import setup_logging
 
@@ -24,7 +29,3 @@ from cognee.modules.visualization.cognee_network_visualization import (
 
 # Pipelines
 from .modules import pipelines
-
-import dotenv
-
-dotenv.load_dotenv(override=True)
