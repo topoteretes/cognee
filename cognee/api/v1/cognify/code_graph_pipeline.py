@@ -43,7 +43,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     tasks = [
         Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
-        Task(add_data_points, task_config={"batch_size": 500}),
+        Task(add_data_points, task_config={"batch_size": 30}),
     ]
 
     if include_docs:

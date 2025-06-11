@@ -28,6 +28,7 @@
 
 <a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
+<a href="https://trendshift.io/repositories/13955" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13955" alt="topoteretes%2Fcognee | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 
 Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
@@ -37,11 +38,15 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   <p align="center">
   🌐 Available Languages
   :
-  <a href="assets/community/README.pt.md">🇵🇹 Português</a>
-  ·
-  <a href="assets/community/README.zh.md">🇨🇳 [中文]</a>
-  ·
-  <a href="assets/community/README.ru.md">🇷🇺 Русский</a>
+  <!-- Keep these links. Translations will automatically update with the README. -->
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">français</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
   </p>
 
 
@@ -61,7 +66,6 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 ## Get Started
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
-
 
 
 ## Contributing
