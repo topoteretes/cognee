@@ -73,7 +73,7 @@ function useDatasets() {
   }, []);
 
   const fetchDatasets = useCallback(() => {
-    fetch('/v1/datasets', {
+    return fetch('/v1/datasets', {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('access_token')}`,
       },
@@ -84,9 +84,9 @@ function useDatasets() {
 
         if (datasets.length > 0) {
           checkDatasetStatuses(datasets);
-        } else {
-          window.location.href = '/wizard';
         }
+
+        return datasets;
       })
       .catch((error) => {
         console.error('Error fetching datasets:', error);

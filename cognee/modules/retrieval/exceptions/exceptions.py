@@ -24,3 +24,13 @@ class CypherSearchError(CogneeApiError):
 
 class NoDataError(CriticalError):
     message: str = "No data found in the system, please add data first."
+
+
+class CollectionDistancesNotFoundError(CogneeApiError):
+    def __init__(
+        self,
+        message: str = "No collection distances found for the given query.",
+        name: str = "CollectionDistancesNotFoundError",
+        status_code: int = status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)

@@ -1,29 +1,24 @@
-import { Spacer, Stack, Text } from 'ohmy-ui';
-import { TextLogo } from '@/ui/App';
-import Footer from '@/ui/Partials/Footer/Footer';
-
-import styles from './AuthPage.module.css';
-import { Divider } from '@/ui/Layout';
-import SignInForm from '@/ui/Partials/SignInForm/SignInForm';
+import { TextLogo } from "@/ui/App";
+import { Divider } from "@/ui/Layout";
+import Footer from "@/ui/Partials/Footer/Footer";
+import SignInForm from "@/ui/Partials/SignInForm/SignInForm";
 
 export default function AuthPage() {
   return (
-    <main className={styles.main}>
-      <Spacer inset vertical="2" horizontal="2">
-        <Stack orientation="horizontal" gap="between" align="center">
-          <TextLogo width={158} height={44} color="white" />
-        </Stack>
-      </Spacer>
-      <Divider />
-      <div className={styles.authContainer}>
-        <Stack gap="4" style={{ width: '100%' }}>
-          <h1><Text size="large">Sign in</Text></h1>
-          <SignInForm />
-        </Stack>
+    <main className="flex flex-col h-full">
+      <div className="pt-6 pr-3 pb-3 pl-6">
+        <TextLogo width={86} height={24} />
       </div>
-      <Spacer inset horizontal="3" wrap>
+      <Divider />
+      <div className="w-full max-w-md pt-12 pb-6 m-auto">
+        <div className="flex flex-col w-full gap-8">
+          <h1><span className="text-xl">Sign in</span></h1>
+          <SignInForm />
+        </div>
+      </div>
+      <div className="pl-6 pr-6">
         <Footer />
-      </Spacer>
+      </div>
     </main>
   )
 }

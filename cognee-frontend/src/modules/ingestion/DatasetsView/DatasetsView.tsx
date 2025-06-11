@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Explorer } from '@/ui/Partials';
-import StatusIcon from './StatusIcon';
+import StatusIcon from '@/ui/elements/StatusIndicator';
 import { LoadingIndicator } from '@/ui/App';
 import { DropdownMenu, GhostButton, Stack, Text, CTAButton, useBoolean, Modal, Spacer } from "ohmy-ui";
 import styles from "./DatasetsView.module.css";

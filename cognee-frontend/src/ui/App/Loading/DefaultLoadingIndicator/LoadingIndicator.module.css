@@ -1,9 +1,9 @@
 
 .loadingIndicator {
-  width: 16px;
-  height: 16px;
+  width: 1rem;
+  height: 1rem;
   border-radius: 50%;
-  border: 2px solid var(--global-color-primary);
+  border: 0.18rem solid white;
   border-top-color: transparent;
   border-bottom-color: transparent;
   animation: spin 2s linear infinite;

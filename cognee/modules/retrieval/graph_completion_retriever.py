@@ -8,6 +8,9 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class GraphCompletionRetriever(BaseRetriever):
@@ -133,6 +136,7 @@ class GraphCompletionRetriever(BaseRetriever):
         triplets = await self.get_triplets(query)
 
         if len(triplets) == 0:
+            logger.warning("Empty context was provided to the completion")
             return ""
 
         return await self.resolve_edges_to_text(triplets)
