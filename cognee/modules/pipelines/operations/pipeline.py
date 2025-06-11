@@ -72,17 +72,6 @@ async def cognee_pipeline(
         - On the first run, the function tests LLM and embedding service connections.
         - If a dataset does not exist in the database, it is created automatically.
         - The function uses asyncio.gather to execute pipelines for multiple datasets concurrently.
-
-    Example:
-        ```python
-        results = await cognee_pipeline(
-            tasks=[task1, task2],
-            datasets=["dataset1", "dataset2"],
-            user=current_user,
-            pipeline_name="example_pipeline",
-            file_processing_status=[FileProcessingStatus.UNPROCESSED, FileProcessingStatus.ERROR]
-        )
-        ```
     """
     # Create tables for databases
     await create_relational_db_and_tables()
@@ -166,6 +155,46 @@ async def run_pipeline(
     pipeline_name: str = "custom_pipeline",
     file_processing_status: list[FileProcessingStatus] | None = None,
 ):
+    """
+    Executes a pipeline for a specific dataset and user.
+
+    This function validates the dataset, retrieves data points, and executes 
+    a series of tasks on the data. It ensures that the pipeline is not executed 
+    multiple times for the same dataset if it is already being processed or completed.
+
+    Args:
+        dataset (Dataset): 
+            The dataset object on which the pipeline will be executed.
+        user (User): 
+            The user initiating the pipeline.
+        tasks (list[Task]): 
+            A list of Task objects defining the operations to be performed in the pipeline.
+        data (optional): 
+            Data to be processed in the pipeline. If not provided, data is fetched 
+            from the database based on the dataset and file processing statuses.
+        pipeline_name (str, optional): 
+            The name of the pipeline being executed. Defaults to "custom_pipeline".
+        file_processing_status (list[FileProcessingStatus], optional): 
+            A list of file processing statuses to filter the data. If not provided, 
+            all data points in the dataset are processed.
+
+    Returns:
+        PipelineRunStatus: 
+            The final status of the pipeline execution.
+
+    Raises:
+        ValueError: 
+            If tasks are not provided as a list or if any task is not an instance of Task.
+
+    Notes:
+        - The function checks the pipeline status to ensure that it is not executed 
+          multiple times for the same dataset.
+        - If no data is provided, it fetches data points from the database based on 
+          the dataset ID and file processing statuses.
+        - The function iterates over the results of the `run_tasks` generator and 
+          returns the final status of the pipeline.
+    """
+
     check_dataset_name(dataset.name)
 
     # Ugly hack, but no easier way to do this.

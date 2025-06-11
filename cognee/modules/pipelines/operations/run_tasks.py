@@ -25,6 +25,36 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 async def run_tasks_with_telemetry(
     tasks: list[Task], data, user: User, pipeline_name: str, context: dict = None
 ):
+    """
+    Executes tasks for a pipeline with telemetry and status tracking.
+
+    This function processes each data point individually, updating its processing 
+    status before and after execution. It also sends telemetry events to track 
+    the pipeline's progress and logs any errors encountered during execution.
+
+    Args:
+        tasks (list[Task]): 
+            A list of Task objects defining the operations to be performed on each data point.
+        data: 
+            A collection of data points to be processed by the tasks.
+        user (User): 
+            The user initiating the pipeline.
+        pipeline_name (str): 
+            The name of the pipeline being executed.
+        context (dict, optional): 
+            Additional context or metadata to be passed to the tasks. Defaults to None.
+
+    Yields:
+        Any: 
+            Results yielded by the `run_tasks_base` function for each data point.
+
+    Raises:
+        Exception: 
+            If an error occurs during the execution of tasks for a data point, 
+            the error is logged, the data point's status is updated to `ERROR`, 
+            and the exception is re-raised.
+    """
+
     config = get_current_settings()
 
     logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
