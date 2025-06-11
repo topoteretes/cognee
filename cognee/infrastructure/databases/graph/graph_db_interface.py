@@ -378,6 +378,3 @@ class GraphDBInterface(ABC):
             - node_id (str): Unique identifier of the node for which to retrieve connections.
         """
         raise NotImplementedError
-
-    async def get_nodeset_subgraph(self, node_type, node_name):
-        pass
