@@ -6,7 +6,7 @@ __version__ = get_cognee_version()
 
 # NOTE: Log level can be set with the LOG_LEVEL env variable
 from cognee.shared.logging_utils import setup_logging
-logger = setup_logging() # noqa
+logger = setup_logging() 
 
 from .api.v1.add import add
 from .api.v1.delete import delete
