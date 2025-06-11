@@ -31,7 +31,7 @@ def upgrade() -> None:
 
     # Update existing records to set processing_status based on token_count
     # Assuming token_count >= 0 means the file has been processed
-    op.execute(sa.text("UPDATE data SET processing_status='PROCESSED' WHERE token_count >= 0"))
+    op.execute(sa.text("UPDATE data SET processing_status='processed' WHERE token_count >= 0"))
 
     op.create_index(op.f('ix_data_processing_status'), 'data', ['processing_status'], unique=False)
 
