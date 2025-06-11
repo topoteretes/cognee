@@ -1,29 +1,40 @@
-import { Spacer, Stack, Text } from 'ohmy-ui';
-import { TextLogo } from '@/ui/App';
-import Footer from '@/ui/Partials/Footer/Footer';
+import Link from "next/link";
 
-import styles from './AuthPage.module.css';
-import { Divider } from '@/ui/Layout';
-import SignInForm from '@/ui/Partials/SignInForm/SignInForm';
+import { auth0 } from "@/modules/auth/auth0";
 
-export default function AuthPage() {
+import { CTAButton } from "@/ui/elements";
+
+
+export default async function AuthPage() {
+  const session = await auth0.getSession();
+
   return (
-    <main className={styles.main}>
-      <Spacer inset vertical="2" horizontal="2">
-        <Stack orientation="horizontal" gap="between" align="center">
-          <TextLogo width={158} height={44} color="white" />
-        </Stack>
-      </Spacer>
-      <Divider />
-      <div className={styles.authContainer}>
-        <Stack gap="4" style={{ width: '100%' }}>
-          <h1><Text size="large">Sign in</Text></h1>
-          <SignInForm />
-        </Stack>
+  <div className="flex flex-col m-auto max-w-md  h-full gap-8 pb-12 pt-6">
+    <h1><span className="text-xl">Welcome to cognee</span></h1>
+    {session ? (
+      <div className="flex flex-col gap-8">
+        <span className="text-lg">Hello, {session.user.name}!</span>
+        <Link href="/auth/logout">
+          <CTAButton>
+            Log out
+          </CTAButton>
+        </Link>
       </div>
-      <Spacer inset horizontal="3" wrap>
-        <Footer />
-      </Spacer>
-    </main>
+    ) : (
+      <div className="flex flex-row h-full gap-8">
+        <Link href="/auth/login?screen_hint=signup">
+          <CTAButton>
+            Sign up
+          </CTAButton>
+        </Link>
+
+        <Link href="/auth/login">
+          <CTAButton>
+            Log in
+          </CTAButton>
+        </Link>
+      </div>
+    )}
+  </div>
   )
 }

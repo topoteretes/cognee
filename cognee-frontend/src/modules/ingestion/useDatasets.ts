@@ -17,11 +17,6 @@ function useDatasets() {
   const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
     fetch(
       `/v1/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`,
-      {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      },
     )
       .then((response) => response.json())
       .then((statuses) => setDatasets(
@@ -42,7 +37,7 @@ function useDatasets() {
 
     statusTimeout.current = setTimeout(() => {
       checkDatasetStatuses(datasets);
-    }, 5000);
+    }, 50000);
   }, [fetchDatasetStatuses]);
   
   useEffect(() => {
@@ -73,20 +68,16 @@ function useDatasets() {
   }, []);
 
   const fetchDatasets = useCallback(() => {
-    fetch('/v1/datasets', {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-      },
-    })
+    return fetch('/v1/datasets')
       .then((response) => response.json())
       .then((datasets) => {
         setDatasets(datasets);
 
         if (datasets.length > 0) {
           checkDatasetStatuses(datasets);
-        } else {
-          window.location.href = '/wizard';
         }
+
+        return datasets;
       })
       .catch((error) => {
         console.error('Error fetching datasets:', error);

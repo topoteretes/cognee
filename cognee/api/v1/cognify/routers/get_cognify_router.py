@@ -4,14 +4,15 @@ from pydantic import BaseModel
 from fastapi import Depends
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from cognee.api.DTO import InDTO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.data_models import KnowledgeGraph
 
 
-class CognifyPayloadDTO(BaseModel):
-    datasets: List[str]
-    dataset_ids: Optional[List[UUID]]
+class CognifyPayloadDTO(InDTO):
+    datasets: Optional[List[str]] = []
+    dataset_ids: Optional[List[UUID]] = []
     graph_model: Optional[BaseModel] = KnowledgeGraph
 
 
@@ -21,6 +22,9 @@ def get_cognify_router() -> APIRouter:
     @router.post("/", response_model=None)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for the cognitive processing of the content."""
+        if not payload.datasets and not payload.dataset_ids:
+            return JSONResponse(status_code=400, content={"error": "No datasets or dataset_ids provided"})
+
         from cognee.api.v1.cognify import cognify as cognee_cognify
 
         try:

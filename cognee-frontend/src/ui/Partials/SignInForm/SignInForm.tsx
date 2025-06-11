@@ -1,19 +1,9 @@
 "use client";
 
-import {
-  CTAButton,
-  FormGroup,
-  FormInput,
-  FormLabel,
-  Input,
-  Spacer,
-  Stack,
-  Text,
-  useBoolean,
-} from 'ohmy-ui';
-import { LoadingIndicator } from '@/ui/App';
-import { fetch, handleServerErrors } from '@/utils';
-import { useState } from 'react';
+import { useState } from "react";
+import { LoadingIndicator } from "@/ui/App";
+import { fetch, useBoolean } from "@/utils";
+import { CTAButton, Input } from "@/ui/elements";
 
 interface SignInFormPayload extends HTMLFormElement {
   vectorDBUrl: HTMLInputElement;
@@ -22,10 +12,10 @@ interface SignInFormPayload extends HTMLFormElement {
 }
 
 const errorsMap = {
-  LOGIN_BAD_CREDENTIALS: 'Invalid username or password',
+  LOGIN_BAD_CREDENTIALS: "Invalid username or password",
 };
 
-export default function SignInForm({ onSignInSuccess = () => window.location.href = '/', submitButtonText = 'Sign in' }) {
+export default function SignInForm({ onSignInSuccess = () => window.location.href = "/", submitButtonText = "Sign in" }) {
   const {
     value: isSigningIn,
     setTrue: disableSignIn,
@@ -46,14 +36,11 @@ export default function SignInForm({ onSignInSuccess = () => window.location.hre
     setSignInError(null);
     disableSignIn();
 
-    fetch('/v1/auth/login', {
-      method: 'POST',
+    fetch("/v1/auth/login", {
+      method: "POST",
       body: authCredentials,
     })
-      .then(handleServerErrors)
-      .then(response => response.json())
-      .then((bearer) => {
-        window.localStorage.setItem('access_token', bearer.access_token);
+      .then(() => {
         onSignInSuccess();
       })
       .catch(error => setSignInError(errorsMap[error.detail as keyof typeof errorsMap]))
@@ -61,36 +48,26 @@ export default function SignInForm({ onSignInSuccess = () => window.location.hre
   };
 
   return (
-    <form onSubmit={signIn} style={{ width: '100%' }}>
-      <Stack gap="4" orientation="vertical">
-        <Stack gap="4" orientation="vertical">
-          <FormGroup orientation="vertical" align="center/" gap="2">
-            <FormLabel>Email:</FormLabel>
-            <FormInput>
-              <Input defaultValue="default_user@example.com" name="email" type="email" placeholder="Your email address" />
-            </FormInput>
-          </FormGroup>
-          <FormGroup orientation="vertical" align="center/" gap="2">
-            <FormLabel>Password:</FormLabel>
-            <FormInput>
-              <Input defaultValue="default_password" name="password" type="password" placeholder="Your password" />
-            </FormInput>
-          </FormGroup>
-        </Stack>
+    <form onSubmit={signIn} className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2">
+        <div className="mb-4">
+          <label className="block mb-2" htmlFor="email">Email</label>
+          <Input id="email" defaultValue="default_user@example.com" name="email" type="email" placeholder="Your email address" />
+        </div>
+        <div className="mb-4">
+          <label className="block mb-2" htmlFor="password">Password</label>
+          <Input id="password" defaultValue="default_password" name="password" type="password" placeholder="Your password" />
+        </div>
+      </div>
 
-        <Spacer top="2">
-          <CTAButton type="submit">
-            <Stack gap="2" orientation="horizontal" align="/center">
-              {submitButtonText}
-              {isSigningIn && <LoadingIndicator />}
-            </Stack>
-          </CTAButton>
-        </Spacer>
+      <CTAButton type="submit">
+        {submitButtonText}
+        {isSigningIn && <LoadingIndicator />}
+      </CTAButton>
 
-        {signInError && (
-          <Text>{signInError}</Text>
-        )}
-      </Stack>
+      {signInError && (
+        <span className="text-s text-white">{signInError}</span>
+      )}
     </form>
   )
 }

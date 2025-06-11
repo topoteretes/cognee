@@ -2,13 +2,14 @@ import os
 import uuid
 from typing import Optional
 from fastapi import Depends, Request
-from fastapi_users import BaseUserManager, UUIDIDMixin, models
+from fastapi_users.exceptions import UserNotExists
+from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users.db import SQLAlchemyUserDatabase
 from contextlib import asynccontextmanager
-from .get_user_db import get_user_db
+
 from .models import User
-from .methods import get_user
-from fastapi_users.exceptions import UserNotExists
+from .get_user_db import get_user_db
+from .methods.get_user_by_email import get_user_by_email
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
@@ -17,15 +18,23 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     )
     verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
 
-    async def get(self, id: models.ID) -> models.UP:
-        """
-        Get a user by id.
+    # async def get(self, id: models.ID) -> models.UP:
+    #     """
+    #     Get a user by id.
 
-        :param id: Id. of the user to retrieve.
-        :raises UserNotExists: The user does not exist.
-        :return: A user.
-        """
-        user = await get_user(id)
+    #     :param id: Id. of the user to retrieve.
+    #     :raises UserNotExists: The user does not exist.
+    #     :return: A user.
+    #     """
+    #     user = await get_user(id)
+
+    #     if user is None:
+    #         raise UserNotExists()
+
+    #     return user
+
+    async def get_by_email(self, user_email: str) -> Optional[User]:
+        user = await get_user_by_email(user_email)
 
         if user is None:
             raise UserNotExists()

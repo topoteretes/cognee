@@ -1,13 +1,25 @@
-export default function handleServerErrors(response: Response): Promise<Response> {
+import { redirect } from "next/navigation";
+
+export default function handleServerErrors(response: Response, retry?: (response: Response) => Promise<Response>): Promise<Response> {
   return new Promise((resolve, reject) => {
     if (response.status === 401) {
-      window.location.href = '/auth';
-      return;
+      if (retry) {
+        return retry(response)
+          .catch(() => {
+            return redirect("/auth");
+          });
+      } else {
+        return redirect("/auth");
+      }
     }
     if (!response.ok) {
       return response.json().then(error => reject(error));
     }
 
-    return resolve(response);
+    if (response.status >= 200 && response.status < 300) {
+      return resolve(response);
+    }
+
+    return reject(response);
   });
 }

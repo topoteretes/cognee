@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Explorer } from '@/ui/Partials';
-import StatusIcon from './StatusIcon';
+import StatusIcon from '@/ui/elements/StatusIndicator';
 import { LoadingIndicator } from '@/ui/App';
 import { DropdownMenu, GhostButton, Stack, Text, CTAButton, useBoolean, Modal, Spacer } from "ohmy-ui";
 import styles from "./DatasetsView.module.css";
@@ -53,7 +53,7 @@ export default function DatasetsView({
     setExplorationDataset(dataset);
     showExplorationWindow();
   }
-
+  
   return (
     <>
       <Stack orientation="vertical" gap="4">
@@ -95,10 +95,10 @@ export default function DatasetsView({
           </DatasetItem>
         ))}
       </Stack>
-      <Modal closeOnBackdropClick={false} onClose={hideExplorationWindow} isOpen={isExplorationWindowShown} className={styles.explorerModal}>
+      <Modal onClose={hideExplorationWindow} isOpen={isExplorationWindowShown} className={styles.explorerModal}>
         <Spacer horizontal="2" vertical="3" wrap>
           <Text>{dataset?.name}</Text>
-        </Spacer>
+        </Spacer> 
         <Explorer dataset={dataset!} />
       </Modal>
     </>
