@@ -301,20 +301,25 @@ DEBUG = True
         print("\n🧪 Testing search functionality...")
 
         search_query = "What is artificial intelligence?"
-        search_types = ["GRAPH_COMPLETION", "RAG_COMPLETION", "CODE", "CHUNKS", "INSIGHTS"]
 
         # Test if all search types will execute
-        for search_type in search_types:
+        from cognee import SearchType
+
+        # Go through all Cognee search types
+        for search_type in SearchType:
+            # Don't test these search types
+            if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER]:
+                break
             try:
-                result = await search(search_query, search_type)
-                self.test_results[f"search_{search_type.lower()}"] = {
+                result = await search(search_query, search_type.value)
+                self.test_results[f"search_{search_type}"] = {
                     "status": "PASS",
                     "result": result,
                     "message": f"Search with {search_type} successful",
                 }
                 print(f"✅ Search {search_type} test passed")
             except Exception as e:
-                self.test_results[f"search_{search_type.lower()}"] = {
+                self.test_results[f"search_{search_type}"] = {
                     "status": "FAIL",
                     "error": str(e),
                     "message": f"Search with {search_type} failed",
