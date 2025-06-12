@@ -58,7 +58,7 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
 3. Install uv if you don't have one
     ```
-    brew install uv
+    pip install uv
     ```
 4. Install all the dependencies you need for cognee mcp server with uv
     ```
