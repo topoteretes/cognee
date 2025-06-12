@@ -10,10 +10,9 @@ import asyncio
 import os
 import tempfile
 import time
-
+from contextlib import asynccontextmanager
 from cognee.shared.logging_utils import setup_logging
-from cognee import SearchType
-from logging import ERROR
+
 
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
@@ -29,6 +28,12 @@ from src.server import (
     retrieved_edges_to_string,
     load_class,
 )
+
+# Import MCP client functionality for server testing
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
 
 # Set timeout for cognify/codify to complete in
 TIMEOUT = 5 * 60  # 5 min  in seconds
@@ -101,6 +106,62 @@ DEBUG = True
         if os.path.exists(self.test_data_dir):
             shutil.rmtree(self.test_data_dir)
         print("✅ Cleanup completed")
+
+    @asynccontextmanager
+    async def mcp_server_session(self):
+        """Context manager to start and manage MCP server session."""
+        # Get the path to the server script
+        server_script = os.path.join(os.path.dirname(__file__), "server.py")
+
+        # Start the server process
+        server_params = StdioServerParameters(
+            command="python",
+            args=[server_script, "--transport", "stdio"],
+            env=None,
+        )
+
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Initialize the session
+                await session.initialize()
+                yield session
+
+    async def test_mcp_server_startup_and_tools(self):
+        """Test that the MCP server starts properly and returns tool results."""
+        print("\n🧪 Testing MCP server startup and tool execution...")
+
+        try:
+            async with self.mcp_server_session() as session:
+                # Test 1: List available tools
+                print("  🔍 Testing tool discovery...")
+                tools_result = await session.list_tools()
+
+                expected_tools = {
+                    "cognify",
+                    "codify",
+                    "search",
+                    "prune",
+                    "cognify_status",
+                    "codify_status",
+                    "cognee_add_developer_rules",
+                }
+                available_tools = {tool.name for tool in tools_result.tools}
+
+                if not expected_tools.issubset(available_tools):
+                    missing_tools = expected_tools - available_tools
+                    raise AssertionError(f"Missing expected tools: {missing_tools}")
+
+                print(
+                    f"    ✅ Found {len(available_tools)} tools: {', '.join(sorted(available_tools))}"
+                )
+
+        except Exception as e:
+            self.test_results["mcp_server_integration"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "MCP server integration test failed",
+            }
+            print(f"❌ MCP server integration test failed: {e}")
 
     async def test_prune(self):
         """Test the prune functionality."""
@@ -382,6 +443,9 @@ class TestModel:
 
         await self.setup()
 
+        # Test MCP server integration first
+        await self.test_mcp_server_startup_and_tools()
+
         # Run tests in logical order
         await self.test_prune()  # Start with clean slate
         await self.test_cognify()
@@ -409,21 +473,24 @@ class TestModel:
         failed = 0
 
         for test_name, result in self.test_results.items():
-            status_emoji = "✅" if result["status"] == "PASS" else "❌"
-            print(f"{status_emoji} {test_name}: {result['status']}")
-
             if result["status"] == "PASS":
+                status_emoji = "✅"
                 passed += 1
             else:
+                status_emoji = "❌"
                 failed += 1
-                if "error" in result:
-                    print(f"   Error: {result['error']}")
+
+            print(f"{status_emoji} {test_name}: {result['status']}")
+
+            if result["status"] == "FAIL" and "error" in result:
+                print(f"   Error: {result['error']}")
 
         print("\n" + "-" * 50)
-        print(f"Total Tests: {passed + failed}")
+        total_tests = passed + failed
+        print(f"Total Tests: {total_tests}")
         print(f"Passed: {passed}")
         print(f"Failed: {failed}")
-        print(f"Success Rate: {(passed / (passed + failed) * 100):.1f}%")
+        print(f"Success Rate: {(passed / total_tests * 100):.1f}%")
 
         assert failed == 0, "\n ⚠️ Number of tests didn't pass!"
 
@@ -435,5 +502,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    from logging import ERROR
+
     logger = setup_logging(log_level=ERROR)
     asyncio.run(main())
