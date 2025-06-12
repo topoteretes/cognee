@@ -33,7 +33,7 @@ jobs:
         working-directory: cognee-mcp
         run: |
          # Remove Cognee wheel that came from PyPI
-         uv pip uninstall -y cognee
+         uv pip uninstall cognee
          # Install of the freshly-checked-out Cognee branch
          uv pip install --no-deps --force-reinstall -e ../
 
