@@ -1158,6 +1158,7 @@ class KuzuAdapter(GraphDBInterface):
                     data = json.loads(props)
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse JSON props for edge {from_id}->{to_id}")
+
             edges.append((from_id, to_id, rel_type, data))
 
         return nodes, edges

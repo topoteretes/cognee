@@ -1,0 +1,38 @@
+[
+  {
+    "name": "TechNova Inc.",
+    "departments": [
+      "Engineering",
+      "Marketing"
+    ]
+  },
+  {
+    "name": "GreenFuture Solutions",
+    "departments": [
+      "Research & Development",
+      "Sales",
+      "Customer Support"
+    ]
+  },
+  {
+    "name": "Skyline Financials",
+    "departments": [
+      "Accounting"
+    ]
+  },
+  {
+    "name": "MediCare Plus",
+    "departments": [
+      "Healthcare",
+      "Administration"
+    ]
+  },
+  {
+    "name": "NextGen Robotics",
+    "departments": [
+      "AI Development",
+      "Manufacturing",
+      "HR"
+    ]
+  }
+]

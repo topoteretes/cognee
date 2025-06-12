@@ -64,14 +64,22 @@ dependencies = [
 api = [
     "uvicorn==0.34.0",
     "gunicorn>=20.1.0,<21",
+    "websockets>=15.0.1",
+    "kuzu==0.9.0",
 ]
 weaviate = ["weaviate-client==4.9.6"]
-qdrant = ["qdrant-client>=1.9.0,<2"]
+qdrant = ["qdrant-client>=1.14.2,<2"]
 neo4j = ["neo4j>=5.20.0,<6"]
 postgres = [
     "psycopg2>=2.9.10,<3",
     "pgvector>=0.3.5,<0.4",
     "asyncpg==0.30.0",
+]
+postgres-binary = [
+    "psycopg2>=2.9.10,<3",
+    "pgvector>=0.3.5,<0.4",
+    "asyncpg==0.30.0",
+    "psycopg2-binary==2.9.10",
 ]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
@@ -87,14 +95,14 @@ anthropic = ["anthropic>=0.26.1,<0.27"]
 deepeval = ["deepeval>=2.0.1,<3"]
 posthog = ["posthog>=3.5.0,<4"]
 falkordb = ["falkordb==1.0.9"]
-kuzu = ["kuzu==0.8.2"]
+kuzu = ["kuzu==0.9.0"]
 groq = ["groq==0.8.0"]
 milvus = ["pymilvus>=2.5.0,<3"]
 chromadb = [
     "chromadb>=0.3.0,<0.7",
     "pypika==0.48.8",
 ]
-docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<0.17"]
+docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<18"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
     "transformers>=4.46.3,<5",

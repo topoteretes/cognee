@@ -453,6 +453,8 @@ class SQLAlchemyAdapter:
                 from cognee.infrastructure.files.storage import LocalStorage
 
                 await self.engine.dispose(close=True)
+                db_directory = path.dirname(self.db_path)
+                LocalStorage.ensure_directory_exists(db_directory)
                 with open(self.db_path, "w") as file:
                     file.write("")
             else:

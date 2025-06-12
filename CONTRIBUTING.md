@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Note for contributors:** When branching out, create a new branch from the `dev` branch.
+
 # 🎉 Welcome to **cognee**! 
 
 We're excited that you're interested in contributing to our project! 
