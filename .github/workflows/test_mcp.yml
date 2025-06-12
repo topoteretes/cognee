@@ -22,10 +22,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install uv
 
+      # This will install all dependencies along with Cognee deployed on PIP
       - name: Install dependencies
         shell: bash
         working-directory: cognee-mcp
         run: uv sync
+
+      # NEW: swap in local cognee (editable)
+      - name: Override with local cognee checkout
+        working-directory: cognee-mcp
+        run: |
+         # Remove Cognee wheel that came from PyPI
+         uv pip uninstall -y cognee
+         # Editable install of the freshly-checked-out Cognee source
+         uv pip install --no-deps --force-reinstall -e ../
 
       - name: Run MCP test
         env:
