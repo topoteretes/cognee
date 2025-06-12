@@ -28,8 +28,13 @@ async def get_authenticated_user(
 
     token = creds.credentials
     try:
+        secret = os.getenv("FASTAPI_USERS_JWT_SECRET")
+        if not secret:
+            raise HTTPException(
+                status_code=500, detail="JWT secret key is not configured on the server"
+            )
         payload = jwt.decode(
-            token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
+            token, secret, algorithms=["HS256"]
         )
 
         auth_data = SimpleNamespace(id=UUID(payload["user_id"]))
