@@ -43,7 +43,7 @@ export default function SignInForm({ onSignInSuccess = () => window.location.hre
       .then(() => {
         onSignInSuccess();
       })
-      .catch(error => setSignInError(errorsMap[error.detail as keyof typeof errorsMap]))
+      .catch(error => setSignInError(errorsMap[error.detail as keyof typeof errorsMap] || error.message))
       .finally(() => enableSignIn());
   };
 

@@ -27,6 +27,12 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
       return response;
     })
     .catch((error) => {
+      if (error.status === undefined) {
+        return Promise.reject(
+          new Error("No connection to the server.")
+        );
+      }
+
       if (error.status === 401) {
         return retry(error);
       }

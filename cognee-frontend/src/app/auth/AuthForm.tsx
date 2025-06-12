@@ -46,7 +46,7 @@ export default function AuthForm({
         .then(() => {
           onSignInSuccess();
         })
-        .catch(error => setSignInError(errorsMap[error.detail as keyof typeof errorsMap]))
+        .catch(error => setSignInError(errorsMap[error.detail as keyof typeof errorsMap] || error.message))
         .finally(() => enableSignIn());
     };
 
@@ -64,9 +64,8 @@ export default function AuthForm({
           {submitButtonText}
           {isSigningIn && <LoadingIndicator />}
         </CTAButton>
-  
         {signInError && (
-          <span className="text-s text-white">{signInError}</span>
+          <span className="text-s text-red-500 mb-4">{signInError}</span>
         )}
       </form>
     );

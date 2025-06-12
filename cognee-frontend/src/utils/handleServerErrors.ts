@@ -6,10 +6,10 @@ export default function handleServerErrors(response: Response, retry?: (response
       if (retry) {
         return retry(response)
           .catch(() => {
-            return redirect("/auth");
+            return redirect("/auth/login");
           });
       } else {
-        return redirect("/auth");
+        return redirect("/auth/login");
       }
     }
     if (!response.ok) {
