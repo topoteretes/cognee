@@ -55,27 +55,15 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    # Use search function filtered by permissions if access control is enabled
-    if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
-        return await permissions_search(
-            query_text, query_type, user, dataset_ids, system_prompt_path, top_k
+    # Enforce backend access control by default (secure)
+    # Only proceed if ENABLE_BACKEND_ACCESS_CONTROL is "true" (case insensitive)
+    if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "true").lower() != "true":
+        raise PermissionError(
+            "Backend access control is disabled. Set ENABLE_BACKEND_ACCESS_CONTROL to 'true' for secure operation."
         )
-
-    query = await log_query(query_text, query_type.value, user.id)
-
-    search_results = await specific_search(
-        query_type,
-        query_text,
-        user,
-        system_prompt_path=system_prompt_path,
-        top_k=top_k,
-        node_type=node_type,
-        node_name=node_name,
+    return await permissions_search(
+        query_text, query_type, user, dataset_ids, system_prompt_path, top_k
     )
-
-    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
-
-    return search_results
 
 
 async def specific_search(
