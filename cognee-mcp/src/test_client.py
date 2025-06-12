@@ -183,12 +183,11 @@ DEBUG = True
             print(f"❌ Prune test failed: {e}")
             raise e
 
-    async def test_cognify(self):
+    async def test_cognify(self, test_text, test_name):
         """Test the cognify functionality."""
         print("\n🧪 Testing cognify functionality...")
         try:
             # Test with simple text
-            test_text = "Artificial Intelligence is transforming the world through machine learning and deep learning technologies."
             cognify_result = await cognify(test_text)
 
             start = time.time()  # mark the start
@@ -207,20 +206,20 @@ DEBUG = True
                     if time.time() - start > TIMEOUT:
                         raise TimeoutError("Database was not created in 5min")
 
-            self.test_results["cognify"] = {
+            self.test_results[test_name] = {
                 "status": "PASS",
                 "result": cognify_result,
-                "message": "Cognify executed successfully",
+                "message": f"{test_name} executed successfully",
             }
-            print("✅ Cognify test passed")
+            print(f"✅ {test_name} test passed")
 
         except Exception as e:
-            self.test_results["cognify"] = {
+            self.test_results[test_name] = {
                 "status": "FAIL",
                 "error": str(e),
-                "message": "Cognify test failed",
+                "message": f"{test_name} test failed",
             }
-            print(f"❌ Cognify test failed: {e}")
+            print(f"❌ {test_name} test failed: {e}")
 
     async def test_codify(self):
         """Test the codify functionality."""
@@ -453,7 +452,17 @@ class TestModel:
 
         # Run tests in logical order
         await self.test_prune()  # Start with clean slate
-        await self.test_cognify()
+
+        # Test cognify twice to make sure updating a dataset with new docs is working as expected
+        await self.test_cognify(
+            test_text="Artificial Intelligence is transforming the world through machine learning and deep learning technologies.",
+            test_name="Cognify1",
+        )
+        await self.test_cognify(
+            test_text="Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.",
+            test_name="Cognify2",
+        )
+
         await self.test_codify()
         await self.test_cognee_add_developer_rules()
 
