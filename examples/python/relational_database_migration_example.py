@@ -67,11 +67,11 @@ async def main():
     print(f"Search results: {search_results}")
 
     # Having a top_k value set to too high might overwhelm the LLM context when specific questions need to be answered.
-    # For this kind of question we've set the top_k to 50
+    # For this kind of question we've set the top_k to 30
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
         query_text="What invoices are related to Leonie Köhler?",
-        top_k=50,
+        top_k=30,
     )
     print(f"Search results: {search_results}")
 
