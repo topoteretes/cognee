@@ -264,7 +264,9 @@ def setup_logging(log_level=None, name=None):
             exc_info=(exc_type, exc_value, traceback),
         )
         logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
-        logger.info("Need help? Reach out to us on our Discord server: https://discord.gg/NQPKmU5CCg")
+        logger.info(
+            "Need help? Reach out to us on our Discord server: https://discord.gg/NQPKmU5CCg"
+        )
 
     # Install exception handlers
     sys.excepthook = handle_exception
