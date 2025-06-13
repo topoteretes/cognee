@@ -3,6 +3,14 @@ from cognee.exceptions import CriticalError
 
 
 class CollectionNotFoundError(CriticalError):
+    """
+    Represents an error that occurs when a requested collection cannot be found.
+
+    This class extends the CriticalError to handle specific cases where a requested
+    collection is unavailable. It can be initialized with a custom message and allows for
+    logging options including log level and whether to log the error.
+    """
+
     def __init__(
         self,
         message,

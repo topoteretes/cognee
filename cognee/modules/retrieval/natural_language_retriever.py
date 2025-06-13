@@ -12,7 +12,15 @@ logger = logging.getLogger("NaturalLanguageRetriever")
 
 
 class NaturalLanguageRetriever(BaseRetriever):
-    """Retriever for handling natural language search"""
+    """
+    Retriever for handling natural language search.
+
+    Public methods include:
+
+    - get_context: Retrieves relevant context using a natural language query converted to
+    Cypher.
+    - get_completion: Returns a completion based on the query and context.
+    """
 
     def __init__(
         self,
@@ -97,7 +105,24 @@ class NaturalLanguageRetriever(BaseRetriever):
         return []
 
     async def get_context(self, query: str) -> Optional[Any]:
-        """Retrieves relevant context using a natural language query converted to Cypher."""
+        """
+        Retrieves relevant context using a natural language query converted to Cypher.
+
+        This method raises a SearchTypeNotSupported exception if the graph engine does not
+        support natural language search. It also logs errors if the execution of the retrieval
+        fails.
+
+        Parameters:
+        -----------
+
+            - query (str): The natural language query used to retrieve context.
+
+        Returns:
+        --------
+
+            - Optional[Any]: Returns the context retrieved from the graph database based on the
+              query.
+        """
         try:
             graph_engine = await get_graph_engine()
 
@@ -110,7 +135,25 @@ class NaturalLanguageRetriever(BaseRetriever):
             raise e
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Returns a completion based on the query and context."""
+        """
+        Returns a completion based on the query and context.
+
+        If context is not provided, it retrieves the context using the given query. No
+        exceptions are explicitly raised from this method, but it relies on the get_context
+        method for possible exceptions.
+
+        Parameters:
+        -----------
+
+            - query (str): The natural language query to get a completion from.
+            - context (Optional[Any]): The context in which to base the completion; if not
+              provided, it will be retrieved using the query. (default None)
+
+        Returns:
+        --------
+
+            - Any: Returns the completion derived from the given query and context.
+        """
         if context is None:
             context = await self.get_context(query)
 

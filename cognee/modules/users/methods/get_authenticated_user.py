@@ -21,7 +21,7 @@ async def get_authenticated_user(authorization: str = Header(...)) -> SimpleName
             token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
         )
 
-        if payload["tenant_id"]:
+        if payload.get("tenant_id"):
             # SimpleNamespace lets us access dictionary elements like attributes
             auth_data = SimpleNamespace(
                 id=UUID(payload["user_id"]),
@@ -29,9 +29,7 @@ async def get_authenticated_user(authorization: str = Header(...)) -> SimpleName
                 roles=payload["roles"],
             )
         else:
-            auth_data = SimpleNamespace(
-                id=UUID(payload["user_id"]), tenant_id=None, roles=payload["roles"]
-            )
+            auth_data = SimpleNamespace(id=UUID(payload["user_id"]), tenant_id=None, roles=[])
 
         return auth_data
 
