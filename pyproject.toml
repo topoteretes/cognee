@@ -27,9 +27,6 @@ dependencies = [
     "nltk==3.9.1",
     "numpy>=1.26.4, <=2.1",
     "pandas>=2.2.2",
-    # Note: New s3fs and boto3 versions don't work well together
-    # Always use comaptible fixed versions of these two dependencies
-    "s3fs[boto3]==2025.3.2",
     "sqlalchemy==2.0.39",
     "aiosqlite>=0.20.0,<0.21",
     "tiktoken<=0.9.0",
@@ -118,6 +115,9 @@ gui = [
     "qasync>=0.27.1,<0.28",
 ]
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
+# Note: New s3fs and boto3 versions don't work well together
+# Always use comaptible fixed versions of these two dependencies
+aws = ["s3fs[boto3]==2025.3.2"]
 dev = [
     "pytest>=7.4.0,<8",
     "pytest-cov>=6.1.1",

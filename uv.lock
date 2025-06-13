@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10, <=3.13"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -57,7 +58,6 @@ dependencies = [
     { name = "aiohappyeyeballs" },
     { name = "aiosignal" },
     { name = "async-timeout", version = "4.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "async-timeout", version = "5.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_version < '0'" },
     { name = "attrs" },
     { name = "frozenlist" },
     { name = "multidict" },
@@ -345,7 +345,6 @@ version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "async-timeout", version = "4.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "async-timeout", version = "5.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_version < '0'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2f/4c/7c991e080e106d854809030d8584e15b2e996e26f16aee6d757e387bc17d/asyncpg-0.30.0.tar.gz", hash = "sha256:c551e9928ab6707602f44811817f82ba3c446e018bfe1d3abecc8ba5f3eac851", size = 957746 }
 wheels = [
@@ -902,7 +901,6 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
-    { name = "s3fs", extra = ["boto3"] },
     { name = "scikit-learn" },
     { name = "sentry-sdk", extra = ["fastapi"] },
     { name = "sqlalchemy" },
@@ -920,6 +918,9 @@ api = [
     { name = "kuzu" },
     { name = "uvicorn" },
     { name = "websockets" },
+]
+aws = [
+    { name = "s3fs", extra = ["boto3"] },
 ]
 chromadb = [
     { name = "chromadb" },
@@ -1103,7 +1104,7 @@ requires-dist = [
     { name = "qasync", marker = "extra == 'gui'", specifier = ">=0.27.1,<0.28" },
     { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.14.2,<2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<1.0.0" },
-    { name = "s3fs", extras = ["boto3"], specifier = "==2025.3.2" },
+    { name = "s3fs", extras = ["boto3"], marker = "extra == 'aws'", specifier = "==2025.3.2" },
     { name = "scikit-learn", specifier = ">=1.6.1,<2" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.9.0,<3" },
     { name = "sqlalchemy", specifier = "==2.0.39" },
@@ -1121,6 +1122,7 @@ requires-dist = [
     { name = "weaviate-client", marker = "extra == 'weaviate'", specifier = "==4.9.6" },
     { name = "websockets", marker = "extra == 'api'", specifier = ">=15.0.1" },
 ]
+provides-extras = ["api", "weaviate", "qdrant", "neo4j", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "gemini", "huggingface", "ollama", "mistral", "anthropic", "deepeval", "posthog", "falkordb", "kuzu", "groq", "milvus", "chromadb", "docs", "codegraph", "evals", "gui", "graphiti", "aws", "dev", "debug"]
 
 [[package]]
 name = "colorama"
@@ -1784,17 +1786,17 @@ name = "fastembed"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "loguru" },
-    { name = "mmh3" },
+    { name = "huggingface-hub", marker = "python_full_version < '3.13'" },
+    { name = "loguru", marker = "python_full_version < '3.13'" },
+    { name = "mmh3", marker = "python_full_version < '3.13'" },
     { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "onnxruntime" },
-    { name = "pillow" },
-    { name = "py-rust-stemmers" },
-    { name = "requests" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
+    { name = "numpy", version = "2.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
+    { name = "onnxruntime", marker = "python_full_version < '3.13'" },
+    { name = "pillow", marker = "python_full_version < '3.13'" },
+    { name = "py-rust-stemmers", marker = "python_full_version < '3.13'" },
+    { name = "requests", marker = "python_full_version < '3.13'" },
+    { name = "tokenizers", marker = "python_full_version < '3.13'" },
+    { name = "tqdm", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c6/f4/036a656c605f63dc25f11284f60f69900a54a19c513e1ae60d21d6977e75/fastembed-0.6.0.tar.gz", hash = "sha256:5c9ead25f23449535b07243bbe1f370b820dcc77ec2931e61674e3fe7ff24733", size = 50731 }
 wheels = [
@@ -3765,8 +3767,8 @@ name = "loguru"
 version = "0.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "win32-setctime", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
+    { name = "win32-setctime", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559 }
 wheels = [

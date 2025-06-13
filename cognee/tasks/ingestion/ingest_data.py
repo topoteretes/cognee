@@ -1,5 +1,4 @@
 import dlt
-import s3fs
 import json
 import inspect
 from uuid import UUID
@@ -40,6 +39,8 @@ async def ingest_data(
 
     fs = None
     if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+        import s3fs
+
         fs = s3fs.S3FileSystem(
             key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
         )
