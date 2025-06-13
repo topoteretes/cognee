@@ -29,7 +29,11 @@ def get_auth_backend():
     bearer_transport = BearerTransport(tokenUrl="api/v1/auth/login")
 
     def get_jwt_strategy() -> JWTStrategy[models.UP, models.ID]:
-        secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
+        secret = os.getenv("FASTAPI_USERS_JWT_SECRET")
+        if not secret:
+            raise RuntimeError(
+                "FASTAPI_USERS_JWT_SECRET environment variable must be set and non-empty for JWT authentication."
+            )
         return CustomJWTStrategy(secret, lifetime_seconds=3600)
 
     auth_backend = AuthenticationBackend(
