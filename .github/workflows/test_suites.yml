@@ -36,7 +36,7 @@ jobs:
   docker-ci-test:
     name: Docker CI test
     needs: [basic-tests, e2e-tests]
-    uses: ./.github/workflows/ci.yaml
+    uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
   graph-db-tests:
