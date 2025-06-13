@@ -1,35 +1,54 @@
-name: 'Build Docker images for Cognee'
-description: 'Build cognee-related Docker images and push to the Docker registry (AWS ECR)'
+name: 'Image Builder'
+description: 'Build and push Docker images'
 inputs:
-  stage:
-    description: 'The stage of the pipeline, such as "dev" or "prd", for the Cognee app'
+  registry:
+    description: 'Container registry'
     required: true
-  aws_account_id:
-    description: 'The AWS account ID for the Cognee app'
+  username:
+    description: 'Registry username'
     required: true
-  should_publish:
-    description: 'Whether to publish the Cognee Docker image to AWS ECR; should be either "true" or "false"'
+  password:
+    description: 'Registry password'
     required: true
-  ecr_image_repo_name:
-    description: 'The Docker image ECR repository name for the Cognee app, such as "workflows"'
+  image_name:
+    description: 'Image name'
     required: true
-  dockerfile_location:
-    description: 'The  directory location of the Dockerfile for the Cognee app'
-    required: true
+  dockerfile:
+    description: 'Path to Dockerfile'
+    required: false
+    default: 'Dockerfile'
+  context:
+    description: 'Build context'
+    required: false
+    default: '.'
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-    - name: Build PromethAI App Docker image
+    - name: Build and push Docker image
       shell: bash
       env:
-        STAGE: ${{ inputs.stage }}
+        REGISTRY: ${{ inputs.registry }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        CONTEXT: ${{ inputs.context }}
+        GITHUB_SHA: ${{ github.sha }}
+        GITHUB_REF_NAME: ${{ github.ref_name }}
       run: |
-        export SHA_SHORT="$(git rev-parse --short HEAD)"
-        export CUR_DATE="$(date +%Y%m%d%H%M%S)"
-        export VERSION="${{ inputs.stage }}-$CUR_DATE-$SHA_SHORT"
-        export STAGE="${{ inputs.stage }}"
-        export APP_DIR="$PWD/${{ inputs.dockerfile_location }}"
-        image_name="${{ inputs.ecr_image_repo_name }}" version="$VERSION" account="${{ inputs.aws_account_id }}" app_dir="$APP_DIR" publish="${{ inputs.should_publish }}" ./bin/dockerize
-        echo "Docker tag is: $VERSION"
-        echo $VERSION > /tmp/.DOCKER_IMAGE_VERSION
+        echo "Building Docker image..."
+        echo "$PASSWORD" | docker login "$REGISTRY" -u "$USERNAME" --password-stdin
+        
+        # Build the image with proper tags
+        if [ "$GITHUB_REF_NAME" = "main" ] || [ "$GITHUB_REF_NAME" = "master" ]; then
+          TAG="latest"
+        else
+          TAG="$GITHUB_REF_NAME"
+        fi
+        
+        docker build -f "$DOCKERFILE" -t "$REGISTRY/$IMAGE_NAME:$TAG" -t "$REGISTRY/$IMAGE_NAME:$GITHUB_SHA" "$CONTEXT"
+        docker push "$REGISTRY/$IMAGE_NAME:$TAG"
+        docker push "$REGISTRY/$IMAGE_NAME:$GITHUB_SHA"
+        
+        echo "Image pushed successfully!"
