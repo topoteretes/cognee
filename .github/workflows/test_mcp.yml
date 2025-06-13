@@ -49,4 +49,4 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         working-directory: cognee-mcp
-        run: uv run python ./src/test_client.py
+        run: python ./src/test_client.py
