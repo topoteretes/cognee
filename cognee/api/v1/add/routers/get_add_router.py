@@ -20,7 +20,7 @@ def get_add_router() -> APIRouter:
     @router.post("/", response_model=dict)
     async def add(
         data: List[UploadFile],
-        datasetName: str,
+        datasetName: Optional[str] = Form(default=None),
         datasetId: Optional[UUID] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):

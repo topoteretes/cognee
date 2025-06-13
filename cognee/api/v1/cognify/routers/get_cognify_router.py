@@ -3,6 +3,7 @@ from uuid import UUID
 from pydantic import BaseModel
 from typing import List, Optional
 from fastapi.responses import JSONResponse
+from cognee.api.DTO import InDTO
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 
@@ -18,8 +19,8 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
 )
 
 
-class CognifyPayloadDTO(BaseModel):
-    datasets: List[str]
+class CognifyPayloadDTO(InDTO):
+    datasets: Optional[List[str]] = None
     dataset_ids: Optional[List[UUID]] = None
     graph_model: Optional[BaseModel] = KnowledgeGraph
 
@@ -30,6 +31,11 @@ def get_cognify_router() -> APIRouter:
     @router.post("/", response_model=None)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for the cognitive processing of the content."""
+        if not payload.datasets and not payload.dataset_ids:
+            return JSONResponse(
+                status_code=400, content={"error": "No datasets or dataset_ids provided"}
+            )
+
         from cognee.api.v1.cognify import cognify as cognee_cognify
 
         try:

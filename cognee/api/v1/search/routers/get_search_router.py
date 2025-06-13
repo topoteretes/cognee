@@ -32,7 +32,7 @@ def get_search_router() -> APIRouter:
     @router.get("/", response_model=list[SearchHistoryItem])
     async def get_search_history(user: User = Depends(get_authenticated_user)):
         try:
-            history = await get_history(user.id)
+            history = await get_history(user.id, limit=0)
 
             return history
         except Exception as error:
