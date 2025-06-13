@@ -166,7 +166,7 @@ def get_datasets_router() -> APIRouter:
                 status_code=200,
                 content=formatted_graph_data,
             )
-        except Exception as error:
+        except Exception:
             return JSONResponse(
                 status_code=409,
                 content="Error retrieving dataset graph data.",
