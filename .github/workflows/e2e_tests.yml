@@ -201,6 +201,10 @@ jobs:
           with:
             python-version: '3.11.x'
 
+        - name: Install specific S3 dependency
+          run: |
+            poetry install -E aws
+
         - name: Run S3 Bucket Test
           env:
             ENV: 'dev'
@@ -243,6 +247,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: poetry run python ./cognee/tests/test_parallel_databases.py
