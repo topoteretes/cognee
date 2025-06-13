@@ -1,16 +1,17 @@
-'use client';
+"use client";
 
-import { v4 } from 'uuid';
-import classNames from 'classnames';
-import { useCallback, useEffect, useState } from 'react';
-import { CTAButton, Stack, Text, DropdownSelect, TextArea, useBoolean } from 'ohmy-ui';
-import { fetch } from '@/utils';
-import styles from './SearchView.module.css';
-import getHistory from '@/modules/chat/getHistory';
+import classNames from "classnames";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { LoadingIndicator } from "@/ui/App";
+import { CTAButton, Select, TextArea } from "@/ui/elements";
+import useChat from "@/modules/chat/hooks/useChat";
+
+import styles from "./SearchView.module.css";
 
 interface Message {
   id: string;
-  user: 'user' | 'system';
+  user: "user" | "system";
   text: any;
 }
 
@@ -19,173 +20,132 @@ interface SelectOption {
   label: string;
 }
 
+interface SearchFormPayload extends HTMLFormElement {
+  chatInput: HTMLInputElement;
+}
+
+const MAIN_DATASET = {
+  id: "",
+  data: [],
+  status: "",
+  name: "main_dataset",
+};
+
 export default function SearchView() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState<string>("");
-
-  const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(event.target.value);
-  }, []);
-
-  const searchOptions = [{
-    value: 'GRAPH_COMPLETION',
-    label: 'Completion using Cognee\'s graph based memory',
+  const searchOptions: SelectOption[] = [{
+    value: "GRAPH_COMPLETION",
+    label: "GraphRAG Completion",
   }, {
-    value: 'RAG_COMPLETION',
-    label: 'Completion using RAG',
+    value: "RAG_COMPLETION",
+    label: "RAG Completion",
   }];
-  const [searchType, setSearchType] = useState(searchOptions[0]);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
-      const messagesContainerElement = document.getElementById('messages');
+      const messagesContainerElement = document.getElementById("messages");
       if (messagesContainerElement) {
         const messagesElements = messagesContainerElement.children[0];
 
         if (messagesElements) {
           messagesContainerElement.scrollTo({
             top: messagesElements.scrollHeight,
-            behavior: 'smooth',
+            behavior: "smooth",
           });
         }
       }
     }, 300);
   }, []);
 
-  useEffect(() => {
-    getHistory()
-      .then((history) => {
-        setMessages(history);
-        scrollToBottom();
-      });
-  }, [scrollToBottom]);
+  // Hardcoded to `main_dataset` for now, change when multiple datasets are supported.
+  const { messages, refreshChat, sendMessage, isSearchRunning } = useChat(MAIN_DATASET);
 
-  const handleSearchSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    refreshChat()
+      .then(() => scrollToBottom());
+  }, []);
+
+  const [searchInputValue, setSearchInputValue] = useState("");
+
+  const handleSearchInputChange = useCallback((value: string) => {
+    setSearchInputValue(value);
+  }, []);
+
+  const handleChatMessageSubmit = useCallback((event: React.FormEvent<SearchFormPayload>) => {
     event.preventDefault();
 
-    if (inputValue.trim() === '') {
+    const formElements = event.currentTarget;
+
+    const searchType = formElements.searchType.value;
+    const chatInput = searchInputValue.trim();
+
+    if (chatInput === "") {
       return;
     }
 
-    setMessages((currentMessages) => [
-      ...currentMessages,
-      {
-        id: v4(),
-        user: 'user',
-        text: inputValue,
-      },
-    ]);
-
     scrollToBottom();
 
-    setInputValue('');
+    setSearchInputValue("");
 
-    const searchTypeValue = searchType.value;
+    sendMessage(chatInput, searchType)
+      .then(scrollToBottom)
+  }, [scrollToBottom, sendMessage, searchInputValue]);
 
-    fetch('/v1/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: inputValue.trim(),
-        searchType: searchTypeValue,
-      }),
-    })
-      .then((response) => response.json())
-      .then((systemMessage) => {
-        setMessages((currentMessages) => [
-          ...currentMessages,
-          {
-            id: v4(),
-            user: 'system',
-            text: convertToSearchTypeOutput(systemMessage, searchTypeValue),
-          },
-        ]);
-
-        scrollToBottom();
-      })
-      .catch(() => {
-        setInputValue(inputValue);
-      });
-  }, [inputValue, scrollToBottom, searchType.value]);
-
-  const {
-    value: isInputExpanded,
-    setTrue: expandInput,
-    setFalse: contractInput,
-  } = useBoolean(false);
+  const chatFormRef = useRef<HTMLFormElement>(null);
 
   const handleSubmitOnEnter = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      handleSearchSubmit(event as unknown as React.FormEvent<HTMLFormElement>);
+    if (event.key === "Enter" && !event.shiftKey) {
+      chatFormRef.current?.requestSubmit();
     }
   };
 
   return (
-    <Stack className={styles.searchViewContainer}>
-      <DropdownSelect<SelectOption>
-        value={searchType}
-        options={searchOptions}
-        onChange={setSearchType}
-      />
-      <div className={styles.messagesContainer} id="messages">
-        <Stack gap="2" className={styles.messages} align="end">
-          {messages.map((message) => (
-            <Text
-              key={message.id}
-              className={classNames(styles.message, {
-                [styles.userMessage]: message.user === "user",
-              })}
-            >
-              {message?.text && (
-                typeof(message.text) == "string" ? message.text : JSON.stringify(message.text)
-              )}
-            </Text>
-          ))}
-        </Stack>
-      </div>
-      <form onSubmit={handleSearchSubmit}>
-        <Stack orientation="horizontal" align="end/" gap="2">
-          <TextArea onKeyUp={handleSubmitOnEnter} style={{ transition: 'height 0.3s ease', height: isInputExpanded ? '128px' : '38px' }} onFocus={expandInput} onBlur={contractInput} value={inputValue} onChange={handleInputChange} name="searchInput" placeholder="Search" />
-          <CTAButton hugContent type="submit">Search</CTAButton>
-        </Stack>
+    <div className="flex flex-col h-full bg-gray-500 p-6 pt-16 rounded-3xl border-indigo-600 border-2 shadow-xl">
+      <form onSubmit={handleChatMessageSubmit} ref={chatFormRef} className="flex flex-col gap-4 h-full">
+        <div className="h-full overflow-y-auto" id="messages">
+          <div className="flex flex-col gap-2 items-end justify-end min-h-full px-6 pb-4">
+            {messages.map((message) => (
+              <p
+                key={message.id}
+                className={classNames({
+                  [classNames("ml-12 px-6 py-4 bg-gray-300 rounded-xl", styles.userMessage)]: message.user === "user",
+                  [classNames("text-gray-200", styles.systemMessage)]: message.user !== "user",
+                })}
+              >
+                {message?.text && (
+                  typeof(message.text) == "string" ? message.text : JSON.stringify(message.text)
+                )}
+              </p>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 bg-gray-300 rounded-xl flex flex-col gap-2">
+          <TextArea
+            value={searchInputValue}
+            onChange={handleSearchInputChange}
+            onKeyUp={handleSubmitOnEnter}
+            isAutoExpanding
+            name="chatInput"
+            placeholder="Ask anything"
+            contentEditable={true}
+            className="resize-none min-h-14 max-h-96 overflow-y-auto"
+          />
+          <div className="flex flex-row items-center justify-between gap-4">
+            <div className="flex flex-row items-center gap-2">
+              <label className="text-gray-600 whitespace-nowrap">Search type:</label>
+              <Select name="searchType" defaultValue={searchOptions[0].value} className="max-w-2xs">
+                {searchOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </Select>
+            </div>
+            <CTAButton disabled={isSearchRunning} type="submit">
+              {isSearchRunning? "Searching..." : "Search"}
+              {isSearchRunning && <LoadingIndicator />}
+            </CTAButton>
+          </div>
+        </div>
       </form>
-    </Stack>
+    </div>
   );
-}
-
-
-interface Node {
-  name: string;
-}
-
-interface Relationship {
-  relationship_name: string;
-}
-
-type InsightMessage = [Node, Relationship, Node];
-
-
-function convertToSearchTypeOutput(systemMessages: any[], searchType: string): string {
-  if (systemMessages.length > 0 && typeof(systemMessages[0]) === "string") {
-    return systemMessages[0];
-  }
-
-  switch (searchType) {
-    case 'INSIGHTS':
-      return systemMessages.map((message: InsightMessage) => {
-        const [node1, relationship, node2] = message;
-        if (node1.name && node2.name) {
-          return `${node1.name} ${relationship.relationship_name} ${node2.name}.`;
-        }
-        return '';
-      }).join('\n');
-    case 'SUMMARIES':
-      return systemMessages.map((message: { text: string }) => message.text).join('\n');
-    case 'CHUNKS':
-      return systemMessages.map((message: { text: string }) => message.text).join('\n');
-    default:
-      return "";
-  }
 }

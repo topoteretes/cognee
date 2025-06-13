@@ -1,16 +1,17 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useRef, useState, MutableRefObject } from "react";
 
+import Link from "next/link";
 import { TextLogo } from "@/ui/App";
 import { Divider } from "@/ui/Layout";
 import { Footer } from "@/ui/Partials";
-import GraphVisualization, { GraphVisualizationAPI } from "./GraphVisualization";
-import CogneeAddWidget, { NodesAndEdges } from "./CogneeAddWidget";
-import GraphControls, { GraphControlsAPI } from "./GraphControls";
 import GraphLegend from "./GraphLegend";
+import { DiscordIcon, GithubIcon } from "@/ui/Icons";
 import ActivityLog, { ActivityLogAPI } from "./ActivityLog";
+import GraphControls, { GraphControlsAPI } from "./GraphControls";
+import CogneeAddWidget, { NodesAndEdges } from "./CogneeAddWidget";
+import GraphVisualization, { GraphVisualizationAPI } from "./GraphVisualization";
 
 import { useBoolean } from "@/utils";
 
@@ -59,19 +60,20 @@ export default function GraphView() {
 
   return (
     <main className="flex flex-col h-full">
-      <div className="flex flex-row justify-between items-center pt-6 pr-3 pb-3 pl-6">
+      <div className="flex flex-row justify-between items-center pt-6 pr-6 pb-6 pl-6">
         <TextLogo width={86} height={24} />
 
-        <div className="flex flex-row items-center gap-8">
-          Powered by{" "}
-
-          <span className="flex flex-row gap-8">
-            <Image src="/images/neo4j.png" alt="Neo4j" width={132} height={48} />
-            <Image src="/images/lancedb.svg" alt="LanceDB" width={132} height={48} />
-            <Image src="/images/deepnote.svg" alt="DeepNote" width={132} height={48} />
-            <Image src="/images/crewai.png" alt="CrewAI" width={132} height={48} />
-          </span>
-        </div>
+        <span className="flex flex-row items-center gap-8">
+          <Link href="https://www.cognee.ai/">
+            <span>Cognee Home</span>
+          </Link>
+          <Link target="_blank" href="https://github.com/topoteretes/cognee">
+            <GithubIcon color="black" />
+          </Link>
+          <Link target="_blank" href="https://discord.gg/m63hxKsp4p">
+            <DiscordIcon color="black" />
+          </Link>
+        </span>
       </div>
       <Divider />
       <div className="w-full h-full relative overflow-hidden">
@@ -83,13 +85,13 @@ export default function GraphView() {
         />
 
         <div className="absolute top-2 left-2 flex flex-col gap-2">
-          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-xs">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
             <CogneeAddWidget onData={onDataChange} />
           </div>
-          {/* <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-xs">
+          {/* <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
             <CrewAITrigger onData={onDataChange} onActivity={(activities) => activityLog.current?.updateActivityLog(activities)} />
           </div> */}
-          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-xs">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
             <h2 className="text-xl text-white mb-4">Activity Log</h2>
             <ActivityLog ref={activityLog as MutableRefObject<ActivityLogAPI>} />
           </div>

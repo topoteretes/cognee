@@ -73,7 +73,11 @@ async def search(
         node_name=node_name,
     )
 
-    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
+    await log_result(
+        query.id,
+        json.dumps(search_results, cls=JSONEncoder) if len(search_results) > 1 else search_results[0],
+        user.id,
+    )
 
     return search_results
 

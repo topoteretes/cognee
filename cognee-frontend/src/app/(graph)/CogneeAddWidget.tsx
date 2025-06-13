@@ -2,10 +2,12 @@
 
 import { ChangeEvent, useEffect } from "react";
 
-import { useBoolean } from "@/utils";
+import { SearchView } from "@/ui/Partials";
 import { LoadingIndicator } from "@/ui/App";
-import { CTAButton, StatusIndicator } from "@/ui/elements";
+import { AddIcon, SearchIcon } from "@/ui/Icons";
+import { CTAButton, GhostButton, Modal, NeutralButton, StatusIndicator } from "@/ui/elements";
 
+import { useBoolean } from "@/utils";
 import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import createDataset from "@/modules/datasets/createDataset";
@@ -60,10 +62,14 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
     setProcessingFilesInProgress();
 
     if (!event.target.files) {
-      throw new Error("Error: No files added to the uploader input.");
+      return;
     }
 
     const files: File[] = Array.from(event.target.files);
+
+    if (!files.length) {
+      return;
+    }
 
     return addData(dataset, files)
       .then(() => {
@@ -94,31 +100,54 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
       });
   };
 
+  const {
+    value: isSearchModalOpen,
+    setTrue: openSearchModal,
+    setFalse: closeSearchModal,
+  } = useBoolean(false);
+
+  const handleSearchClick = () => {
+    openSearchModal();
+  };
+
   return (
-    <div className="flex flex-col gap-4 mb-4">
+    <div className="flex flex-col gap-4">
       {datasets.length ? datasets.map((dataset) => (
         <div key={dataset.id} className="flex gap-8 items-center justify-between">
           <div className="flex flex-row gap-4 items-center">
             <StatusIndicator status={dataset.status} />
             <span className="text-white">{dataset.name}</span>
           </div>
-          <CTAButton type="button" className="relative">
-            <input type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
-            <span className="flex flex-row gap-2 items-center">
-              + Add Data
-              {isProcessingFiles && <LoadingIndicator />}
-            </span>
-          </CTAButton>
+          <div className="flex gap-2">
+            <CTAButton type="button" className="relative">
+              <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
+              <span className="flex flex-row gap-2 items-center">
+                <AddIcon />
+                {isProcessingFiles && <LoadingIndicator />}
+              </span>
+            </CTAButton>
+            <NeutralButton onClick={handleSearchClick} type="button">
+              <SearchIcon />
+            </NeutralButton>
+          </div>
         </div>
       )) : (
         <CTAButton type="button" className="relative">
-          <input type="file" multiple onChange={handleAddFilesNoDataset} className="absolute w-full h-full cursor-pointer opacity-0" />
+          <input tabIndex={-1} type="file" multiple onChange={handleAddFilesNoDataset} className="absolute w-full h-full cursor-pointer opacity-0" />
           <span className="flex flex-row gap-2 items-center">
             + Add Data
             {isProcessingFiles && <LoadingIndicator />}
           </span>
         </CTAButton>
       )}
+      <Modal isOpen={isSearchModalOpen}>
+        <div className="relative w-full max-w-3xl h-full max-h-5/6">
+          <GhostButton onClick={closeSearchModal} className="absolute right-2 top-2">
+            <AddIcon className="rotate-45" />
+          </GhostButton>
+          <SearchView />
+        </div>
+      </Modal>
     </div>
   );
 }
