@@ -124,7 +124,7 @@ class OntologyResolver:
         return "unknown"
 
     def get_subgraph(
-        self, node_name: str, node_type: str = "individuals"
+        self, node_name: str, node_type: str = "individuals", directed: bool = True
     ) -> Tuple[List[Any], List[Tuple[str, str, str]], Optional[Any]]:
         nodes_set = set()
         edges: List[Tuple[str, str, str]] = []
@@ -180,13 +180,14 @@ class OntologyResolver:
                             visited.add(target)
                             queue.append(target)
                         nodes_set.add(target)
-                    for source in self.graph.subjects(prop, current):
-                        source_label = self._uri_to_key(source)
-                        edges.append((source_label, prop_label, current_label))
-                        if source not in visited:
-                            visited.add(source)
-                            queue.append(source)
-                        nodes_set.add(source)
+                    if not directed:
+                        for source in self.graph.subjects(prop, current):
+                            source_label = self._uri_to_key(source)
+                            edges.append((source_label, prop_label, current_label))
+                            if source not in visited:
+                                visited.add(source)
+                                queue.append(source)
+                            nodes_set.add(source)
 
             rdf_nodes = [
                 AttachedOntologyNode(uri=uri, category=self._get_category(uri))
