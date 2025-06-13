@@ -75,9 +75,7 @@ async def search(
 
     await log_result(
         query.id,
-        json.dumps(search_results, cls=JSONEncoder)
-        if len(search_results) > 1
-        else search_results[0],
+        json.dumps(search_results if len(search_results) > 1 else search_results[0], cls=JSONEncoder),
         user.id,
     )
 

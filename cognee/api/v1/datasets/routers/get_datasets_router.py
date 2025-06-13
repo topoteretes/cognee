@@ -65,7 +65,7 @@ class GraphDTO(OutDTO):
     edges: List[GraphEdgeDTO]
 
 
-class DatasetCreationData(InDTO):
+class DatasetCreationPayload(InDTO):
     name: str
 
 
@@ -87,7 +87,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.post("/", response_model=DatasetDTO)
     async def create_new_dataset(
-        dataset_data: DatasetCreationData, user: User = Depends(get_authenticated_user)
+        dataset_data: DatasetCreationPayload, user: User = Depends(get_authenticated_user)
     ):
         try:
             datasets = await get_datasets_by_name([dataset_data.name], user.id)
