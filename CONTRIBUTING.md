@@ -1,6 +1,5 @@
-<span style="display: inline-block; padding: 1rem 1.5rem; margin-bottom: 2rem; background: #FAA0A0; border-radius: 0.5rem; color: black;">
-<b>Note for contributors:</b> When branching out, create a new branch from the <span style="padding: 2px; border-radius: 0.25rem; background: #3D3D3D; color: #CFCFCF;">dev</span> branch.
-</span>
+> [!IMPORTANT]
+> **Note for contributors:** When branching out, create a new branch from the `dev` branch.
 
 # 🎉 Welcome to **cognee**! 
 
