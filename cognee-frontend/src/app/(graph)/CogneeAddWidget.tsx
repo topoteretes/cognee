@@ -81,7 +81,10 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
           setProcessingFilesDone();
         };
 
-        return cognifyDataset(dataset, onUpdate);
+        return cognifyDataset(dataset, onUpdate)
+          .then(() => {
+            refreshDatasets();
+          });
       });
   };
 

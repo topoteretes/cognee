@@ -2,8 +2,14 @@ import handleServerErrors from "./handleServerErrors";
 
 let numberOfRetries = 0;
 
+const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true"
+
 export default async function fetch(url: string, options: RequestInit = {}): Promise<Response> {
   function retry(lastError: Response) {
+    if (!isAuth0Enabled) {
+      return Promise.reject(lastError);
+    }
+
     if (numberOfRetries >= 1) {
       return Promise.reject(lastError);
     }

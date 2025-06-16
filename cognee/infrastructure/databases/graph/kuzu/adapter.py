@@ -46,7 +46,12 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            os.makedirs(self.db_path, exist_ok=True)
+            try:
+                os.makedirs(self.db_path, exist_ok=True)
+            except FileExistsError:
+                os.remove(self.db_path)
+                os.makedirs(self.db_path, exist_ok=True)
+
             self.db = Database(self.db_path)
             self.db.init_database()
             self.connection = Connection(self.db)
@@ -210,7 +215,7 @@ class KuzuAdapter(GraphDBInterface):
 
             - bool: True if the node exists, False otherwise.
         """
-        query_str = "MATCH (n:Node) WHERE n.id = $id RETURN COUNT(n) > 0"
+        query_str = "MATCH (n) WHERE n.id = $id RETURN COUNT(n) > 0"
         result = await self.query(query_str, {"id": node_id})
         return result[0][0] if result else False
 
@@ -350,7 +355,7 @@ class KuzuAdapter(GraphDBInterface):
 
             - node_id (str): The identifier of the node to be deleted.
         """
-        query_str = "MATCH (n:Node) WHERE n.id = $id DETACH DELETE n"
+        query_str = "MATCH (n) WHERE n.id = $id DETACH DELETE n"
         await self.query(query_str, {"id": node_id})
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
@@ -366,7 +371,7 @@ class KuzuAdapter(GraphDBInterface):
 
             - node_ids (List[str]): A list of identifiers for the nodes to be deleted.
         """
-        query_str = "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n"
+        query_str = "MATCH (n) WHERE n.id IN $ids DETACH DELETE n"
         await self.query(query_str, {"ids": node_ids})
 
     async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
@@ -388,7 +393,7 @@ class KuzuAdapter(GraphDBInterface):
               otherwise None.
         """
         query_str = """
-        MATCH (n:Node)
+        MATCH (n)
         WHERE n.id = $id
         RETURN {
             id: n.id,
@@ -427,7 +432,7 @@ class KuzuAdapter(GraphDBInterface):
               extracted nodes.
         """
         query_str = """
-        MATCH (n:Node)
+        MATCH (n)
         WHERE n.id IN $node_ids
         RETURN {
             id: n.id,
@@ -468,7 +473,7 @@ class KuzuAdapter(GraphDBInterface):
             - bool: True if the edge exists, False otherwise.
         """
         query_str = """
-        MATCH (from:Node)-[r:EDGE]->(to:Node)
+        MATCH (from)-[r:EDGE]->(to)
         WHERE from.id = $from_id AND to.id = $to_id AND r.relationship_name = $edge_label
         RETURN COUNT(r) > 0
         """
@@ -514,7 +519,7 @@ class KuzuAdapter(GraphDBInterface):
             # Batch check query with direct string comparison
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node)-[r:EDGE]->(to:Node)
+            MATCH (from)-[r:EDGE]->(to)
             WHERE from.id = edge.from_id
             AND to.id = edge.to_id
             AND r.relationship_name = edge.relationship_name
@@ -601,7 +606,7 @@ class KuzuAdapter(GraphDBInterface):
 
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node), (to:Node)
+            MATCH (from), (to)
             WHERE from.id = edge.from_id AND to.id = edge.to_id
             MERGE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name
@@ -641,7 +646,7 @@ class KuzuAdapter(GraphDBInterface):
               target_node as dictionaries of node properties.
         """
         query_str = """
-        MATCH (n:Node)-[r]-(m:Node)
+        MATCH (n)-[r]-(m)
         WHERE n.id = $node_id
         RETURN {
             id: n.id,
@@ -712,7 +717,7 @@ class KuzuAdapter(GraphDBInterface):
               found, otherwise None.
         """
         query_str = """
-        MATCH (n:Node)
+        MATCH (n)
         WHERE n.id = $id
         RETURN {
             id: n.id,
@@ -750,7 +755,7 @@ class KuzuAdapter(GraphDBInterface):
               retrieved node.
         """
         query_str = """
-        MATCH (n:Node)
+        MATCH (n)
         WHERE n.id IN $node_ids
         RETURN {
             id: n.id,
@@ -908,7 +913,7 @@ class KuzuAdapter(GraphDBInterface):
               source_node and target_node properties.
         """
         query_str = """
-        MATCH (n:Node)-[r:EDGE]-(m:Node)
+        MATCH (n)-[r:EDGE]-(m)
         WHERE n.id = $node_id
         RETURN {
             id: n.id,
@@ -1018,7 +1023,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         try:
             nodes_query = """
-            MATCH (n:Node)
+            MATCH (n)
             RETURN n.id, {
                 name: n.name,
                 type: n.type,
@@ -1044,7 +1049,7 @@ class KuzuAdapter(GraphDBInterface):
                 return [], []
 
             edges_query = """
-            MATCH (n:Node)-[r:EDGE]->(m:Node)
+            MATCH (n)-[r]->(m)
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edges = await self.query(edges_query)
@@ -1109,7 +1114,7 @@ class KuzuAdapter(GraphDBInterface):
         label = node_type.__name__
         primary_query = """
             UNWIND $names AS wantedName
-            MATCH (n:Node)
+            MATCH (n)
             WHERE n.type = $label AND n.name = wantedName
             RETURN DISTINCT n.id
         """
@@ -1119,7 +1124,7 @@ class KuzuAdapter(GraphDBInterface):
             return [], []
 
         neighbor_query = """
-            MATCH (n:Node)-[:EDGE]-(nbr:Node)
+            MATCH (n)-[:EDGE]-(nbr)
             WHERE n.id IN $ids
             RETURN DISTINCT nbr.id
         """
@@ -1129,7 +1134,7 @@ class KuzuAdapter(GraphDBInterface):
         all_ids = list({*primary_ids, *neighbor_ids})
 
         nodes_query = """
-            MATCH (n:Node)
+            MATCH (n)
             WHERE n.id IN $ids
             RETURN n.id, n.name, n.type, n.properties
         """
@@ -1145,7 +1150,7 @@ class KuzuAdapter(GraphDBInterface):
             nodes.append((node_id, data))
 
         edges_query = """
-            MATCH (a:Node)-[r:EDGE]-(b:Node)
+            MATCH (a)-[r:EDGE]-(b)
             WHERE a.id IN $ids AND b.id IN $ids
             RETURN a.id, b.id, r.relationship_name, r.properties
         """
@@ -1424,7 +1429,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         try:
             # Use DETACH DELETE to remove both nodes and their relationships in one operation
-            await self.query("MATCH (n:Node) DETACH DELETE n")
+            await self.query("MATCH (n) DETACH DELETE n")
             logger.info("Cleared all data from graph while preserving structure")
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
@@ -1450,13 +1455,13 @@ class KuzuAdapter(GraphDBInterface):
             # Reinitialize the database
             self._initialize_connection()
             # Verify the database is empty
-            result = self.connection.execute("MATCH (n:Node) RETURN COUNT(n)")
+            result = self.connection.execute("MATCH (n) RETURN COUNT(n)")
             count = result.get_next()[0] if result.has_next() else 0
             if count > 0:
                 logger.warning(
                     f"Database still contains {count} nodes after clearing, forcing deletion"
                 )
-                self.connection.execute("MATCH (n:Node) DETACH DELETE n")
+                self.connection.execute("MATCH (n) DETACH DELETE n")
             logger.info("Database cleared successfully")
         except Exception as e:
             logger.error(f"Error during database clearing: {e}")

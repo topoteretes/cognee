@@ -23,6 +23,7 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
 from cognee.shared.utils import send_telemetry
@@ -75,7 +76,9 @@ async def search(
 
     await log_result(
         query.id,
-        json.dumps(search_results if len(search_results) > 1 else search_results[0], cls=JSONEncoder),
+        json.dumps(
+            search_results if len(search_results) > 1 else search_results[0], cls=JSONEncoder
+        ),
         user.id,
     )
 
@@ -157,7 +160,10 @@ async def permissions_search(
     query = await log_query(query_text, query_type.value, user.id)
 
     # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
-    search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
+    try:
+        search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
+    except PermissionDeniedError:
+        search_datasets = []
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await specific_search_by_context(

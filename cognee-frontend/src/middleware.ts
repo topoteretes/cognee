@@ -1,16 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { auth0 } from "./modules/auth/auth0";
+// import { auth0 } from "./modules/auth/auth0";
 
 export async function middleware(request: NextRequest) {
-  if (process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true") {
-    if (request.nextUrl.pathname === "/auth/token") {
-        return NextResponse.next();
-    }
+  // if (process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true") {
+  //   if (request.nextUrl.pathname === "/auth/token") {
+  //       return NextResponse.next();
+  //   }
 
-    const response: NextResponse = await auth0.middleware(request);
+  //   const response: NextResponse = await auth0.middleware(request);
 
-    return response;
-  }
+  //   return response;
+  // }
 
   return NextResponse.next();
 }

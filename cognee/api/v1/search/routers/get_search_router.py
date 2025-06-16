@@ -29,7 +29,7 @@ def get_search_router() -> APIRouter:
         user: str
         created_at: datetime
 
-    @router.get("/", response_model=list[SearchHistoryItem])
+    @router.get("", response_model=list[SearchHistoryItem])
     async def get_search_history(user: User = Depends(get_authenticated_user)):
         try:
             history = await get_history(user.id, limit=0)
@@ -38,7 +38,7 @@ def get_search_router() -> APIRouter:
         except Exception as error:
             return JSONResponse(status_code=500, content={"error": str(error)})
 
-    @router.post("/", response_model=list)
+    @router.post("", response_model=list)
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for searching for nodes in the graph."""
         from cognee.api.v1.search import search as cognee_search

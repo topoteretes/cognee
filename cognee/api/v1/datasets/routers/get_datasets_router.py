@@ -72,7 +72,7 @@ class DatasetCreationPayload(InDTO):
 def get_datasets_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("/", response_model=list[DatasetDTO])
+    @router.get("", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):
         try:
             datasets = await get_all_user_permission_datasets(user, "read")
@@ -85,7 +85,7 @@ def get_datasets_router() -> APIRouter:
                 detail=f"Error retrieving datasets: {str(error)}",
             ) from error
 
-    @router.post("/", response_model=DatasetDTO)
+    @router.post("", response_model=DatasetDTO)
     async def create_new_dataset(
         dataset_data: DatasetCreationPayload, user: User = Depends(get_authenticated_user)
     ):
