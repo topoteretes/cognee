@@ -77,6 +77,12 @@ jobs:
     uses: ./.github/workflows/examples_tests.yml
     secrets: inherit
 
+  mcp-test:
+    name: Example Tests
+    needs: [ basic-tests, e2e-tests ]
+    uses: ./.github/workflows/test_mcp.yml
+    secrets: inherit
+
   db-examples-tests:
     name: DB Examples Tests
     needs: [vector-db-tests, graph-db-tests, relational-db-migration-tests]
@@ -102,6 +108,7 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
+      mcp-test,
       relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,
@@ -120,6 +127,7 @@ jobs:
       vector-db-tests,
       example-tests,
       db-examples-tests,
+      mcp-test,
       gemini-tests,
       ollama-tests,
       relational-db-migration-tests,

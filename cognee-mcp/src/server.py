@@ -74,7 +74,7 @@ async def cognee_add_developer_rules(
         with redirect_stdout(sys.stderr):
             logger.info(f"Starting cognify for: {file_path}")
             try:
-                await cognee.add(file_path, nodeset="developer_rules")
+                await cognee.add(file_path, node_set=["developer_rules"])
                 model = KnowledgeGraph
                 if graph_model_file and graph_model_name:
                     model = load_class(graph_model_file, graph_model_name)
@@ -82,6 +82,7 @@ async def cognee_add_developer_rules(
                 logger.info(f"Cognify finished for: {file_path}")
             except Exception as e:
                 logger.error(f"Cognify failed for {file_path}: {str(e)}")
+                raise ValueError(f"Failed to cognify: {str(e)}")
 
     tasks = []
     for rel_path in developer_rule_paths:
