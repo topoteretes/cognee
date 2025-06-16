@@ -72,6 +72,7 @@ class Storage(Protocol):
         """
         pass
 
+
 class StorageManager:
     """
     Manages storage operations by delegating tasks to a storage backend.

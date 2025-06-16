@@ -7,9 +7,7 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 
 
 @contextmanager
-def open_data_file(
-    file_path: str, mode: str = "rb", encoding: Optional[str] = None, **kwargs
-):
+def open_data_file(file_path: str, mode: str = "rb", encoding: Optional[str] = None, **kwargs):
     if file_path.startswith("s3://"):
         s3_config = get_s3_config()
         if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:

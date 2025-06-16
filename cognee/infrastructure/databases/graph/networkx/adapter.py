@@ -674,13 +674,15 @@ class NetworkXAdapter(GraphDBInterface):
               default graph file. (default None)
         """
         if file_path is None:
-            file_path = self.filename # Assuming self.filename is defined elsewhere and holds the default graph file path
+            file_path = (
+                self.filename
+            )  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
             file_dir_path = os.path.dirname(file_path)
             file_path = os.path.basename(file_path)
 
             file_storage = LocalFileStorage(file_dir_path)
-          
+
             file_storage.remove(file_path)
 
             self.graph = None

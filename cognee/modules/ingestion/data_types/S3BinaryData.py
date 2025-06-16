@@ -5,9 +5,7 @@ from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 from .IngestionData import IngestionData
 
 
-def create_s3_binary_data(
-    s3_path: str, name: Optional[str] = None
-) -> "S3BinaryData":
+def create_s3_binary_data(s3_path: str, name: Optional[str] = None) -> "S3BinaryData":
     return S3BinaryData(s3_path, name=name)
 
 
@@ -16,9 +14,7 @@ class S3BinaryData(IngestionData):
     s3_path: str = None
     metadata: Optional[FileMetadata] = None
 
-    def __init__(
-        self, s3_path: str, name: Optional[str] = None
-    ):
+    def __init__(self, s3_path: str, name: Optional[str] = None):
         self.s3_path = s3_path
         self.name = name
 
