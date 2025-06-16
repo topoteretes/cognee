@@ -1,27 +1,26 @@
+import os
 from typing import Optional
-import s3fs
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
+from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 from .IngestionData import IngestionData
 
 
 def create_s3_binary_data(
-    s3_path: str, name: Optional[str] = None, s3: Optional[s3fs.S3FileSystem] = None
+    s3_path: str, name: Optional[str] = None
 ) -> "S3BinaryData":
-    return S3BinaryData(s3_path, name=name, s3=s3)
+    return S3BinaryData(s3_path, name=name)
 
 
 class S3BinaryData(IngestionData):
     name: Optional[str] = None
     s3_path: str = None
-    fs: s3fs.S3FileSystem = None
     metadata: Optional[FileMetadata] = None
 
     def __init__(
-        self, s3_path: str, name: Optional[str] = None, s3: Optional[s3fs.S3FileSystem] = None
+        self, s3_path: str, name: Optional[str] = None
     ):
         self.s3_path = s3_path
         self.name = name
-        self.fs = s3 if s3 is not None else s3fs.S3FileSystem()
 
     def get_identifier(self):
         metadata = self.get_metadata()
@@ -33,10 +32,20 @@ class S3BinaryData(IngestionData):
 
     def ensure_metadata(self):
         if self.metadata is None:
-            with self.fs.open(self.s3_path, "rb") as f:
-                self.metadata = get_file_metadata(f)
+            file_dir_path = os.path.dirname(self.s3_path)
+            file_path = os.path.basename(self.s3_path)
+
+            file_storage = S3FileStorage(file_dir_path)
+
+            with file_storage.open(file_path, "rb") as file:
+                self.metadata = get_file_metadata(file)
             if self.metadata.get("name") is None:
-                self.metadata["name"] = self.name or self.s3_path.split("/")[-1]
+                self.metadata["name"] = self.name or file_path
 
     def get_data(self):
-        return self.fs.open(self.s3_path, "rb")
+        file_dir_path = os.path.dirname(self.s3_path)
+        file_path = os.path.basename(self.s3_path)
+
+        file_storage = S3FileStorage(file_dir_path)
+
+        return file_storage.open(file_path, "rb")

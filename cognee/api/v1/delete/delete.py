@@ -1,13 +1,14 @@
+import os
 from typing import Union, BinaryIO, List
+from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.modules.ingestion import classify
 from cognee.infrastructure.databases.relational import get_relational_engine
 from sqlalchemy import select
 from sqlalchemy.sql import delete as sql_delete
 from cognee.modules.data.models import Data, DatasetData, Dataset
 from cognee.infrastructure.databases.graph import get_graph_engine
-from io import StringIO, BytesIO
+from io import BytesIO
 import hashlib
-import asyncio
 from uuid import UUID
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
@@ -39,7 +40,14 @@ async def delete(
     # Handle different input types
     if isinstance(data, str):
         if data.startswith("file://"):  # It's a file path
-            with open(data.replace("file://", ""), mode="rb") as file:
+            full_file_path = data.replace("file://", "")
+
+            file_dir = os.path.dirname(full_file_path)
+            file_path = os.path.basename(full_file_path)
+
+            file_storage = LocalFileStorage(file_dir)
+
+            with file_storage.open(file_path, mode="rb") as file:
                 classified_data = classify(file)
                 content_hash = classified_data.get_metadata()["content_hash"]
                 return await delete_single_document(content_hash, dataset_name, mode)

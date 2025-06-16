@@ -1,4 +1,4 @@
-from typing import Protocol, BinaryIO
+from typing import Protocol, BinaryIO, Union
 
 
 class Storage(Protocol):
@@ -6,7 +6,7 @@ class Storage(Protocol):
     Abstract interface for storage operations.
     """
 
-    def store(self, file_path: str, data: bytes):
+    def store(self, file_path: str, data: Union[BinaryIO, str]):
         """
         Store data at the specified file path.
 
@@ -18,19 +18,36 @@ class Storage(Protocol):
         """
         pass
 
-    def retrieve(self, file_path: str):
+    def open(self, file_path: str, mode: str = "r"):
         """
-        Retrieve data from the specified file path.
+        Retrieve file from the specified file path.
 
         Parameters:
         -----------
 
             - file_path (str): The path from where the data will be retrieved.
+            - mode (str): The mode to open the file, with "r" as the default for reading text
         """
         pass
 
-    @staticmethod
-    def remove(file_path: str):
+    def copy_file(self, source_file_path: str, destination_file_path: str):
+        """
+        Copy a file from a source path to a destination path.
+
+        Parameters:
+        -----------
+
+            - source_file_path (str): The path of the file to be copied.
+            - destination_file_path (str): The path where the file will be copied to.
+
+        Returns:
+        --------
+
+            - str: The path to the copied file.
+        """
+        pass
+
+    def remove(self, file_path: str):
         """
         Remove the storage at the specified file path.
 
@@ -41,6 +58,19 @@ class Storage(Protocol):
         """
         pass
 
+    def remove_all(self, root_path: str):
+        """
+        Remove an entire directory tree at the specified path, including all files and
+        subdirectories.
+
+        If the directory does not exist, no action is taken and no exception is raised.
+
+        Parameters:
+        -----------
+
+            - tree_path (str): The root path of the directory tree to be removed.
+        """
+        pass
 
 class StorageManager:
     """
@@ -48,8 +78,9 @@ class StorageManager:
 
     Public methods include:
     - store: Store data in the specified path.
-    - retrieve: Retrieve data from the specified path.
+    - open: Open a file from the specified path.
     - remove: Remove the file at the specified path.
+    - remove_all: Remove all files under the directory tree.
     """
 
     storage: Storage = None
@@ -75,7 +106,7 @@ class StorageManager:
         """
         return self.storage.store(file_path, data)
 
-    def retrieve(self, file_path: str):
+    def open(self, file_path: str, *args, **kwargs):
         """
         Retrieve data from the specified file path.
 
@@ -89,7 +120,7 @@ class StorageManager:
 
             Returns the retrieved data, as defined by the storage implementation.
         """
-        return self.storage.retrieve(file_path)
+        return self.storage.open(file_path, *args, **kwargs)
 
     def remove(self, file_path: str):
         """
@@ -107,3 +138,17 @@ class StorageManager:
             implementation.
         """
         return self.storage.remove(file_path)
+
+    def remove_all(self, tree_path: str):
+        """
+        Remove an entire directory tree at the specified path, including all files and
+        subdirectories.
+
+        If the directory does not exist, no action is taken and no exception is raised.
+
+        Parameters:
+        -----------
+
+            - tree_path (str): The root path of the directory tree to be removed.
+        """
+        return self.storage.remove_all(tree_path)

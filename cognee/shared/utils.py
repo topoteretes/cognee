@@ -13,14 +13,14 @@ import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
-import sys
+import pathlib
+from uuid import uuid4
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
-
-from uuid import uuid4
-import pathlib
+from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.shared.exceptions import IngestionError
+
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -107,7 +107,12 @@ def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
 
     try:
         if isinstance(file_obj, str):
-            with open(file_obj, "rb") as file:
+            file_dir_path = os.path.dirname(file_obj)
+            file_path = os.path.basename(file_obj)
+
+            file_storage = LocalFileStorage(file_dir_path)
+
+            with file_storage.open(file_path, "rb") as file:
                 while True:
                     # Reading is buffered, so we can read smaller chunks.
                     chunk = file.read(h.block_size)

@@ -12,9 +12,6 @@ def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
 
     classified_data = classify(data, filename)
 
-    storage_path = os.path.join(data_directory_path, "data")
-    LocalStorage.ensure_directory_exists(storage_path)
-
     file_metadata = classified_data.get_metadata()
     if "name" not in file_metadata or file_metadata["name"] is None:
         data_contents = classified_data.get_data().encode("utf-8")
@@ -22,8 +19,11 @@ def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
         file_metadata["name"] = "text_" + hash_contents + ".txt"
     file_name = file_metadata["name"]
 
-    # Don't save file if it already exists
-    if not os.path.isfile(os.path.join(storage_path, file_name)):
-        LocalStorage(storage_path).store(file_name, classified_data.get_data())
+    storage_path = os.path.join(data_directory_path, "data")
+    storage = LocalStorage(storage_path)
 
-    return "file://" + storage_path + "/" + file_name
+    # Don't save file if it already exists
+    if not storage.file_exists(file_name):
+        storage.store(file_name, classified_data.get_data())
+
+    return "file://" + os.path.join(storage_path, file_name)

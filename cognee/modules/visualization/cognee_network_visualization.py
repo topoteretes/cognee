@@ -3,7 +3,7 @@ import json
 import networkx
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.files.storage import LocalStorage
+from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 
 logger = get_logger()
 
@@ -191,10 +191,12 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         home_dir = os.path.expanduser("~")
         destination_file_path = os.path.join(home_dir, "graph_visualization.html")
 
-    LocalStorage.ensure_directory_exists(os.path.dirname(destination_file_path))
+    dir_path = os.path.dirname(destination_file_path)
+    file_path = os.path.basename(destination_file_path)
 
-    with open(destination_file_path, "w") as f:
-        f.write(html_content)
+    file_storage = LocalFileStorage(dir_path)
+
+    file_storage.store(file_path, html_content)
 
     logger.info(f"Graph visualization saved as {destination_file_path}")
 

@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -89,7 +90,12 @@ async def main():
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    with open(get_relational_engine().db_path, "r") as file:
+    db_path = get_relational_engine().db_path
+    dir_path = os.path.dirname(db_path)
+    file_path = os.path.basename(db_path)
+    file_storage = LocalFileStorage(dir_path)
+
+    with file_storage.open(file_path, "r") as file:
         content = file.read()
         assert content == "", "SQLite relational database is not empty"
 
