@@ -20,7 +20,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _add_dataset_permission(conn, user_id, dataset_id, permission_name):
+def _create_dataset_permission(conn, user_id, dataset_id, permission_name) -> dict:
     from cognee.modules.users.models import Permission
 
     permission = conn.execute(
@@ -30,21 +30,14 @@ def _add_dataset_permission(conn, user_id, dataset_id, permission_name):
     if permission is None:
         permission = Permission(name=permission_name)
 
-    from cognee.modules.users.models import ACL
-
-    op.bulk_insert(
-        ACL.__table__,
-        [
-            {
-                "id": uuid4(),
-                "create_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-                "principal_id": user_id,
-                "dataset_id": dataset_id,
-                "permission_id": permission.id,
-            }
-        ],
-    )
+    return {
+        "id": uuid4(),
+        "create_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "principal_id": user_id,
+        "dataset_id": dataset_id,
+        "permission_id": permission.id,
+    }
 
 
 def _uuid_type():
@@ -84,11 +77,18 @@ def upgrade() -> None:
     if not datasets:
         return
 
+    acl_list = []
+
     for dataset in datasets:
-        _add_dataset_permission(conn, dataset.owner_id, dataset.id, "read")
-        _add_dataset_permission(conn, dataset.owner_id, dataset.id, "write")
-        _add_dataset_permission(conn, dataset.owner_id, dataset.id, "share")
-        _add_dataset_permission(conn, dataset.owner_id, dataset.id, "delete")
+        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "read"))
+        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "write"))
+        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "share"))
+        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "delete"))
+
+    if acl_list:
+        from cognee.modules.users.models import ACL
+
+        op.bulk_insert(ACL.__table__, acl_list)
 
 
 def downgrade() -> None:
