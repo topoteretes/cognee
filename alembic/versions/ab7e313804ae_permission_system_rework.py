@@ -24,33 +24,85 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def _define_dataset_table() -> sa.Table:
+    # Note: We can't use any Cognee model info to gather data (as it can change) in database so we must use our own table
+    #       definition or load what is in the database
+    table = sa.Table(
+        "datasets",
+        sa.MetaData(),
+        sa.Column("id", UUID, primary_key=True, default=uuid4),
+        sa.Column("name", sa.Text),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+        ),
+        sa.Column("owner_id", UUID, sa.ForeignKey("principals.id"), index=True),
+    )
+
+    return table
+
+
+def _define_data_table() -> sa.Table:
+    # Note: We can't use any Cognee model info to gather data (as it can change) in database so we must use our own table
+    #       definition or load what is in the database
+    table = sa.Table(
+        "data",
+        sa.MetaData(),
+        sa.Column("id", UUID, primary_key=True, default=uuid4),
+        sa.Column("name", sa.String),
+        sa.Column("extension", sa.String),
+        sa.Column("mime_type", sa.String),
+        sa.Column("raw_data_location", sa.String),
+        sa.Column("owner_id", UUID, index=True),
+        sa.Column("content_hash", sa.String),
+        sa.Column("external_metadata", sa.JSON),
+        sa.Column("node_set", sa.JSON, nullable=True),  # list of strings
+        sa.Column("token_count", sa.Integer),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+        ),
+    )
+
+    return table
+
+
 def _ensure_permission(conn, permission_name) -> str:
     """
     Return the permission.id for the given name, creating the row if needed.
     """
-    from cognee.modules.users.models import Permission
-
-    row = conn.execute(sa.select(Permission).filter(Permission.name == permission_name)).fetchone()
+    permissions_table = sa.Table(
+        "permissions",
+        sa.MetaData(),
+        sa.Column("id", UUID, primary_key=True, index=True, default=uuid4),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+        ),
+        sa.Column("name", sa.String, unique=True, nullable=False, index=True),
+    )
+    row = conn.execute(
+        sa.select(permissions_table).filter(permissions_table.c.name == permission_name)
+    ).fetchone()
 
     if row is None:
         permission_id = uuid4()
-
-        permissions_table = sa.Table(
-            "acls",
-            sa.MetaData(),
-            sa.Column("id", UUID, primary_key=True, default=uuid4),
-            sa.Column(
-                "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-            ),
-            sa.Column(
-                "updated_at",
-                sa.DateTime(timezone=True),
-                onupdate=lambda: datetime.now(timezone.utc),
-            ),
-            sa.Column("principal_id", UUID, sa.ForeignKey("principals.id")),
-            sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id")),
-            sa.Column("dataset_id", UUID, sa.ForeignKey("datasets.id", ondelete="CASCADE")),
-        )
 
         op.bulk_insert(
             permissions_table,
@@ -59,7 +111,6 @@ def _ensure_permission(conn, permission_name) -> str:
                     "id": permission_id,
                     "name": permission_name,
                     "created_at": _now(),
-                    "updated_at": _now(),
                 }
             ],
         )
@@ -73,7 +124,6 @@ def _build_acl_row(*, user_id, target_id, permission_id, target_col) -> dict:
     return {
         "id": uuid4(),
         "created_at": _now(),
-        "updated_at": _now(),
         "principal_id": user_id,
         target_col: target_id,
         "permission_id": permission_id,
@@ -114,9 +164,10 @@ def upgrade() -> None:
         sa.Column("dataset_id", UUID, sa.ForeignKey("datasets.id", ondelete="CASCADE")),
     )
 
-    from cognee.modules.data.models import Dataset
-
-    datasets = conn.execute(sa.select(Dataset)).fetchall()
+    # Note: We can't use any Cognee model info to gather data (as it can change) in database so we must use our own table
+    #       definition or load what is in the database
+    dataset_table = _define_dataset_table()
+    datasets = conn.execute(sa.select(dataset_table)).fetchall()
 
     if not datasets:
         return
@@ -152,9 +203,10 @@ def downgrade() -> None:
         sa.Column("data_id", UUID, sa.ForeignKey("data.id", ondelete="CASCADE")),
     )
 
-    from cognee.modules.data.models import Data
-
-    data = conn.execute(sa.select(Data)).fetchall()
+    # Note: We can't use any Cognee model info to gather data (as it can change) in database so we must use our own table
+    #       definition or load what is in the database
+    data_table = _define_data_table()
+    data = conn.execute(sa.select(data_table)).fetchall()
 
     if not data:
         return
