@@ -34,6 +34,8 @@ def _ensure_permission(conn, permission_name) -> str:
 
     if row is None:
         permission_id = uuid4()
+        # TODO: The Permission table might change in future version of Cognee,
+        #       if this happens this migration version won't work anymore. Not sure what to do
         op.bulk_insert(
             Permission.__table__,
             [
