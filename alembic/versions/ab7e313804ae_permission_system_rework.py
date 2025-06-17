@@ -34,10 +34,26 @@ def _ensure_permission(conn, permission_name) -> str:
 
     if row is None:
         permission_id = uuid4()
-        # TODO: The Permission table might change in future version of Cognee,
-        #       if this happens this migration version won't work anymore. Not sure what to do
+
+        permissions_table = sa.Table(
+            "acls",
+            sa.MetaData(),
+            sa.Column("id", UUID, primary_key=True, default=uuid4),
+            sa.Column(
+                "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                onupdate=lambda: datetime.now(timezone.utc),
+            ),
+            sa.Column("principal_id", UUID, sa.ForeignKey("principals.id")),
+            sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id")),
+            sa.Column("dataset_id", UUID, sa.ForeignKey("datasets.id", ondelete="CASCADE")),
+        )
+
         op.bulk_insert(
-            Permission.__table__,
+            permissions_table,
             [
                 {
                     "id": permission_id,
@@ -86,17 +102,16 @@ def upgrade() -> None:
 
     acls_table = op.create_table(
         "acls",
-        sa.Column("id", UUID, primary_key=True, nullable=False, default=uuid4),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("principal_id", UUID, sa.ForeignKey("principals.id"), nullable=True),
-        sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id"), nullable=True),
+        sa.Column("id", UUID, primary_key=True, default=uuid4),
         sa.Column(
-            "dataset_id",
-            UUID,
-            sa.ForeignKey("datasets.id", ondelete="CASCADE"),
-            nullable=True,
+            "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
         ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
+        ),
+        sa.Column("principal_id", UUID, sa.ForeignKey("principals.id")),
+        sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id")),
+        sa.Column("dataset_id", UUID, sa.ForeignKey("datasets.id", ondelete="CASCADE")),
     )
 
     from cognee.modules.data.models import Dataset
@@ -126,16 +141,15 @@ def downgrade() -> None:
     acls_table = op.create_table(
         "acls",
         sa.Column("id", UUID, primary_key=True, nullable=False, default=uuid4),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("principal_id", UUID, sa.ForeignKey("principals.id"), nullable=True),
-        sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id"), nullable=True),
         sa.Column(
-            "data_id",
-            UUID,
-            sa.ForeignKey("data.id", ondelete="CASCADE"),
-            nullable=True,
+            "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
         ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
+        ),
+        sa.Column("principal_id", UUID, sa.ForeignKey("principals.id")),
+        sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id")),
+        sa.Column("data_id", UUID, sa.ForeignKey("data.id", ondelete="CASCADE")),
     )
 
     from cognee.modules.data.models import Data
