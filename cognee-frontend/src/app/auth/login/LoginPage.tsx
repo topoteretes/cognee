@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
 
@@ -15,6 +17,7 @@ export default function LoginPage() {
         <AuthForm
           authUrl="/v1/auth/login"
           submitButtonText="Login"
+          formatPayload={formatPayload}
         />
 
         <p className="text-center mt-2 text-sm">
@@ -25,4 +28,13 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+function formatPayload(data: { email: string, password: string }) {
+  const payload = new URLSearchParams();
+
+  payload.append("username", data.email);
+  payload.append("password", data.password);
+
+  return payload;
 }

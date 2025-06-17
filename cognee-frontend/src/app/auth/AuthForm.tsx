@@ -12,11 +12,15 @@ interface AuthFormPayload extends HTMLFormElement {
 
 const errorsMap = {
   LOGIN_BAD_CREDENTIALS: "Invalid username or password",
+  REGISTER_USER_ALREADY_EXISTS: "User already exists",
 };
+
+const defaultFormatPayload: (data: { email: string; password: string; }) => any = (data) => data;
 
 export default function AuthForm({
   submitButtonText = "Sign in",
   authUrl = "/v1/auth/login",
+  formatPayload = defaultFormatPayload,
   onSignInSuccess = () => window.location.href = "/",
 }) {
   const {
@@ -31,17 +35,23 @@ export default function AuthForm({
       event.preventDefault();
       const formElements = event.currentTarget;
 
-      const authCredentials = new FormData();
       // Backend expects username and password fields
-      authCredentials.append("username", formElements.email.value);
-      authCredentials.append("password", formElements.password.value);
+      const authCredentials = {
+        email: formElements.email.value,
+        password: formElements.password.value,
+      };
 
       setSignInError(null);
       disableSignIn();
 
+      const formattedPayload = formatPayload(authCredentials);
+
       fetch(authUrl, {
         method: "POST",
-        body: authCredentials,
+        body: formattedPayload instanceof URLSearchParams ? formattedPayload.toString() : JSON.stringify(formattedPayload),
+        headers: {
+          "Content-Type": formattedPayload instanceof URLSearchParams ? "application/x-www-form-urlencoded" : "application/json",
+        },
       })
         .then(() => {
           onSignInSuccess();

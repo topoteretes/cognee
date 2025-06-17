@@ -23,7 +23,6 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
 from cognee.shared.utils import send_telemetry

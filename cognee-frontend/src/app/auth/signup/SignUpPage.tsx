@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
 
@@ -15,6 +17,7 @@ export default function SignUpPage() {
         <AuthForm
           authUrl="/v1/auth/register"
           submitButtonText="Sign up"
+          onSignInSuccess={() => window.location.href = "/auth/login"}
         />
 
         <p className="text-center mt-2 text-sm">

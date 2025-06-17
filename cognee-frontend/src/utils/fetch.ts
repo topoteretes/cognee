@@ -33,7 +33,7 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
       return response;
     })
     .catch((error) => {
-      if (error.status === undefined) {
+      if (error.detail === undefined) {
         return Promise.reject(
           new Error("No connection to the server.")
         );

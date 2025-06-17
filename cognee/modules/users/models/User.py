@@ -1,12 +1,13 @@
-from uuid import UUID as uuid_UUID
 from typing import Optional
+from uuid import UUID as uuid_UUID
+from fastapi_users import schemas
+from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import ForeignKey, Column, UUID
 from sqlalchemy.orm import relationship, Mapped
-from fastapi_users.db import SQLAlchemyBaseUserTableUUID
+
 from .Principal import Principal
 from .UserRole import UserRole
 from .Role import Role
-from fastapi_users import schemas
 
 
 class User(SQLAlchemyBaseUserTableUUID, Principal):
@@ -46,6 +47,7 @@ class UserRead(schemas.BaseUser[uuid_UUID]):
 
 class UserCreate(schemas.BaseUserCreate):
     tenant_id: Optional[uuid_UUID] = None
+    is_verified: bool = True
 
 
 class UserUpdate(schemas.BaseUserUpdate):
