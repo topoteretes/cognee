@@ -2,7 +2,8 @@ from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 
 from functools import lru_cache
-
+import base64
+import json
 
 @lru_cache
 def create_vector_engine(
@@ -132,6 +133,41 @@ def create_vector_engine(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
+        )
+
+    elif vector_db_provider == "opensearch":
+        from .opensearch.OpenSearchAdapter import OpenSearchAdapter
+
+        if not vector_db_url:
+            raise EnvironmentError("Missing required OpenSearch hosts!")
+
+        # hosts pode ser passado como string separada por vírgula ou lista
+        hosts = [h.strip() for h in vector_db_url.split(",")] if isinstance(vector_db_url, str) else vector_db_url
+        http_auth = None
+        if vector_db_key:
+            vector_db_key_decoded = base64.b64decode(vector_db_key).decode("utf-8")
+            vector_db_key_decoded_dict = json.loads(vector_db_key_decoded)
+            username = vector_db_key_decoded_dict.get("username")
+            password = vector_db_key_decoded_dict.get("password")
+            if username and password:
+                http_auth = (username, password)
+            use_ssl = vector_db_key_decoded_dict.get("use_ssl", "False").lower() == "true"
+            verify_certs = vector_db_key_decoded_dict.get("verify_certs", "True").lower() == "true"
+            ssl_assert_hostname = vector_db_key_decoded_dict.get("ssl_assert_hostname", "True").lower() == "true"
+            ssl_show_warn = vector_db_key_decoded_dict.get("ssl_show_warn", "True").lower() == "true"
+            index_prefix = vector_db_key_decoded_dict.get("index_prefix", "")
+
+        return OpenSearchAdapter(
+            hosts=hosts,
+            embedding_engine=embedding_engine,
+            http_auth=http_auth,
+            index_prefix=f"{index_prefix}cognee",
+            **{
+                "use_ssl": use_ssl,
+                "verify_certs": verify_certs,
+                "ssl_assert_hostname": ssl_assert_hostname,
+                "ssl_show_warn": ssl_show_warn,
+            }
         )
 
     else:
