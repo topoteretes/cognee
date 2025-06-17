@@ -160,10 +160,7 @@ async def permissions_search(
     query = await log_query(query_text, query_type.value, user.id)
 
     # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
-    try:
-        search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
-    except PermissionDeniedError:
-        search_datasets = []
+    search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await specific_search_by_context(

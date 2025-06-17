@@ -16,7 +16,6 @@ from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunInfo
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
@@ -105,12 +104,11 @@ def get_cognify_router() -> APIRouter:
                 continue
 
             try:
-                await set_database_global_context_variables(pipeline_run.dataset_id, user.id)
                 await websocket.send_json(
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
                         "status": pipeline_run_info.status,
-                        "payload": await get_formatted_graph_data(),
+                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user.id),
                     }
                 )
 

@@ -1,7 +1,8 @@
 import os
+import re
 import uuid
 from typing import Optional
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi_users.exceptions import UserNotExists
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users.db import SQLAlchemyUserDatabase
@@ -40,6 +41,17 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             raise UserNotExists()
 
         return user
+
+    async def on_after_login(
+        self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
+    ):
+        access_token_cookie = response.headers.get("Set-Cookie")
+        match = re.search(
+            r"(?i)\bSet-Cookie:\s*([^=]+)=([^;]+)", f"Set-Cookie: {access_token_cookie}"
+        )
+        if match:
+            access_token = match.group(2)
+            response.headers.append("Authorization", f"Bearer {access_token}")
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         print(f"User {user.id} has registered.")

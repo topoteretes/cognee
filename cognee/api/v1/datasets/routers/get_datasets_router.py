@@ -9,7 +9,6 @@ from fastapi import HTTPException, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
 
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
@@ -158,9 +157,7 @@ def get_datasets_router() -> APIRouter:
 
             dataset = await get_dataset(user.id, dataset_id)
 
-            await set_database_global_context_variables(dataset.name, user.id)
-
-            formatted_graph_data = await get_formatted_graph_data()
+            formatted_graph_data = await get_formatted_graph_data(dataset.id, user.id)
 
             return JSONResponse(
                 status_code=200,
