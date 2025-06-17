@@ -71,7 +71,7 @@ class TestCogneeServerStart(unittest.TestCase):
 
         # Add request
         url = "http://127.0.0.1:8000/api/v1/add"
-        file_path = Path("test_data/example.png")
+        file_path = Path(os.path.join(Path(__file__).parent, "test_data/example.png"))
         headers = {"Authorization": auth_var}
 
         form_data = {"datasetName": "test"}
