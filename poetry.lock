@@ -3651,6 +3651,19 @@ files = [
 pygments = "*"
 
 [[package]]
+name = "isodate"
+version = "0.7.2"
+description = "An ISO 8601 date/time/duration parser and formatter"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+markers = "python_version < \"3.11\""
+files = [
+    {file = "isodate-0.7.2-py3-none-any.whl", hash = "sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15"},
+    {file = "isodate-0.7.2.tar.gz", hash = "sha256:4cd1aa0f43ca76f4a6c6c0292a85f40b35ec2e43e315b59f06e6d32171a953e6"},
+]
+
+[[package]]
 name = "isoduration"
 version = "20.11.0"
 description = "Operations with ISO 8601 durations"
@@ -6830,20 +6843,6 @@ files = [
 ]
 
 [[package]]
-name = "owlready2"
-version = "0.47"
-description = "A package for ontology-oriented programming in Python: load OWL 2.0 ontologies as Python objects, modify them, save them, and perform reasoning via HermiT. Includes an optimized RDF quadstore."
-optional = false
-python-versions = ">=3.6"
-groups = ["main"]
-files = [
-    {file = "owlready2-0.47.tar.gz", hash = "sha256:af7e1d2205c0b5886d2e34397ab8c10ca29ff68c3dc3702d43393966ac7f6eb0"},
-]
-
-[package.extras]
-test = ["flask", "gevent", "rdflib"]
-
-[[package]]
 name = "packaging"
 version = "24.2"
 description = "Core utilities for Python packages"
@@ -9099,6 +9098,29 @@ files = [
 
 [package.extras]
 all = ["numpy"]
+
+[[package]]
+name = "rdflib"
+version = "7.1.4"
+description = "RDFLib is a Python library for working with RDF, a simple yet powerful language for representing information."
+optional = false
+python-versions = "<4.0.0,>=3.8.1"
+groups = ["main"]
+files = [
+    {file = "rdflib-7.1.4-py3-none-any.whl", hash = "sha256:72f4adb1990fa5241abd22ddaf36d7cafa5d91d9ff2ba13f3086d339b213d997"},
+    {file = "rdflib-7.1.4.tar.gz", hash = "sha256:fed46e24f26a788e2ab8e445f7077f00edcf95abb73bcef4b86cefa8b62dd174"},
+]
+
+[package.dependencies]
+isodate = {version = ">=0.7.2,<1.0.0", markers = "python_version < \"3.11\""}
+pyparsing = ">=2.1.0,<4"
+
+[package.extras]
+berkeleydb = ["berkeleydb (>=18.1.0,<19.0.0)"]
+html = ["html5rdf (>=1.2,<2)"]
+lxml = ["lxml (>=4.3,<6.0)"]
+networkx = ["networkx (>=2,<4)"]
+orjson = ["orjson (>=3.9.14,<4)"]
 
 [[package]]
 name = "readme-renderer"
@@ -12037,4 +12059,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "4d5f5cfe7072a53e4d9d38e5503a9839b555add9087b8947e5eecf0f80b9cbbb"
+content-hash = "caff6dd76472193be899359bd8f74842050b0bd296239349035f2f77a656a809"

@@ -7,7 +7,6 @@ from cognee.modules.engine.utils import (
     generate_node_id,
     generate_node_name,
 )
-from owlready2 import Thing, ThingClass
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 
@@ -76,7 +75,7 @@ def expand_with_nodes_and_edges(
                     ont_node_id = generate_node_id(ontology_node_to_store.name)
                     ont_node_name = generate_node_name(ontology_node_to_store.name)
 
-                    if isinstance(ontology_node_to_store, ThingClass):
+                    if ontology_node_to_store.category == "classes":
                         ont_node_key = f"{ont_node_id}_type"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -88,7 +87,7 @@ def expand_with_nodes_and_edges(
                                 ontology_valid=True,
                             )
 
-                    elif isinstance(ontology_node_to_store, Thing):
+                    elif ontology_node_to_store.category == "individuals":
                         ont_node_key = f"{ont_node_id}_entity"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -157,7 +156,7 @@ def expand_with_nodes_and_edges(
                     ont_node_id = generate_node_id(ontology_node_to_store.name)
                     ont_node_name = generate_node_name(ontology_node_to_store.name)
 
-                    if isinstance(ontology_node_to_store, ThingClass):
+                    if ontology_node_to_store.category == "classes":
                         ont_node_key = f"{ont_node_id}_type"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -169,7 +168,7 @@ def expand_with_nodes_and_edges(
                                 ontology_valid=True,
                             )
 
-                    elif isinstance(ontology_node_to_store, Thing):
+                    elif ontology_node_to_store.category == "individuals":
                         ont_node_key = f"{ont_node_id}_entity"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
