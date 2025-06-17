@@ -9,7 +9,7 @@ Create Date: 2025-06-16 15:20:43.118246
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from sqlalchemy import UUID
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -20,32 +20,60 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _create_dataset_permission(conn, user_id, dataset_id, permission_name) -> dict:
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _ensure_permission(conn, permission_name) -> str:
+    """
+    Return the permission.id for the given name, creating the row if needed.
+    """
     from cognee.modules.users.models import Permission
 
-    permission = conn.execute(
-        sa.select(Permission).filter(Permission.name == permission_name)
-    ).fetchone()
+    row = conn.execute(sa.select(Permission).filter(Permission.name == permission_name)).fetchone()
 
-    if permission is None:
-        permission = Permission(name=permission_name)
+    if row is None:
+        permission_id = uuid4()
+        op.bulk_insert(
+            Permission.__table__,
+            [
+                {
+                    "id": permission_id,
+                    "name": permission_name,
+                    "created_at": _now(),
+                    "updated_at": _now(),
+                }
+            ],
+        )
+        return permission_id
 
+    return row.id
+
+
+def _build_acl_row(*, user_id, target_id, permission_id, target_col) -> dict:
+    """Create a dict with the correct column names for the ACL row."""
     return {
         "id": uuid4(),
-        "create_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "created_at": _now(),
+        "updated_at": _now(),
         "principal_id": user_id,
-        "dataset_id": dataset_id,
-        "permission_id": permission.id,
+        target_col: target_id,
+        "permission_id": permission_id,
     }
 
 
-def _uuid_type():
-    """Return a UUID-compatible column type for the current dialect."""
-    if op.get_bind().dialect.name == "postgresql":
-        return postgresql.UUID(as_uuid=True)
-    # SQLite (and others): fall back to CHAR(36) – application inserts uuid4()
-    return sa.CHAR(36)
+def _create_dataset_permission(conn, user_id, dataset_id, permission_name):
+    perm_id = _ensure_permission(conn, permission_name)
+    return _build_acl_row(
+        user_id=user_id, target_id=dataset_id, permission_id=perm_id, target_col="dataset_id"
+    )
+
+
+def _create_data_permission(conn, user_id, data_id, permission_name):
+    perm_id = _ensure_permission(conn, permission_name)
+    return _build_acl_row(
+        user_id=user_id, target_id=data_id, permission_id=perm_id, target_col="data_id"
+    )
 
 
 def upgrade() -> None:
@@ -54,17 +82,16 @@ def upgrade() -> None:
     # Recreate ACLs table with default permissions set to datasets instead of documents
     op.drop_table("acls")
 
-    uuid_type = _uuid_type()
-    op.create_table(
+    acls_table = op.create_table(
         "acls",
-        sa.Column("id", uuid_type, primary_key=True, nullable=False),
+        sa.Column("id", UUID, primary_key=True, nullable=False, default=uuid4),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("principal_id", uuid_type, sa.ForeignKey("principals.id"), nullable=True),
-        sa.Column("permission_id", uuid_type, sa.ForeignKey("permissions.id"), nullable=True),
+        sa.Column("principal_id", UUID, sa.ForeignKey("principals.id"), nullable=True),
+        sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id"), nullable=True),
         sa.Column(
             "dataset_id",
-            uuid_type,
+            UUID,
             sa.ForeignKey("datasets.id", ondelete="CASCADE"),
             nullable=True,
         ),
@@ -86,12 +113,42 @@ def upgrade() -> None:
         acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "delete"))
 
     if acl_list:
-        from cognee.modules.users.models import ACL
-
-        op.bulk_insert(ACL.__table__, acl_list)
+        op.bulk_insert(acls_table, acl_list)
 
 
 def downgrade() -> None:
-    # op.drop_table('acls')
-    # op.create_table('acls')
-    pass
+    conn = op.get_bind()
+
+    op.drop_table("acls")
+
+    acls_table = op.create_table(
+        "acls",
+        sa.Column("id", UUID, primary_key=True, nullable=False, default=uuid4),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("principal_id", UUID, sa.ForeignKey("principals.id"), nullable=True),
+        sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id"), nullable=True),
+        sa.Column(
+            "data_id",
+            UUID,
+            sa.ForeignKey("data.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+
+    from cognee.modules.data.models import Data
+
+    data = conn.execute(sa.select(Data)).fetchall()
+
+    if not data:
+        return
+
+    acl_list = []
+    for single_data in data:
+        acl_list.append(_create_data_permission(conn, single_data.owner_id, single_data.id, "read"))
+        acl_list.append(
+            _create_data_permission(conn, single_data.owner_id, single_data.id, "write")
+        )
+
+    if acl_list:
+        op.bulk_insert(acls_table, acl_list)
