@@ -24,6 +24,10 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     initialize_queue,
     remove_queue,
 )
+from cognee.shared.logging_utils import get_logger
+
+
+logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
@@ -74,17 +78,19 @@ def get_cognify_router() -> APIRouter:
                 async with get_user_db_context(session) as user_db:
                     async with get_user_manager_context(user_db) as user_manager:
                         user = await get_authenticated_user(
-                            cookie=access_token, strategy_cookie=strategy, user_manager=user_manager
+                            cookie=access_token,
+                            strategy_cookie=strategy,
+                            user_manager=user_manager,
+                            bearer=None,
                         )
-        except Exception:
+        except Exception as error:
+            logger.error(f"Authentication failed: {str(error)}")
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
             return
 
         pipeline_run_id = UUID(pipeline_run_id)
 
         pipeline_run = await get_pipeline_run(pipeline_run_id)
-
-        await set_database_global_context_variables(pipeline_run.dataset_id, user.id)
 
         initialize_queue(pipeline_run_id)
 
@@ -99,6 +105,7 @@ def get_cognify_router() -> APIRouter:
                 continue
 
             try:
+                await set_database_global_context_variables(pipeline_run.dataset_id, user.id)
                 await websocket.send_json(
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
