@@ -16,7 +16,6 @@ jobs:
   run_opensearch_integration_test:
     name: test
     runs-on: ubuntu-22.04
-    environment: dev
     services:
       opensearch-node1:
         image: opensearchproject/opensearch:2.17.1
