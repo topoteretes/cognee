@@ -26,14 +26,7 @@ jobs:
           - discovery.type=single-node
           - bootstrap.memory_lock=true
           - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-          - OPENSEARCH_INITIAL_ADMIN_PASSWORD=oPens777@seArchopensearch 
-        ulimits:
-          memlock:
-            soft: -1
-            hard: -1
-          nofile:
-            soft: 65536
-            hard: 65536
+          - OPENSEARCH_INITIAL_ADMIN_PASSWORD=oPens777@seArchopensearch
         ports:
           - 9200:9200
           - 9600:9600
