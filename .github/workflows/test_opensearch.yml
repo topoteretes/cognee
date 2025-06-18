@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
     types: [labeled, synchronize]
-  push:
-    branches:
-      - just-for-tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
