@@ -43,7 +43,7 @@ def create_vector_engine(
         adapter = supported_databases[vector_db_provider]
 
         return adapter(
-            utl=vector_db_url,
+            url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
         )
