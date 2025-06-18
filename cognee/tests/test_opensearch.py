@@ -70,6 +70,9 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
+    # Wait for the data to be processed
+    asyncio.sleep(5)
+
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
@@ -107,7 +110,8 @@ async def main():
 
     await cognee.prune.prune_system(metadata=True)
     # Checagem básica: tente buscar qualquer índice, deve estar vazio
-    indices = await vector_engine.client.indices.get(f"{vector_engine.index_prefix}_*")
+    indices = await vector_engine.client.indices.get(index=f"{vector_engine.index_prefix}_*")
+
     assert len(indices) == 0, "OpenSearch vector database is not empty"
 
 if __name__ == "__main__":

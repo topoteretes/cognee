@@ -30,7 +30,7 @@ class OpenSearchAdapter(VectorDBInterface):
         )
 
     def _index_name(self, collection_name: str) -> str:
-        return f"{self.index_prefix}_{collection_name}"
+        return f"{self.index_prefix}_{collection_name}".lower()
 
     async def embed_data(self, data: List[str]) -> List[List[float]]:
         return await self.embedding_engine.embed_text(data)
@@ -48,6 +48,11 @@ class OpenSearchAdapter(VectorDBInterface):
         if not await self.has_collection(collection_name):
             vector_size = self.embedding_engine.get_vector_size()
             body = {
+                "settings": {
+                    "index": {
+                        "knn": True
+                    }
+                },
                 "mappings": {
                     "properties": {
                         "id": {"type": "keyword"},
@@ -65,6 +70,23 @@ class OpenSearchAdapter(VectorDBInterface):
                 }
             }
             await self.client.indices.create(index=index, body=body)
+
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        await self.create_collection(f"{index_name}_{index_property_name}")
+    
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+    ):
+        await self.create_data_points(
+            f"{index_name}_{index_property_name}",
+            [
+                IndexSchema(
+                    id=data_point.id,
+                    text=DataPoint.get_embeddable_data(data_point),
+                )
+                for data_point in data_points
+            ],
+        )
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         index = self._index_name(collection_name)
@@ -131,7 +153,7 @@ class OpenSearchAdapter(VectorDBInterface):
             results = []
             for hit in hits:
                 source = hit["_source"]
-                score = hit.get("_score", 0)
+                score = 1 - hit.get("_score", 0)
                 results.append(
                     ScoredResult(
                         id=parse_id(source["id"]),
