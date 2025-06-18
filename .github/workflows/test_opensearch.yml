@@ -19,6 +19,7 @@ jobs:
   run_opensearch_integration_test:
     name: test
     runs-on: ubuntu-22.04
+    environment: dev
     services:
       opensearch-node1:
         image: opensearchproject/opensearch:2.17.1
@@ -55,7 +56,6 @@ jobs:
         run: poetry install -E opensearch --no-interaction
   
       - name: Run OpenSearch tests
-        environment: dev
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
