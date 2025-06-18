@@ -1,15 +1,3 @@
-# import os
-# import litellm
-# import httpx
-# client = httpx.AsyncClient(
-#     headers={
-#         "Authorization": f"Bearer {os.getenv('LLM_API_KEY')}",
-#         "api-key": os.getenv('LLM_API_KEY')
-#     },
-#     verify=os.getenv('REQUESTS_CA_BUNDLE'),  # opcional
-# )
-# litellm.aclient_session = client
-
 import os
 import pathlib
 import cognee
@@ -23,17 +11,6 @@ logger = get_logger()
 async def main():
 
     cognee.config.set_vector_db_provider("opensearch")
-    # Configure OpenSearch (ajuste os valores conforme necessário para seu ambiente)
-    # vector_db_url = os.environ.get("VECTOR_DB_URL", "http://localhost:9200")
-    # vector_db_key = os.environ.get("VECTOR_DB_KEY", "")  # user:pass ou vazio se não usar auth
-
-    # cognee.config.set_vector_db_config(
-    #     {
-    #         "vector_db_url": vector_db_url,
-    #         "vector_db_key": vector_db_key,
-    #         "vector_db_provider": "opensearch",
-    #     }
-    # )
 
     data_directory_path = str(
         pathlib.Path(
