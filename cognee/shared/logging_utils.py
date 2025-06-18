@@ -245,6 +245,11 @@ def setup_logging(log_level=None, name=None):
         # Hand back to the original hook → prints traceback and exits
         sys.__excepthook__(exc_type, exc_value, traceback)
 
+        logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
+        logger.info(
+            "Need help? Reach out to us on our Discord server: https://discord.gg/NQPKmU5CCg"
+        )
+
     # Install exception handlers
     sys.excepthook = handle_exception
 
@@ -331,6 +336,8 @@ def setup_logging(log_level=None, name=None):
         cognee_version=COGNEE_VERSION,
         os_info=OS_INFO,
     )
+
+    logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
 
     # Return the configured logger
     return logger
