@@ -67,6 +67,6 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           VECTOR_DB_PROVIDER: 'opensearch'
-          VECTOR_DB_URL: 'http://localhost:9200'
+          VECTOR_DB_URL: 'https://localhost:9200'
           VECTOR_DB_KEY: 'eyJ1c2VybmFtZSI6ICJhZG1pbiIsICJwYXNzd29yZCI6ICJvUGVuczc3N0BzZUFyY2hvcGVuc2VhcmNoIiwgInVzZV9zc2wiOiAiRmFsc2UiLCAidmVyaWZ5X2NlcnRzIjogIkZhbHNlIiwgInNzbF9hc3NlcnRfaG9zdG5hbWUiOiAiRmFsc2UiLCAic3NsX3Nob3dfd2FybiI6ICJGYWxzZSIsICJpbmRleF9wcmVmaXgiOiAiYXBwLXByZWZpeC0ifQ=='
         run: poetry run python ./cognee/tests/test_opensearch.py
