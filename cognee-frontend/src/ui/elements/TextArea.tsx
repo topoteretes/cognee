@@ -67,7 +67,7 @@ export default function TextArea({
         fakeTextAreaElement.removeEventListener("keyup", handleKeyUp);
       }
     };
-  }, [handleKeyUp, handleTextChange, placeholder]);
+  }, []);
 
   useEffect(() => {
     const fakeTextAreaElement = fakeTextAreaRef.current;
@@ -75,7 +75,7 @@ export default function TextArea({
     if (fakeTextAreaElement && textAreaText !== value && textAreaText !== placeholder) {
       fakeTextAreaElement.innerText = value;
     }
-  }, [placeholder, value]);
+  }, [value]);
 
   return isAutoExpanding ? (
     <>
