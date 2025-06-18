@@ -53,7 +53,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         if match:
             access_token = match.group(2)
             response.status_code = 200
-            response.body = json.dumps({"access_token": access_token, "token_type": "bearer"}).encode(encoding="utf-8")
+            response.body = json.dumps(
+                {"access_token": access_token, "token_type": "bearer"}
+            ).encode(encoding="utf-8")
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         print(f"User {user.id} has registered.")
