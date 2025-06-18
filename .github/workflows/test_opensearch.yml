@@ -22,7 +22,7 @@ jobs:
     services:
       opensearch-node1:
         image: opensearchproject/opensearch:2.17.1
-        environment:
+        env:
           - discovery.type=single-node
           - bootstrap.memory_lock=true
           - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
