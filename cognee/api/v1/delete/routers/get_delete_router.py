@@ -14,7 +14,7 @@ logger = get_logger()
 def get_delete_router() -> APIRouter:
     router = APIRouter()
 
-    @router.delete("/", response_model=None)
+    @router.delete("", response_model=None)
     async def delete(
         data: List[UploadFile],
         dataset_name: str = Form("main_dataset"),

@@ -1,24 +1,40 @@
-import { TextLogo } from "@/ui/App";
-import { Divider } from "@/ui/Layout";
-import Footer from "@/ui/Partials/Footer/Footer";
-import SignInForm from "@/ui/Partials/SignInForm/SignInForm";
+import Link from "next/link";
 
-export default function AuthPage() {
+import { auth0 } from "@/modules/auth/auth0";
+
+import { CTAButton } from "@/ui/elements";
+
+
+export default async function AuthPage() {
+  const session = await auth0.getSession();
+
   return (
-    <main className="flex flex-col h-full">
-      <div className="pt-6 pr-3 pb-3 pl-6">
-        <TextLogo width={86} height={24} />
+  <div className="flex flex-col m-auto max-w-md  h-full gap-8 pb-12 pt-6">
+    <h1><span className="text-xl">Welcome to cognee</span></h1>
+    {session ? (
+      <div className="flex flex-col gap-8">
+        <span className="text-lg">Hello, {session.user.name}!</span>
+        <Link href="/auth/logout">
+          <CTAButton>
+            Log out
+          </CTAButton>
+        </Link>
       </div>
-      <Divider />
-      <div className="w-full max-w-md pt-12 pb-6 m-auto">
-        <div className="flex flex-col w-full gap-8">
-          <h1><span className="text-xl">Sign in</span></h1>
-          <SignInForm />
-        </div>
+    ) : (
+      <div className="flex flex-row h-full gap-8">
+        <Link href="/auth/login?screen_hint=signup">
+          <CTAButton>
+            Sign up
+          </CTAButton>
+        </Link>
+
+        <Link href="/auth/login">
+          <CTAButton>
+            Log in
+          </CTAButton>
+        </Link>
       </div>
-      <div className="pl-6 pr-6">
-        <Footer />
-      </div>
-    </main>
+    )}
+  </div>
   )
 }
