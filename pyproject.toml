@@ -95,7 +95,7 @@ chromadb = [
     "pypika==0.48.8",
 ]
 opensearch = [
-    "opensearch-py"
+    "opensearch-py==3.0.0"
 ]
 docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.16.13,<0.17"]
 codegraph = [
