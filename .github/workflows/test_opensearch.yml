@@ -54,7 +54,8 @@ jobs:
       - name: Install dependencies
         run: poetry install -E opensearch --no-interaction
   
-      - name: Run <engine_name> tests
+      - name: Run OpenSearch tests
+        environment: dev
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
