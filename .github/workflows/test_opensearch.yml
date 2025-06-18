@@ -23,10 +23,10 @@ jobs:
       opensearch-node1:
         image: opensearchproject/opensearch:2.17.1
         env:
-          - discovery.type=single-node
-          - bootstrap.memory_lock=true
-          - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-          - OPENSEARCH_INITIAL_ADMIN_PASSWORD=oPens777@seArchopensearch
+          discovery.type: single-node
+          bootstrap.memory_lock: true
+          OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+          OPENSEARCH_INITIAL_ADMIN_PASSWORD: "oPens777@seArchopensearch"
         ports:
           - 9200:9200
           - 9600:9600
