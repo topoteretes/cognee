@@ -10,7 +10,7 @@ import GraphLegend from "./GraphLegend";
 import { DiscordIcon, GithubIcon } from "@/ui/Icons";
 import ActivityLog, { ActivityLogAPI } from "./ActivityLog";
 import GraphControls, { GraphControlsAPI } from "./GraphControls";
-import CogneeAddWidget, { NodesAndEdges } from "./CogneeAddWidget";
+import CogneeAddWidget, { NodesAndLinks } from "./CogneeAddWidget";
 import GraphVisualization, { GraphVisualizationAPI } from "./GraphVisualization";
 
 import { useBoolean } from "@/utils";
@@ -18,7 +18,7 @@ import { useBoolean } from "@/utils";
 interface GraphNode {
   id: string | number;
   label: string;
-  properties?: {};
+  properties?: object;
 }
 
 interface GraphData {
@@ -29,13 +29,11 @@ interface GraphData {
 export default function GraphView() {
   const {
     value: isAddNodeFormOpen,
-    setTrue: enableAddNodeForm,
-    setFalse: disableAddNodeForm,
   } = useBoolean(false);
 
   const [data, updateData] = useState<GraphData>();
 
-  const onDataChange = useCallback((newData: NodesAndEdges) => {
+  const onDataChange = useCallback((newData: NodesAndLinks) => {
     if (newData === null) {
       // Requests for resetting the data
       updateData(undefined);
@@ -46,10 +44,7 @@ export default function GraphView() {
       return;
     }
 
-    updateData({
-      nodes: newData.nodes,
-      links: newData.links,
-    });
+    updateData(newData);
   }, []);
 
   const graphRef = useRef<GraphVisualizationAPI>();
@@ -64,7 +59,7 @@ export default function GraphView() {
         <TextLogo width={86} height={24} />
 
         <span className="flex flex-row items-center gap-8">
-          <Link href="https://www.cognee.ai/">
+          <Link target="_blank" href="https://www.cognee.ai/">
             <span>Cognee Home</span>
           </Link>
           <Link target="_blank" href="https://github.com/topoteretes/cognee">

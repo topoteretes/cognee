@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth0 } from "@/modules/auth/auth0";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(request: Request) {
   const accessToken = await auth0.getAccessToken();
 

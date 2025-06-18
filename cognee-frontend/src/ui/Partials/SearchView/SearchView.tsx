@@ -9,12 +9,6 @@ import useChat from "@/modules/chat/hooks/useChat";
 
 import styles from "./SearchView.module.css";
 
-interface Message {
-  id: string;
-  user: "user" | "system";
-  text: any;
-}
-
 interface SelectOption {
   value: string;
   label: string;
@@ -62,7 +56,7 @@ export default function SearchView() {
   useEffect(() => {
     refreshChat()
       .then(() => scrollToBottom());
-  }, []);
+  }, [refreshChat, scrollToBottom]);
 
   const [searchInputValue, setSearchInputValue] = useState("");
 

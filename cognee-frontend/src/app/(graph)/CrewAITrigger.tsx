@@ -10,7 +10,9 @@ interface CrewAIFormPayload extends HTMLFormElement {
 }
 
 interface CrewAITriggerProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onData: (data: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onActivity: (activities: any) => void;
 }
 
@@ -28,7 +30,6 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
 
     const websocket = new WebSocket("ws://localhost:8000/api/v1/crewai/subscribe");
 
-    let isCrewAIDone = false;
     onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Dispatching hiring crew agents" }]);
 
     websocket.onmessage = (event) => {
@@ -65,7 +66,6 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
       }]);
 
       if (data.status === "PipelineRunCompleted") {
-        isCrewAIDone = true;
         websocket.close();
       }
     };

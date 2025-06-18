@@ -15,7 +15,7 @@ const errorsMap = {
   REGISTER_USER_ALREADY_EXISTS: "User already exists",
 };
 
-const defaultFormatPayload: (data: { email: string; password: string; }) => any = (data) => data;
+const defaultFormatPayload: (data: { email: string; password: string; }) => object = (data) => data;
 
 export default function AuthForm({
   submitButtonText = "Sign in",

@@ -1,7 +1,7 @@
 "use client";
 
 import classNames from "classnames";
-import { InputHTMLAttributes, useEffect, useLayoutEffect, useRef } from "react"
+import { InputHTMLAttributes, useCallback, useEffect, useLayoutEffect, useRef } from "react"
 
 interface TextAreaProps extends Omit<InputHTMLAttributes<HTMLTextAreaElement>, "onChange"> {
   isAutoExpanding?: boolean; // Set to true to enable auto-expanding text area behavior. Default is false.
@@ -20,20 +20,20 @@ export default function TextArea({
   onKeyUp,
   ...props
  }: TextAreaProps) {
-  const handleTextChange = (event: Event) => {
+  const handleTextChange = useCallback((event: Event) => {
     const fakeTextAreaElement = event.target as HTMLDivElement;
     const newValue = fakeTextAreaElement.innerText;
 
     if (newValue !== value) {
       onChange?.(newValue);
     }
-  };
+  }, [onChange, value]);
 
-  const handleKeyUp = (event: Event) => {
+  const handleKeyUp = useCallback((event: Event) => {
     if (onKeyUp) {
       onKeyUp(event as unknown as React.KeyboardEvent<HTMLTextAreaElement>);
     }
-  };
+  }, [onKeyUp]);
 
   const handleTextAreaFocus = (event: React.FocusEvent<HTMLDivElement>) => {
     if (event.target.innerText.trim() === placeholder) {
@@ -67,7 +67,7 @@ export default function TextArea({
         fakeTextAreaElement.removeEventListener("keyup", handleKeyUp);
       }
     };
-  }, []);
+  }, [handleKeyUp, handleTextChange, placeholder]);
 
   useEffect(() => {
     const fakeTextAreaElement = fakeTextAreaRef.current;
@@ -75,7 +75,7 @@ export default function TextArea({
     if (fakeTextAreaElement && textAreaText !== value && textAreaText !== placeholder) {
       fakeTextAreaElement.innerText = value;
     }
-  }, [value]);
+  }, [placeholder, value]);
 
   return isAutoExpanding ? (
     <>

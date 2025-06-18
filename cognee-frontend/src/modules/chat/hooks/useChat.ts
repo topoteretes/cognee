@@ -6,7 +6,7 @@ import { Dataset } from "@/modules/ingestion/useDatasets";
 interface ChatMessage {
   id: string;
   user: "user" | "system";
-  text: any;
+  text: string;
 }
 
 const fetchMessages = () => {
@@ -29,6 +29,8 @@ const sendMessage = (message: string, searchType: string) => {
     .then(response => response.json());
 };
 
+// Will be used in the future.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function useChat(dataset: Dataset) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
@@ -38,8 +40,9 @@ export default function useChat(dataset: Dataset) {
     setFalse: enableSearchRun,
   } = useBoolean(false);
   
-  const refreshChat = useCallback(() => {
-    return fetchMessages().then(data => setMessages(data));
+  const refreshChat = useCallback(async () => {
+    const data = await fetchMessages();
+    return setMessages(data);
   }, []);
 
   const handleMessageSending = useCallback((message: string, searchType: string) => {
@@ -74,7 +77,7 @@ export default function useChat(dataset: Dataset) {
         throw new Error("Failed to send message. Please try again. If the issue persists, please contact support.")
       })
       .finally(() => enableSearchRun());
-  }, []);
+  }, [disableSearchRun, enableSearchRun]);
 
   return {
     messages,
@@ -95,6 +98,7 @@ interface Relationship {
 
 type InsightMessage = [Node, Relationship, Node];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertToSearchTypeOutput(systemMessage: any[] | any, searchType: string): string {
   if (Array.isArray(systemMessage) && systemMessage.length === 1 && typeof(systemMessage[0]) === "string") {
     return systemMessage[0];

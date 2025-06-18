@@ -14,20 +14,23 @@ import createDataset from "@/modules/datasets/createDataset";
 import getDatasetGraph from "@/modules/datasets/getDatasetGraph";
 import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
 
-export interface NodesAndEdges {
+export interface NodesAndLinks {
   nodes: { id: string; label: string }[];
   links: { source: string; target: string; label: string }[];
 }
 
+export interface NodesAndEdges {
+  nodes: { id: string; label: string }[];
+  edges: { source: string; target: string; label: string }[];
+}
+
 interface CogneeAddWidgetProps {
-  onData: (data: NodesAndEdges) => void;
+  onData: (data: NodesAndLinks) => void;
 }
 
 export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
   const {
     datasets,
-    addDataset,
-    removeDataset,
     refreshDatasets,
   } = useDatasets();
 
@@ -73,7 +76,7 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
 
     return addData(dataset, files)
       .then(() => {
-        const onUpdate = (data: any) => {
+        const onUpdate = (data: NodesAndEdges) => {
           onData({
             nodes: data.nodes,
             links: data.edges,
@@ -135,8 +138,8 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
           </div>
         </div>
       )) : (
-        <CTAButton type="button" className="relative">
-          <input tabIndex={-1} type="file" multiple onChange={handleAddFilesNoDataset} className="absolute w-full h-full cursor-pointer opacity-0" />
+        <CTAButton type="button" className="relative" disabled={isProcessingFiles}>
+          <input disabled={isProcessingFiles} tabIndex={-1} type="file" multiple onChange={handleAddFilesNoDataset} className="absolute w-full h-full cursor-pointer opacity-0" />
           <span className="flex flex-row gap-2 items-center">
             + Add Data
             {isProcessingFiles && <LoadingIndicator />}

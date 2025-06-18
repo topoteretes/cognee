@@ -20,14 +20,14 @@ export interface GraphVisualizationAPI {
 export default function GraphVisualization({ ref, data, graphControls }: GraphVisuzaliationProps) {
   const textSize = 6;
   const nodeSize = 15;
-  const addNodeDistanceFromSourceNode = 15;
+  // const addNodeDistanceFromSourceNode = 15;
 
   const handleNodeClick = (node: NodeObject) => {
     graphControls.current?.setSelectedNode(node);
     // ref.current?.d3ReheatSimulation()
   }
 
-  const handleBackgroundClick = (event: MouseEvent) => {
+  const handleBackgroundClick = (/* event: MouseEvent */) => {
     const selectedNode = graphControls.current?.getSelectedNode();
 
     if (!selectedNode) {
@@ -56,7 +56,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
   };
 
   function renderNode(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number, renderType: string = "replace") {
-    const selectedNode = graphControls.current?.getSelectedNode();
+    // const selectedNode = graphControls.current?.getSelectedNode();
 
     ctx.save();
 
@@ -153,6 +153,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
     renderNode(node, ctx, globalScale, "after");
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function handleDagError(loopNodeIds: (string | number)[]) {}
 
   const graphRef = useRef<ForceGraphMethods>();

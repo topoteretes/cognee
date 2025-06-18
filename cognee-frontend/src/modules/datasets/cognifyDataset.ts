@@ -3,11 +3,11 @@ import { fetch } from "@/utils";
 import { Dataset } from "../ingestion/useDatasets";
 
 interface GraphData {
-  nodes: { id: string | number; label: string; properties?: {} }[];
+  nodes: { id: string; label: string; properties?: object }[];
   edges: { source: string; target: string; label: string }[];
 }
 
-export default async function cognifyDataset(dataset: Dataset, onUpdate = (data: GraphData) => {}) {
+export default async function cognifyDataset(dataset: Dataset, onUpdate: (data: GraphData) => void) {
   const data = await (
     fetch("/v1/cognify", {
       method: "POST",
@@ -43,7 +43,7 @@ export default async function cognifyDataset(dataset: Dataset, onUpdate = (data:
 
     websocket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      onUpdate({
+      onUpdate?.({
         nodes: data.payload.nodes,
         edges: data.payload.edges,
       });
