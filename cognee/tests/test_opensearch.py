@@ -1,14 +1,14 @@
-import os
-import litellm
-import httpx
-client = httpx.AsyncClient(
-    headers={
-        "Authorization": f"Bearer {os.getenv('LLM_API_KEY')}",
-        "api-key": os.getenv('LLM_API_KEY')
-    },
-    verify=os.getenv('REQUESTS_CA_BUNDLE'),  # opcional
-)
-litellm.aclient_session = client
+# import os
+# import litellm
+# import httpx
+# client = httpx.AsyncClient(
+#     headers={
+#         "Authorization": f"Bearer {os.getenv('LLM_API_KEY')}",
+#         "api-key": os.getenv('LLM_API_KEY')
+#     },
+#     verify=os.getenv('REQUESTS_CA_BUNDLE'),  # opcional
+# )
+# litellm.aclient_session = client
 
 import os
 import pathlib

@@ -1,0 +1,77 @@
+name: test | opensearch
+ 
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+ 
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+
+jobs:
+  run_opensearch_integration_test:
+    name: test
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'opensearch') }}
+    services:
+      opensearch-node1:
+        image: opensearchproject/opensearch:2.17.1
+        container_name: opensearch-node1
+        environment:
+          - discovery.type=single-node
+          - bootstrap.memory_lock=true
+          - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+          - OPENSEARCH_INITIAL_ADMIN_PASSWORD=oPens777@seArchopensearch 
+        ulimits:
+          memlock:
+            soft: -1
+            hard: -1
+          nofile:
+            soft: 65536
+            hard: 65536
+        ports:
+          - 9200:9200
+          - 9600:9600
+
+    defaults:
+      run:
+        shell: bash
+  
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+  
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+            python-version: '3.11.x'
+  
+      - name: Install Poetry
+        uses: snok/install-poetry@v1.4.1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+  
+      - name: Install dependencies
+        run: poetry install -E opensearch --no-interaction
+  
+      - name: Run <engine_name> tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          VECTOR_DB_PROVIDER: 'opensearch'
+          VECTOR_DB_URL: 'http://localhost:9200'
+          VECTOR_DB_KEY: 'eyJ1c2VybmFtZSI6ICJhZG1pbiIsICJwYXNzd29yZCI6ICJvUGVuczc3N0BzZUFyY2hvcGVuc2VhcmNoIiwgInVzZV9zc2wiOiAiRmFsc2UiLCAidmVyaWZ5X2NlcnRzIjogIkZhbHNlIiwgInNzbF9hc3NlcnRfaG9zdG5hbWUiOiAiRmFsc2UiLCAic3NsX3Nob3dfd2FybiI6ICJGYWxzZSIsICJpbmRleF9wcmVmaXgiOiAiYXBwLXByZWZpeC0ifQ=='
+        run: poetry run python ./cognee/tests/test_opensearch.py

@@ -7,6 +7,8 @@ from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBI
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 import asyncio
+import base64
+import json
 
 class IndexSchema(DataPoint):
     text: str
@@ -17,16 +19,40 @@ class OpenSearchAdapter(VectorDBInterface):
         self,
         hosts: list,
         embedding_engine: EmbeddingEngine,
-        http_auth: Optional[tuple] = None,
-        index_prefix: str = "cognee",
-        **kwargs
+        parameters_base64_key: Optional[str] = None,
     ):
+        http_auth = None
+        index_prefix=""
+        use_ssl = False
+        verify_certs = True
+        ssl_assert_hostname = True
+        ssl_show_warn = True
+
+        #Decoding the parameters_key if provided
+        if parameters_base64_key:
+            vector_db_key_decoded = base64.b64decode(parameters_base64_key).decode("utf-8")
+            vector_db_key_decoded_dict = json.loads(vector_db_key_decoded)
+            username = vector_db_key_decoded_dict.get("username", None)
+            password = vector_db_key_decoded_dict.get("password", None)
+            if username and password:
+                http_auth = (username, password)
+            use_ssl = vector_db_key_decoded_dict.get("use_ssl", "False").lower() == "true"
+            verify_certs = vector_db_key_decoded_dict.get("verify_certs", "True").lower() == "true"
+            ssl_assert_hostname = vector_db_key_decoded_dict.get("ssl_assert_hostname", "True").lower() == "true"
+            ssl_show_warn = vector_db_key_decoded_dict.get("ssl_show_warn", "True").lower() == "true"
+            index_prefix = vector_db_key_decoded_dict.get("index_prefix", "")
+        
         self.embedding_engine = embedding_engine
-        self.index_prefix = index_prefix
+        self.index_prefix =f"{index_prefix}cognee"
         self.client = AsyncOpenSearch(
             hosts=hosts,
             http_auth=http_auth,
-            **kwargs
+            **{
+                "use_ssl": use_ssl,
+                "verify_certs": verify_certs,
+                "ssl_assert_hostname": ssl_assert_hostname,
+                "ssl_show_warn": ssl_show_warn,
+            }
         )
 
     def _index_name(self, collection_name: str) -> str:
