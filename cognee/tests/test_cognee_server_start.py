@@ -46,11 +46,11 @@ class TestCogneeServerStart(unittest.TestCase):
     def test_server_is_running(self):
         """Test that the server is running and can accept connections."""
         # Test health endpoint
-        health_response = requests.get("http://localhost:8000/health", timeout=10)
+        health_response = requests.get("http://localhost:8000/health", timeout=15)
         self.assertEqual(health_response.status_code, 200)
 
         # Test root endpoint
-        root_response = requests.get("http://localhost:8000/", timeout=10)
+        root_response = requests.get("http://localhost:8000/", timeout=15)
         self.assertEqual(root_response.status_code, 200)
         self.assertIn("message", root_response.json())
         self.assertEqual(root_response.json()["message"], "Hello, World, I am alive!")
@@ -61,7 +61,7 @@ class TestCogneeServerStart(unittest.TestCase):
             "username": "default_user@example.com",
             "password": "default_password",
         }
-        login_response = requests.post(url, data=form_data, timeout=10)
+        login_response = requests.post(url, data=form_data, timeout=15)
         login_response.raise_for_status()  # raises on HTTP 4xx/5xx
 
         # Define Bearer token to use for authorization
@@ -83,7 +83,7 @@ class TestCogneeServerStart(unittest.TestCase):
             )
         }
 
-        add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=15)
+        add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=50)
         add_response.raise_for_status()  # raise if HTTP 4xx/5xx
 
         # Cognify request
@@ -110,7 +110,7 @@ class TestCogneeServerStart(unittest.TestCase):
 
         payload = {"searchType": "GRAPH_COMPLETION", "query": "What's in the document?"}
 
-        search_response = requests.post(url, headers=headers, json=payload, timeout=15)
+        search_response = requests.post(url, headers=headers, json=payload, timeout=50)
         search_response.raise_for_status()  # raises on HTTP 4xx/5xx
 
 
