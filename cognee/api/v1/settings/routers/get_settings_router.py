@@ -46,13 +46,13 @@ class SettingsPayloadDTO(InDTO):
 def get_settings_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("/", response_model=SettingsDTO)
+    @router.get("", response_model=SettingsDTO)
     async def get_settings(user: User = Depends(get_authenticated_user)):
         from cognee.modules.settings import get_settings as get_cognee_settings
 
         return get_cognee_settings()
 
-    @router.post("/", response_model=None)
+    @router.post("", response_model=None)
     async def save_settings(
         new_settings: SettingsPayloadDTO, user: User = Depends(get_authenticated_user)
     ):

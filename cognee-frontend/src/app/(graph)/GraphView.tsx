@@ -1,24 +1,24 @@
 "use client";
 
-import { forceCollide, forceManyBody } from "d3-force-3d";
-import { useEffect, useRef, useState } from "react";
-import ForceGraph, { ForceGraphMethods, LinkObject, NodeObject } from "react-force-graph-2d";
+import { useCallback, useRef, useState, MutableRefObject } from "react";
 
+import Link from "next/link";
 import { TextLogo } from "@/ui/App";
 import { Divider } from "@/ui/Layout";
 import { Footer } from "@/ui/Partials";
-import CrewAITrigger from "./CrewAITrigger";
-import CogneeAddWidget, { NodesAndEdges } from "./CogneeAddWidget";
+import GraphLegend from "./GraphLegend";
+import { DiscordIcon, GithubIcon } from "@/ui/Icons";
+import ActivityLog, { ActivityLogAPI } from "./ActivityLog";
 import GraphControls, { GraphControlsAPI } from "./GraphControls";
+import CogneeAddWidget, { NodesAndLinks } from "./CogneeAddWidget";
+import GraphVisualization, { GraphVisualizationAPI } from "./GraphVisualization";
 
 import { useBoolean } from "@/utils";
-
-// import exampleData from "./example_data.json";
 
 interface GraphNode {
   id: string | number;
   label: string;
-  properties?: {};
+  properties?: object;
 }
 
 interface GraphData {
@@ -29,246 +29,95 @@ interface GraphData {
 export default function GraphView() {
   const {
     value: isAddNodeFormOpen,
-    setTrue: enableAddNodeForm,
-    setFalse: disableAddNodeForm,
   } = useBoolean(false);
 
-  const [data, updateData] = useState<GraphData | null>(null);
+  const [data, updateData] = useState<GraphData>();
 
-  const onDataChange = (newData: NodesAndEdges) => {
-    if (data === null) {
-      updateData({
-        nodes: newData.nodes,
-        links: newData.links,
-      });
-    } else {
-      updateData({
-        nodes: [...data.nodes, ...newData.nodes],
-        links: [...data.links, ...newData.links],
-      });
-    }
-  };
-
-  const graphRef = useRef<ForceGraphMethods>();
-
-  const graphControls = useRef<GraphControlsAPI>(null);
-
-  const handleNodeClick = (node: NodeObject) => {
-    graphControls.current?.setSelectedNode(node);
-    graphRef.current?.d3ReheatSimulation();
-  };
-
-  const textSize = 6;
-  const nodeSize = 15;
-  const addNodeDistanceFromSourceNode = 15;
-
-  const handleBackgroundClick = (event: MouseEvent) => {
-    const graphBoundingBox = document.getElementById("graph-container")?.querySelector("canvas")?.getBoundingClientRect();
-    const x = event.clientX - graphBoundingBox!.x;
-    const y = event.clientY - graphBoundingBox!.y;
-
-    const graphClickCoords = graphRef.current!.screen2GraphCoords(x, y);
-
-    const selectedNode = graphControls.current?.getSelectedNode();
-
-    if (!selectedNode) {
+  const onDataChange = useCallback((newData: NodesAndLinks) => {
+    if (newData === null) {
+      // Requests for resetting the data
+      updateData(undefined);
       return;
     }
 
-    const distanceFromAddNode = Math.sqrt(
-      Math.pow(graphClickCoords.x - (selectedNode!.x! + addNodeDistanceFromSourceNode), 2)
-      + Math.pow(graphClickCoords.y - (selectedNode!.y! + addNodeDistanceFromSourceNode), 2)
-    );
-
-    if (distanceFromAddNode <= 10) {
-      enableAddNodeForm();
-    } else {
-      disableAddNodeForm();
-      graphControls.current?.setSelectedNode(null);
-    }
-  };
-
-  function renderNode(node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) {
-    const selectedNode = graphControls.current?.getSelectedNode();
-
-    ctx.save();
-
-    if (node.id === selectedNode?.id) {
-      ctx.fillStyle = "gray";
-
-      ctx.beginPath();
-      ctx.arc(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode, 10, 0, 2 * Math.PI);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(node.x! + addNodeDistanceFromSourceNode - 5, node.y! + addNodeDistanceFromSourceNode)
-      ctx.lineTo(node.x! + addNodeDistanceFromSourceNode - 5 + 10, node.y! + addNodeDistanceFromSourceNode);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode - 5)
-      ctx.lineTo(node.x! + addNodeDistanceFromSourceNode, node.y! + addNodeDistanceFromSourceNode - 5 + 10);
-      ctx.stroke();
+    if (!newData.nodes.length && !newData.links.length) {
+      return;
     }
 
-    // ctx.beginPath();
-    // ctx.arc(node.x, node.y, nodeSize, 0, 2 * Math.PI);
-    // ctx.fill();
+    updateData(newData);
+  }, []);
 
-    // draw text label (with background rect)
-    const textPos = {
-      x: node.x!,
-      y: node.y!,
-    };
-    
-    ctx.translate(textPos.x, textPos.y);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "#333333";
-    ctx.font = `${textSize}px Sans-Serif`;
-    ctx.fillText(node.label, 0, 0);
+  const graphRef = useRef<GraphVisualizationAPI>();
 
-    ctx.restore();
-  }
+  const graphControls = useRef<GraphControlsAPI>();
 
-  function renderLink(link: LinkObject, ctx: CanvasRenderingContext2D) {
-    const MAX_FONT_SIZE = 4;
-    const LABEL_NODE_MARGIN = nodeSize * 1.5;
+  const activityLog = useRef<ActivityLogAPI>();
 
-    const start = link.source;
-    const end = link.target;
-
-    // ignore unbound links
-    if (typeof start !== "object" || typeof end !== "object") return;
-
-    const textPos = {
-      x: start.x! + (end.x! - start.x!) / 2,
-      y: start.y! + (end.y! - start.y!) / 2,
-    };
-
-    const relLink = { x: end.x! - start.x!, y: end.y! - start.y! };
-
-    const maxTextLength = Math.sqrt(Math.pow(relLink.x, 2) + Math.pow(relLink.y, 2)) - LABEL_NODE_MARGIN * 2;
-
-    let textAngle = Math.atan2(relLink.y, relLink.x);
-    // maintain label vertical orientation for legibility
-    if (textAngle > Math.PI / 2) textAngle = -(Math.PI - textAngle);
-    if (textAngle < -Math.PI / 2) textAngle = -(-Math.PI - textAngle);
-
-    const label = link.label
-
-    // estimate fontSize to fit in link length
-    ctx.font = "1px Sans-Serif";
-    const fontSize = Math.min(MAX_FONT_SIZE, maxTextLength / ctx.measureText(label).width);
-    ctx.font = `${fontSize}px Sans-Serif`;
-    const textWidth = ctx.measureText(label).width;
-    const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.2); // some padding
-
-    // draw text label (with background rect)
-    ctx.save();
-    ctx.translate(textPos.x, textPos.y);
-    ctx.rotate(textAngle);
-
-    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-    ctx.fillRect(- bckgDimensions[0] / 2, - bckgDimensions[1] / 2, bckgDimensions[0], bckgDimensions[1]);
-
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "darkgrey";
-    ctx.fillText(label, 0, 0);
-    ctx.restore();
-  }
-
-  function handleDagError(loopNodeIds: (string | number)[]) {
-    console.log(loopNodeIds);
-  }
-
-  useEffect(() => {
-    // add collision force
-    graphRef.current!.d3Force("collision", forceCollide(nodeSize * 1.5));
-    graphRef.current!.d3Force("charge", forceManyBody().strength(-1500).distanceMin(300).distanceMax(900));
-  }, [data]);
-
-  const [graphShape, setGraphShape] = useState<string | undefined>(undefined);
-  
   return (
     <main className="flex flex-col h-full">
-      <div className="pt-6 pr-3 pb-3 pl-6">
+      <div className="flex flex-row justify-between items-center pt-6 pr-6 pb-6 pl-6">
         <TextLogo width={86} height={24} />
+
+        <span className="flex flex-row items-center gap-8">
+          <Link target="_blank" href="https://www.cognee.ai/">
+            <span>Cognee Home</span>
+          </Link>
+          <Link target="_blank" href="https://github.com/topoteretes/cognee">
+            <GithubIcon color="black" />
+          </Link>
+          <Link target="_blank" href="https://discord.gg/m63hxKsp4p">
+            <DiscordIcon color="black" />
+          </Link>
+        </span>
       </div>
       <Divider />
       <div className="w-full h-full relative overflow-hidden">
-        <div className="w-full h-full" id="graph-container">
-          {data ? (
-            <ForceGraph
-              ref={graphRef}
-              dagMode={graphShape as undefined}
-              dagLevelDistance={300}
-              onDagError={handleDagError}
-              graphData={data}
+        <GraphVisualization
+          key={data?.nodes.length}
+          ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+          data={data}
+          graphControls={graphControls as MutableRefObject<GraphControlsAPI>}
+        />
 
-              nodeLabel="label"
-              nodeRelSize={nodeSize}
-              nodeCanvasObject={renderNode}
-              nodeCanvasObjectMode={() => "after"}
-              nodeAutoColorBy="group"
+        <div className="absolute top-2 left-2 flex flex-col gap-2">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
+            <CogneeAddWidget onData={onDataChange} />
+          </div>
+          {/* <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
+            <CrewAITrigger onData={onDataChange} onActivity={(activities) => activityLog.current?.updateActivityLog(activities)} />
+          </div> */}
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
+            <h2 className="text-xl text-white mb-4">Activity Log</h2>
+            <ActivityLog ref={activityLog as MutableRefObject<ActivityLogAPI>} />
+          </div>
+        </div>
 
-              linkLabel="label"
-              linkCanvasObject={renderLink}
-              linkCanvasObjectMode={() => "after"}
-              linkDirectionalArrowLength={3.5}
-              linkDirectionalArrowRelPos={1}
-
-              onNodeClick={handleNodeClick}
-              onBackgroundClick={handleBackgroundClick}
-              d3VelocityDecay={0.3}
+        <div className="absolute top-2 right-2 flex flex-col gap-2 items-end">
+          <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-110">
+            <GraphControls
+              data={data}
+              ref={graphControls as MutableRefObject<GraphControlsAPI>}
+              isAddNodeFormOpen={isAddNodeFormOpen}
+              onFitIntoView={() => graphRef.current!.zoomToFit(1000, 50)}
+              onGraphShapeChange={(shape) => graphRef.current!.setGraphShape(shape)}
             />
-          ) : (
-            <ForceGraph
-              ref={graphRef}
-              dagMode="lr"
-              dagLevelDistance={100}
-              graphData={{
-                nodes: [{ id: 1, label: "Add" }, { id: 2, label: "Cognify" }, { id: 3, label: "Search" }],
-                links: [{ source: 1, target: 2, label: "but don't forget to" }, { source: 2, target: 3, label: "and after that you can" }],
-              }}
-
-              nodeLabel="label"
-              nodeRelSize={20}
-              nodeCanvasObject={renderNode}
-              nodeCanvasObjectMode={() => "after"}
-              nodeAutoColorBy="group"
-
-              linkLabel="label"
-              linkCanvasObject={renderLink}
-              linkCanvasObjectMode={() => "after"}
-              linkDirectionalArrowLength={3.5}
-              linkDirectionalArrowRelPos={1}
-            />
+          </div>
+          {data?.nodes.length && (
+            <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-48">
+              <GraphLegend data={data?.nodes} />
+            </div>
           )}
-        </div>
-
-        <div className="absolute top-2 left-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md max-w-2xl">
-          <CogneeAddWidget onData={onDataChange} />
-          <CrewAITrigger />
-        </div>
-
-        <div className="absolute top-2 right-2 bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md">
-          <GraphControls
-            ref={graphControls}
-            isAddNodeFormOpen={isAddNodeFormOpen}
-            onFitIntoView={() => graphRef.current?.zoomToFit(1000, 50)}
-            onGraphShapeChange={setGraphShape}
-          />
         </div>
       </div>
       <Divider />
       <div className="pl-6 pr-6">
         <Footer>
-          <div className="flex flex-row items-center gap-6">
-            <span>Nodes: {data?.nodes.length}</span>
-            <span>Edges: {data?.links.length}</span>
-          </div>
+          {(data?.nodes.length || data?.links.length) && (
+            <div className="flex flex-row items-center gap-6">
+              <span>Nodes: {data?.nodes.length || 0}</span>
+              <span>Edges: {data?.links.length || 0}</span>
+            </div>
+          )}
         </Footer>
       </div>
     </main>
