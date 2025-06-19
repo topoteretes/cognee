@@ -2,3 +2,4 @@ from .tasks.task import Task
 from .operations.run_tasks import run_tasks
 from .operations.run_parallel import run_tasks_parallel
 from .operations.pipeline import cognee_pipeline
+from .operations.pipeline import merge_pipeline_run_info

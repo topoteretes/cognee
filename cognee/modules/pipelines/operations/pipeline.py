@@ -7,7 +7,10 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
-from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.pipelines.operations.get_pipeline_status import (
+    get_pipeline_status,
+    get_pipeline_run,
+)
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -18,6 +21,11 @@ from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     load_or_create_datasets,
     check_dataset_name,
+)
+
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunStarted,
 )
 
 from cognee.infrastructure.databases.relational import (
@@ -148,22 +156,45 @@ async def run_pipeline(
             PipelineRunStatus.DATASET_PROCESSING_COMPLETED
         ]  # TODO: this is a random assignment, find permanent solution
 
-    if str(dataset_id) in task_status:
-        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
-            logger.info("Dataset %s is already being processed.", dataset_id)
-            return
-        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
-            logger.info("Dataset %s is already processed.", dataset_id)
-            return
+    if (
+        str(dataset_id) in task_status
+        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
+    ):
+        logger.info("Dataset %s is already being processed.", dataset_id)
+        pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
+        yield PipelineRunStarted(
+            pipeline_run_id=pipeline_run.pipeline_run_id,
+            datasets={dataset.name: dataset.id},
+            payload=data,
+        )
+    elif (
+        str(dataset_id) in task_status
+        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+    ):
+        logger.info("Dataset %s is already processed.", dataset_id)
+        pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
+        yield PipelineRunCompleted(
+            pipeline_run_id=pipeline_run.pipeline_run_id, datasets={dataset.name: dataset.id}
+        )
+    else:
+        if not isinstance(tasks, list):
+            raise ValueError("Tasks must be a list")
 
-    if not isinstance(tasks, list):
-        raise ValueError("Tasks must be a list")
+        for task in tasks:
+            if not isinstance(task, Task):
+                raise ValueError(f"Task {task} is not an instance of Task")
 
-    for task in tasks:
-        if not isinstance(task, Task):
-            raise ValueError(f"Task {task} is not an instance of Task")
+        pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
 
-    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
+        async for pipeline_run_info in pipeline_run:
+            yield pipeline_run_info
 
-    async for pipeline_run_info in pipeline_run:
-        yield pipeline_run_info
+
+def merge_pipeline_run_info(old_run_info, new_run_info):
+    if old_run_info:
+        updated_run_info = old_run_info
+        # Combine dataset dictionaries of run_infos
+        updated_run_info.datasets = old_run_info.datasets | new_run_info.datasets
+        return updated_run_info
+    else:
+        return new_run_info

@@ -2,6 +2,7 @@ import json
 from typing import Any
 from uuid import UUID, uuid4
 
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
@@ -77,7 +78,7 @@ async def run_tasks_with_telemetry(
 
 async def run_tasks(
     tasks: list[Task],
-    dataset_id: UUID = uuid4(),
+    dataset_id: UUID,
     data: Any = None,
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
@@ -85,6 +86,13 @@ async def run_tasks(
 ):
     if not user:
         user = get_default_user()
+
+    # Get Dataset object
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        from cognee.modules.data.models import Dataset
+
+        dataset = await session.get(Dataset, dataset_id)
 
     pipeline_id = generate_pipeline_id(user.id, pipeline_name)
 
@@ -94,6 +102,7 @@ async def run_tasks(
 
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,
+        datasets={dataset.name: dataset.id},
         payload=data,
     )
 
@@ -107,6 +116,7 @@ async def run_tasks(
         ):
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
+                datasets={dataset.name: dataset.id},
                 payload=result,
             )
 
@@ -114,13 +124,17 @@ async def run_tasks(
             pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data
         )
 
-        yield PipelineRunCompleted(pipeline_run_id=pipeline_run_id)
+        yield PipelineRunCompleted(
+            pipeline_run_id=pipeline_run_id, datasets={dataset.name: dataset.id}
+        )
 
     except Exception as error:
         await log_pipeline_run_error(
             pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, error
         )
 
-        yield PipelineRunErrored(pipeline_run_id=pipeline_run_id, payload=error)
+        yield PipelineRunErrored(
+            pipeline_run_id=pipeline_run_id, payload=error, datasets={dataset.name: dataset.id}
+        )
 
         raise error
