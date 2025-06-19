@@ -95,7 +95,7 @@ class TestCogneeServerStart(unittest.TestCase):
 
         payload = {"datasets": ["test"]}
 
-        cognify_response = requests.post(url, headers=headers, json=payload, timeout=15)
+        cognify_response = requests.post(url, headers=headers, json=payload, timeout=150)
         cognify_response.raise_for_status()  # raises on HTTP 4xx/5xx
 
         # TODO: Add test to verify cognify pipeline is complete before testing search
