@@ -19,6 +19,8 @@ class Dataset(Base):
 
     owner_id = Column(UUID, index=True)
 
+    acls = relationship("ACL", back_populates="dataset", cascade="all, delete-orphan")
+
     data: Mapped[List["Data"]] = relationship(
         "Data",
         secondary=DatasetData.__tablename__,

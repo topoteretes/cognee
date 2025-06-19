@@ -46,7 +46,12 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            os.makedirs(self.db_path, exist_ok=True)
+            try:
+                os.makedirs(self.db_path, exist_ok=True)
+            except FileExistsError:
+                os.remove(self.db_path)
+                os.makedirs(self.db_path, exist_ok=True)
+
             self.db = Database(self.db_path)
             self.db.init_database()
             self.connection = Connection(self.db)
@@ -1044,7 +1049,7 @@ class KuzuAdapter(GraphDBInterface):
                 return [], []
 
             edges_query = """
-            MATCH (n:Node)-[r:EDGE]->(m:Node)
+            MATCH (n:Node)-[r]->(m:Node)
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edges = await self.query(edges_query)
@@ -1158,6 +1163,7 @@ class KuzuAdapter(GraphDBInterface):
                     data = json.loads(props)
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse JSON props for edge {from_id}->{to_id}")
+
             edges.append((from_id, to_id, rel_type, data))
 
         return nodes, edges

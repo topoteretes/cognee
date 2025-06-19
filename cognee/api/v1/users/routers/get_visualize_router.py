@@ -8,7 +8,7 @@ logger = get_logger()
 def get_visualize_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("/", response_model=None)
+    @router.get("", response_model=None)
     async def visualize():
         """This endpoint is responsible for adding data to the graph."""
         from cognee.api.v1.visualize import visualize_graph

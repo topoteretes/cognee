@@ -3,10 +3,6 @@ name: test | gemini
 on:
   workflow_call:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
-
 jobs:
   test-gemini:
     name: Run Gemini Test

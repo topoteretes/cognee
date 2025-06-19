@@ -39,13 +39,13 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   🌐 Available Languages
   :
   <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> | 
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">français</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
   </p>
 

@@ -2,7 +2,7 @@ import os
 import pathlib
 import asyncio
 from uuid import NAMESPACE_OID, uuid5
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.modules.observability.get_observe import get_observe
 
 from cognee.api.v1.search import SearchType, search
@@ -43,7 +43,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     tasks = [
         Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
-        Task(add_data_points, task_config={"batch_size": 500}),
+        Task(add_data_points, task_config={"batch_size": 30}),
     ]
 
     if include_docs:
@@ -97,4 +97,5 @@ if __name__ == "__main__":
         for file in search_results:
             print(file["name"])
 
+    logger = setup_logging(name="code_graph_pipeline")
     asyncio.run(main())
