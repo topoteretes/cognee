@@ -377,14 +377,11 @@ class MemgraphAdapter(GraphDBInterface):
             The result of the edge addition operation, including relationship details.
         """
 
-        exists = await asyncio.gather(
-            self.has_node(str(from_node)),
-            self.has_node(str(to_node))
-        )
+        exists = await asyncio.gather(self.has_node(str(from_node)), self.has_node(str(to_node)))
 
         if not all(exists):
             return None
-            
+
         serialized_properties = self.serialize_properties(edge_properties or {})
 
         query = dedent(
