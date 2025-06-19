@@ -1,18 +1,25 @@
 import json
-from cognee.shared.logging_utils import get_logger
+from typing import Any
 from uuid import UUID, uuid4
 
-from typing import Any
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunErrored,
+    PipelineRunStarted,
+    PipelineRunYield,
+)
+
 from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
 from cognee.modules.settings import get_current_settings
-from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
-from uuid import uuid5, NAMESPACE_OID
 
 from .run_tasks_base import run_tasks_base
 from ..tasks.task import Task
@@ -76,29 +83,44 @@ async def run_tasks(
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
 ):
-    pipeline_id = uuid5(NAMESPACE_OID, pipeline_name)
+    if not user:
+        user = get_default_user()
+
+    pipeline_id = generate_pipeline_id(user.id, pipeline_name)
 
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
 
-    yield pipeline_run
     pipeline_run_id = pipeline_run.pipeline_run_id
 
+    yield PipelineRunStarted(
+        pipeline_run_id=pipeline_run_id,
+        payload=data,
+    )
+
     try:
-        async for _ in run_tasks_with_telemetry(
+        async for result in run_tasks_with_telemetry(
             tasks=tasks,
             data=data,
             user=user,
             pipeline_name=pipeline_id,
             context=context,
         ):
-            pass
+            yield PipelineRunYield(
+                pipeline_run_id=pipeline_run_id,
+                payload=result,
+            )
 
-        yield await log_pipeline_run_complete(
+        await log_pipeline_run_complete(
             pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data
         )
 
-    except Exception as e:
-        yield await log_pipeline_run_error(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, e
+        yield PipelineRunCompleted(pipeline_run_id=pipeline_run_id)
+
+    except Exception as error:
+        await log_pipeline_run_error(
+            pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, error
         )
-        raise e
+
+        yield PipelineRunErrored(pipeline_run_id=pipeline_run_id, payload=error)
+
+        raise error

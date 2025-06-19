@@ -1,8 +1,8 @@
-import cognee
 import asyncio
-from cognee.shared.logging_utils import get_logger, ERROR
 
+import cognee
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import setup_logging, ERROR
 
 job_1 = """
 CV 1: Relevant
@@ -191,7 +191,7 @@ async def main(enable_steps):
 
 
 if __name__ == "__main__":
-    logger = get_logger(level=ERROR)
+    logger = setup_logging(log_level=ERROR)
 
     rebuild_kg = True
     retrieve = True
