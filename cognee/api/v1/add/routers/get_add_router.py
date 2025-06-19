@@ -10,6 +10,7 @@ import requests
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.data.methods import get_unique_dataset_id
 
 logger = get_logger()
 
@@ -52,7 +53,14 @@ def get_add_router() -> APIRouter:
             else:
                 add_run = await cognee_add(data, datasetName, user=user, dataset_id=datasetId)
 
-                return add_run.model_dump()
+                # Create response json with add function return value
+                response_json = add_run.model_dump()
+
+                # Add dataset_id to json response
+                dataset_id = await get_unique_dataset_id(datasetName, user=user)
+                response_json["dataset_id"] = dataset_id
+
+                return response_json
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 
