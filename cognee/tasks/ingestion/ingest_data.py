@@ -124,6 +124,10 @@ async def ingest_data(
                         # Convert from list to Dataset element
                         if isinstance(dataset, list):
                             dataset = dataset[0]
+
+                        dataset = await session.merge(
+                            dataset
+                        )  # Add found dataset object into current session
                     else:
                         # Create new one
                         dataset = await create_dataset(dataset_name, user, session)
