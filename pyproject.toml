@@ -33,7 +33,7 @@ dependencies = [
     "sqlalchemy==2.0.39",
     "aiosqlite>=0.20.0,<0.21",
     "tiktoken<=0.9.0",
-    "litellm>=1.57.4",
+    "litellm>=1.57.4, <1.71.0",
     "instructor>=1.7.2",
     "langfuse>=2.32.0,<3",
     "filetype>=1.2.0",
