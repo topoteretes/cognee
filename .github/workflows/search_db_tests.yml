@@ -1,0 +1,48 @@
+name: Reusable Search DB Tests
+
+on:
+  workflow_call:
+    inputs:
+      databases:
+        required: false
+        type: string
+        default: "all"
+        description: "Which vector databases to test (comma-separated list or 'all')"
+    secrets:
+      WEAVIATE_API_URL:
+        required: false
+      WEAVIATE_API_KEY:
+        required: false
+
+jobs:
+  run-kuzu-search-tests:
+    name: Search test for Kuzu
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E kuzu
+
+      - name: Run Kuzu search Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: true
