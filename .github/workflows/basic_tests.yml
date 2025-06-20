@@ -102,8 +102,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Unit Tests
-        run: true
-        #run: poetry run pytest cognee/tests/unit/ commented out for development purposes
+        run: poetry run pytest cognee/tests/unit/
 
   integration-tests:
     name: Run Integration Tests
