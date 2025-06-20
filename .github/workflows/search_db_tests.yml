@@ -56,18 +56,18 @@ jobs:
       if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/pgvector/postgres') }}
       services:
         postgres:
-          image: postgres:15
+          image: pgvector/pgvector:pg17
           env:
-            POSTGRES_USER: postgres
-            POSTGRES_PASSWORD: password
+            POSTGRES_USER: cognee
+            POSTGRES_PASSWORD: cognee
             POSTGRES_DB: cognee_db
-          ports:
-            - 5432:5432
           options: >-
-            --health-cmd "pg_isready -U postgres"
+            --health-cmd pg_isready
             --health-interval 10s
             --health-timeout 5s
             --health-retries 5
+          ports:
+            - 5432:5432
       steps:
         - name: Check out
           uses: actions/checkout@v4
@@ -81,14 +81,6 @@ jobs:
 
         - name: Install dependencies
           run: poetry install -E kuzu -E postgres
-
-        - name: Install pgvector extension
-          run: |
-            docker exec $(docker ps -q --filter ancestor=postgres:15) bash -lc "\
-              apt-get update && \
-              apt-get install -y postgresql-15-vector && \
-              pg_ctlcluster 15 main start \
-            "
 
         - name: Run Kuzu/PGVector/Postgres Tests
           env:
@@ -107,6 +99,6 @@ jobs:
             DB_NAME: 'cognee_db'
             DB_HOST: '127.0.0.1'
             DB_PORT: 5432
-            DB_USERNAME: postgres
-            DB_PASSWORD: password
+            DB_USERNAME: 'cognee'
+            DB_PASSWORD: 'cognee'
           run: poetry run python ./cognee/tests/test_search_db.py
