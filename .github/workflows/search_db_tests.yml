@@ -15,8 +15,8 @@ on:
         required: false
 
 jobs:
-  run-kuzu-lance-search-tests:
-    name: Search test for Kuzu/LanceDB
+  run-kuzu-lance-sqlite-search-tests:
+    name: Search test for Kuzu/LanceDB/sqlite
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
     steps:
@@ -50,8 +50,8 @@ jobs:
         run: poetry run python ./cognee/tests/test_search_db.py
 
 
-  run-kuzu-pgvector-postgres:
-      name: Kuzu / PGVector / Postgres Search Tests
+  run-kuzu-pgvector-postgres-search-tests:
+      name: Search test for Kuzu/PGVector/Postgres
       runs-on: ubuntu-22.04
       if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/pgvector/postgres') }}
       services:
@@ -99,6 +99,6 @@ jobs:
             DB_NAME: 'cognee_db'
             DB_HOST: '127.0.0.1'
             DB_PORT: 5432
-            DB_USERNAME: 'cognee'
-            DB_PASSWORD: 'cognee'
+            DB_USERNAME: cognee
+            DB_PASSWORD: cognee
           run: poetry run python ./cognee/tests/test_search_db.py
