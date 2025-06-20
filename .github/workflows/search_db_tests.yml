@@ -79,7 +79,7 @@ jobs:
             python-version: ${{ inputs.python-version }}
 
         - name: Install dependencies
-          run: poetry install -E kuzu -E pgvector
+          run: poetry install -E kuzu -E postgres
 
         - name: Run Kuzu/PGVector/Postgres Tests
           env:
