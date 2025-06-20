@@ -82,6 +82,14 @@ jobs:
         - name: Install dependencies
           run: poetry install -E kuzu -E postgres
 
+        - name: Install pgvector extension
+          run: |
+            docker exec $(docker ps -q --filter ancestor=postgres:15) bash -lc "\
+              apt-get update && \
+              apt-get install -y postgresql-15-vector && \
+              pg_ctlcluster 15 main start \
+            "
+
         - name: Run Kuzu/PGVector/Postgres Tests
           env:
             ENV: dev
