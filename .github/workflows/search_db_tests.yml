@@ -15,7 +15,7 @@ on:
         required: false
 
 jobs:
-  run-kuzu-search-tests:
+  run-kuzu-lance-search-tests:
     name: Search test for Kuzu
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
@@ -45,4 +45,6 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: true
+          GRAPH_DATABASE_PROVIDER: 'kuzu'
+          VECTOR_DB_PROVIDER: 'lancedb'
+        run: poetry run python ./cognee/tests/test_search_db.py
