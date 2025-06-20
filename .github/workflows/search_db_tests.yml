@@ -16,9 +16,9 @@ on:
 
 jobs:
   run-kuzu-lance-search-tests:
-    name: Search test for Kuzu
+    name: Search test for Kuzu/LanceDB
     runs-on: ubuntu-22.04
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -48,3 +48,56 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           VECTOR_DB_PROVIDER: 'lancedb'
         run: poetry run python ./cognee/tests/test_search_db.py
+
+
+  run-kuzu-pgvector-postgres:
+      name: Kuzu / PGVector / Postgres Search Tests
+      runs-on: ubuntu-22.04
+      if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/pgvector/postgres') }}
+      services:
+        postgres:
+          image: postgres:15
+          env:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: password
+          ports:
+            - 5432:5432
+          options: >-
+            --health-cmd "pg_isready -U postgres"
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
+      steps:
+        - name: Check out
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
+
+        - name: Cognee Setup
+          uses: ./.github/actions/cognee_setup
+          with:
+            python-version: ${{ inputs.python-version }}
+
+        - name: Install dependencies
+          run: poetry install -E kuzu -E pgvector
+
+        - name: Run Kuzu/PGVector/Postgres Tests
+          env:
+            ENV: dev
+            LLM_MODEL: ${{ secrets.LLM_MODEL }}
+            LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+            LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+            LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+            EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+            EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+            EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+            EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+            GRAPH_DATABASE_PROVIDER: 'kuzu'
+            VECTOR_DB_PROVIDER: 'pgvector'
+            DB_PROVIDER: 'postgres'
+            DB_NAME: 'cognee_db'
+            DB_HOST: '127.0.0.1'
+            DB_PORT: 5432
+            DB_USERNAME: postgres
+            DB_PASSWORD: password
+          run: poetry run python ./cognee/tests/test_search_db.py
