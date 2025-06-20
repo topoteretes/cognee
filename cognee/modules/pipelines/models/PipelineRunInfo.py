@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class PipelineRunInfo(BaseModel):
     status: str
     pipeline_run_id: UUID
+    datasets: dict
     payload: Optional[Any] = None
 
     model_config = {
