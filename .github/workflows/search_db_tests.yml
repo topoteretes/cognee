@@ -16,7 +16,7 @@ on:
 
 jobs:
   run-kuzu-lance-sqlite-search-tests:
-    name: Search test for Kuzu/LanceDB/sqlite
+    name: Search test for Kuzu/LanceDB/Sqlite
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
     steps:
@@ -47,8 +47,61 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           VECTOR_DB_PROVIDER: 'lancedb'
+          DB_PROVIDER: 'sqlite'
         run: poetry run python ./cognee/tests/test_search_db.py
 
+  run-neo4j-lance-sqlite-search-tests:
+    name: Search test for Neo4j/LanceDB/Sqlite
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j/lance/sqlite') }}
+    services:
+      neo4j:
+        image: neo4j:5.11
+        env:
+          NEO4J_AUTH: neo4j/pleaseletmein
+          NEO4J_PLUGINS: '["apoc","graph-data-science"]'
+        ports:
+          - 7474:7474
+          - 7687:7687
+        options: >-
+          --health-cmd="cypher-shell -u neo4j -p pleaseletmein 'RETURN 1'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E neo4j
+
+      - name: Run Neo4j search Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: 'neo4j'
+          VECTOR_DB_PROVIDER: 'lancedb'
+          DB_PROVIDER: 'sqlite'
+          GRAPH_DATABASE_URL: bolt://localhost:7687
+          GRAPH_DATABASE_USERNAME: neo4j
+          GRAPH_DATABASE_PASSWORD: pleaseletmein
+        run: poetry run python ./cognee/tests/test_search_db.py
 
   run-kuzu-pgvector-postgres-search-tests:
       name: Search test for Kuzu/PGVector/Postgres
