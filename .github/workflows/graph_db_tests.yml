@@ -1,5 +1,8 @@
 name: Reusable Graph DB Tests
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
