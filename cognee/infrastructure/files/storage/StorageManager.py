@@ -1,76 +1,7 @@
-from typing import Protocol, BinaryIO, Union
+from typing import BinaryIO
+from contextlib import contextmanager
 
-
-class Storage(Protocol):
-    """
-    Abstract interface for storage operations.
-    """
-
-    def store(self, file_path: str, data: Union[BinaryIO, str]):
-        """
-        Store data at the specified file path.
-
-        Parameters:
-        -----------
-
-            - file_path (str): The path where the data will be stored.
-            - data (bytes): The binary data to be stored.
-        """
-        pass
-
-    def open(self, file_path: str, mode: str = "r"):
-        """
-        Retrieve file from the specified file path.
-
-        Parameters:
-        -----------
-
-            - file_path (str): The path from where the data will be retrieved.
-            - mode (str): The mode to open the file, with "r" as the default for reading text
-        """
-        pass
-
-    def copy_file(self, source_file_path: str, destination_file_path: str):
-        """
-        Copy a file from a source path to a destination path.
-
-        Parameters:
-        -----------
-
-            - source_file_path (str): The path of the file to be copied.
-            - destination_file_path (str): The path where the file will be copied to.
-
-        Returns:
-        --------
-
-            - str: The path to the copied file.
-        """
-        pass
-
-    def remove(self, file_path: str):
-        """
-        Remove the storage at the specified file path.
-
-        Parameters:
-        -----------
-
-            - file_path (str): The path of the file to be removed.
-        """
-        pass
-
-    def remove_all(self, root_path: str):
-        """
-        Remove an entire directory tree at the specified path, including all files and
-        subdirectories.
-
-        If the directory does not exist, no action is taken and no exception is raised.
-
-        Parameters:
-        -----------
-
-            - tree_path (str): The root path of the directory tree to be removed.
-        """
-        pass
+from .storage import Storage
 
 
 class StorageManager:
@@ -88,6 +19,22 @@ class StorageManager:
 
     def __init__(self, storage: Storage):
         self.storage = storage
+
+    def file_exists(self, file_path: str):
+        """
+        Check if a specified file exists in the storage.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The path of the file to check for existence.
+
+        Returns:
+        --------
+
+            - bool: True if the file exists, otherwise False.
+        """
+        return self.storage.file_exists(file_path)
 
     def store(self, file_path: str, data: BinaryIO):
         """
@@ -107,6 +54,7 @@ class StorageManager:
         """
         return self.storage.store(file_path, data)
 
+    @contextmanager
     def open(self, file_path: str, *args, **kwargs):
         """
         Retrieve data from the specified file path.
@@ -121,7 +69,21 @@ class StorageManager:
 
             Returns the retrieved data, as defined by the storage implementation.
         """
-        return self.storage.open(file_path, *args, **kwargs)
+        with self.storage.open(file_path, *args, **kwargs) as file:
+            yield file
+
+    def ensure_directory_exists(self, directory_path: str = None):
+        """
+        Ensure that the specified directory exists, creating it if necessary.
+
+        If the directory already exists, no action is taken.
+
+        Parameters:
+        -----------
+
+            - directory_path (str): The path of the directory to check or create.
+        """
+        return self.storage.ensure_directory_exists(directory_path)
 
     def remove(self, file_path: str):
         """
@@ -140,7 +102,7 @@ class StorageManager:
         """
         return self.storage.remove(file_path)
 
-    def remove_all(self, tree_path: str):
+    def remove_all(self, tree_path: str = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.

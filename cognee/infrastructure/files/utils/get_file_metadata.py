@@ -1,6 +1,6 @@
 from typing import BinaryIO, TypedDict
 from .guess_file_type import guess_file_type
-from cognee.shared.utils import get_file_content_hash
+from ..utils.get_file_content_hash import get_file_content_hash
 
 
 class FileMetadata(TypedDict):

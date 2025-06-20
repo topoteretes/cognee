@@ -1,20 +1,21 @@
 import os
-from typing import Union, BinaryIO, List
-from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
-from cognee.modules.ingestion import classify
-from cognee.infrastructure.databases.relational import get_relational_engine
-from sqlalchemy import select
-from sqlalchemy.sql import delete as sql_delete
-from cognee.modules.data.models import Data, DatasetData, Dataset
-from cognee.infrastructure.databases.graph import get_graph_engine
-from io import BytesIO
 import hashlib
 from uuid import UUID
-from cognee.infrastructure.databases.vector import get_vector_engine
+from io import BytesIO
+from sqlalchemy import select
+from typing import Union, BinaryIO, List
+from sqlalchemy.sql import delete as sql_delete
+
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.ingestion import classify
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.models import Data, DatasetData, Dataset
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from .exceptions import DocumentNotFoundError, DatasetNotFoundError, DocumentSubgraphNotFoundError
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -45,7 +46,7 @@ async def delete(
             file_dir = os.path.dirname(full_file_path)
             file_path = os.path.basename(full_file_path)
 
-            file_storage = LocalFileStorage(file_dir)
+            file_storage = get_file_storage(file_dir)
 
             with file_storage.open(file_path, mode="rb") as file:
                 classified_data = classify(file)

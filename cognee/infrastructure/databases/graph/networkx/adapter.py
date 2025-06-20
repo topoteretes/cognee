@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Union, Type, Tuple
 
 from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
-from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.infrastructure.files.storage import get_file_storage
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
@@ -570,7 +570,7 @@ class NetworkXAdapter(GraphDBInterface):
         file_dir_path = os.path.dirname(file_path)
         file_path = os.path.basename(file_path)
 
-        file_storage = LocalFileStorage(file_dir_path)
+        file_storage = get_file_storage(file_dir_path)
 
         json_data = json.dumps(graph_data, cls=JSONEncoder)
 
@@ -590,12 +590,12 @@ class NetworkXAdapter(GraphDBInterface):
             file_path = self.filename
         try:
             file_dir_path = os.path.dirname(file_path)
-            file_path = os.path.basename(file_path)
+            file_name = os.path.basename(file_path)
 
-            file_storage = LocalFileStorage(file_dir_path)
+            file_storage = get_file_storage(file_dir_path)
 
-            if file_storage.file_exists(file_path):
-                with file_storage.open(file_path, "r") as file:
+            if file_storage.file_exists(file_name):
+                with file_storage.open(file_name, "r") as file:
                     graph_data = json.loads(file.read())
                     for node in graph_data["nodes"]:
                         try:
@@ -681,7 +681,7 @@ class NetworkXAdapter(GraphDBInterface):
             file_dir_path = os.path.dirname(file_path)
             file_path = os.path.basename(file_path)
 
-            file_storage = LocalFileStorage(file_dir_path)
+            file_storage = get_file_storage(file_dir_path)
 
             file_storage.remove(file_path)
 

@@ -2,7 +2,7 @@ import os
 import s3fs
 from typing import BinaryIO, Union
 from contextlib import contextmanager
-from .StorageManager import Storage
+from .storage import Storage
 
 
 class S3FileStorage(Storage):
@@ -74,7 +74,10 @@ class S3FileStorage(Storage):
         full_file_path = os.path.join(self.storage_path, file_path)
 
         with self.s3.open(full_file_path, mode=mode) as file:
-            yield file
+            try:
+                yield file
+            finally:
+                file.close()
 
     def file_exists(self, file_path: str):
         """
@@ -92,7 +95,7 @@ class S3FileStorage(Storage):
         """
         return self.s3.exists(os.path.join(self.storage_path, file_path))
 
-    def ensure_directory_exists(self, file_path: str):
+    def ensure_directory_exists(self, directory_path: str = None):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -101,9 +104,10 @@ class S3FileStorage(Storage):
         Parameters:
         -----------
 
-            - file_path (str): The path of the directory to check or create.
+            - directory_path (str): The path of the directory to check or create.
         """
-        directory_path = os.path.dirname(directory_path)
+        if directory_path == None:
+            directory_path = self.storage_path
 
         if not self.file_exists(directory_path):
             self.s3.makedirs(directory_path, exist_ok=True)
@@ -155,7 +159,12 @@ class S3FileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
+        if tree_path == None:
+            tree_path = self.storage_path
+        else:
+            tree_path = os.path.join(self.storage_path, tree_path)
+
         try:
-            self.s3.rm(os.path.join(self.storage_path, tree_path), recursive=True)
+            self.s3.rm(tree_path, recursive=True)
         except FileNotFoundError:
             pass

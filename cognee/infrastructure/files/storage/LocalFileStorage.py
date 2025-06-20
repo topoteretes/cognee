@@ -2,7 +2,7 @@ import os
 import shutil
 from typing import BinaryIO, Optional, Union
 from contextlib import contextmanager
-from .StorageManager import Storage
+from .storage import Storage
 
 
 class LocalFileStorage(Storage):
@@ -48,6 +48,8 @@ class LocalFileStorage(Storage):
             else:
                 file.write(data)
 
+            file.close()
+
     @contextmanager
     def open(self, file_path: str, mode: str = "rb", *args, **kwargs):
         """
@@ -71,7 +73,10 @@ class LocalFileStorage(Storage):
         full_file_path = os.path.join(self.storage_path, file_path)
 
         with open(full_file_path, mode=mode, *args, **kwargs) as file:
-            yield file
+            try:
+                yield file
+            finally:
+                file.close()
 
     def file_exists(self, file_path: str):
         """
@@ -89,7 +94,7 @@ class LocalFileStorage(Storage):
         """
         return os.path.exists(os.path.join(self.storage_path, file_path))
 
-    def ensure_directory_exists(self, directory_path: str = ""):
+    def ensure_directory_exists(self, directory_path: str = None):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -100,7 +105,8 @@ class LocalFileStorage(Storage):
 
             - directory_path (str): The path of the directory to check or create.
         """
-        directory_path = os.path.dirname(directory_path)
+        if directory_path == None:
+            directory_path = self.storage_path
 
         if not os.path.exists(directory_path):
             os.makedirs(directory_path, exist_ok=True)
@@ -140,7 +146,7 @@ class LocalFileStorage(Storage):
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
 
-    def remove_all(self, tree_path: str):
+    def remove_all(self, tree_path: str = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -154,7 +160,12 @@ class LocalFileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
+        if tree_path == None:
+            tree_path = self.storage_path
+        else:
+            tree_path = os.path.join(self.storage_path, tree_path)
+
         try:
-            shutil.rmtree(os.path.join(self.storage_path, tree_path))
+            shutil.rmtree(tree_path)
         except FileNotFoundError:
             pass

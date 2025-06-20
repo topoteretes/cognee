@@ -2,7 +2,7 @@ import os.path
 import hashlib
 from typing import BinaryIO, Union
 from cognee.base_config import get_base_config
-from cognee.infrastructure.files.storage import LocalStorage
+from cognee.infrastructure.files.storage import get_file_storage
 from .classify import classify
 
 
@@ -20,7 +20,7 @@ def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
     file_name = file_metadata["name"]
 
     storage_path = os.path.join(data_directory_path, "data")
-    storage = LocalStorage(storage_path)
+    storage = get_file_storage(storage_path)
 
     # Don't save file if it already exists
     if not storage.file_exists(file_name):

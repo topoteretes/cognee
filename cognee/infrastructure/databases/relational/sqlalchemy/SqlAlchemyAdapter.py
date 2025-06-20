@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.infrastructure.files.storage import get_file_storage
 
 from ..ModelBase import Base
 
@@ -36,7 +36,8 @@ class SQLAlchemyAdapter:
         if self.engine.dialect.name == "sqlite":
             self.db_path = connection_string.split("///")[1]
 
-            file_storage = LocalFileStorage(self.db_path)
+            db_dir_path = path.dirname(self.db_path)
+            file_storage = get_file_storage(db_dir_path)
             file_storage.ensure_directory_exists()
 
     @asynccontextmanager
@@ -254,12 +255,12 @@ class SQLAlchemyAdapter:
             if len(raw_data_location_entities) == 1:
                 # delete local file only if it's created by cognee
                 from cognee.base_config import get_base_config
-                from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+                from cognee.infrastructure.files.storage import get_file_storage
 
                 config = get_base_config()
 
                 if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
-                    file_storage = LocalFileStorage(config.data_root_directory)
+                    file_storage = get_file_storage(config.data_root_directory)
 
                     file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
 
@@ -444,10 +445,10 @@ class SQLAlchemyAdapter:
         for SQLite.
         """
         if self.engine.dialect.name == "sqlite" and not os.path.exists(self.db_path):
-            from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+            from cognee.infrastructure.files.storage import get_file_storage
 
             db_directory = path.dirname(self.db_path)
-            LocalFileStorage(db_directory).ensure_directory_exists()
+            get_file_storage(db_directory).ensure_directory_exists()
 
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:
@@ -459,12 +460,12 @@ class SQLAlchemyAdapter:
         """
         try:
             if self.engine.dialect.name == "sqlite":
-                from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+                from cognee.infrastructure.files.storage import get_file_storage
 
                 await self.engine.dispose(close=True)
                 db_directory = path.dirname(self.db_path)
                 file_path = path.basename(self.db_path)
-                file_storage = LocalFileStorage(db_directory)
+                file_storage = get_file_storage(db_directory)
                 file_storage.store(file_path, "")
             else:
                 async with self.engine.begin() as connection:

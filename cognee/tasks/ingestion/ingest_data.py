@@ -100,7 +100,6 @@ async def ingest_data(
             file_paths.append(file_path)
 
             # Ingest data and add metadata
-            # with open(file_path.replace("file://", ""), mode="rb") as file:
             with open_data_file(file_path) as file:
                 classified_data = ingestion.classify(file)
 

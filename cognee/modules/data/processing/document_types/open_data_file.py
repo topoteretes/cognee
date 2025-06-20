@@ -3,7 +3,7 @@ from typing import Optional
 from contextlib import contextmanager
 from cognee.api.v1.add.config import get_s3_config
 from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.infrastructure.files.storage import get_file_storage
 
 
 @contextmanager
@@ -34,8 +34,10 @@ def open_data_file(file_path: str, mode: str = "rb", encoding: Optional[str] = N
                 yield file
 
     else:
+        file_path = file_path.replace("file://", "")
         file_dir_path = path.dirname(file_path)
         file_name = path.basename(file_path)
-        file_storage = LocalFileStorage(file_dir_path)
+        file_storage = get_file_storage(file_dir_path)
 
-        return file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs)
+        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+            yield file
