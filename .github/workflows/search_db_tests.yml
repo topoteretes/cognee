@@ -1,5 +1,8 @@
 name: Reusable Search DB Tests
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
