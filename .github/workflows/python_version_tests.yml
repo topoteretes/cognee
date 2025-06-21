@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ${{ fromJSON(inputs.python-versions) }}
+        python-version: ${{ fromJSON(inputs.python-version) }}
         os: [ubuntu-22.04, macos-13, macos-15, windows-latest]
       fail-fast: false
     steps:
