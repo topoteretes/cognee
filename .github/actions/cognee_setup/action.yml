@@ -22,6 +22,14 @@ runs:
         python -m pip install --upgrade pip
         pip install poetry
 
+    - name: Refresh Poetry lock file
+      shell: bash
+      run: |
+        echo "Removing existing poetry.lock to ensure fresh dependencies"
+        rm -f poetry.lock
+        echo "Regenerating poetry.lock with latest dependency versions"
+        poetry lock --no-update
+
     - name: Install dependencies
       shell: bash
       run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama -E dev
