@@ -9,7 +9,7 @@ from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
-from cognee.infrastructure.files.storage import LocalStorage
+from cognee.infrastructure.files.storage.LocalFileStorage import LocalStorage
 
 
 class config:
@@ -19,7 +19,7 @@ class config:
 
         relational_config = get_relational_config()
         relational_config.db_path = databases_directory_path
-        LocalStorage.ensure_directory_exists(databases_directory_path)
+        LocalStorage(databases_directory_path).ensure_directory_exists()
 
         graph_config = get_graph_config()
         graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")

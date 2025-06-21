@@ -2,7 +2,7 @@ from cognee.shared.logging_utils import get_logger, ERROR
 import json
 from typing import List, Optional
 
-from cognee.infrastructure.files.storage import LocalStorage
+from cognee.infrastructure.files.storage.LocalFileStorage import LocalStorage
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.modules.data.models.questions_base import QuestionsBase
 from cognee.modules.data.models.questions_data import Questions
@@ -21,7 +21,7 @@ async def create_and_insert_questions_table(questions_payload):
     relational_engine = get_relational_engine()
 
     if relational_engine.engine.dialect.name == "sqlite":
-        LocalStorage.ensure_directory_exists(relational_config.db_path)
+        LocalStorage(relational_config.db_path).ensure_directory_exists()
 
     async with relational_engine.engine.begin() as connection:
         if len(QuestionsBase.metadata.tables.keys()) > 0:

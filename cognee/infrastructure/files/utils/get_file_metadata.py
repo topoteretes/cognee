@@ -1,5 +1,4 @@
 from typing import BinaryIO, TypedDict
-import hashlib
 from .guess_file_type import guess_file_type
 from cognee.shared.utils import get_file_content_hash
 

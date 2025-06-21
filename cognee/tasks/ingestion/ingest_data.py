@@ -4,6 +4,7 @@ import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 import cognee.modules.ingestion as ingestion
+from cognee.modules.data.processing.document_types.open_data_file import open_data_file
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset, get_dataset_data, get_datasets_by_name
 from cognee.modules.users.methods import get_default_user
@@ -15,7 +16,7 @@ from .get_dlt_destination import get_dlt_destination
 from .save_data_item_to_storage import save_data_item_to_storage
 
 
-from cognee.api.v1.add.config import get_s3_config
+# from cognee.api.v1.add.config import get_s3_config
 
 
 async def ingest_data(
@@ -35,22 +36,22 @@ async def ingest_data(
         destination=destination,
     )
 
-    s3_config = get_s3_config()
+    # s3_config = get_s3_config()
 
-    fs = None
-    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
-        import s3fs
+    # fs = None
+    # if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+    #     import s3fs
 
-        fs = s3fs.S3FileSystem(
-            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
-        )
+    #     fs = s3fs.S3FileSystem(
+    #         key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
+    #     )
 
-    def open_data_file(file_path: str):
-        if file_path.startswith("s3://"):
-            return fs.open(file_path, mode="rb")
-        else:
-            local_path = file_path.replace("file://", "")
-            return open(local_path, mode="rb")
+    # def open_data_file(file_path: str):
+    #     if file_path.startswith("s3://"):
+    #         return fs.open(file_path, mode="rb")
+    #     else:
+    #         local_path = file_path.replace("file://", "")
+    #         return open(local_path, mode="rb")
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
@@ -62,12 +63,12 @@ async def ingest_data(
     async def data_resources(file_paths: List[str], user: User):
         for file_path in file_paths:
             with open_data_file(file_path) as file:
-                if file_path.startswith("s3://"):
-                    classified_data = ingestion.classify(file, s3fs=fs)
-                else:
-                    classified_data = ingestion.classify(file)
+                classified_data = ingestion.classify(file)
+
                 data_id = ingestion.identify(classified_data, user)
+
                 file_metadata = classified_data.get_metadata()
+
                 yield {
                     "id": data_id,
                     "name": file_metadata["name"],
@@ -101,7 +102,7 @@ async def ingest_data(
             # Ingest data and add metadata
             # with open(file_path.replace("file://", ""), mode="rb") as file:
             with open_data_file(file_path) as file:
-                classified_data = ingestion.classify(file, s3fs=fs)
+                classified_data = ingestion.classify(file)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)
