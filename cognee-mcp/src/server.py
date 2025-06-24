@@ -188,6 +188,58 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
     ]
 
 
+@mcp.tool(
+    name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
+)
+async def save_interaction(data: str) -> list:
+    """
+    Transform and save a user-agent interaction into structured knowledge.
+
+    Parameters
+    ----------
+    data : str
+        The input string containing user queries and corresponding agent answers.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with information about the background task launch.
+    """
+
+    async def save_user_agent_interaction(data: str) -> None:
+        """Build knowledge graph from the interaction data"""
+        with redirect_stdout(sys.stderr):
+            logger.info("Save interaction process starting.")
+
+            await cognee.add(data, node_set=["user_agent_interaction"])
+
+            try:
+                await cognee.cognify()
+                logger.info("Save interaction process finished.")
+            except Exception as e:
+                logger.error("Save  interaction process failed.")
+                raise ValueError(f"Failed to Save interaction: {str(e)}")
+
+    asyncio.create_task(
+        save_user_agent_interaction(
+            data=data,
+        )
+    )
+
+    log_file = get_log_file_location()
+    text = (
+        f"Background process launched to process the user-agent interaction.\n"
+        f"To check the current status, use the cognify_status tool or check the log file at: {log_file}"
+    )
+
+    return [
+        types.TextContent(
+            type="text",
+            text=text,
+        )
+    ]
+
+
 @mcp.tool()
 async def codify(repo_path: str) -> list:
     """
