@@ -10,7 +10,7 @@ class TestPipelines(unittest.TestCase):
     def setUp(self):
         # Ensure we're in the correct directory
         self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-        self.pipelines_dir = os.path.join(self.project_root, "src", "pipelines")
+        self.pipelines_dir = os.path.join(self.project_root, "cognee-starter-kit", "src", "pipelines")
 
         # Required environment variables
         self.required_env_vars = ["LLM_API_KEY", "EMBEDDING_API_KEY"]
