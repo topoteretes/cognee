@@ -110,10 +110,10 @@ Remember – use the CODE search type to query your code graph. For huge repos,
     #!/bin/bash
     export ENV=local
     export TOKENIZERS_PARALLELISM=false
-    export EMBEDDING_PROVIDER = "fastembed"
+    export EMBEDDING_PROVIDER="fastembed"
     export EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2"
-    export EMBEDDING_DIMENSIONS= 384
-    export EMBEDDING_MAX_TOKENS-256
+    export EMBEDDING_DIMENSIONS=384
+    export EMBEDDING_MAX_TOKENS=256
     export LLM_API_KEY=your-OpenAI-API-key
     uv --directory /{cognee_root_path}/cognee-mcp run cognee
     ```
