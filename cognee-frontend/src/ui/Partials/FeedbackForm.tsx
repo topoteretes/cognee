@@ -26,19 +26,22 @@ export default function FeedbackForm({ onSuccess }: FeedbackFormProps) {
     event.preventDefault();
     const formElements = event.currentTarget;
 
-    const authCredentials = new FormData();
-    authCredentials.append("feedback", formElements.feedback.value);
-
     setFeedbackError(null);
     disableFeedbackSubmit();
 
-    fetch("/v1/feedback/reasoning", {
+    fetch("/v1/crewai/feedback", {
       method: "POST",
-      body: authCredentials,
+      body: JSON.stringify({
+        feedback: formElements.feedback.value,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
     })
       .then(response => response.json())
       .then(() => {
         onSuccess();
+        formElements.feedback.value = "";
       })
       .catch(error => setFeedbackError(error.detail))
       .finally(() => enableFeedbackSubmit());
@@ -48,7 +51,7 @@ export default function FeedbackForm({ onSuccess }: FeedbackFormProps) {
     <form onSubmit={signIn} className="flex flex-col gap-2">
       <div className="flex flex-col gap-2">
         <div className="mb-4">
-          <label className="block text-white" htmlFor="feedback">Your feedback on agents reasoning</label>
+          <label className="block text-white" htmlFor="feedback">Feedback on agent&apos;s reasoning</label>
           <TextArea id="feedback" name="feedback" type="text" placeholder="Your feedback" />
         </div>
       </div>

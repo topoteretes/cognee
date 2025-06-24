@@ -35,7 +35,7 @@ jobs:
          # Remove Cognee wheel that came from PyPI
          uv pip uninstall cognee
          # Install of the freshly-checked-out Cognee branch
-         uv pip install --no-deps --force-reinstall -e ../
+         uv pip install --force-reinstall -e ../
 
       - name: Run MCP test
         env:

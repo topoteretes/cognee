@@ -1,6 +1,6 @@
 [project]
 name = "cognee"
-version = "0.1.42"
+version = "0.2.0.dev0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -31,12 +31,12 @@ dependencies = [
     "aiosqlite>=0.20.0,<0.21",
     "tiktoken<=0.9.0",
     "litellm>=1.57.4",
-    "instructor==1.7.2",
+    "instructor>=1.7.2",
     "langfuse>=2.32.0,<3",
     "filetype>=1.2.0",
     "aiohttp>=3.11.14",
     "aiofiles>=23.2.1",
-    "owlready2>=0.47,<0.48",
+    "rdflib>=7.1.4,<7.2.0",
     "graphistry>=0.33.5,<0.34",
     "pypdf>=4.1.0,<6.0.0",
     "jinja2>=3.1.3,<4",

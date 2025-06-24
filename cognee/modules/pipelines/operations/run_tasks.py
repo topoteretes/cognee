@@ -121,6 +121,6 @@ async def run_tasks(
             pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, error
         )
 
-        yield PipelineRunErrored(payload=error)
+        yield PipelineRunErrored(pipeline_run_id=pipeline_run_id, payload=error)
 
         raise error
