@@ -1,120 +1,157 @@
-# cognee MCP server
+Here's a well-structured, comprehensive documentation for setting up the Cognee MCP Server:
 
-Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
+# Cognee MCP Server Documentation
 
-### Installing Manually
-A MCP server project
-=======
-1. Clone the [cognee](https://github.com/topoteretes/cognee) repo
+## Overview
+The Cognee MCP (Model Control Protocol) Server enables integration between Cognee and Claude Desktop, providing enhanced AI capabilities.
 
-2. Install dependencies
+## Installation Methods
 
-```
-brew install uv
-```
+### Method 1: Manual Installation (Recommended)
 
-```jsx
-cd cognee-mcp
-uv sync --dev --all-extras --reinstall
-```
+#### Prerequisites
+- Homebrew (macOS/Linux)
+- Python 3.9+
+- Claude Desktop installed
 
-3. Activate the venv with
+#### Installation Steps
 
-```jsx
-source .venv/bin/activate
-```
+1. **Install UV package manager**:
+   ```bash
+   brew install uv
+   ```
 
-4. Add the new server to your Claude config:
+2. **Clone the repository**:
+   ```bash
+   git clone https://github.com/cognee/cognee.git
+   cd cognee/cognee-mcp
+   ```
 
-The file should be located here: ~/Library/Application\ Support/Claude/
-```
-cd ~/Library/Application\ Support/Claude/
-```
-You need to create claude_desktop_config.json in this folder if it doesn't exist
-Make sure to add your paths and LLM API key to the file bellow
-Use your editor of choice, for example Nano:
-```
-nano claude_desktop_config.json
-```
+3. **Install dependencies**:
+   ```bash
+   uv sync --dev --all-extras --reinstall
+   ```
 
-```
-{
-	"mcpServers": {
-		"cognee": {
-			"command": "/Users/{user}/cognee/.venv/bin/uv",
-			"args": [
-        "--directory",
-        "/Users/{user}/cognee/cognee-mcp",
-        "run",
-        "cognee"
-      ],
-      "env": {
-        "ENV": "local",
-        "TOKENIZERS_PARALLELISM": "false",
-        "LLM_API_KEY": "sk-"
-      }
-		}
-	}
-}
-```
+4. **Activate virtual environment**:
+   ```bash
+   source .venv/bin/activate
+   ```
 
-Restart your Claude desktop.
-
-### Installing via Smithery
-
-To install Cognee for Claude Desktop automatically via [Smithery](https://smithery.ai/server/cognee):
-
+### Method 2: Smithery Installation (Automated)
 ```bash
 npx -y @smithery/cli install cognee --client claude
 ```
 
-Define cognify tool in server.py
-Restart your Claude desktop.
+## Configuration
+
+### Claude Desktop Configuration
+
+1. Navigate to Claude config directory:
+   ```bash
+   cd ~/Library/Application\ Support/Claude/
+   ```
+
+2. Create/edit config file:
+   ```bash
+   nano claude_desktop_config.json
+   ```
+
+3. Add this configuration (replace placeholders):
+   ```json
+   {
+     "mcpServers": {
+       "cognee": {
+         "command": "/Users/{user}/cognee/.venv/bin/uv",
+         "args": [
+           "--directory",
+           "/Users/{user}/cognee/cognee-mcp",
+           "run",
+           "cognee"
+         ],
+         "env": {
+           "ENV": "local",
+           "TOKENIZERS_PARALLELISM": "false",
+           "LLM_API_KEY": "sk-your-api-key-here"
+         }
+       }
+     }
+   }
+   ```
 
 ## Running the Server
 
-### Standard stdio transport:
+### Standard Mode
 ```bash
 python src/server.py
 ```
 
-### SSE transport:
+### SSE Transport Mode
 ```bash
 python src/server.py --transport sse
 ```
 
-## Development and Debugging
+## Development Workflow
 
-To use debugger, run:
+### Using Local Cognee Build
+
+1. Build Cognee package:
+   ```bash
+   poetry build -o ./cognee-mcp/sources
+   ```
+
+2. Modify `cognee-mcp/pyproject.toml`:
+   ```toml
+   [tool.poetry.dependencies]
+   cognee = { path = "sources/cognee-0.1.38-py3-none-any.whl" }
+   
+   [tool.uv.sources]
+   cognee = { path = "sources/cognee-0.1.38-py3-none-any.whl" }
+   ```
+
+3. Sync dependencies:
+   ```bash
+   uv sync --dev --all-extras --reinstall
+   ```
+
+### Development Server
 ```bash
 mcp dev src/server.py
 ```
-Open inspector with timeout passed:
+
+### Debugging
+Access debug inspector:
 ```
 http://localhost:5173?timeout=120000
 ```
 
-To apply new changes while developing cognee you need to do:
+## Troubleshooting
 
-1. `poetry lock` in cognee folder
-2. `uv sync --dev --all-extras --reinstall`
-3. `mcp dev src/server.py`
+### Common Issues
 
-### Development
-In order to use local cognee build, run in root of the cognee repo:
+1. **Missing Dependencies**:
+   - Ensure all system dependencies are installed
+   - Run `uv sync --dev --all-extras --reinstall` after any dependency changes
+
+2. **Connection Issues**:
+   - Verify Claude Desktop is restarted after configuration changes
+   - Check server logs for errors
+
+3. **Build Problems**:
+   - Clean previous builds with `poetry lock` and rebuild
+   - Verify Python version compatibility (requires 3.9+)
+
+## Maintenance
+
+### Updating Dependencies
 ```bash
-poetry build -o ./cognee-mcp/sources
+poetry lock
+uv sync --dev --all-extras --reinstall
 ```
-After the build process is done, change the cognee library dependency inside the `cognee-mcp/pyproject.toml` from
-```toml
-cognee[postgres,codegraph,gemini,huggingface]==0.1.38
-```
-to
-```toml
-cognee[postgres,codegraph,gemini,huggingface]
-```
-After that add the following snippet to the same file (`cognee-mcp/pyproject.toml`).
-```toml
-[tool.uv.sources]
-cognee = { path = "sources/cognee-0.1.38-py3-none-any.whl" }
-```
+
+### Updating Configuration
+After any changes to:
+- `claude_desktop_config.json`
+- `pyproject.toml`
+- Server code
+
+Always restart both the server and Claude Desktop.
