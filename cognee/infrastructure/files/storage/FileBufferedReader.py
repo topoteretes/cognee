@@ -14,9 +14,3 @@ class FileBufferedReader(BufferedReader):
     def read(self, size: int = -1):
         data = self._file.read(size)
         return data
-
-    def readinto(self, b):
-        data = self._file.read(len(b))
-        n = len(data)
-        b[:n] = data
-        return n

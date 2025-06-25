@@ -2,7 +2,7 @@ import os
 import pytest
 import networkx as nx
 import pandas as pd
-from unittest.mock import AsyncMock, patch, mock_open
+from unittest.mock import patch, mock_open
 from io import BytesIO
 from uuid import uuid4
 
@@ -29,12 +29,21 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
     assert len(anon_id) > 0
 
 
-@patch("cognee.infrastructure.files.storage.StorageManager.StorageManager.open")
 @pytest.mark.asyncio
+@patch("cognee.infrastructure.files.storage.StorageManager.StorageManager.open")
 async def test_get_file_content_hash_file(mock_open_file):
-    mock_file = AsyncMock()
-    mock_file.__aenter__.return_value.read.return_value = b"test_data"
-    mock_open_file.return_value = mock_file
+    is_called = False
+
+    def read_data(size):
+        nonlocal is_called
+
+        if is_called:
+            return None
+
+        is_called = True
+        return b"test_data"
+    
+    mock_open_file.return_value.__aenter__.return_value.read = read_data
 
     import hashlib
 
