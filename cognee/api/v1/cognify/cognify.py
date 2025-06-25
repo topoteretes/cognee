@@ -9,7 +9,6 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.pipelines import cognee_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.pipelines.operations import merge_pipeline_run_info
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
@@ -67,7 +66,7 @@ async def run_cognify_blocking(
     graph_db_config: dict = None,
     vector_db_config: dict = False,
 ):
-    pipeline_run_info = None
+    total_run_info = {}
 
     async for run_info in cognee_pipeline(
         tasks=tasks,
@@ -77,9 +76,12 @@ async def run_cognify_blocking(
         graph_db_config=graph_db_config,
         vector_db_config=vector_db_config,
     ):
-        pipeline_run_info = merge_pipeline_run_info(pipeline_run_info, run_info)
+        if run_info.dataset_id:
+            total_run_info[run_info.dataset_id] = run_info
+        else:
+            total_run_info = run_info
 
-    return pipeline_run_info
+    return total_run_info
 
 
 async def run_cognify_as_background_process(

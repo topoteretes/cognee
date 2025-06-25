@@ -102,7 +102,8 @@ async def run_tasks(
 
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,
-        datasets={dataset.name: dataset.id},
+        dataset_id=dataset.id,
+        dataset_name=dataset.name,
         payload=data,
     )
 
@@ -116,7 +117,8 @@ async def run_tasks(
         ):
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
-                datasets={dataset.name: dataset.id},
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
                 payload=result,
             )
 
@@ -125,7 +127,9 @@ async def run_tasks(
         )
 
         yield PipelineRunCompleted(
-            pipeline_run_id=pipeline_run_id, datasets={dataset.name: dataset.id}
+            pipeline_run_id=pipeline_run_id,
+            dataset_id=dataset.id,
+            dataset_name=dataset.name,
         )
 
     except Exception as error:
@@ -134,7 +138,10 @@ async def run_tasks(
         )
 
         yield PipelineRunErrored(
-            pipeline_run_id=pipeline_run_id, payload=error, datasets={dataset.name: dataset.id}
+            pipeline_run_id=pipeline_run_id,
+            payload=error,
+            dataset_id=dataset.id,
+            dataset_name=dataset.name,
         )
 
         raise error

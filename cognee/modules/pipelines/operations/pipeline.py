@@ -156,45 +156,32 @@ async def run_pipeline(
             PipelineRunStatus.DATASET_PROCESSING_COMPLETED
         ]  # TODO: this is a random assignment, find permanent solution
 
-    if (
-        str(dataset_id) in task_status
-        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED
-    ):
-        logger.info("Dataset %s is already being processed.", dataset_id)
-        pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
-        yield PipelineRunStarted(
-            pipeline_run_id=pipeline_run.pipeline_run_id,
-            datasets={dataset.name: dataset.id},
-            payload=data,
-        )
-    elif (
-        str(dataset_id) in task_status
-        and task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED
-    ):
-        logger.info("Dataset %s is already processed.", dataset_id)
-        pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
-        yield PipelineRunCompleted(
-            pipeline_run_id=pipeline_run.pipeline_run_id, datasets={dataset.name: dataset.id}
-        )
-    else:
-        if not isinstance(tasks, list):
-            raise ValueError("Tasks must be a list")
+    if str(dataset_id) in task_status:
+        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
+            logger.info("Dataset %s is already being processed.", dataset_id)
+            pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
+            yield PipelineRunStarted(
+                pipeline_run_id=pipeline_run.pipeline_run_id,
+                datasets={dataset.name: dataset.id},
+                payload=data,
+            )
+            return
+        elif task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+            logger.info("Dataset %s is already processed.", dataset_id)
+            pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
+            yield PipelineRunCompleted(
+                pipeline_run_id=pipeline_run.pipeline_run_id, datasets={dataset.name: dataset.id}
+            )
+            return
 
-        for task in tasks:
-            if not isinstance(task, Task):
-                raise ValueError(f"Task {task} is not an instance of Task")
+    if not isinstance(tasks, list):
+        raise ValueError("Tasks must be a list")
 
-        pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
+    for task in tasks:
+        if not isinstance(task, Task):
+            raise ValueError(f"Task {task} is not an instance of Task")
 
-        async for pipeline_run_info in pipeline_run:
-            yield pipeline_run_info
+    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
 
-
-def merge_pipeline_run_info(old_run_info, new_run_info):
-    if old_run_info:
-        updated_run_info = old_run_info
-        # Combine dataset dictionaries of run_infos
-        updated_run_info.datasets = old_run_info.datasets | new_run_info.datasets
-        return updated_run_info
-    else:
-        return new_run_info
+    async for pipeline_run_info in pipeline_run:
+        yield pipeline_run_info
