@@ -1,5 +1,5 @@
 from typing import BinaryIO
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 
 from .storage import Storage
 
@@ -20,7 +20,7 @@ class StorageManager:
     def __init__(self, storage: Storage):
         self.storage = storage
 
-    def file_exists(self, file_path: str):
+    async def file_exists(self, file_path: str):
         """
         Check if a specified file exists in the storage.
 
@@ -34,9 +34,9 @@ class StorageManager:
 
             - bool: True if the file exists, otherwise False.
         """
-        return self.storage.file_exists(file_path)
+        return await self.storage.file_exists(file_path)
 
-    def store(self, file_path: str, data: BinaryIO):
+    async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.
 
@@ -45,17 +45,17 @@ class StorageManager:
 
             - file_path (str): The path where the data should be stored.
             - data (BinaryIO): The data in a binary format that needs to be stored.
+            - overwrite (bool): If True, overwrite the existing file.
 
         Returns:
         --------
 
-            Returns the outcome of the store operation, as defined by the storage
-            implementation.
+            Returns the full path to the file.
         """
-        return self.storage.store(file_path, data)
+        return await self.storage.store(file_path, data, overwrite)
 
-    @contextmanager
-    def open(self, file_path: str, *args, **kwargs):
+    @asynccontextmanager
+    async def open(self, file_path: str, encoding: str = None, *args, **kwargs):
         """
         Retrieve data from the specified file path.
 
@@ -69,10 +69,23 @@ class StorageManager:
 
             Returns the retrieved data, as defined by the storage implementation.
         """
-        with self.storage.open(file_path, *args, **kwargs) as file:
-            yield file
+        if "s3://" in self.storage.storage_path:
+            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
-    def ensure_directory_exists(self, directory_path: str = None):
+            storage = S3FileStorage(self.storage.storage_path)
+
+            async with storage.open(file_path, *args, **kwargs) as file:
+                yield file
+
+        else:
+            from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+
+            storage = LocalFileStorage(self.storage.storage_path)
+
+            async with storage.open(file_path, *args, **kwargs) as file:
+                yield file
+
+    async def ensure_directory_exists(self, directory_path: str = None):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -83,9 +96,9 @@ class StorageManager:
 
             - directory_path (str): The path of the directory to check or create.
         """
-        return self.storage.ensure_directory_exists(directory_path)
+        return await self.storage.ensure_directory_exists(directory_path)
 
-    def remove(self, file_path: str):
+    async def remove(self, file_path: str):
         """
         Remove the file at the specified path.
 
@@ -100,9 +113,9 @@ class StorageManager:
             Returns the outcome of the remove operation, as defined by the storage
             implementation.
         """
-        return self.storage.remove(file_path)
+        return await self.storage.remove(file_path)
 
-    def remove_all(self, tree_path: str = None):
+    async def remove_all(self, tree_path: str = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -114,4 +127,4 @@ class StorageManager:
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        return self.storage.remove_all(tree_path)
+        return await self.storage.remove_all(tree_path)

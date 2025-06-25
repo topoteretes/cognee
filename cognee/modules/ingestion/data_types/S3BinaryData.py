@@ -2,6 +2,7 @@ import os
 from typing import Optional
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
 from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+from cognee.infrastructure.utils import run_sync
 from .IngestionData import IngestionData
 
 
@@ -34,7 +35,8 @@ class S3BinaryData(IngestionData):
             file_storage = S3FileStorage(file_dir_path)
 
             with file_storage.open(file_path, "rb") as file:
-                self.metadata = get_file_metadata(file)
+                self.metadata = run_sync(get_file_metadata(file))
+
             if self.metadata.get("name") is None:
                 self.metadata["name"] = self.name or file_path
 

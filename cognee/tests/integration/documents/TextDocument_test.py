@@ -1,12 +1,12 @@
 import os
+import sys
 import uuid
-
 import pytest
+from unittest.mock import patch
+
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
-from unittest.mock import patch
 from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
-import sys
 
 chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
@@ -30,7 +30,8 @@ GROUND_TRUTH = {
 @patch.object(
     chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
-def test_TextDocument(mock_engine, input_file, chunk_size):
+@pytest.mark.asyncio
+async def test_TextDocument(mock_engine, input_file, chunk_size):
     test_file_path = os.path.join(
         os.sep,
         *(os.path.dirname(__file__).split(os.sep)[:-2]),
@@ -47,7 +48,7 @@ def test_TextDocument(mock_engine, input_file, chunk_size):
 
     for ground_truth, paragraph_data in zip(
         GROUND_TRUTH[input_file],
-        document.read(chunker_cls=TextChunker, max_chunk_size=chunk_size),
+        await document.read(chunker_cls=TextChunker, max_chunk_size=chunk_size),
     ):
         assert ground_truth["word_count"] == paragraph_data.chunk_size, (
             f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'

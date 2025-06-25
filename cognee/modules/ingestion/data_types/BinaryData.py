@@ -1,5 +1,6 @@
 from typing import BinaryIO
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
+from cognee.infrastructure.utils.run_sync import run_sync
 from .IngestionData import IngestionData
 
 
@@ -28,7 +29,7 @@ class BinaryData(IngestionData):
 
     def ensure_metadata(self):
         if self.metadata is None:
-            self.metadata = get_file_metadata(self.data)
+            self.metadata = run_sync(get_file_metadata(self.data))
 
             if self.metadata["name"] is None:
                 self.metadata["name"] = self.name

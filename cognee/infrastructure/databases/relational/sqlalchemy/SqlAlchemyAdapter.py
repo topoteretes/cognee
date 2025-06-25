@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 
 from ..ModelBase import Base
 
@@ -38,7 +39,8 @@ class SQLAlchemyAdapter:
 
             db_dir_path = path.dirname(self.db_path)
             file_storage = get_file_storage(db_dir_path)
-            file_storage.ensure_directory_exists()
+
+            run_sync(file_storage.ensure_directory_exists())
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -254,18 +256,20 @@ class SQLAlchemyAdapter:
             # Don't delete local file unless this is the only reference to the file in the database
             if len(raw_data_location_entities) == 1:
                 # delete local file only if it's created by cognee
-                from cognee.base_config import get_base_config
                 from cognee.infrastructure.files.storage import get_file_storage
 
-                config = get_base_config()
+                storage_config = get_storage_config()
 
-                if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
-                    file_storage = get_file_storage(config.data_root_directory)
+                if (
+                    storage_config["data_root_directory"]
+                    in raw_data_location_entities[0].raw_data_location
+                ):
+                    file_storage = get_file_storage(storage_config["data_root_directory"])
 
                     file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
 
-                    if file_storage.file_exists(file_path):
-                        file_storage.remove(file_path)
+                    if await file_storage.file_exists(file_path):
+                        await file_storage.remove(file_path)
                     else:
                         # Report bug as file should exist
                         logger.error("Local file which should exist can't be found.")
@@ -448,7 +452,7 @@ class SQLAlchemyAdapter:
             from cognee.infrastructure.files.storage import get_file_storage
 
             db_directory = path.dirname(self.db_path)
-            get_file_storage(db_directory).ensure_directory_exists()
+            await get_file_storage(db_directory).ensure_directory_exists()
 
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:
@@ -466,7 +470,7 @@ class SQLAlchemyAdapter:
                 db_directory = path.dirname(self.db_path)
                 file_path = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                file_storage.store(file_path, "")
+                await file_storage.remove(file_path)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information

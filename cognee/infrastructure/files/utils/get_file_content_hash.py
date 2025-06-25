@@ -6,7 +6,7 @@ from ..storage import get_file_storage
 from ..exceptions import FileContentHashingError
 
 
-def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
+async def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
     h = hashlib.md5()
 
     try:
@@ -16,7 +16,7 @@ def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
 
             file_storage = get_file_storage(file_dir_path)
 
-            with file_storage.open(file_path, "rb") as file:
+            async with file_storage.open(file_path, "rb") as file:
                 while True:
                     # Reading is buffered, so we can read smaller chunks.
                     chunk = file.read(h.block_size)

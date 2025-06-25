@@ -574,7 +574,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         json_data = json.dumps(graph_data, cls=JSONEncoder)
 
-        file_storage.store(file_path, json_data)
+        await file_storage.store(file_path, json_data, overwrite=True)
 
     async def load_graph_from_file(self, file_path: str = None):
         """
@@ -594,8 +594,8 @@ class NetworkXAdapter(GraphDBInterface):
 
             file_storage = get_file_storage(file_dir_path)
 
-            if file_storage.file_exists(file_name):
-                with file_storage.open(file_name, "r") as file:
+            if await file_storage.file_exists(file_name):
+                async with file_storage.open(file_name, "r") as file:
                     graph_data = json.loads(file.read())
                     for node in graph_data["nodes"]:
                         try:
@@ -683,7 +683,7 @@ class NetworkXAdapter(GraphDBInterface):
 
             file_storage = get_file_storage(file_dir_path)
 
-            file_storage.remove(file_path)
+            await file_storage.remove(file_path)
 
             self.graph = None
             logger.info("Graph deleted successfully.")

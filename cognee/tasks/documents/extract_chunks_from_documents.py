@@ -1,10 +1,10 @@
+from uuid import UUID
+from sqlalchemy import select
 from typing import AsyncGenerator
 
 from cognee.modules.data.processing.document_types.Document import Document
-from sqlalchemy import select
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational import get_relational_engine
-from uuid import UUID
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.Chunker import Chunker
 
@@ -38,7 +38,9 @@ async def extract_chunks_from_documents(
     """
     for document in documents:
         document_token_count = 0
-        for document_chunk in document.read(max_chunk_size=max_chunk_size, chunker_cls=chunker):
+        async for document_chunk in document.read(
+            max_chunk_size=max_chunk_size, chunker_cls=chunker
+        ):
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
             yield document_chunk

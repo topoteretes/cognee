@@ -313,7 +313,7 @@ class LanceDBAdapter(VectorDBInterface):
         if self.url.startswith("/"):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
-            get_file_storage(db_dir_path).remove_all(db_file_name)
+            await get_file_storage(db_dir_path).remove_all(db_file_name)
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []

@@ -48,7 +48,7 @@ async def delete(
 
             file_storage = get_file_storage(file_dir)
 
-            with file_storage.open(file_path, mode="rb") as file:
+            async with file_storage.open(file_path, mode="rb") as file:
                 classified_data = classify(file)
                 content_hash = classified_data.get_metadata()["content_hash"]
                 return await delete_single_document(content_hash, dataset_name, mode)

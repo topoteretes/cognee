@@ -14,6 +14,9 @@ from cognee.infrastructure.databases.relational import get_relational_config, ge
 class config:
     @staticmethod
     def system_root_directory(system_root_directory: str):
+        base_config = get_base_config()
+        base_config.system_root_directory = system_root_directory
+
         databases_directory_path = os.path.join(system_root_directory, "databases")
 
         relational_config = get_relational_config()

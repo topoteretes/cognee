@@ -1,9 +1,11 @@
+import sys
 import uuid
+import pytest
 from unittest.mock import patch
+
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
 from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
-import sys
 
 chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
@@ -21,7 +23,8 @@ The commotion has attracted an audience: a murder of crows has gathered in the l
 @patch.object(
     chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
-def test_ImageDocument(mock_engine):
+@pytest.mark.asyncio
+async def test_ImageDocument(mock_engine):
     document = ImageDocument(
         id=uuid.uuid4(),
         name="image-dummy-test",
@@ -29,10 +32,10 @@ def test_ImageDocument(mock_engine):
         external_metadata="",
         mime_type="",
     )
-    with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
+    async with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
         for ground_truth, paragraph_data in zip(
             GROUND_TRUTH,
-            document.read(chunker_cls=TextChunker, max_chunk_size=64),
+            await document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):
             assert ground_truth["word_count"] == paragraph_data.chunk_size, (
                 f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'

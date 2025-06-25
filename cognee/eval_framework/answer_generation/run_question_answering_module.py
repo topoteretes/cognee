@@ -22,7 +22,7 @@ async def create_and_insert_answers_table(questions_payload):
     relational_engine = get_relational_engine()
 
     if relational_engine.engine.dialect.name == "sqlite":
-        get_file_storage(relational_config.db_path).ensure_directory_exists()
+        await get_file_storage(relational_config.db_path).ensure_directory_exists()
 
     async with relational_engine.engine.begin() as connection:
         if len(AnswersBase.metadata.tables.keys()) > 0:

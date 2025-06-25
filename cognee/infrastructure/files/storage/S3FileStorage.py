@@ -1,7 +1,11 @@
 import os
 import s3fs
 from typing import BinaryIO, Union
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
+
+from cognee.api.v1.add.config import get_s3_config
+from cognee.infrastructure.utils.run_async import run_async
+from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
 
@@ -16,9 +20,20 @@ class S3FileStorage(Storage):
 
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
-        self.s3 = s3fs.S3FileSystem(anon=True)
+        s3_config = get_s3_config()
+        if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+            self.s3 = s3fs.S3FileSystem(
+                key=s3_config.aws_access_key_id,
+                secret=s3_config.aws_secret_access_key,
+                anon=False,
+                endpoint_url="https://s3-eu-west-1.amazonaws.com",
+            )
+        else:
+            raise ValueError("S3 credentials are not set in the configuration.")
 
-    def store(self, file_path: str, data: Union[BinaryIO, str]):
+    async def store(
+        self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False
+    ) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
         stream.
@@ -33,26 +48,36 @@ class S3FileStorage(Storage):
             - file_path (str): The relative path of the file where the data will be stored.
             - data (Union[BinaryIO, str]): The data to be stored, which can be a string or a
               binary stream.
+            - overwrite (bool): If True, overwrite the existing file.
         """
-        full_file_path = os.path.join(self.storage_path, file_path)
+        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
 
         file_dir_path = os.path.dirname(full_file_path)
 
-        self.ensure_directory_exists(file_dir_path)
+        await self.ensure_directory_exists(file_dir_path)
 
-        with self.s3.open(
-            full_file_path,
-            mode="w" if isinstance(data, str) else "wb",
-            encoding="utf-8" if isinstance(data, str) else None,
-        ) as file:
-            if hasattr(data, "read"):
-                data.seek(0)
-                file.write(data.read())
-            else:
-                file.write(data)
+        if overwrite or not await self.file_exists(file_path):
 
-    @contextmanager
-    def open(self, file_path: str, mode: str = "r"):
+            def save_data_to_file():
+                with self.s3.open(
+                    full_file_path,
+                    mode="w" if isinstance(data, str) else "wb",
+                    encoding="utf-8" if isinstance(data, str) else None,
+                ) as file:
+                    if hasattr(data, "read"):
+                        data.seek(0)
+                        file.write(data.read())
+                    else:
+                        file.write(data)
+
+                    file.close()
+
+            await run_async(save_data_to_file)
+
+        return "s3://" + full_file_path
+
+    @asynccontextmanager
+    async def open(self, file_path: str, mode: str = "r"):
         """
         Retrieve data from a specified file path, returning the content as bytes.
 
@@ -71,15 +96,20 @@ class S3FileStorage(Storage):
 
             The content of the retrieved file as bytes.
         """
-        full_file_path = os.path.join(self.storage_path, file_path)
+        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
 
-        with self.s3.open(full_file_path, mode=mode) as file:
-            try:
-                yield file
-            finally:
-                file.close()
+        def get_file():
+            return self.s3.open(full_file_path, mode=mode)
 
-    def file_exists(self, file_path: str):
+        file = await run_async(get_file)
+        file = FileBufferedReader(file, name="s3://" + full_file_path)
+
+        try:
+            yield file
+        finally:
+            pass
+
+    async def file_exists(self, file_path: str):
         """
         Check if a specified file exists in the filesystem.
 
@@ -93,9 +123,11 @@ class S3FileStorage(Storage):
 
             - bool: True if the file exists, otherwise False.
         """
-        return self.s3.exists(os.path.join(self.storage_path, file_path))
+        return await run_async(
+            self.s3.exists, os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        )
 
-    def ensure_directory_exists(self, directory_path: str = None):
+    async def ensure_directory_exists(self, directory_path: str = None):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -107,12 +139,15 @@ class S3FileStorage(Storage):
             - directory_path (str): The path of the directory to check or create.
         """
         if directory_path == None:
-            directory_path = self.storage_path
+            directory_path = self.storage_path.replace("s3://", "")
 
-        if not self.file_exists(directory_path):
-            self.s3.makedirs(directory_path, exist_ok=True)
+        def ensure_directory():
+            if not self.s3.exists(directory_path):
+                self.s3.makedirs(directory_path, exist_ok=True)
 
-    def copy_file(self, source_file_path: str, destination_file_path: str):
+        await run_async(ensure_directory)
+
+    async def copy_file(self, source_file_path: str, destination_file_path: str):
         """
         Copy a file from a source path to a destination path.
 
@@ -127,13 +162,17 @@ class S3FileStorage(Storage):
 
             - str: The path to the copied file.
         """
-        return self.s3.copy(
-            os.path.join(self.storage_path, source_file_path),
-            os.path.join(self.storage_path, destination_file_path),
-            recursive=True,
-        )
 
-    def remove(self, file_path: str):
+        def copy():
+            return self.s3.copy(
+                os.path.join(self.storage_path.replace("s3://", ""), source_file_path),
+                os.path.join(self.storage_path.replace("s3://", ""), destination_file_path),
+                recursive=True,
+            )
+
+        return await run_async(copy)
+
+    async def remove(self, file_path: str):
         """
         Remove the specified file from the filesystem if it exists.
 
@@ -142,12 +181,15 @@ class S3FileStorage(Storage):
 
             - file_path (str): The path of the file to be removed.
         """
-        full_file_path = os.path.join(self.storage_path, file_path)
+        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
 
-        if self.file_exists(full_file_path):
-            self.s3.rm_file(full_file_path)
+        def remove_file():
+            if self.s3.exists(full_file_path):
+                self.s3.rm_file(full_file_path)
 
-    def remove_all(self, tree_path: str):
+        await run_async(remove_file)
+
+    async def remove_all(self, tree_path: str):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -160,11 +202,14 @@ class S3FileStorage(Storage):
             - tree_path (str): The root path of the directory tree to be removed.
         """
         if tree_path == None:
-            tree_path = self.storage_path
+            tree_path = self.storage_path.replace("s3://", "")
         else:
-            tree_path = os.path.join(self.storage_path, tree_path)
+            tree_path = os.path.join(self.storage_path.replace("s3://", ""), tree_path)
+
+        # async_remove_all = run_async(lambda: self.s3.rm(tree_path, recursive=True))
 
         try:
-            self.s3.rm(tree_path, recursive=True)
+            # await async_remove_all()
+            await run_async(self.s3.rm, tree_path, recursive=True)
         except FileNotFoundError:
             pass

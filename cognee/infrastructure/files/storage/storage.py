@@ -2,6 +2,8 @@ from typing import BinaryIO, Protocol, Union
 
 
 class Storage(Protocol):
+    storage_path: str
+
     """
     Abstract interface for storage operations.
     """

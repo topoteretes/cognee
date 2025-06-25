@@ -1,8 +1,7 @@
-from cognee.base_config import get_base_config
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 
 
 async def prune_data():
-    base_config = get_base_config()
-    data_root_directory = base_config.data_root_directory
-    get_file_storage(data_root_directory).remove_all()
+    storage_config = get_storage_config()
+    data_root_directory = storage_config["data_root_directory"]
+    await get_file_storage(data_root_directory).remove_all()

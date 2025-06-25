@@ -1,10 +1,11 @@
 import dlt
 import json
 import inspect
+from os import path
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 import cognee.modules.ingestion as ingestion
-from cognee.modules.data.processing.document_types.open_data_file import open_data_file
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import create_dataset, get_dataset_data, get_datasets_by_name
 from cognee.modules.users.methods import get_default_user
@@ -14,9 +15,6 @@ from cognee.modules.users.permissions.methods import give_permission_on_dataset
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from .get_dlt_destination import get_dlt_destination
 from .save_data_item_to_storage import save_data_item_to_storage
-
-
-# from cognee.api.v1.add.config import get_s3_config
 
 
 async def ingest_data(
@@ -36,23 +34,6 @@ async def ingest_data(
         destination=destination,
     )
 
-    # s3_config = get_s3_config()
-
-    # fs = None
-    # if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
-    #     import s3fs
-
-    #     fs = s3fs.S3FileSystem(
-    #         key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
-    #     )
-
-    # def open_data_file(file_path: str):
-    #     if file_path.startswith("s3://"):
-    #         return fs.open(file_path, mode="rb")
-    #     else:
-    #         local_path = file_path.replace("file://", "")
-    #         return open(local_path, mode="rb")
-
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
@@ -62,7 +43,7 @@ async def ingest_data(
     @dlt.resource(standalone=True, primary_key="id", merge_key="id")
     async def data_resources(file_paths: List[str], user: User):
         for file_path in file_paths:
-            with open_data_file(file_path) as file:
+            async with open_data_file(file_path) as file:
                 classified_data = ingestion.classify(file)
 
                 data_id = ingestion.identify(classified_data, user)
@@ -98,10 +79,11 @@ async def ingest_data(
             file_path = await save_data_item_to_storage(data_item, dataset_name)
 
             file_paths.append(file_path)
+            file_name = path.basename(file_path)
 
             # Ingest data and add metadata
-            with open_data_file(file_path) as file:
-                classified_data = ingestion.classify(file)
+            async with open_data_file(file_path) as file:
+                classified_data = ingestion.classify(file, file_name)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)
