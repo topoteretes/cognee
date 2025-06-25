@@ -95,14 +95,16 @@ async def main():
     file_path = os.path.basename(db_path)
     file_storage = get_file_storage(dir_path)
 
-    with file_storage.open(file_path, "r") as file:
-        content = file.read()
-        assert content == "", "SQLite relational database is not empty"
+    assert not await file_storage.file_exists(file_path), (
+        "SQLite relational database is not deleted"
+    )
 
     from cognee.infrastructure.databases.graph import get_graph_config
 
     graph_config = get_graph_config()
-    assert not os.path.exists(graph_config.graph_file_path), "Networkx graph database is not empty"
+    assert not await file_storage.file_exists(os.path.basename(graph_config.graph_file_path)), (
+        "Networkx graph database is not empty"
+    )
 
 
 if __name__ == "__main__":

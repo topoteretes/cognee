@@ -62,7 +62,7 @@ class LocalFileStorage(Storage):
                 encoding="utf-8" if isinstance(data, str) else None,
             ) as file:
                 if hasattr(data, "read"):
-                    await data.seek(0)
+                    data.seek(0)
                     await file.write(data.read())
                 else:
                     await file.write(data)
