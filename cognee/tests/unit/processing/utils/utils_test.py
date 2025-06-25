@@ -29,7 +29,6 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
     assert len(anon_id) > 0
 
 
-
 @patch("cognee.infrastructure.files.storage.StorageManager.StorageManager.open")
 @pytest.mark.asyncio
 async def test_get_file_content_hash_file(mock_open_file):

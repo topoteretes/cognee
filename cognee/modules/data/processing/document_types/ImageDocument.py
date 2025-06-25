@@ -12,10 +12,11 @@ class ImageDocument(Document):
         return result.choices[0].message.content
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
-        # Transcribe the image file
-        text = await self.transcribe_image()
+        async def get_text():
+            # Transcribe the image file
+            yield await self.transcribe_image()
 
-        chunker = chunker_cls(self, get_text=lambda: [text], max_chunk_size=max_chunk_size)
+        chunker = chunker_cls(self, get_text=get_text, max_chunk_size=max_chunk_size)
 
         async for chunk in chunker.read():
             yield chunk

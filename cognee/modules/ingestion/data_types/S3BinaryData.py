@@ -24,18 +24,18 @@ class S3BinaryData(IngestionData):
         return metadata["content_hash"]
 
     def get_metadata(self):
-        self.ensure_metadata()
+        run_sync(self.ensure_metadata())
         return self.metadata
 
-    def ensure_metadata(self):
+    async def ensure_metadata(self):
         if self.metadata is None:
             file_dir_path = os.path.dirname(self.s3_path)
             file_path = os.path.basename(self.s3_path)
 
             file_storage = S3FileStorage(file_dir_path)
 
-            with file_storage.open(file_path, "rb") as file:
-                self.metadata = run_sync(get_file_metadata(file))
+            async with file_storage.open(file_path, "rb") as file:
+                self.metadata = await get_file_metadata(file)
 
             if self.metadata.get("name") is None:
                 self.metadata["name"] = self.name or file_path
@@ -46,4 +46,4 @@ class S3BinaryData(IngestionData):
 
         file_storage = S3FileStorage(file_dir_path)
 
-        return file_storage.open(file_path, "rb")
+        return run_sync(file_storage.open(file_path, "rb"))

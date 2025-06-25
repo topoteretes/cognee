@@ -6,6 +6,7 @@ from unittest.mock import patch
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
 from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
+from cognee.tests.integration.documents.async_gen_zip import async_gen_zip
 
 chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
@@ -33,9 +34,9 @@ async def test_ImageDocument(mock_engine):
         mime_type="",
     )
     async with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
-        for ground_truth, paragraph_data in zip(
+        async for ground_truth, paragraph_data in async_gen_zip(
             GROUND_TRUTH,
-            await document.read(chunker_cls=TextChunker, max_chunk_size=64),
+            document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):
             assert ground_truth["word_count"] == paragraph_data.chunk_size, (
                 f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'

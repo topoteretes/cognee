@@ -12,11 +12,11 @@ class AudioDocument(Document):
         return result.text
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
-        # Transcribe the audio file
+        async def get_text():
+            # Transcribe the audio file
+            yield await self.create_transcript()
 
-        text = await self.create_transcript()
-
-        chunker = chunker_cls(self, max_chunk_size=max_chunk_size, get_text=lambda: [text])
+        chunker = chunker_cls(self, max_chunk_size=max_chunk_size, get_text=get_text)
 
         async for chunk in chunker.read():
             yield chunk

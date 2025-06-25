@@ -138,7 +138,7 @@ class S3FileStorage(Storage):
 
             - directory_path (str): The path of the directory to check or create.
         """
-        if directory_path == None:
+        if directory_path is None:
             directory_path = self.storage_path.replace("s3://", "")
 
         def ensure_directory():
@@ -201,7 +201,7 @@ class S3FileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        if tree_path == None:
+        if tree_path is None:
             tree_path = self.storage_path.replace("s3://", "")
         else:
             tree_path = os.path.join(self.storage_path.replace("s3://", ""), tree_path)
