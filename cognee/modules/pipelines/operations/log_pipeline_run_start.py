@@ -4,6 +4,8 @@ from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from typing import Any
 
+from cognee.modules.pipelines.utils import generate_pipeline_run_id
+
 
 async def log_pipeline_run_start(pipeline_id: str, pipeline_name: str, dataset_id: UUID, data: Any):
     if not data:
@@ -13,7 +15,7 @@ async def log_pipeline_run_start(pipeline_id: str, pipeline_name: str, dataset_i
     else:
         data_info = str(data)
 
-    pipeline_run_id = uuid4()
+    pipeline_run_id = generate_pipeline_run_id(pipeline_id, dataset_id)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,

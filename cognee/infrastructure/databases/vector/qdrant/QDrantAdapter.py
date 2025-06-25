@@ -391,13 +391,7 @@ class QDrantAdapter(VectorDBInterface):
         if query_text is None and query_vector is None:
             raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
-        if limit <= 0:
-            return []
-
         if not await self.has_collection(collection_name):
-            logger.warning(
-                f"Collection '{collection_name}' not found in QdrantAdapter.search; returning []."
-            )
             return []
 
         if query_vector is None:
@@ -405,6 +399,8 @@ class QDrantAdapter(VectorDBInterface):
 
         try:
             client = self.get_qdrant_client()
+            if limit == 0:
+                collection_size = await client.count(collection_name=collection_name)
 
             results = await client.search(
                 collection_name=collection_name,
@@ -414,7 +410,7 @@ class QDrantAdapter(VectorDBInterface):
                     if query_vector is not None
                     else (await self.embed_data([query_text]))[0],
                 ),
-                limit=limit if limit > 0 else None,
+                limit=limit if limit > 0 else collection_size.count,
                 with_vectors=with_vector,
             )
 
@@ -431,13 +427,6 @@ class QDrantAdapter(VectorDBInterface):
                 )
                 for result in results
             ]
-        except UnexpectedResponse as error:
-            if "Collection not found" in str(error):
-                raise CollectionNotFoundError(
-                    message=f"Collection {collection_name} not found!"
-                ) from error
-            else:
-                raise error
         finally:
             await client.close()
 

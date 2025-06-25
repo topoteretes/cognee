@@ -1,7 +1,7 @@
 import asyncio
 
 import cognee
-from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.modules.pipelines import Task, run_tasks
 from cognee.tasks.temporal_awareness import build_graph_with_temporal_awareness
 from cognee.infrastructure.databases.relational import (
@@ -74,7 +74,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = get_logger(level=ERROR)
+    logger = setup_logging(log_level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

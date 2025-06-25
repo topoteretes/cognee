@@ -4,7 +4,7 @@ import sys
 import argparse
 import cognee
 import asyncio
-from cognee.shared.logging_utils import get_logger, get_log_file_location
+from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -20,7 +20,6 @@ from cognee.modules.storage.utils import JSONEncoder
 mcp = FastMCP("Cognee")
 
 logger = get_logger()
-log_file = get_log_file_location()
 
 
 @mcp.tool()
@@ -75,7 +74,7 @@ async def cognee_add_developer_rules(
         with redirect_stdout(sys.stderr):
             logger.info(f"Starting cognify for: {file_path}")
             try:
-                await cognee.add(file_path, nodeset="developer_rules")
+                await cognee.add(file_path, node_set=["developer_rules"])
                 model = KnowledgeGraph
                 if graph_model_file and graph_model_name:
                     model = load_class(graph_model_file, graph_model_name)
@@ -83,6 +82,7 @@ async def cognee_add_developer_rules(
                 logger.info(f"Cognify finished for: {file_path}")
             except Exception as e:
                 logger.error(f"Cognify failed for {file_path}: {str(e)}")
+                raise ValueError(f"Failed to cognify: {str(e)}")
 
     tasks = []
     for rel_path in developer_rule_paths:
@@ -91,7 +91,7 @@ async def cognee_add_developer_rules(
             tasks.append(asyncio.create_task(cognify_task(abs_path)))
         else:
             logger.warning(f"Skipped missing developer rule file: {abs_path}")
-
+    log_file = get_log_file_location()
     return [
         types.TextContent(
             type="text",
@@ -173,6 +173,7 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
         )
     )
 
+    log_file = get_log_file_location()
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
         f"To check current cognify status use the cognify_status tool\n"
@@ -234,6 +235,7 @@ async def codify(repo_path: str) -> list:
 
     asyncio.create_task(codify_task(repo_path))
 
+    log_file = get_log_file_location()
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
         f"To check current codify status use the codify_status tool\n"
@@ -454,6 +456,8 @@ async def main():
 
 
 if __name__ == "__main__":
+    logger = setup_logging()
+
     try:
         asyncio.run(main())
     except Exception as e:
