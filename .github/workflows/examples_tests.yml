@@ -3,6 +3,9 @@ name: Reusable Examples Tests
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   test-multimedia-example:
     name: Run Multimedia Example
