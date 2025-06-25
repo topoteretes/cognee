@@ -68,7 +68,7 @@ app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
     allow_headers=["*"],
@@ -108,6 +108,22 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
 
 
+@app.get("/")
+async def root():
+    """
+    Root endpoint that returns a welcome message.
+    """
+    return {"message": "Hello, World, I am alive!"}
+
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint that returns the server status.
+    """
+    return Response(status_code=200)
+
+
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 
 app.include_router(
@@ -128,11 +144,11 @@ app.include_router(
     tags=["auth"],
 )
 
-app.include_router(
-    get_users_router(),
-    prefix="/api/v1/users",
-    tags=["users"],
-)
+app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
+
+app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
+
+app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
 app.include_router(
     get_permissions_router(),
@@ -140,30 +156,7 @@ app.include_router(
     tags=["permissions"],
 )
 
-
-@app.get("/")
-async def root():
-    """
-    Root endpoint that returns a welcome message.
-    """
-    return {"message": "Hello, World, I am alive!"}
-
-
-@app.get("/health")
-def health_check():
-    """
-    Health check endpoint that returns the server status.
-    """
-    return Response(status_code=200)
-
-
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
-
-app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
-
-app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
-
-app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
@@ -176,6 +169,12 @@ app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["re
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
     app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])
+
+app.include_router(
+    get_users_router(),
+    prefix="/api/v1/users",
+    tags=["users"],
+)
 
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
@@ -197,4 +196,7 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 if __name__ == "__main__":
     logger = setup_logging()
-    start_api_server()
+
+    start_api_server(
+        host=os.getenv("HTTP_API_HOST", "0.0.0.0"), port=int(os.getenv("HTTP_API_PORT", 8000))
+    )

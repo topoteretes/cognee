@@ -26,6 +26,18 @@ class DatasetNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
+class DataNotFoundError(CogneeApiError):
+    """Raised when a dataset cannot be found."""
+
+    def __init__(
+        self,
+        message: str = "Data not found.",
+        name: str = "DataNotFoundError",
+        status_code: int = status.HTTP_404_NOT_FOUND,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class DocumentSubgraphNotFoundError(CogneeApiError):
     """Raised when a document's subgraph cannot be found in the graph database."""
 
