@@ -5,7 +5,7 @@ from ..models import PipelineRun
 from sqlalchemy.orm import aliased
 
 
-async def get_pipeline_status(dataset_ids: list[UUID], pipeline_name: str):
+async def get_pipeline_run_by_dataset(dataset_id: UUID, pipeline_name: str):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
@@ -19,17 +19,18 @@ async def get_pipeline_status(dataset_ids: list[UUID], pipeline_name: str):
                 )
                 .label("rn"),
             )
-            .filter(PipelineRun.dataset_id.in_(dataset_ids))
+            .filter(PipelineRun.dataset_id == dataset_id)
             .filter(PipelineRun.pipeline_name == pipeline_name)
             .subquery()
         )
 
         aliased_pipeline_run = aliased(PipelineRun, query)
 
-        latest_runs = select(aliased_pipeline_run).filter(query.c.rn == 1)
+        latest_run = select(aliased_pipeline_run).filter(query.c.rn == 1)
 
-        runs = (await session.execute(latest_runs)).scalars().all()
+        run = (await session.execute(latest_run)).scalars().all()
 
-        pipeline_statuses = {str(run.dataset_id): run.status for run in runs}
-
-        return pipeline_statuses
+        if run:
+            return run[0]
+        else:
+            return None

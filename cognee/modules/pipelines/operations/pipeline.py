@@ -7,10 +7,9 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
-from cognee.modules.pipelines.operations.get_pipeline_status import (
-    get_pipeline_status,
-    get_pipeline_run,
-)
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
+
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -159,18 +158,21 @@ async def run_pipeline(
     if str(dataset_id) in task_status:
         if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
             logger.info("Dataset %s is already being processed.", dataset_id)
-            pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
+            pipeline_run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
             yield PipelineRunStarted(
                 pipeline_run_id=pipeline_run.pipeline_run_id,
-                datasets={dataset.name: dataset.id},
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
                 payload=data,
             )
             return
         elif task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
             logger.info("Dataset %s is already processed.", dataset_id)
-            pipeline_run = await get_pipeline_run(dataset_id, pipeline_name)
+            pipeline_run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
             yield PipelineRunCompleted(
-                pipeline_run_id=pipeline_run.pipeline_run_id, datasets={dataset.name: dataset.id}
+                pipeline_run_id=pipeline_run.pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
             )
             return
 
