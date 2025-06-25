@@ -60,7 +60,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "uvicorn==0.34.0",
-    "gunicorn>=20.1.0,<21",
+    "gunicorn>=20.1.0,<24",
     "websockets>=15.0.1",
     "kuzu==0.9.0",
 ]
