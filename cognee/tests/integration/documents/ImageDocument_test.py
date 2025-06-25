@@ -33,7 +33,7 @@ async def test_ImageDocument(mock_engine):
         external_metadata="",
         mime_type="",
     )
-    async with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
+    with patch.object(ImageDocument, "transcribe_image", return_value=TEST_TEXT):
         async for ground_truth, paragraph_data in async_gen_zip(
             GROUND_TRUTH,
             document.read(chunker_cls=TextChunker, max_chunk_size=64),
