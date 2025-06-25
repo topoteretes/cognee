@@ -85,8 +85,8 @@ def create_graph_engine(
 
         return Neo4jAdapter(
             graph_database_url=graph_database_url,
-            graph_database_username=graph_database_username or "",
-            graph_database_password=graph_database_password or "",
+            graph_database_username=graph_database_username or None,
+            graph_database_password=graph_database_password or None,
         )
 
     elif graph_database_provider == "falkordb":
@@ -133,8 +133,8 @@ def create_graph_engine(
 
         return MemgraphAdapter(
             graph_database_url=graph_database_url,
-            graph_database_username=graph_database_username or "",
-            graph_database_password=graph_database_password or "",
+            graph_database_username=graph_database_username or None,
+            graph_database_password=graph_database_password or None,
         )
 
     from .networkx.adapter import NetworkXAdapter
