@@ -77,7 +77,6 @@ def create_graph_engine(
         )
 
     if graph_database_provider == "neo4j":
-        # Make credentials optional - only validate URL is present
         if not graph_database_url:
             raise EnvironmentError("Missing required Neo4j URL.")
 
@@ -125,7 +124,6 @@ def create_graph_engine(
         )
 
     elif graph_database_provider == "memgraph":
-        # Make credentials optional - only validate URL is present
         if not graph_database_url:
             raise EnvironmentError("Missing required Memgraph URL.")
 
