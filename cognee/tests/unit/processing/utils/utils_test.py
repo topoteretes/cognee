@@ -42,7 +42,7 @@ async def test_get_file_content_hash_file(mock_open_file):
 
         is_called = True
         return b"test_data"
-    
+
     mock_open_file.return_value.__aenter__.return_value.read = read_data
 
     import hashlib
