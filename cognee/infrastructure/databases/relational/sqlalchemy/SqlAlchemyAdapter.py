@@ -7,7 +7,7 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import text, select, MetaData, Table, delete, inspect
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
@@ -32,7 +32,7 @@ class SQLAlchemyAdapter:
         self.db_path: str = None
         self.db_uri: str = connection_string
 
-        self.engine = create_async_engine(connection_string)
+        self.engine = create_async_engine(connection_string, poolclass=NullPool if "sqlite" in connection_string else None)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
         if self.engine.dialect.name == "sqlite":
