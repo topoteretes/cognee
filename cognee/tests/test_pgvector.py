@@ -35,7 +35,9 @@ async def test_local_file_deletion(data_text, file_location):
     async with engine.get_async_session() as session:
         # Get data entry from database based on file path
         data = (
-            await session.scalars(select(Data).where(Data.raw_data_location == "file://" + file_location))
+            await session.scalars(
+                select(Data).where(Data.raw_data_location == "file://" + file_location)
+            )
         ).one()
         assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exist: {data.raw_data_location}"
