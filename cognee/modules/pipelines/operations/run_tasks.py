@@ -94,7 +94,7 @@ async def run_tasks(
 
         dataset = await session.get(Dataset, dataset_id)
 
-    pipeline_id = generate_pipeline_id(user.id, pipeline_name)
+    pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
 
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
 
