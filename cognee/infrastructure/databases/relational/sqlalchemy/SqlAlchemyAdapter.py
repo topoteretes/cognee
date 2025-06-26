@@ -1,4 +1,5 @@
 import os
+import asyncio
 from os import path
 from uuid import UUID
 from typing import Optional
@@ -467,6 +468,8 @@ class SQLAlchemyAdapter:
                 from cognee.infrastructure.files.storage import get_file_storage
 
                 await self.engine.dispose(close=True)
+                # Wait for the database connections to close and release the file (Windows)
+                await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_path = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
