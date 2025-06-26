@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
+    system_root_directory: str = get_absolute_path(".cognee_system")
     monitoring_tool: object = Observer.LANGFUSE
     graphistry_username: Optional[str] = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password: Optional[str] = os.getenv("GRAPHISTRY_PASSWORD")

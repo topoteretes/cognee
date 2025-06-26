@@ -1,17 +1,20 @@
 import os
+import asyncio
 from os import path
-from cognee.shared.logging_utils import get_logger
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
-from sqlalchemy import text, select, MetaData, Table, delete, inspect
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.data.models.Data import Data
+from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.utils.run_sync import run_sync
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 
 from ..ModelBase import Base
 
@@ -29,11 +32,18 @@ class SQLAlchemyAdapter:
         self.db_path: str = None
         self.db_uri: str = connection_string
 
-        self.engine = create_async_engine(connection_string)
+        self.engine = create_async_engine(
+            connection_string, poolclass=NullPool if "sqlite" in connection_string else None
+        )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
         if self.engine.dialect.name == "sqlite":
             self.db_path = connection_string.split("///")[1]
+
+            db_dir_path = path.dirname(self.db_path)
+            file_storage = get_file_storage(db_dir_path)
+
+            run_sync(file_storage.ensure_directory_exists())
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -249,13 +259,20 @@ class SQLAlchemyAdapter:
             # Don't delete local file unless this is the only reference to the file in the database
             if len(raw_data_location_entities) == 1:
                 # delete local file only if it's created by cognee
-                from cognee.base_config import get_base_config
+                from cognee.infrastructure.files.storage import get_file_storage
 
-                config = get_base_config()
+                storage_config = get_storage_config()
 
-                if config.data_root_directory in raw_data_location_entities[0].raw_data_location:
-                    if os.path.exists(raw_data_location_entities[0].raw_data_location):
-                        os.remove(raw_data_location_entities[0].raw_data_location)
+                if (
+                    storage_config["data_root_directory"]
+                    in raw_data_location_entities[0].raw_data_location
+                ):
+                    file_storage = get_file_storage(storage_config["data_root_directory"])
+
+                    file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
+
+                    if await file_storage.file_exists(file_path):
+                        await file_storage.remove(file_path)
                     else:
                         # Report bug as file should exist
                         logger.error("Local file which should exist can't be found.")
@@ -435,10 +452,10 @@ class SQLAlchemyAdapter:
         for SQLite.
         """
         if self.engine.dialect.name == "sqlite" and not os.path.exists(self.db_path):
-            from cognee.infrastructure.files.storage import LocalStorage
+            from cognee.infrastructure.files.storage import get_file_storage
 
             db_directory = path.dirname(self.db_path)
-            LocalStorage.ensure_directory_exists(db_directory)
+            await get_file_storage(db_directory).ensure_directory_exists()
 
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:
@@ -450,13 +467,15 @@ class SQLAlchemyAdapter:
         """
         try:
             if self.engine.dialect.name == "sqlite":
-                from cognee.infrastructure.files.storage import LocalStorage
+                from cognee.infrastructure.files.storage import get_file_storage
 
                 await self.engine.dispose(close=True)
+                # Wait for the database connections to close and release the file (Windows)
+                await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
-                LocalStorage.ensure_directory_exists(db_directory)
-                with open(self.db_path, "w") as file:
-                    file.write("")
+                file_path = path.basename(self.db_path)
+                file_storage = get_file_storage(db_directory)
+                await file_storage.remove(file_path)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information

@@ -1,8 +1,9 @@
 from io import StringIO
+from typing import Any, AsyncGenerator
 
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.data.exceptions import UnstructuredLibraryImportError
-from cognee.modules.data.processing.document_types.open_data_file import open_data_file
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 from .Document import Document
 
@@ -10,15 +11,15 @@ from .Document import Document
 class UnstructuredDocument(Document):
     type: str = "unstructured"
 
-    def read(self, chunker_cls: Chunker, max_chunk_size: int) -> str:
-        def get_text():
+    async def read(self, chunker_cls: Chunker, max_chunk_size: int) -> AsyncGenerator[Any, Any]:
+        async def get_text():
             try:
                 from unstructured.partition.auto import partition
             except ModuleNotFoundError:
                 raise UnstructuredLibraryImportError
 
             if self.raw_data_location.startswith("s3://"):
-                with open_data_file(self.raw_data_location, mode="rb") as f:
+                async with open_data_file(self.raw_data_location, mode="rb") as f:
                     elements = partition(file=f, content_type=self.mime_type)
             else:
                 elements = partition(self.raw_data_location, content_type=self.mime_type)
@@ -34,4 +35,5 @@ class UnstructuredDocument(Document):
 
         chunker = chunker_cls(self, get_text=get_text, max_chunk_size=max_chunk_size)
 
-        yield from chunker.read()
+        async for chunk in chunker.read():
+            yield chunk
