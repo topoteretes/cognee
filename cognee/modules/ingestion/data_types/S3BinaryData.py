@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from contextlib import asynccontextmanager
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
 from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 from cognee.infrastructure.utils import run_sync
@@ -40,10 +41,12 @@ class S3BinaryData(IngestionData):
             if self.metadata.get("name") is None:
                 self.metadata["name"] = self.name or file_path
 
-    def get_data(self):
+    @asynccontextmanager
+    async def get_data(self):
         file_dir_path = os.path.dirname(self.s3_path)
         file_path = os.path.basename(self.s3_path)
 
         file_storage = S3FileStorage(file_dir_path)
 
-        return run_sync(file_storage.open(file_path, "rb"))
+        async with file_storage.open(file_path, "rb") as file:
+            yield file

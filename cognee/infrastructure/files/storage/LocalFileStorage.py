@@ -14,10 +14,7 @@ from .storage import Storage
 @asynccontextmanager
 async def async_open(path, *args, **kwargs):
     file = await asyncio.to_thread(open, path, *args, **kwargs)
-    try:
-        yield file
-    finally:
-        await asyncio.to_thread(file.close)
+    yield file
 
 
 class LocalFileStorage(Storage):
@@ -94,7 +91,12 @@ class LocalFileStorage(Storage):
         full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
 
         async with async_open(full_file_path, mode=mode, *args, **kwargs) as file:
-            yield FileBufferedReader(file, name="file://" + full_file_path)
+            file = FileBufferedReader(file, name="file://" + full_file_path)
+
+            try:
+                yield file
+            finally:
+                file.close()
 
     async def file_exists(self, file_path: str):
         """

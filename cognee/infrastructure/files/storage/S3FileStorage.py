@@ -107,7 +107,7 @@ class S3FileStorage(Storage):
         try:
             yield file
         finally:
-            pass
+            file.close()
 
     async def file_exists(self, file_path: str):
         """
