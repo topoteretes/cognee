@@ -32,7 +32,9 @@ class SQLAlchemyAdapter:
         self.db_path: str = None
         self.db_uri: str = connection_string
 
-        self.engine = create_async_engine(connection_string, poolclass=NullPool if "sqlite" in connection_string else None)
+        self.engine = create_async_engine(
+            connection_string, poolclass=NullPool if "sqlite" in connection_string else None
+        )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
         if self.engine.dialect.name == "sqlite":
