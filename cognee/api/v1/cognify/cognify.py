@@ -107,19 +107,19 @@ async def run_cognify_as_background_process(
                 break
 
     # Start all pipelines
-    # for dataset in datasets:
-    pipeline_run = cognee_pipeline(
-        tasks=tasks,
-        user=user,
-        datasets=datasets,
-        pipeline_name="cognify_pipeline",
-        graph_db_config=graph_db_config,
-        vector_db_config=vector_db_config,
-    )
+    for dataset in datasets:
+        pipeline_run = cognee_pipeline(
+            tasks=tasks,
+            user=user,
+            datasets=dataset,
+            pipeline_name="cognify_pipeline",
+            graph_db_config=graph_db_config,
+            vector_db_config=vector_db_config,
+        )
 
-    # Save Pipeline run started info
-    pipeline_run_started_info.append(await anext(pipeline_run))
-    asyncio.create_task(handle_rest_of_the_run(pipeline_run_instance=pipeline_run))
+        # Save dataset Pipeline run started info
+        pipeline_run_started_info.append(await anext(pipeline_run))
+        asyncio.create_task(handle_rest_of_the_run(pipeline_run_instance=pipeline_run))
 
     return pipeline_run_started_info
 
