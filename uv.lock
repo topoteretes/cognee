@@ -916,7 +916,6 @@ anthropic = [
 ]
 api = [
     { name = "gunicorn" },
-    { name = "kuzu" },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -1054,7 +1053,6 @@ requires-dist = [
     { name = "instructor", specifier = ">=1.7.2" },
     { name = "jinja2", specifier = ">=3.1.3,<4" },
     { name = "kuzu", specifier = "==0.9.0" },
-    { name = "kuzu", marker = "extra == 'api'", specifier = "==0.9.0" },
     { name = "lancedb", specifier = "==0.21.0" },
     { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = "==0.3.2" },
     { name = "langfuse", specifier = ">=2.32.0,<3" },

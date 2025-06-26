@@ -12027,7 +12027,7 @@ cffi = ["cffi (>=1.11)"]
 
 [extras]
 anthropic = ["anthropic"]
-api = ["gunicorn", "kuzu", "uvicorn", "websockets"]
+api = ["gunicorn", "uvicorn", "websockets"]
 aws = ["s3fs"]
 chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
@@ -12058,4 +12058,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "9f1caf16f77cc0dbd8ff8980d2696ba73f6013f31fba45c340d97217da117c04"
+content-hash = "de20ef3dd7b184575facc5954017e974ad0171d628ec87dc852391c0d7b2b38b"
