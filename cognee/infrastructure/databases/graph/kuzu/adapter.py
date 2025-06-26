@@ -1421,11 +1421,10 @@ class KuzuAdapter(GraphDBInterface):
 
     async def delete_graph(self) -> None:
         """
-        Delete all data from the graph while preserving the database structure.
+        Delete all data from the graph directory.
 
-        This method removes all nodes and relationships from the graph but maintains the
-        underlying database for future use. It raises exceptions for failures occurring during
-        deletion processes.
+        This method deletes all nodes and relationships from the graph directory
+        It raises exceptions for failures occurring during deletion processes.
         """
         try:
             # Use DETACH DELETE to remove both nodes and their relationships in one operation
