@@ -4,7 +4,6 @@ import json
 from typing import Optional, Any, List, Dict, Type, Tuple
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger, ERROR
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
@@ -13,15 +12,12 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
     Node,
 )
 from .exceptions import (
-    NeptuneAnalyticsError,
-    NeptuneAnalyticsConnectionError,
     NeptuneAnalyticsConfigurationError,
 )
 from .neptune_analytics_utils import (
     validate_graph_id,
     validate_aws_region,
     build_neptune_config,
-    format_neptune_error,
 )
 
 logger = get_logger("NeptuneAnalyticsAdapter", level=ERROR)
@@ -36,7 +32,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
     def __init__(
         self,
         graph_id: str,
-        region: str = "us-east-1",
+        region: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
@@ -47,7 +43,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         Parameters:
         -----------
             - graph_id (str): The Neptune Analytics graph identifier
-            - region (str): AWS region where the graph is located (default: us-east-1)
+            - region (Optional[str]): AWS region where the graph is located (default: us-east-1)
             - aws_access_key_id (Optional[str]): AWS access key ID
             - aws_secret_access_key (Optional[str]): AWS secret access key
             - aws_session_token (Optional[str]): AWS session token for temporary credentials
@@ -60,7 +56,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         if not validate_graph_id(graph_id):
             raise NeptuneAnalyticsConfigurationError(f"Invalid graph ID: {graph_id}")
         
-        if not validate_aws_region(region):
+        if region and not validate_aws_region(region):
             raise NeptuneAnalyticsConfigurationError(f"Invalid AWS region: {region}")
         
         self.graph_id = graph_id
