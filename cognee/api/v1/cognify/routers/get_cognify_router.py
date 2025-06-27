@@ -56,7 +56,7 @@ def get_cognify_router() -> APIRouter:
                 datasets, user, payload.graph_model, run_in_background=payload.run_in_background
             )
 
-            return cognify_run.model_dump()
+            return cognify_run
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 
