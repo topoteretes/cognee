@@ -1,6 +1,6 @@
 """This module contains the configuration for the graph database."""
 
-from pathlib import Path
+import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
@@ -55,8 +55,8 @@ class GraphConfig(BaseSettings):
             values.graph_filename = f"cognee_graph_{provider}"
         # Set file path based on graph database provider if no file path is provided
         if not values.graph_file_path:
-            base = Path(get_absolute_path(".cognee_system")) / "databases"
-            values.graph_file_path = base / values.graph_filename
+            base = os.path.join(get_absolute_path(".cognee_system"), "databases")
+            values.graph_file_path = os.path.join(base, values.graph_filename)
         return values
 
     def to_dict(self) -> dict:
