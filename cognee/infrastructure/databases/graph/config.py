@@ -46,6 +46,7 @@ class GraphConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
+    # If no specific graph_filename or path are provided
     @pydantic.model_validator(mode="after")
     def fill_derived(cls, values):
         provider = values.graph_database_provider.lower()
