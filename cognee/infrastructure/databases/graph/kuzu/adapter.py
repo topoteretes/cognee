@@ -1417,16 +1417,25 @@ class KuzuAdapter(GraphDBInterface):
 
     async def delete_graph(self) -> None:
         """
-        Delete all data from the graph while preserving the database structure.
+        Delete all data from the graph directory.
 
-        This method removes all nodes and relationships from the graph but maintains the
-        underlying database for future use. It raises exceptions for failures occurring during
-        deletion processes.
+        This method deletes all nodes and relationships from the graph directory
+        It raises exceptions for failures occurring during deletion processes.
         """
         try:
             # Use DETACH DELETE to remove both nodes and their relationships in one operation
             await self.query("MATCH (n:Node) DETACH DELETE n")
             logger.info("Cleared all data from graph while preserving structure")
+
+            if self.connection:
+                self.connection = None
+            if self.db:
+                self.db.close()
+                self.db = None
+            if os.path.exists(self.db_path):
+                shutil.rmtree(self.db_path)
+                logger.info(f"Deleted Kuzu database files at {self.db_path}")
+
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
             raise

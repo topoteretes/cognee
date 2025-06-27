@@ -33,7 +33,7 @@ class GraphConfig(BaseSettings):
 
     # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
     # and determine default graph db file and path based on this parameter if no values are provided
-    graph_database_provider: str = Field("NETWORKX", env="GRAPH_DATABASE_PROVIDER")
+    graph_database_provider: str = Field("kuzu", env="GRAPH_DATABASE_PROVIDER")
 
     graph_database_url: str = ""
     graph_database_username: str = ""
