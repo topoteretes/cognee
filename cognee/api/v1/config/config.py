@@ -23,7 +23,8 @@ class config:
         relational_config.db_path = databases_directory_path
 
         graph_config = get_graph_config()
-        graph_config.graph_file_path = os.path.join(databases_directory_path, "cognee.graph")
+        graph_file_name = graph_config.graph_filename
+        graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
 
         vector_config = get_vectordb_config()
         if vector_config.vector_db_provider == "lancedb":

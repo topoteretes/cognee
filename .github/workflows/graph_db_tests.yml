@@ -35,7 +35,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E kuzu
+          poetry install
 
       - name: Run Kuzu Tests
         env:

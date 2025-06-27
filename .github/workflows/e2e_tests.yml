@@ -234,7 +234,7 @@ jobs:
 
       - name: Install specific graph db dependency
         run: |
-          poetry install -E kuzu
+          poetry install
 
       - name: Run parallel databases test
         env:

@@ -165,11 +165,56 @@ class TestInsightsRetriever:
 
         await graph_engine.add_edges(
             [
-                (person1.id, company1.id, "works_for"),
-                (person2.id, company2.id, "works_for"),
-                (person3.id, company3.id, "works_for"),
-                (person4.id, company1.id, "works_for"),
-                (person5.id, company1.id, "works_for"),
+                (
+                    (str)(person1.id),
+                    (str)(company1.id),
+                    "works_for",
+                    dict(
+                        relationship_name="works_for",
+                        source_node_id=person1.id,
+                        target_node_id=company1.id,
+                    ),
+                ),
+                (
+                    (str)(person2.id),
+                    (str)(company2.id),
+                    "works_for",
+                    dict(
+                        relationship_name="works_for",
+                        source_node_id=person2.id,
+                        target_node_id=company2.id,
+                    ),
+                ),
+                (
+                    (str)(person3.id),
+                    (str)(company3.id),
+                    "works_for",
+                    dict(
+                        relationship_name="works_for",
+                        source_node_id=person3.id,
+                        target_node_id=company3.id,
+                    ),
+                ),
+                (
+                    (str)(person4.id),
+                    (str)(company1.id),
+                    "works_for",
+                    dict(
+                        relationship_name="works_for",
+                        source_node_id=person4.id,
+                        target_node_id=company1.id,
+                    ),
+                ),
+                (
+                    (str)(person5.id),
+                    (str)(company1.id),
+                    "works_for",
+                    dict(
+                        relationship_name="works_for",
+                        source_node_id=person5.id,
+                        target_node_id=company1.id,
+                    ),
+                ),
             ]
         )
 
