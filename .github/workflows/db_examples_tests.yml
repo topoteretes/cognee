@@ -99,7 +99,7 @@ jobs:
 
       - name: Install Kuzu extra
         run: |
-          poetry install -E kuzu
+          poetry install
 
       - name: Run Kuzu Example
         env:
@@ -188,7 +188,7 @@ jobs:
     defaults:
         run:
           shell: bash
-  
+
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -265,5 +265,3 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: |
           poetry run python examples/database_examples/pgvector_example.py
-
-  
