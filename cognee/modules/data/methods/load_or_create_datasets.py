@@ -14,7 +14,7 @@ async def load_or_create_datasets(
     """
     Given a list of dataset identifiers (names or UUIDs), return Dataset instances:
       - If an identifier matches an existing Dataset (by name or id), reuse it.
-      - Otherwise, create a new Dataset with a unique id. Note: Created dataset is not stored to database.
+      - Otherwise, create a new Dataset with a unique id.
     """
     result: List[Dataset] = []
 
