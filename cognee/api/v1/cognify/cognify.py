@@ -94,19 +94,22 @@ async def run_cognify_as_background_process(
     # Store pipeline status for all pipelines
     pipeline_run_started_info = []
 
-    async def handle_rest_of_the_run(pipeline_run_instance):
-        while True:
-            try:
-                pipeline_run_info = await anext(pipeline_run_instance)
+    async def handle_rest_of_the_run(pipeline_list):
+        # Execute all provided pipelines one by one to avoid database write conflicts
+        for pipeline in pipeline_list:
+            while True:
+                try:
+                    pipeline_run_info = await anext(pipeline)
 
-                push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
 
-                if isinstance(pipeline_run_info, PipelineRunCompleted):
+                    if isinstance(pipeline_run_info, PipelineRunCompleted):
+                        break
+                except StopAsyncIteration:
                     break
-            except StopAsyncIteration:
-                break
 
-    # Start all pipelines
+    # Start all pipelines to get started status
+    pipeline_list = []
     for dataset in datasets:
         pipeline_run = cognee_pipeline(
             tasks=tasks,
@@ -119,7 +122,10 @@ async def run_cognify_as_background_process(
 
         # Save dataset Pipeline run started info
         pipeline_run_started_info.append(await anext(pipeline_run))
-        asyncio.create_task(handle_rest_of_the_run(pipeline_run_instance=pipeline_run))
+        pipeline_list.append(pipeline_run)
+
+    # Send all started pipelines to execute one by one in background
+    asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
 
     return pipeline_run_started_info
 
