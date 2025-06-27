@@ -35,7 +35,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E kuzu
+          poetry install
 
       - name: Run Kuzu search Tests
         env:
@@ -136,7 +136,7 @@ jobs:
             python-version: ${{ inputs.python-version }}
 
         - name: Install dependencies
-          run: poetry install -E kuzu -E postgres
+          run: poetry install -E postgres
 
         - name: Run Kuzu/PGVector/Postgres Tests
           env:
