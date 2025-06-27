@@ -10,7 +10,7 @@ from cognee.modules.pipelines import cognee_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.models import User
 
@@ -103,7 +103,9 @@ async def run_cognify_as_background_process(
 
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
 
-                    if isinstance(pipeline_run_info, PipelineRunCompleted):
+                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
+                        pipeline_run_info, PipelineRunErrored
+                    ):
                         break
                 except StopAsyncIteration:
                     break
