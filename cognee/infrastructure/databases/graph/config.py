@@ -29,8 +29,8 @@ class GraphConfig(BaseSettings):
     - model_config
     """
 
-    graph_filename: str = "cognee_graph.pkl"
-    graph_database_provider: str = "NETWORKX"
+    graph_filename: str = "cognee_graph"
+    graph_database_provider: str = "kuzu"
     graph_database_url: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""

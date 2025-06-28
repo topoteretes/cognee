@@ -55,14 +55,14 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "onnxruntime<=1.21.1",
     "pylance==0.22.0",
+    "kuzu==0.9.0"
 ]
 
 [project.optional-dependencies]
 api = [
     "uvicorn==0.34.0",
     "gunicorn>=20.1.0,<24",
-    "websockets>=15.0.1",
-    "kuzu==0.9.0",
+    "websockets>=15.0.1"
 ]
 weaviate = ["weaviate-client==4.9.6"]
 qdrant = ["qdrant-client>=1.14.2,<2"]
@@ -92,7 +92,6 @@ anthropic = ["anthropic>=0.26.1,<0.27"]
 deepeval = ["deepeval>=2.0.1,<3"]
 posthog = ["posthog>=3.5.0,<4"]
 falkordb = ["falkordb==1.0.9"]
-kuzu = ["kuzu==0.9.0"]
 groq = ["groq==0.8.0"]
 milvus = ["pymilvus>=2.5.0,<3"]
 chromadb = [
