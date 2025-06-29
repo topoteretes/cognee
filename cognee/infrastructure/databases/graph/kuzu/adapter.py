@@ -46,11 +46,7 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            try:
-                os.makedirs(self.db_path, exist_ok=True)
-            except FileExistsError:
-                os.remove(self.db_path)
-                os.makedirs(self.db_path, exist_ok=True)
+            os.makedirs(self.db_path, exist_ok=True)
 
             self.db = Database(self.db_path)
             self.db.init_database()
@@ -79,7 +75,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.debug("Kuzu database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
-            raise
+            raise e
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
