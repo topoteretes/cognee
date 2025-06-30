@@ -67,6 +67,8 @@ jobs:
     name: Python Version Tests
     needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/python_version_tests.yml
+    with:
+      python-versions: '["3.10.x", "3.11.x", "3.12.x"]'
     secrets: inherit
 
   # Matrix-based vector database tests

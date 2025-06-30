@@ -23,5 +23,9 @@ def open_data_file(
             return f
         else:
             return fs.open(file_path, mode=mode, encoding=encoding, **kwargs)
+    elif file_path.startswith("file://"):
+        # Handle local file URLs by stripping the file:// prefix
+        file_path = file_path.replace("file://", "", 1)
+        return open(file_path, mode=mode, encoding=encoding, **kwargs)
     else:
         return open(file_path, mode=mode, encoding=encoding, **kwargs)
