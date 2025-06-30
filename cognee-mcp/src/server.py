@@ -17,10 +17,17 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
-from cognee.modules.codingagents.coding_rule_associations import (
-    add_rule_associations,
-    get_existing_rules,
-)
+
+try:
+    from codingagents.coding_rule_associations import (
+        add_rule_associations,
+        get_existing_rules,
+    )
+except ModuleNotFoundError:
+    from .codingagents.coding_rule_associations import (
+        add_rule_associations,
+        get_existing_rules,
+    )
 
 
 mcp = FastMCP("Cognee")
