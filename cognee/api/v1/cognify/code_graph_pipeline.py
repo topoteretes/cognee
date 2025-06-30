@@ -11,10 +11,8 @@ from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import create_dataset
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
-from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.ingestion import ingest_data
 from cognee.tasks.repo_processor import get_non_py_files, get_repo_file_dependencies
