@@ -579,6 +579,9 @@ gemini = [
 huggingface = [
     { name = "transformers" },
 ]
+kuzu = [
+    { name = "kuzu" },
+]
 neo4j = [
     { name = "neo4j" },
 ]
@@ -593,7 +596,7 @@ name = "cognee-mcp"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
-    { name = "cognee", extra = ["codegraph", "docs", "gemini", "huggingface", "neo4j", "postgres"] },
+    { name = "cognee", extra = ["codegraph", "docs", "gemini", "huggingface", "kuzu", "neo4j", "postgres"] },
     { name = "fastmcp" },
     { name = "mcp" },
     { name = "uv" },
@@ -606,7 +609,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cognee", extras = ["postgres", "codegraph", "gemini", "huggingface", "docs", "neo4j"], specifier = "==0.2.0.dev0" },
+    { name = "cognee", extras = ["postgres", "codegraph", "gemini", "huggingface", "docs", "neo4j", "kuzu"], specifier = ">=0.2.0.dev0" },
     { name = "fastmcp", specifier = ">=1.0" },
     { name = "mcp", specifier = "==1.5.0" },
     { name = "uv", specifier = ">=0.6.3" },
@@ -1890,6 +1893,36 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/eb/78d50346c51db22c7203c1611f9b513075f35c4e0e4877c5dde378d66043/kiwisolver-1.4.8-pp310-pypy310_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7cd2785b9391f2873ad46088ed7599a6a71e762e1ea33e87514b1a441ed1da1c", size = 81186, upload-time = "2024-12-24T18:30:45.654Z" },
     { url = "https://files.pythonhosted.org/packages/43/f8/7259f18c77adca88d5f64f9a522792e178b2691f3748817a8750c2d216ef/kiwisolver-1.4.8-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c07b29089b7ba090b6f1a669f1411f27221c3662b3a1b7010e67b59bb5a6f10b", size = 80279, upload-time = "2024-12-24T18:30:47.951Z" },
     { url = "https://files.pythonhosted.org/packages/3a/1d/50ad811d1c5dae091e4cf046beba925bcae0a610e79ae4c538f996f63ed5/kiwisolver-1.4.8-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:65ea09a5a3faadd59c2ce96dc7bf0f364986a315949dc6374f04396b0d60e09b", size = 71762, upload-time = "2024-12-24T18:30:48.903Z" },
+]
+
+[[package]]
+name = "kuzu"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/72/d7f009f3d46bccd853749a6a6845be0c1ecc3607d39e28862d104ce119f8/kuzu-0.9.0.tar.gz", hash = "sha256:2e59f3d4d1fc385e9e90d7ae09f072ec2f4cfeff508582523a0034ceb076f6eb", size = 4839346, upload-time = "2025-04-01T19:17:24.881Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/a6/d97cc82ec808d707b9d89fb21cb62d418e74f5533b06d85a7ec9c1bdf658/kuzu-0.9.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ec9f216d67c092ea52086c99cf4b1deabe0f8daaf47c80cf1892b3b41c57d58a", size = 3667262, upload-time = "2025-04-01T19:16:12.055Z" },
+    { url = "https://files.pythonhosted.org/packages/46/c4/97d07a16a437a21f9334f22d874d5491c77d7a2e310c0290f5803b38df01/kuzu-0.9.0-cp310-cp310-macosx_11_0_x86_64.whl", hash = "sha256:bda6d845bf1c7da204ffa7730573118f2d43fe6b14b1a5d0d2845ec3d3481362", size = 4123434, upload-time = "2025-04-01T19:16:14.459Z" },
+    { url = "https://files.pythonhosted.org/packages/77/4d/48eaa2ba8222b7d2702bd806c566d29a365ba91b7258e9921d2c8275ba23/kuzu-0.9.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ab5b28f101c93899fc15668b6cb25f6db3d4a9844fcc4affed293caaaafaa4b7", size = 6083037, upload-time = "2025-04-01T19:16:16.31Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/f4/38f363b9e43a610d7b0d93eb38ba7359984dca01c8d1f4f6f469077d99d6/kuzu-0.9.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:183bb1de19ffec1c3b07c0b4d5eecf02eb4eeafc1d50aea409bc91e1fad4d6d2", size = 6878892, upload-time = "2025-04-01T19:16:18.481Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/f3/6465cf09b9aaedd36154c869acd27acd077701c059aaed2ec8815981cd8e/kuzu-0.9.0-cp310-cp310-win_amd64.whl", hash = "sha256:2e36ce7da1bbebb538082656de18a717895d9352a33c8bcac170ef2fc22a4902", size = 4174749, upload-time = "2025-04-01T19:16:20.247Z" },
+    { url = "https://files.pythonhosted.org/packages/73/a8/47815aefdf1c71c7a505252f717a4dee2778f994c544ca7d149fc08b092c/kuzu-0.9.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:82dd690d823df816e7826945e5243a4ae65e3e948ef512709a59205b84b9f6dd", size = 3668928, upload-time = "2025-04-01T19:16:22.324Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/f8/ec1b54fd635d99e764f5d9b6955a8d331cd1ad504ee922b2633847777576/kuzu-0.9.0-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:c394e019a14e9c5636228cf1acd333997c31e5da3d9a60a1df2c03b828438432", size = 4125076, upload-time = "2025-04-01T19:16:24.404Z" },
+    { url = "https://files.pythonhosted.org/packages/13/b6/40db1dec30b7236362473efc32c10f75d0874d3ed9a5bd8b7a0c614a3dd3/kuzu-0.9.0-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f7d493f88ed31eada4b88a92b115bc6085c60498c47336ab06a489e75a727bab", size = 6084606, upload-time = "2025-04-01T19:16:27.029Z" },
+    { url = "https://files.pythonhosted.org/packages/06/84/7b3ee53a8de3b21dc73e5659ddd88a3c4d527fdec803e86d37ae1c43da67/kuzu-0.9.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:171b47cf2b3923c813f1ed88fb9d3964a9355129b5d3ebca54eba3450bfc1f97", size = 6878619, upload-time = "2025-04-01T19:16:28.776Z" },
+    { url = "https://files.pythonhosted.org/packages/40/2f/6f84eb0518352b65425cef8cae62198e6c5eceed564a5f93ca0a2faae8a9/kuzu-0.9.0-cp311-cp311-win_amd64.whl", hash = "sha256:3c8a8a611f599801c8db6aeffb978cd1badcfa3ec8f79c15b701810fee71765f", size = 4175347, upload-time = "2025-04-01T19:16:31.956Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/57/f27a0a0e59e3925e85e03516d978289b66a1c98326c85a0d702d43e18c16/kuzu-0.9.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:509af4029f9dcb9c3e843a825df44ec30009a70fad891cbcfb611c3b8cdfefd6", size = 3669315, upload-time = "2025-04-01T19:16:33.988Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/96/d9d47285110eab0c9d2564b6608840c8fca5c95cfe9ce7dfcc791d3293b2/kuzu-0.9.0-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:885f17f6e46c15ecef121fc57a941f8b60f0a5c1d3995813bb7a4c7437fb2259", size = 4127134, upload-time = "2025-04-01T19:16:36.352Z" },
+    { url = "https://files.pythonhosted.org/packages/00/fe/ea1263767a4067a666f6402d78a7cc23724392dd09a7100f8309a1305bc6/kuzu-0.9.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:94f2e35aa345b543a4a21de0e82b70eac4c753987cfa4ded75ae7f9f23edbf11", size = 6083859, upload-time = "2025-04-01T19:16:38.089Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/ce/edd4a180a1cdb2c945832392f68f3c988d2efdb0620465d6cc846d9058a0/kuzu-0.9.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:67430c9813607a3b901c4a1e6bfb3b93538af230bc821e675c552a162818f589", size = 6878571, upload-time = "2025-04-01T19:16:39.87Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/78/d6b79c6d3c8c57a3d980a5ecf5df8a281269208a60b3d8abeabb8c6ce579/kuzu-0.9.0-cp312-cp312-win_amd64.whl", hash = "sha256:549f4a72f815554fb998582876c5875cb0917a192e6a58d196e8247fd8902701", size = 4175988, upload-time = "2025-04-01T19:16:41.89Z" },
+    { url = "https://files.pythonhosted.org/packages/51/3e/73d6c92ee872182de2602c53379667b976e4140e173e8541b37ac198fbdd/kuzu-0.9.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ec2e709599b4015d0a179a191dd7850e7bf076f83b37b70d0dc2e4ee59ce7725", size = 3669449, upload-time = "2025-04-01T19:16:43.672Z" },
+    { url = "https://files.pythonhosted.org/packages/85/d7/3e2a7b8b39ea2fbe11e6c3567e08927823c42e7cc6c426464bd71cac29ac/kuzu-0.9.0-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:8aad4fbd74b283ffb0b115138dfc62d9775c8f19ba62ab243e55e3cd648652b6", size = 4127321, upload-time = "2025-04-01T19:16:45.398Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/e5/630d77dd49d9f2f5d1e35c3fd47ce75574ebfdd9081e7f56cbae35814b75/kuzu-0.9.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ba9dd4f412e31d34345b6461fc9489955ae9566abf426e56af478b6e791b735a", size = 6083958, upload-time = "2025-04-01T19:16:47.449Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/a2/27462033d07e87eaf11c65073515a5eaad139a74af483d117dfce350c48f/kuzu-0.9.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:340502cbce54f21a5b2440a75c28d61ddfd26d6d6848e9daa6140798bdd5b367", size = 6878543, upload-time = "2025-04-01T19:16:49.259Z" },
+    { url = "https://files.pythonhosted.org/packages/af/4a/ebe459433bd4e9ae900531359756ec5d2ad1ba35c6e4053069c0bfa8545c/kuzu-0.9.0-cp313-cp313-win_amd64.whl", hash = "sha256:e1ddb189dfa2aee0123dcd1a5ccc5b831a7f297233a09fccfd76294fc2f9e6bd", size = 4176144, upload-time = "2025-04-01T19:16:51.032Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/34/67016765830540f64288dbaed662465daef03fbacd69026b324b33e8a7f1/kuzu-0.9.0-cp313-cp313t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1fae68db87ba48268228c89e70ed1fde2f43843d8ed6b2debaafd314c45e8542", size = 6090336, upload-time = "2025-04-01T19:16:53.565Z" },
+    { url = "https://files.pythonhosted.org/packages/52/d5/0a67f8994b7ecb2d7b0d6902dd78b0516f0d549db83a23f80baebee3117b/kuzu-0.9.0-cp313-cp313t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a0279ba37c639d96f303eb6ad4481e634495be31210991d8008c385ee50b4e0a", size = 6881186, upload-time = "2025-04-01T19:16:55.58Z" },
 ]
 
 [[package]]
