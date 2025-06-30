@@ -90,7 +90,7 @@ async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
     return relationships
 
 
-async def rule_associations(data: str, rules_nodeset_name: str):
+async def add_rule_associations(data: str, rules_nodeset_name: str):
     llm_client = get_llm_client()
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)

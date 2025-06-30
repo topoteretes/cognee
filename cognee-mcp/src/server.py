@@ -18,7 +18,7 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.codingagents.coding_rule_associations import (
-    rule_associations,
+    add_rule_associations,
     get_existing_rules,
 )
 
@@ -224,7 +224,7 @@ async def save_interaction(data: str) -> list:
                 logger.info("Save interaction process finished.")
                 logger.info("Generating associated rules from interaction data.")
 
-                await rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
 
                 logger.info("Associated rules generated from interaction data.")
 
