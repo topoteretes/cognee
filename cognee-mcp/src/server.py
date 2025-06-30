@@ -389,7 +389,7 @@ async def get_developer_rules() -> list:
     Retrieve all developer rules that were generated based on previous interactions.
 
     This tool queries the Cognee knowledge graph and returns a list of developer
-    rules..
+    rules.
 
     Parameters
     ----------
