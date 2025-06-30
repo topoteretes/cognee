@@ -1,7 +1,9 @@
 from typing import List, Union
 from uuid import UUID
 
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Dataset
+from cognee.modules.data.methods import create_dataset
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.data.exceptions import DatasetNotFoundError
 
@@ -12,7 +14,7 @@ async def load_or_create_datasets(
     """
     Given a list of dataset identifiers (names or UUIDs), return Dataset instances:
       - If an identifier matches an existing Dataset (by name or id), reuse it.
-      - Otherwise, create a new Dataset with a unique id. Note: Created dataset is not stored to database.
+      - Otherwise, create a new Dataset with a unique id.
     """
     result: List[Dataset] = []
 
@@ -37,6 +39,12 @@ async def load_or_create_datasets(
             name=identifier,
             owner_id=user.id,
         )
+
+        # Save dataset to database
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            await create_dataset(identifier, user, session)
+
         result.append(new_dataset)
 
     return result

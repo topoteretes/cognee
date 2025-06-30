@@ -84,6 +84,28 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
 You can do more advanced configurations by creating .env file using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers / database configurations, and for more info check out our <a href="https://docs.cognee.ai">documentation</a>.
 
+
+## 🐳 Docker Usage
+
+If you’d rather run cognee-mcp in a container, you have two options:
+
+1. **Build locally**
+   1. Make sure you are in /cognee root directory and have a fresh `.env` containing only your `LLM_API_KEY` (and your chosen settings).
+   2. Remove any old image and rebuild:
+      ```bash
+      docker rmi cognee/cognee-mcp:main || true
+      docker build --no-cache -f cognee-mcp/Dockerfile -t cognee/cognee-mcp:main .
+      ```
+   3. Run it:
+      ```bash
+      docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+      ```
+2. **Pull from Docker Hub** (no build required):
+   ```bash
+   # With your .env file
+   docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+
+
 ## 💻 Basic Usage
 
 The MCP server exposes its functionality through tools. Call them from any MCP client (Cursor, Claude Desktop, Cline, Roo and more).

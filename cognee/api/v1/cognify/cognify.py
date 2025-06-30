@@ -10,7 +10,7 @@ from cognee.modules.pipelines import cognee_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.models import User
 
@@ -66,7 +66,7 @@ async def run_cognify_blocking(
     graph_db_config: dict = None,
     vector_db_config: dict = False,
 ):
-    pipeline_run_info = None
+    total_run_info = {}
 
     async for run_info in cognee_pipeline(
         tasks=tasks,
@@ -76,9 +76,12 @@ async def run_cognify_blocking(
         graph_db_config=graph_db_config,
         vector_db_config=vector_db_config,
     ):
-        pipeline_run_info = run_info
+        if run_info.dataset_id:
+            total_run_info[run_info.dataset_id] = run_info
+        else:
+            total_run_info = run_info
 
-    return pipeline_run_info
+    return total_run_info
 
 
 async def run_cognify_as_background_process(
@@ -88,30 +91,43 @@ async def run_cognify_as_background_process(
     graph_db_config: dict = None,
     vector_db_config: dict = False,
 ):
-    pipeline_run = cognee_pipeline(
-        tasks=tasks,
-        user=user,
-        datasets=datasets,
-        pipeline_name="cognify_pipeline",
-        graph_db_config=graph_db_config,
-        vector_db_config=vector_db_config,
-    )
+    # Store pipeline status for all pipelines
+    pipeline_run_started_info = []
 
-    pipeline_run_started_info = await anext(pipeline_run)
+    async def handle_rest_of_the_run(pipeline_list):
+        # Execute all provided pipelines one by one to avoid database write conflicts
+        for pipeline in pipeline_list:
+            while True:
+                try:
+                    pipeline_run_info = await anext(pipeline)
 
-    async def handle_rest_of_the_run():
-        while True:
-            try:
-                pipeline_run_info = await anext(pipeline_run)
+                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
 
-                push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-
-                if isinstance(pipeline_run_info, PipelineRunCompleted):
+                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
+                        pipeline_run_info, PipelineRunErrored
+                    ):
+                        break
+                except StopAsyncIteration:
                     break
-            except StopAsyncIteration:
-                break
 
-    asyncio.create_task(handle_rest_of_the_run())
+    # Start all pipelines to get started status
+    pipeline_list = []
+    for dataset in datasets:
+        pipeline_run = cognee_pipeline(
+            tasks=tasks,
+            user=user,
+            datasets=dataset,
+            pipeline_name="cognify_pipeline",
+            graph_db_config=graph_db_config,
+            vector_db_config=vector_db_config,
+        )
+
+        # Save dataset Pipeline run started info
+        pipeline_run_started_info.append(await anext(pipeline_run))
+        pipeline_list.append(pipeline_run)
+
+    # Send all started pipelines to execute one by one in background
+    asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
 
     return pipeline_run_started_info
 

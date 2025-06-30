@@ -4,6 +4,7 @@ import sys
 import argparse
 import cognee
 import asyncio
+
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 import importlib.util
 from contextlib import redirect_stdout
@@ -16,6 +17,11 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.codingagents.coding_rule_associations import (
+    add_rule_associations,
+    get_existing_rules,
+)
+
 
 mcp = FastMCP("Cognee")
 
@@ -188,6 +194,64 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
     ]
 
 
+@mcp.tool(
+    name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
+)
+async def save_interaction(data: str) -> list:
+    """
+    Transform and save a user-agent interaction into structured knowledge.
+
+    Parameters
+    ----------
+    data : str
+        The input string containing user queries and corresponding agent answers.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with information about the background task launch.
+    """
+
+    async def save_user_agent_interaction(data: str) -> None:
+        """Build knowledge graph from the interaction data"""
+        with redirect_stdout(sys.stderr):
+            logger.info("Save interaction process starting.")
+
+            await cognee.add(data, node_set=["user_agent_interaction"])
+
+            try:
+                await cognee.cognify()
+                logger.info("Save interaction process finished.")
+                logger.info("Generating associated rules from interaction data.")
+
+                await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+
+                logger.info("Associated rules generated from interaction data.")
+
+            except Exception as e:
+                logger.error("Save interaction process failed.")
+                raise ValueError(f"Failed to Save interaction: {str(e)}")
+
+    asyncio.create_task(
+        save_user_agent_interaction(
+            data=data,
+        )
+    )
+
+    log_file = get_log_file_location()
+    text = (
+        f"Background process launched to process the user-agent interaction.\n"
+        f"To check the current status, use the cognify_status tool or check the log file at: {log_file}"
+    )
+
+    return [
+        types.TextContent(
+            type="text",
+            text=text,
+        )
+    ]
+
+
 @mcp.tool()
 async def codify(repo_path: str) -> list:
     """
@@ -317,6 +381,41 @@ async def search(search_query: str, search_type: str) -> list:
 
     search_results = await search_task(search_query, search_type)
     return [types.TextContent(type="text", text=search_results)]
+
+
+@mcp.tool()
+async def get_developer_rules() -> list:
+    """
+    Retrieve all developer rules that were generated based on previous interactions.
+
+    This tool queries the Cognee knowledge graph and returns a list of developer
+    rules.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with the retrieved developer rules.
+        The format is plain text containing the developer rules in bulletpoints.
+
+    Notes
+    -----
+    - The specific logic for fetching rules is handled internally.
+    - This tool does not accept any parameters and is intended for simple rule inspection use cases.
+    """
+
+    async def fetch_rules_from_cognee() -> str:
+        """Collect all developer rules from Cognee"""
+        with redirect_stdout(sys.stderr):
+            developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
+            return developer_rules
+
+    rules_text = await fetch_rules_from_cognee()
+
+    return [types.TextContent(type="text", text=rules_text)]
 
 
 @mcp.tool()

@@ -1,6 +1,6 @@
 [project]
 name = "cognee"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -27,10 +27,13 @@ dependencies = [
     "nltk==3.9.1",
     "numpy>=1.26.4, <=2.1",
     "pandas>=2.2.2",
+    # Note: New s3fs and boto3 versions don't work well together
+    # Always use comaptible fixed versions of these two dependencies
+    "s3fs[boto3]==2025.3.2",
     "sqlalchemy==2.0.39",
     "aiosqlite>=0.20.0,<0.21",
     "tiktoken<=0.9.0",
-    "litellm>=1.57.4",
+    "litellm>=1.57.4, <1.71.0",
     "instructor>=1.7.2",
     "langfuse>=2.32.0,<3",
     "filetype>=1.2.0",
