@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@auth0/nextjs-auth0": "^4.6.0",
     "classnames": "^2.5.1",
     "culori": "^4.0.1",
     "d3-force-3d": "^3.0.6",
@@ -17,7 +16,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-force-graph-2d": "^1.27.1",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "@auth0/nextjs-auth0": "^4.6.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
