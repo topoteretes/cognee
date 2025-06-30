@@ -14,7 +14,7 @@ echo "Environment: $ENVIRONMENT"
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
 
-MIGRATION_OUTPUT=$(alembic upgrade head 2>&1)
+MIGRATION_OUTPUT=$(alembic upgrade head)
 MIGRATION_EXIT_CODE=$?
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
@@ -37,10 +37,10 @@ sleep 2
 if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee
+        exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport sse
     else
-        exec cognee
+        exec cognee --transport sse
     fi
 else
-    exec cognee
+    exec cognee --transport sse
 fi
