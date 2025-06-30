@@ -68,17 +68,11 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
         ]
 
     dataset_name = "codebase"
-    # Create a Dataset instance
-    dataset = Dataset(
-        id=await get_unique_dataset_id(dataset_name=dataset_name, user=user),
-        name=dataset_name,
-        owner_id=user.id,
-    )
 
     # Save dataset to database
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        await create_dataset(dataset_name, user, session)
+        dataset = await create_dataset(dataset_name, user, session)
 
     if include_docs:
         non_code_pipeline_run = run_tasks(
