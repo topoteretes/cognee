@@ -229,7 +229,7 @@ async def save_interaction(data: str) -> list:
                 logger.info("Associated rules generated from interaction data.")
 
             except Exception as e:
-                logger.error("Save  interaction process failed.")
+                logger.error("Save interaction process failed.")
                 raise ValueError(f"Failed to Save interaction: {str(e)}")
 
     asyncio.create_task(
