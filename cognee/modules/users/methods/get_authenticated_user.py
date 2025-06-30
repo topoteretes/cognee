@@ -1,17 +1,9 @@
-from cognee.modules.users.authentication.get_api_auth_backend import get_api_auth_backend
-from cognee.modules.users.authentication.get_client_auth_backend import get_client_auth_backend
 from ..get_fastapi_users import get_fastapi_users
 
 
 fastapi_users = get_fastapi_users()
 
-def get_enabled_backends():
-    api_auth_backend = get_api_auth_backend()
-    client_auth_backend = get_client_auth_backend()
-
-    return [api_auth_backend, client_auth_backend]
-
-get_authenticated_user = fastapi_users.current_user(active=True, get_enabled_backends=get_enabled_backends)
+get_authenticated_user = fastapi_users.current_user(active=True)
 
 # from types import SimpleNamespace
 

@@ -88,27 +88,23 @@ def custom_openapi():
     )
 
     openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
-            "type": "http",
-            "scheme": "bearer"
-        },
+        "BearerAuth": {"type": "http", "scheme": "bearer"},
         "CookieAuth": {
             "type": "apiKey",
             "in": "cookie",
-            "name": os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token")
-        }
+            "name": os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
+        },
     }
 
-    openapi_schema["security"] = [
-        {"BearerAuth": []},
-        {"CookieAuth": []}
-    ]
+    openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
 
     app.openapi_schema = openapi_schema
 
     return app.openapi_schema
 
+
 app.openapi = custom_openapi
+
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
