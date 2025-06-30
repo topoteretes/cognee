@@ -12,6 +12,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
@@ -73,6 +74,36 @@ app.add_middleware(
     allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title="Cognee API",
+        version="1.0.0",
+        description="Cognee API with Bearer token and Cookie auth",
+        routes=app.routes,
+    )
+
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer"},
+        "CookieAuth": {
+            "type": "apiKey",
+            "in": "cookie",
+            "name": os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
+        },
+    }
+
+    openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+
+    app.openapi_schema = openapi_schema
+
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.exception_handler(RequestValidationError)

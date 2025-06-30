@@ -56,6 +56,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             response.body = json.dumps(
                 {"access_token": access_token, "token_type": "bearer"}
             ).encode(encoding="utf-8")
+            response.headers.append("Content-Type", "application/json")
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         print(f"User {user.id} has registered.")
