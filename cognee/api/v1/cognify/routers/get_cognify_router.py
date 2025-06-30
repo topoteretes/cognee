@@ -39,7 +39,7 @@ class CognifyPayloadDTO(InDTO):
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=None)
+    @router.post("", response_model=dict)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for the cognitive processing of the content."""
         if not payload.datasets and not payload.dataset_ids:

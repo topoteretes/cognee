@@ -28,9 +28,6 @@ async def get_pipeline_run_by_dataset(dataset_id: UUID, pipeline_name: str):
 
         latest_run = select(aliased_pipeline_run).filter(query.c.rn == 1)
 
-        run = (await session.execute(latest_run)).scalars().all()
+        run = (await session.execute(latest_run)).scalars().first()
 
-        if run:
-            return run[0]
-        else:
-            return None
+        return run
