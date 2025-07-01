@@ -147,7 +147,6 @@ class TestIncrementalLoader:
             signature_data=b"signature",
         )
 
-
         # This would normally be called after should_process_file
         # Testing the block extraction logic
         pass  # Placeholder for full integration test
