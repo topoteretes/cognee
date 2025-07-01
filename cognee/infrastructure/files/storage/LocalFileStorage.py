@@ -7,7 +7,6 @@ from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
 
-
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
@@ -19,9 +18,7 @@ class LocalFileStorage(Storage):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
 
-    def store(
-        self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False
-    ) -> str:
+    def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
         stream.
@@ -103,9 +100,7 @@ class LocalFileStorage(Storage):
 
             - bool: True if the file exists, otherwise False.
         """
-        return os.path.exists(
-            os.path.join(self.storage_path.replace("file://", ""), file_path)
-        )
+        return os.path.exists(os.path.join(self.storage_path.replace("file://", ""), file_path))
 
     def ensure_directory_exists(self, directory_path: str = None):
         """
