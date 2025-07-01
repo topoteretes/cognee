@@ -39,7 +39,7 @@ class CognifyPayloadDTO(InDTO):
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=None)
+    @router.post("", response_model=dict)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for the cognitive processing of the content."""
         if not payload.datasets and not payload.dataset_ids:
@@ -56,7 +56,7 @@ def get_cognify_router() -> APIRouter:
                 datasets, user, payload.graph_model, run_in_background=payload.run_in_background
             )
 
-            return cognify_run.model_dump()
+            return cognify_run
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

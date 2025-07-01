@@ -14,7 +14,7 @@ echo "Environment: $ENVIRONMENT"
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
 
-MIGRATION_OUTPUT=$(alembic upgrade head 2>&1)
+MIGRATION_OUTPUT=$(alembic upgrade head)
 MIGRATION_EXIT_CODE=$?
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then

@@ -7,7 +7,10 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
+
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -18,6 +21,11 @@ from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     load_or_create_datasets,
     check_dataset_name,
+)
+
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunStarted,
 )
 
 from cognee.infrastructure.databases.relational import (
@@ -117,22 +125,22 @@ async def run_pipeline(
 
     # Ugly hack, but no easier way to do this.
     if pipeline_name == "add_pipeline":
+        pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
         # Refresh the add pipeline status so data is added to a dataset.
         # Without this the app_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
-        dataset_id = uuid5(NAMESPACE_OID, f"{dataset.name}{str(user.id)}")
 
         await log_pipeline_run_initiated(
-            pipeline_id=uuid5(NAMESPACE_OID, "add_pipeline"),
+            pipeline_id=pipeline_id,
             pipeline_name="add_pipeline",
-            dataset_id=dataset_id,
+            dataset_id=dataset.id,
         )
 
         # Refresh the cognify pipeline status after we add new files.
         # Without this the cognify_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
         await log_pipeline_run_initiated(
-            pipeline_id=uuid5(NAMESPACE_OID, "cognify_pipeline"),
+            pipeline_id=pipeline_id,
             pipeline_name="cognify_pipeline",
-            dataset_id=dataset_id,
+            dataset_id=dataset.id,
         )
 
     dataset_id = dataset.id
@@ -151,9 +159,22 @@ async def run_pipeline(
     if str(dataset_id) in task_status:
         if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
             logger.info("Dataset %s is already being processed.", dataset_id)
+            pipeline_run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
+            yield PipelineRunStarted(
+                pipeline_run_id=pipeline_run.pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                payload=data,
+            )
             return
-        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+        elif task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
             logger.info("Dataset %s is already processed.", dataset_id)
+            pipeline_run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
+            yield PipelineRunCompleted(
+                pipeline_run_id=pipeline_run.pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+            )
             return
 
     if not isinstance(tasks, list):
