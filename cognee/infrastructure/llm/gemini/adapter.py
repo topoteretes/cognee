@@ -1,4 +1,5 @@
 import litellm
+import logging
 from pydantic import BaseModel
 from typing import Type, Optional
 from litellm import acompletion, JSONSchemaValidationError
@@ -12,6 +13,13 @@ from cognee.infrastructure.llm.rate_limiter import (
     rate_limit_async,
     sleep_and_retry_async,
 )
+
+# Configure Litellm logging to reduce verbosity
+litellm.set_verbose = False
+
+# Suppress Litellm ERROR logging (using standard logging for external library configuration)
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
 logger = get_logger()
 observe = get_observe()

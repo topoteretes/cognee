@@ -16,6 +16,15 @@ from cognee.infrastructure.llm.rate_limiter import (
     sleep_and_retry_sync,
 )
 from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
+import logging
+
+# Configure Litellm logging to reduce verbosity
+litellm.set_verbose = False
+
+# Suppress Litellm ERROR logging using standard logging
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
 observe = get_observe()
 
