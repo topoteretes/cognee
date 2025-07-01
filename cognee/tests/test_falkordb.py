@@ -1,11 +1,11 @@
 import os
 import cognee
 import pathlib
+from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-# from cognee.shared.utils import render_graph
 
 logger = get_logger()
 
@@ -44,8 +44,6 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    # await render_graph(None, include_labels = True, include_nodes = True)
-
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
@@ -81,7 +79,8 @@ async def main():
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+    data_root_directory = get_storage_config()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     # Assert relational, vector and graph databases have been cleaned properly
     await cognee.prune.prune_system(metadata=True)

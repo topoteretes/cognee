@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.search.operations import get_history
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data
@@ -166,7 +167,8 @@ async def main():
     await test_local_file_deletion(text, explanation_file_path)
 
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+    data_root_directory = get_storage_config()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
