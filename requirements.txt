@@ -1,0 +1,1 @@
+python-rsync>=0.1.2 

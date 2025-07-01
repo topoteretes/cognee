@@ -1,6 +1,7 @@
 import dlt
 import json
 import inspect
+from datetime import datetime
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 import cognee.modules.ingestion as ingestion
@@ -13,6 +14,7 @@ from cognee.modules.users.permissions.methods import give_permission_on_dataset
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from .get_dlt_destination import get_dlt_destination
 from .save_data_item_to_storage import save_data_item_to_storage
+from cognee.modules.ingestion.incremental import IncrementalLoader
 
 
 from cognee.api.v1.add.config import get_s3_config
@@ -107,6 +109,15 @@ async def ingest_data(
                 data_id = ingestion.identify(classified_data, user)
 
                 file_metadata = classified_data.get_metadata()
+                
+                # Initialize incremental loader for this file
+                incremental_loader = IncrementalLoader()
+                
+                # Check if file needs incremental processing
+                should_process, change_info = await incremental_loader.should_process_file(file, data_id)
+                
+                # Save updated file signature regardless of whether processing is needed
+                await incremental_loader.save_file_signature(file, data_id)
 
                 from sqlalchemy import select
 
@@ -139,6 +150,13 @@ async def ingest_data(
                     ext_metadata = get_external_metadata_dict(data_item)
                     if node_set:
                         ext_metadata["node_set"] = node_set
+                    
+                    # Add incremental processing metadata
+                    ext_metadata["incremental_processing"] = {
+                        "should_process": should_process,
+                        "change_info": change_info,
+                        "processing_timestamp": json.loads(json.dumps(datetime.now().isoformat()))
+                    }
 
                     if data_point is not None:
                         data_point.name = file_metadata["name"]
