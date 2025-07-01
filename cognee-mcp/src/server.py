@@ -556,7 +556,7 @@ def log_database_configuration():
         elif relational_config.db_provider == "sqlite":
             logger.info(f"SQLite path: {relational_config.db_path}")
             logger.info(f"SQLite database: {relational_config.db_name}")
-        
+
         # Log vector database configuration
         vector_config = get_vectordb_config()
         logger.info(f"Vector database: {vector_config.vector_db_provider}")
@@ -564,7 +564,7 @@ def log_database_configuration():
             logger.info(f"Vector database path: {vector_config.vector_db_url}")
         elif vector_config.vector_db_provider in ["qdrant", "weaviate", "pgvector"]:
             logger.info(f"Vector database URL: {vector_config.vector_db_url}")
-            
+
         # Log graph database configuration
         graph_config = get_graph_config()
         logger.info(f"Graph database: {graph_config.graph_database_provider}")
@@ -572,7 +572,7 @@ def log_database_configuration():
             logger.info(f"Graph database path: {graph_config.graph_file_path}")
         elif graph_config.graph_database_provider in ["neo4j", "falkordb"]:
             logger.info(f"Graph database URL: {graph_config.graph_database_url}")
-            
+
     except Exception as e:
         logger.warning(f"Could not retrieve database configuration: {str(e)}")
 
@@ -591,7 +591,7 @@ async def main():
 
     # Log database configurations
     log_database_configuration()
-    
+
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
         await mcp.run_stdio_async()

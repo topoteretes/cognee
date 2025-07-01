@@ -29,54 +29,54 @@ async def main():
     logging.info(edge_type_counts)
 
     # Assert there is exactly one PdfDocument.
-    assert type_counts.get("PdfDocument", 0) == 1, (
-        f"Expected exactly one PdfDocument, but found {type_counts.get('PdfDocument', 0)}"
-    )
+    assert (
+        type_counts.get("PdfDocument", 0) == 1
+    ), f"Expected exactly one PdfDocument, but found {type_counts.get('PdfDocument', 0)}"
 
     # Assert there is exactly one TextDocument.
-    assert type_counts.get("TextDocument", 0) == 1, (
-        f"Expected exactly one TextDocument, but found {type_counts.get('TextDocument', 0)}"
-    )
+    assert (
+        type_counts.get("TextDocument", 0) == 1
+    ), f"Expected exactly one TextDocument, but found {type_counts.get('TextDocument', 0)}"
 
     # Assert there are at least two DocumentChunk nodes.
-    assert type_counts.get("DocumentChunk", 0) >= 2, (
-        f"Expected at least two DocumentChunk nodes, but found {type_counts.get('DocumentChunk', 0)}"
-    )
+    assert (
+        type_counts.get("DocumentChunk", 0) >= 2
+    ), f"Expected at least two DocumentChunk nodes, but found {type_counts.get('DocumentChunk', 0)}"
 
     # Assert there is at least two TextSummary.
-    assert type_counts.get("TextSummary", 0) >= 2, (
-        f"Expected at least two TextSummary, but found {type_counts.get('TextSummary', 0)}"
-    )
+    assert (
+        type_counts.get("TextSummary", 0) >= 2
+    ), f"Expected at least two TextSummary, but found {type_counts.get('TextSummary', 0)}"
 
     # Assert there is at least one Entity.
-    assert type_counts.get("Entity", 0) > 0, (
-        f"Expected more than zero Entity nodes, but found {type_counts.get('Entity', 0)}"
-    )
+    assert (
+        type_counts.get("Entity", 0) > 0
+    ), f"Expected more than zero Entity nodes, but found {type_counts.get('Entity', 0)}"
 
     # Assert there is at least one EntityType.
-    assert type_counts.get("EntityType", 0) > 0, (
-        f"Expected more than zero EntityType nodes, but found {type_counts.get('EntityType', 0)}"
-    )
+    assert (
+        type_counts.get("EntityType", 0) > 0
+    ), f"Expected more than zero EntityType nodes, but found {type_counts.get('EntityType', 0)}"
 
     # Assert that there are at least two 'is_part_of' edges.
-    assert edge_type_counts.get("is_part_of", 0) >= 2, (
-        f"Expected at least two 'is_part_of' edges, but found {edge_type_counts.get('is_part_of', 0)}"
-    )
+    assert (
+        edge_type_counts.get("is_part_of", 0) >= 2
+    ), f"Expected at least two 'is_part_of' edges, but found {edge_type_counts.get('is_part_of', 0)}"
 
     # Assert that there are at least two 'made_from' edges.
-    assert edge_type_counts.get("made_from", 0) >= 2, (
-        f"Expected at least two 'made_from' edges, but found {edge_type_counts.get('made_from', 0)}"
-    )
+    assert (
+        edge_type_counts.get("made_from", 0) >= 2
+    ), f"Expected at least two 'made_from' edges, but found {edge_type_counts.get('made_from', 0)}"
 
     # Assert that there is at least one 'is_a' edge.
-    assert edge_type_counts.get("is_a", 0) >= 1, (
-        f"Expected at least one 'is_a' edge, but found {edge_type_counts.get('is_a', 0)}"
-    )
+    assert (
+        edge_type_counts.get("is_a", 0) >= 1
+    ), f"Expected at least one 'is_a' edge, but found {edge_type_counts.get('is_a', 0)}"
 
     # Assert that there is at least one 'contains' edge.
-    assert edge_type_counts.get("contains", 0) >= 1, (
-        f"Expected at least one 'contains' edge, but found {edge_type_counts.get('contains', 0)}"
-    )
+    assert (
+        edge_type_counts.get("contains", 0) >= 1
+    ), f"Expected at least one 'contains' edge, but found {edge_type_counts.get('contains', 0)}"
 
 
 if __name__ == "__main__":

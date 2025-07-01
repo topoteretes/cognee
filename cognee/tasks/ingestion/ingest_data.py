@@ -109,13 +109,15 @@ async def ingest_data(
                 data_id = ingestion.identify(classified_data, user)
 
                 file_metadata = classified_data.get_metadata()
-                
+
                 # Initialize incremental loader for this file
                 incremental_loader = IncrementalLoader()
-                
+
                 # Check if file needs incremental processing
-                should_process, change_info = await incremental_loader.should_process_file(file, data_id)
-                
+                should_process, change_info = await incremental_loader.should_process_file(
+                    file, data_id
+                )
+
                 # Save updated file signature regardless of whether processing is needed
                 await incremental_loader.save_file_signature(file, data_id)
 
@@ -150,12 +152,12 @@ async def ingest_data(
                     ext_metadata = get_external_metadata_dict(data_item)
                     if node_set:
                         ext_metadata["node_set"] = node_set
-                    
+
                     # Add incremental processing metadata
                     ext_metadata["incremental_processing"] = {
                         "should_process": should_process,
                         "change_info": change_info,
-                        "processing_timestamp": json.loads(json.dumps(datetime.now().isoformat()))
+                        "processing_timestamp": json.loads(json.dumps(datetime.now().isoformat())),
                     }
 
                     if data_point is not None:

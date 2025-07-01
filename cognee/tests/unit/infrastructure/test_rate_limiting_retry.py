@@ -110,9 +110,9 @@ def test_sync_retry():
         print(f"Number of attempts: {test_function_sync.counter}")
 
         # The function should succeed on the 3rd attempt (after 2 failures)
-        assert test_function_sync.counter == 3, (
-            f"Expected 3 attempts, got {test_function_sync.counter}"
-        )
+        assert (
+            test_function_sync.counter == 3
+        ), f"Expected 3 attempts, got {test_function_sync.counter}"
         assert elapsed >= 0.3, f"Expected at least 0.3 seconds of backoff, got {elapsed:.2f}"
 
         print("✅ PASS: Synchronous retry mechanism is working correctly")
@@ -143,9 +143,9 @@ async def test_async_retry():
         print(f"Number of attempts: {test_function_async.counter}")
 
         # The function should succeed on the 3rd attempt (after 2 failures)
-        assert test_function_async.counter == 3, (
-            f"Expected 3 attempts, got {test_function_async.counter}"
-        )
+        assert (
+            test_function_async.counter == 3
+        ), f"Expected 3 attempts, got {test_function_async.counter}"
         assert elapsed >= 0.3, f"Expected at least 0.3 seconds of backoff, got {elapsed:.2f}"
 
         print("✅ PASS: Asynchronous retry mechanism is working correctly")

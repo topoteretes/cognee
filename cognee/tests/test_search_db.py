@@ -66,9 +66,9 @@ async def main():
         assert isinstance(context, str), f"{name}: Context should be a string"
         assert context.strip(), f"{name}: Context should not be empty"
         lower = context.lower()
-        assert "germany" in lower or "netherlands" in lower, (
-            f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
-        )
+        assert (
+            "germany" in lower or "netherlands" in lower
+        ), f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
 
     triplets_gk = await GraphCompletionRetriever().get_triplets(
         query="Next to which country is Germany located?"
@@ -96,18 +96,18 @@ async def main():
             distance = edge.attributes.get("vector_distance")
             node1_distance = edge.node1.attributes.get("vector_distance")
             node2_distance = edge.node2.attributes.get("vector_distance")
-            assert isinstance(distance, float), (
-                f"{name}: vector_distance should be float, got {type(distance)}"
-            )
-            assert 0 <= distance <= 1, (
-                f"{name}: edge vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
-            assert 0 <= node1_distance <= 1, (
-                f"{name}: node_1 vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
-            assert 0 <= node2_distance <= 1, (
-                f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
+            assert isinstance(
+                distance, float
+            ), f"{name}: vector_distance should be float, got {type(distance)}"
+            assert (
+                0 <= distance <= 1
+            ), f"{name}: edge vector_distance {distance} out of [0,1], this shouldn't happen"
+            assert (
+                0 <= node1_distance <= 1
+            ), f"{name}: node_1 vector_distance {distance} out of [0,1], this shouldn't happen"
+            assert (
+                0 <= node2_distance <= 1
+            ), f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
 
     completion_gk = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -137,9 +137,9 @@ async def main():
         text = completion[0]
         assert isinstance(text, str), f"{name}: element should be a string"
         assert text.strip(), f"{name}: string should not be empty"
-        assert "netherlands" in text.lower(), (
-            f"{name}: expected 'netherlands' in result, got: {text!r}"
-        )
+        assert (
+            "netherlands" in text.lower()
+        ), f"{name}: expected 'netherlands' in result, got: {text!r}"
 
 
 if __name__ == "__main__":

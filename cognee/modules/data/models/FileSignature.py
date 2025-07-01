@@ -10,26 +10,28 @@ class FileSignature(Base):
     __tablename__ = "file_signatures"
 
     id = Column(UUID, primary_key=True, default=uuid4)
-    
+
     # Reference to the original data entry
     data_id = Column(UUID, index=True)
-    
+
     # File information
     file_path = Column(String)
     file_size = Column(Integer)
     content_hash = Column(String, index=True)  # Overall file hash for quick comparison
-    
+
     # Block information
     total_blocks = Column(Integer)
     block_size = Column(Integer)
     strong_len = Column(Integer)
-    
+
     # Signature data (binary)
     signature_data = Column(LargeBinary)
-    
+
     # Block details (JSON array of block info)
-    blocks_info = Column(JSON)  # Array of {block_index, weak_checksum, strong_hash, block_size, file_offset}
-    
+    blocks_info = Column(
+        JSON
+    )  # Array of {block_index, weak_checksum, strong_hash, block_size, file_offset}
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
@@ -47,4 +49,4 @@ class FileSignature(Base):
             "blocks_info": self.blocks_info,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        } 
+        }

@@ -18,6 +18,7 @@ litellm.set_verbose = False
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 logging.getLogger("litellm").setLevel(logging.CRITICAL)
 
+
 class GenericAPIAdapter(LLMInterface):
     """
     Adapter for Generic API LLM provider API.
