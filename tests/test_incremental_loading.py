@@ -111,10 +111,10 @@ class TestIncrementalLoader:
     @pytest.mark.asyncio
     async def test_should_process_new_file(self):
         """Test processing decision for new files"""
-        loader = IncrementalLoader()
+        IncrementalLoader()
 
         content = b"This is a new file that hasn't been seen before."
-        file_obj = BytesIO(content)
+        BytesIO(content)
 
         # For a new file (no existing signature), should process
         # Note: This test would need a mock database setup in real implementation
@@ -123,10 +123,10 @@ class TestIncrementalLoader:
 
     def test_block_data_extraction(self):
         """Test extraction of changed block data"""
-        loader = IncrementalLoader(block_size=10)
+        IncrementalLoader(block_size=10)
 
         content = b"Block1____Block2____Block3____"
-        file_obj = BytesIO(content)
+        BytesIO(content)
 
         # Create mock change info
         from cognee.modules.ingestion.incremental.block_hash_service import BlockInfo, FileSignature
@@ -137,7 +137,7 @@ class TestIncrementalLoader:
             BlockInfo(2, 34567, "hash3", 10, 20),
         ]
 
-        signature = FileSignature(
+        FileSignature(
             file_path="test",
             file_size=30,
             total_blocks=3,
@@ -147,11 +147,6 @@ class TestIncrementalLoader:
             signature_data=b"signature",
         )
 
-        change_info = {
-            "type": "incremental_changes",
-            "changed_blocks": [1],  # Only middle block changed
-            "new_signature": signature,
-        }
 
         # This would normally be called after should_process_file
         # Testing the block extraction logic

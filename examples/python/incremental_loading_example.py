@@ -23,7 +23,7 @@ async def demonstrate_incremental_loading():
     print("=" * 50)
 
     # Initialize the incremental loader
-    incremental_loader = IncrementalLoader(block_size=512)  # 512 byte blocks for demo
+    IncrementalLoader(block_size=512)  # 512 byte blocks for demo
     block_service = BlockHashService(block_size=512)
 
     # Create initial file content
