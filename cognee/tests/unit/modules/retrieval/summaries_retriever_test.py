@@ -136,11 +136,11 @@ class TextSummariesRetriever:
     @pytest.mark.asyncio
     async def test_chunk_context_on_empty_graph(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_summary_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_summary_context_on_empty_graph"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_summary_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_summary_context_on_empty_graph"
         )
         cognee.config.data_root_directory(data_directory_path)
 

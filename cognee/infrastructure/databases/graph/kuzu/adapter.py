@@ -46,7 +46,7 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            os.makedirs(self.db_path, exist_ok=True)
+            # os.makedirs(self.db_path, exist_ok=True)
 
             self.db = Database(self.db_path)
             self.db.init_database()
