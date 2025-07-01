@@ -196,7 +196,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
 
     file_storage = LocalFileStorage(dir_path)
 
-    await file_storage.store(file_path, html_content, overwrite=True)
+    file_storage.store(file_path, html_content, overwrite=True)
 
     logger.info(f"Graph visualization saved as {destination_file_path}")
 
