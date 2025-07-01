@@ -8660,6 +8660,76 @@ typing-extensions = ">=4.9.0"
 XlsxWriter = ">=0.5.7"
 
 [[package]]
+name = "python-rsync"
+version = "0.1.2"
+description = "python binding for librsync"
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "python_rsync-0.1.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:33b08611d2155c94e93fd0e79eb7446ea941e9359f66858c173683445d6bbf54"},
+    {file = "python_rsync-0.1.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:4f3b13a529de705b8c2e7f4ce060ade38bd72ee5134ed9ccb5a47041bd39e5e1"},
+    {file = "python_rsync-0.1.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:6078a30e1f853d5238b1c149a7ec35eb1fc67a546440b72b9eaabd42e5413f3c"},
+    {file = "python_rsync-0.1.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:110f1c025c44786b225b692bd17619347125dd44712997798942bfc36835b601"},
+    {file = "python_rsync-0.1.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9de3fae89818098f02c69509852ead8a41eab2a157f276665f82124513de7c88"},
+    {file = "python_rsync-0.1.2-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:5076210ca66c34461b0254c1fbe98d9a137ec91ad9c800f9ed710ee86da93d2c"},
+    {file = "python_rsync-0.1.2-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:3929df72beb02cff26fa0cf239e0c896dea2a4a2de9101ddecce8c2e578460b2"},
+    {file = "python_rsync-0.1.2-cp310-cp310-win32.whl", hash = "sha256:9ff16b0250a9d11806236d8d06df08b4bb4a55650b42e1928b43b6b83cc38025"},
+    {file = "python_rsync-0.1.2-cp310-cp310-win_amd64.whl", hash = "sha256:1aa1a229a7a912c9c21ca12ea7b8ef6c93475fdfa6ad9d932ca27bd70faa988b"},
+    {file = "python_rsync-0.1.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:edc553dd34cce4e0572c5dae8210bbc904e6a5e691d5b4d4cc7e21538bcf8cd1"},
+    {file = "python_rsync-0.1.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:d53ad0d172f64bb1ae004e464d873d89c7b412e476e61978b05afc310a9d1e53"},
+    {file = "python_rsync-0.1.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ed2026e4ad261dd19c1237c5156f7b5d702ee5a1678a311da62257c81aa5210e"},
+    {file = "python_rsync-0.1.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:1c4c3b8280323f9a4633b334260abce42b6e6be7bd3e2fe25320e8525f2a1da8"},
+    {file = "python_rsync-0.1.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:21eddc755236d53624ae641707b122d3afda39f139df1e1f02fdd2144fec863f"},
+    {file = "python_rsync-0.1.2-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:e6a5d4207047b047caa35d6ffae8b59cf7d8b545617e0f699b6747789ee55355"},
+    {file = "python_rsync-0.1.2-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:8a1df1d98848fd722a2f063a05296b48d57d3d5335f10c71542c7c97ce1c1235"},
+    {file = "python_rsync-0.1.2-cp311-cp311-win32.whl", hash = "sha256:c9fdae57970426290fefec3e7c71abc8ab082e8d3d1cdeae6a28c8c902ebea03"},
+    {file = "python_rsync-0.1.2-cp311-cp311-win_amd64.whl", hash = "sha256:364ad90a43550d0af7d00297a12b1851453c7c52de2e867cd4eab6d401634c36"},
+    {file = "python_rsync-0.1.2-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:1c5dd30f6aca29906be2d11bea8a49754dff9badf43c9da3a487dc9f1512ef7b"},
+    {file = "python_rsync-0.1.2-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:a66e573ef9c3116633c04ad6890e0238d1b101d62b558737c5e3c5fb954d521f"},
+    {file = "python_rsync-0.1.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:89c98d71126e89ba9106fe03144c6e4c31506f2ccf1d518a4ee6781d26118553"},
+    {file = "python_rsync-0.1.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6be8098287209b0b225cf680530ff12ebd1a254585b76f32ecb2f5dba5489b9a"},
+    {file = "python_rsync-0.1.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f02b49e04d4deb9a24f2518c14fe37a1f7deaab9c8619b95374062d1353cb576"},
+    {file = "python_rsync-0.1.2-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:c699193580d347dbae38dcda189d6f92fec3a385861b79157748e891ab81b441"},
+    {file = "python_rsync-0.1.2-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:0e692aa7656a623dff3fdd6a2df64eda61ff20db13fdfaf735fbc1897ab4a966"},
+    {file = "python_rsync-0.1.2-cp312-cp312-win32.whl", hash = "sha256:5480823fff254f5b31279af3facbf7162caf131778528c0c4c03b2180a71a204"},
+    {file = "python_rsync-0.1.2-cp312-cp312-win_amd64.whl", hash = "sha256:d0fa9c3efc482daed331c930854b1e5282391a322b16e28a7b097e675a098a45"},
+    {file = "python_rsync-0.1.2-cp38-cp38-macosx_10_9_universal2.whl", hash = "sha256:e3ea57b70e1bfd8fdfd47a4398aee55c29df4b944536e5feb192dccfd76cddaf"},
+    {file = "python_rsync-0.1.2-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:23fc6f81ee71e45b9374118d9c71766af9d10e6a7eb7c8b7a7c408caf943e8f0"},
+    {file = "python_rsync-0.1.2-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:1143c6a156e45e5d2a6885be305b42ad612c3653c3dc9bcffdcba156126c56a0"},
+    {file = "python_rsync-0.1.2-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:21f16e6adfd78a703516f89fb90dcc2651118289d0de7dbb4ba0873c702b1441"},
+    {file = "python_rsync-0.1.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:44ef72ca47f2d3b76bdac3e0ab895c50c143979da31fbf069be8b83ee273ff33"},
+    {file = "python_rsync-0.1.2-cp38-cp38-musllinux_1_1_aarch64.whl", hash = "sha256:ae294c5b71cbe9a5a2f78f35df7c3acca2ca1f42060da0361d2e37ea0f7bbf50"},
+    {file = "python_rsync-0.1.2-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:ec5a18f93eed7bd3507adff1a77ee7b5d41f1a2f0a452e0fd8d624be7c480d9b"},
+    {file = "python_rsync-0.1.2-cp38-cp38-win32.whl", hash = "sha256:e83ce678853abb6119735f65da635600009fc4b4a09f518c5a390e3c22088f5e"},
+    {file = "python_rsync-0.1.2-cp38-cp38-win_amd64.whl", hash = "sha256:0df3d3914794369130bbf4b611682a1bb8cdff08de85cae4f53b57c062df9d81"},
+    {file = "python_rsync-0.1.2-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:e35bdaab27a1125694f8eed3596a54b374fdf6a705376dc01057c0eea71121f8"},
+    {file = "python_rsync-0.1.2-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:a5588d8db64a3e0a1aa4b017ccd29d510e2dcee06cfc6a4b65bc17f6a10491f5"},
+    {file = "python_rsync-0.1.2-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:c11e2079e3f4abe25765cd4d01032f2ee6163217e7075751e254519c3064459e"},
+    {file = "python_rsync-0.1.2-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:018475ce3a2a926159b6182ce27f8a14c27e40061d0758103bccbe2542610210"},
+    {file = "python_rsync-0.1.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:503f48b7ac9f83433676d9cce1a1c7f38e5c1f3866a6a2d12efc8ed4e3879ee6"},
+    {file = "python_rsync-0.1.2-cp39-cp39-musllinux_1_1_aarch64.whl", hash = "sha256:797be624f24a3c8a799719f92d2709cd5b4fbdaa55f6ab39ed9fb7c45cd03450"},
+    {file = "python_rsync-0.1.2-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:791acef7eb9a73182532e67e722203e6b2ffcd38aa29fee007af048d32331033"},
+    {file = "python_rsync-0.1.2-cp39-cp39-win32.whl", hash = "sha256:f49d5b7776b1187699fbcdbcaa4c829af69204b4d1ad52c979357ac4e705371a"},
+    {file = "python_rsync-0.1.2-cp39-cp39-win_amd64.whl", hash = "sha256:13ed69f16527263de839bf71556a513af526208f669b36b4eb13c80e25842a37"},
+    {file = "python_rsync-0.1.2-pp310-pypy310_pp73-macosx_10_9_x86_64.whl", hash = "sha256:caa9bd3cec7678d1b297a13bf25deb577e6f588dd9e1f8e6e93d9e966d448983"},
+    {file = "python_rsync-0.1.2-pp310-pypy310_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:deb1f7df5c5b6a14a86d818c646018d4402356370d40532f831ecc2e347e5eb3"},
+    {file = "python_rsync-0.1.2-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:393dd81f3a6f686b6a36aa99dc8924c731276a9055a9762e482b59dc19140385"},
+    {file = "python_rsync-0.1.2-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:cc3b528e2101b6ed0852efa1fb77e7e35302ef0e163af6d77771bebc69833739"},
+    {file = "python_rsync-0.1.2-pp38-pypy38_pp73-macosx_10_9_x86_64.whl", hash = "sha256:43df902e3cdafe452951afdab47888d69fbd42f3d522547803c595c6009acd40"},
+    {file = "python_rsync-0.1.2-pp38-pypy38_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d5a56422a162f931c39fe3b7e0c42866101afab710ca2cecb1324f91ebe137ca"},
+    {file = "python_rsync-0.1.2-pp38-pypy38_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3c3a07694c620e7845086eb6ef41a324e02d2b9b47c67b43fe3da9f40c69ed1e"},
+    {file = "python_rsync-0.1.2-pp38-pypy38_pp73-win_amd64.whl", hash = "sha256:277e1c3259cf781fef83e586e992d8f7dd321c73ef4cc91a436a9ca3cdb3bc83"},
+    {file = "python_rsync-0.1.2-pp39-pypy39_pp73-macosx_10_9_x86_64.whl", hash = "sha256:4d93f814e1c106fb52957c2f162c01334d785ec599d441d61f16f8e08362c4bf"},
+    {file = "python_rsync-0.1.2-pp39-pypy39_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8a8a4821c9f9e69defc54acc45f4f054b33610c23a89d03fd9bf8cd786bad619"},
+    {file = "python_rsync-0.1.2-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7448dd9b301e217e3d2eb2cdd772725294051827230b5b77bbda74934a03cedb"},
+    {file = "python_rsync-0.1.2-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:f9f954297585f8bee97681a64b40eca4d98bbc325f49da893141f08d2bb49b7d"},
+]
+
+[package.dependencies]
+cffi = ">=1.0.0"
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 description = "World timezone definitions, modern and historical"
@@ -12100,4 +12170,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "c33c4bc9654072b74c2f768c6d4bf9da7b1a814b50046539fceb78a5541d30ee"
+content-hash = "cd3fac9f262eaf01a4ae8cbe81ae0bc9b4729c61cd2f88942acaef5a93f30818"
