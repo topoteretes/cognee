@@ -1,4 +1,5 @@
 import os
+import tempfile
 import pytest
 import networkx as nx
 import pandas as pd
@@ -30,26 +31,23 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
 
 
 @pytest.mark.asyncio
-@patch("cognee.infrastructure.files.storage.StorageManager.open")
-async def test_get_file_content_hash_file(mock_open_file):
-    is_called = False
+async def test_get_file_content_hash_file():
+    temp_file_path = None
+    text_content = "Test content with UTF-8: café ☕"
 
-    def read_data(size):
-        nonlocal is_called
-
-        if is_called:
-            return None
-
-        is_called = True
-        return b"test_data"
-
-    mock_open_file.return_value.__aenter__.return_value.read = read_data
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt", encoding="utf-8") as f:
+        test_content = text_content
+        f.write(test_content)
+        temp_file_path = f.name
 
     import hashlib
 
-    expected_hash = hashlib.md5(b"test_data").hexdigest()
-    result = await get_file_content_hash("test_file.txt")
-    assert result == expected_hash
+    try:
+        expected_hash = hashlib.md5(text_content.encode("utf-8")).hexdigest()
+        result = await get_file_content_hash(temp_file_path)
+        assert result == expected_hash
+    finally:
+        os.unlink(temp_file_path)
 
 
 @pytest.mark.asyncio
