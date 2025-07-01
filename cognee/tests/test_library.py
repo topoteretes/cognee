@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
@@ -79,7 +80,8 @@ async def main():
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+    data_root_directory = file_storage_config.get()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     # Assert relational, vector and graph databases have been cleaned properly
     await cognee.prune.prune_system(metadata=True)

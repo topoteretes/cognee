@@ -1,20 +1,11 @@
 import os
 import shutil
-import asyncio
-import aiofiles
-import aiofiles.os
-from aiofiles import ospath
+from contextlib import contextmanager
 from typing import BinaryIO, Optional, Union
-from contextlib import asynccontextmanager
 
 from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
-
-@asynccontextmanager
-async def async_open(path, *args, **kwargs):
-    file = await asyncio.to_thread(open, path, *args, **kwargs)
-    yield file
 
 
 class LocalFileStorage(Storage):
@@ -28,7 +19,7 @@ class LocalFileStorage(Storage):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
 
-    async def store(
+    def store(
         self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False
     ) -> str:
         """
@@ -50,26 +41,26 @@ class LocalFileStorage(Storage):
         full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
         file_dir_path = os.path.dirname(full_file_path)
 
-        await self.ensure_directory_exists(file_dir_path)
+        self.ensure_directory_exists(file_dir_path)
 
-        if overwrite or not await self.file_exists(file_path):
-            async with aiofiles.open(
+        if overwrite or not os.path.exists(full_file_path):
+            with open(
                 full_file_path,
                 mode="w" if isinstance(data, str) else "wb",
                 encoding="utf-8" if isinstance(data, str) else None,
             ) as file:
                 if hasattr(data, "read"):
                     data.seek(0)
-                    await file.write(data.read())
+                    file.write(data.read())
                 else:
-                    await file.write(data)
+                    file.write(data)
 
-                await file.close()
+                file.close()
 
         return "file://" + full_file_path
 
-    @asynccontextmanager
-    async def open(self, file_path: str, mode: str = "rb", *args, **kwargs):
+    @contextmanager
+    def open(self, file_path: str, mode: str = "rb", *args, **kwargs):
         """
         Retrieve data from a specified file path, returning the content as bytes.
 
@@ -90,7 +81,7 @@ class LocalFileStorage(Storage):
         """
         full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
 
-        async with async_open(full_file_path, mode=mode, *args, **kwargs) as file:
+        with open(full_file_path, mode=mode, *args, **kwargs) as file:
             file = FileBufferedReader(file, name="file://" + full_file_path)
 
             try:
@@ -98,7 +89,7 @@ class LocalFileStorage(Storage):
             finally:
                 file.close()
 
-    async def file_exists(self, file_path: str):
+    def file_exists(self, file_path: str):
         """
         Check if a specified file exists in the storage.
 
@@ -112,11 +103,11 @@ class LocalFileStorage(Storage):
 
             - bool: True if the file exists, otherwise False.
         """
-        return await ospath.exists(
+        return os.path.exists(
             os.path.join(self.storage_path.replace("file://", ""), file_path)
         )
 
-    async def ensure_directory_exists(self, directory_path: str = None):
+    def ensure_directory_exists(self, directory_path: str = None):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -130,8 +121,8 @@ class LocalFileStorage(Storage):
         if directory_path is None:
             directory_path = self.storage_path.replace("file://", "")
 
-        if not await ospath.exists(directory_path):
-            await aiofiles.os.makedirs(directory_path, exist_ok=True)
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path, exist_ok=True)
 
     def copy_file(self, source_file_path: str, destination_file_path: str):
         """
@@ -154,7 +145,7 @@ class LocalFileStorage(Storage):
             os.path.join(self.storage_path.replace("file://", ""), destination_file_path),
         )
 
-    async def remove(self, file_path: str):
+    def remove(self, file_path: str):
         """
         Remove the specified file from the storage if it exists.
 
@@ -165,10 +156,10 @@ class LocalFileStorage(Storage):
         """
         full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
 
-        if await ospath.exists(full_file_path):
-            await aiofiles.os.remove(full_file_path)
+        if os.path.exists(full_file_path):
+            os.remove(full_file_path)
 
-    async def remove_all(self, tree_path: str = None):
+    def remove_all(self, tree_path: str = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -188,6 +179,6 @@ class LocalFileStorage(Storage):
             tree_path = os.path.join(self.storage_path.replace("file://", ""), tree_path)
 
         try:
-            await asyncio.to_thread(shutil.rmtree, tree_path)
+            return shutil.rmtree(tree_path)
         except FileNotFoundError:
             pass

@@ -1,3 +1,4 @@
+import inspect
 from typing import BinaryIO
 from contextlib import asynccontextmanager
 
@@ -34,7 +35,10 @@ class StorageManager:
 
             - bool: True if the file exists, otherwise False.
         """
-        return await self.storage.file_exists(file_path)
+        if inspect.iscoroutinefunction(self.storage.file_exists):
+            return await self.storage.file_exists(file_path)
+        else:
+            return self.storage.file_exists(file_path)
 
     async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
@@ -52,7 +56,10 @@ class StorageManager:
 
             Returns the full path to the file.
         """
-        return await self.storage.store(file_path, data, overwrite)
+        if inspect.iscoroutinefunction(self.storage.store):
+            return await self.storage.store(file_path, data, overwrite)
+        else:
+            return self.storage.store(file_path, data, overwrite)
 
     @asynccontextmanager
     async def open(self, file_path: str, encoding: str = None, *args, **kwargs):
@@ -82,7 +89,7 @@ class StorageManager:
 
             storage = LocalFileStorage(self.storage.storage_path)
 
-            async with storage.open(file_path, *args, **kwargs) as file:
+            with storage.open(file_path, *args, **kwargs) as file:
                 yield file
 
     async def ensure_directory_exists(self, directory_path: str = None):
@@ -96,7 +103,10 @@ class StorageManager:
 
             - directory_path (str): The path of the directory to check or create.
         """
-        return await self.storage.ensure_directory_exists(directory_path)
+        if inspect.iscoroutinefunction(self.storage.ensure_directory_exists):
+            return await self.storage.ensure_directory_exists(directory_path)
+        else:
+            return self.storage.ensure_directory_exists(directory_path)
 
     async def remove(self, file_path: str):
         """
@@ -113,7 +123,10 @@ class StorageManager:
             Returns the outcome of the remove operation, as defined by the storage
             implementation.
         """
-        return await self.storage.remove(file_path)
+        if inspect.iscoroutinefunction(self.storage.remove):
+            return await self.storage.remove(file_path)
+        else:
+            return self.storage.remove(file_path)
 
     async def remove_all(self, tree_path: str = None):
         """
@@ -127,4 +140,7 @@ class StorageManager:
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        return await self.storage.remove_all(tree_path)
+        if inspect.iscoroutinefunction(self.storage.remove_all):
+            return await self.storage.remove_all(tree_path)
+        else:
+            return self.storage.remove_all(tree_path)

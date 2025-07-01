@@ -15,9 +15,9 @@ class config:
     @staticmethod
     def system_root_directory(system_root_directory: str):
         base_config = get_base_config()
-        base_config.system_root_directory = system_root_directory
+        base_config.system_root_directory = os.path.join(system_root_directory, ".cognee_system")
 
-        databases_directory_path = os.path.join(system_root_directory, "databases")
+        databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
 
         relational_config = get_relational_config()
         relational_config.db_path = databases_directory_path
@@ -33,7 +33,7 @@ class config:
     @staticmethod
     def data_root_directory(data_root_directory: str):
         base_config = get_base_config()
-        base_config.data_root_directory = data_root_directory
+        base_config.data_root_directory = os.path.join(data_root_directory, ".data_storage")
 
     @staticmethod
     def monitoring_tool(monitoring_tool: object):

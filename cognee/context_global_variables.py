@@ -43,15 +43,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     base_config = get_base_config()
 
-    data_root_directory = os.path.join(base_config.data_root_directory, user.id)
-    system_directory_path = os.path.join(base_config.system_root_directory, "databases", user.id)
-
-    # TODO: Find better location for database files
-    # cognee_directory_path = str(
-    #     pathlib.Path(
-    #         os.path.join(pathlib.Path(__file__).parent, f".cognee_system/databases/{user.id}")
-    #     ).resolve()
-    # )
+    data_root_directory = os.path.join(base_config.data_root_directory, str(user.id))
+    system_directory_path = os.path.join(base_config.system_root_directory, "databases", str(user.id))
 
     # Set vector and graph database configuration based on dataset database information
     vector_config = {
