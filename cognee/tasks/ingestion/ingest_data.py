@@ -76,7 +76,7 @@ async def ingest_data(
 
         # Process data
         for data_item in data:
-            file_path = await save_data_item_to_storage(data_item, dataset_name)
+            file_path = await save_data_item_to_storage(data_item)
 
             file_paths.append(file_path)
             file_name = path.basename(file_path)

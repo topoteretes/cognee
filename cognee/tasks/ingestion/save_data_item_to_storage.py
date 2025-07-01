@@ -4,12 +4,12 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], dataset_name: str) -> str:
+async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
 
-        file_path = await get_data_from_llama_index(data_item, dataset_name)
+        file_path = await get_data_from_llama_index(data_item)
 
     # data is a file object coming from upload.
     elif hasattr(data_item, "file"):

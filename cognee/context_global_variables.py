@@ -36,8 +36,6 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     base_config = get_base_config()
 
     if not os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
-        file_storage_config.set({"data_root_directory": base_config.data_root_directory})
-
         return
 
     user = await get_user(user_id)
@@ -45,7 +43,9 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     # To ensure permissions are enforced properly all datasets will have their own databases
     dataset_database = await get_or_create_dataset_database(dataset, user)
 
-    data_root_directory = os.path.join(base_config.data_root_directory, str(user.id))
+    data_root_directory = os.path.join(
+        base_config.data_root_directory, str(user.tenant_id or user.id)
+    )
     system_directory_path = os.path.join(
         base_config.system_root_directory, "databases", str(user.id)
     )

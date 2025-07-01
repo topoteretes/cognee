@@ -24,7 +24,7 @@ class Storage(Protocol):
         """
         pass
 
-    def store(self, file_path: str, data: Union[BinaryIO, str]):
+    def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool):
         """
         Store data at the specified file path.
 
@@ -33,6 +33,7 @@ class Storage(Protocol):
 
             - file_path (str): The path where the data will be stored.
             - data (bytes): The binary data to be stored.
+            - overwrite (bool): If True, overwrite the existing file.
         """
         pass
 
