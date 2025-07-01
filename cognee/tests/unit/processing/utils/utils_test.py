@@ -30,7 +30,7 @@ def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
 
 
 @pytest.mark.asyncio
-@patch("cognee.infrastructure.files.storage.StorageManager.StorageManager.open")
+@patch("cognee.infrastructure.files.storage.StorageManager.open")
 async def test_get_file_content_hash_file(mock_open_file):
     is_called = False
 
