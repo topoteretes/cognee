@@ -39,6 +39,151 @@ async def cognify(
     graph_db_config: dict = None,
     run_in_background: bool = False,
 ):
+    """
+    Transform ingested data into a structured knowledge graph.
+    
+    This is the core processing step in Cognee that converts raw text and documents 
+    into an intelligent knowledge graph. It analyzes content, extracts entities and 
+    relationships, and creates semantic connections for enhanced search and reasoning.
+    
+    Prerequisites:
+        - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation)
+        - **Data Added**: Must have data previously added via `cognee.add()`
+        - **Vector Database**: Must be accessible for embeddings storage
+        - **Graph Database**: Must be accessible for relationship storage
+    
+    Input Requirements:
+        - **Datasets**: Must contain data previously added via `cognee.add()`
+        - **Content Types**: Works with any text-extractable content including:
+            * Natural language documents
+            * Structured data (CSV, JSON)
+            * Code repositories
+            * Academic papers and technical documentation
+            * Mixed multimedia content (with text extraction)
+            
+    Processing Pipeline:
+        1. **Document Classification**: Identifies document types and structures
+        2. **Permission Validation**: Ensures user has processing rights
+        3. **Text Chunking**: Breaks content into semantically meaningful segments
+        4. **Entity Extraction**: Identifies key concepts, people, places, organizations
+        5. **Relationship Detection**: Discovers connections between entities
+        6. **Graph Construction**: Builds semantic knowledge graph with embeddings
+        7. **Content Summarization**: Creates hierarchical summaries for navigation
+        
+    Graph Model Customization:
+        The `graph_model` parameter allows custom knowledge structures:
+        - **Default**: General-purpose KnowledgeGraph for any domain
+        - **Custom Models**: Domain-specific schemas (e.g., scientific papers, code analysis)
+        - **Ontology Integration**: Use `ontology_file_path` for predefined vocabularies
+        
+    Args:
+        datasets: Dataset name(s) to process. Processes all available data if None.
+            - Single dataset: "my_dataset"
+            - Multiple datasets: ["docs", "research", "reports"]
+            - None: Process all datasets for the user
+        user: User context for authentication and data access. Uses default if None.
+        graph_model: Pydantic model defining the knowledge graph structure.
+                    Defaults to KnowledgeGraph for general-purpose processing.
+        chunker: Text chunking strategy (TextChunker, LangchainChunker).
+                - TextChunker: Paragraph-based chunking (default, most reliable)
+                - LangchainChunker: Recursive character splitting with overlap
+                Determines how documents are segmented for processing.
+        chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
+                   Formula: min(embedding_max_tokens, llm_max_tokens // 2)
+                   Default limits: ~512-8192 tokens depending on models.
+                   Smaller chunks = more granular but potentially fragmented knowledge.
+        ontology_file_path: Path to RDF/OWL ontology file for domain-specific entity types.
+                          Useful for specialized fields like medical or legal documents.
+        vector_db_config: Custom vector database configuration for embeddings storage.
+        graph_db_config: Custom graph database configuration for relationship storage.
+        run_in_background: If True, starts processing asynchronously and returns immediately.
+                          If False, waits for completion before returning.
+                          Background mode recommended for large datasets (>100MB).
+                          Use pipeline_run_id from return value to monitor progress.
+                          
+    Returns:
+        Union[dict, list[PipelineRunInfo]]: 
+            - **Blocking mode**: Dictionary mapping dataset_id -> PipelineRunInfo with:
+                * Processing status (completed/failed/in_progress)
+                * Extracted entity and relationship counts
+                * Processing duration and resource usage
+                * Error details if any failures occurred
+            - **Background mode**: List of PipelineRunInfo objects for tracking progress
+                * Use pipeline_run_id to monitor status
+                * Check completion via pipeline monitoring APIs
+                
+    Next Steps:
+        After successful cognify processing, use search functions to query the knowledge:
+        
+        ```python
+        import cognee
+        from cognee import SearchType
+        
+        # Process your data into knowledge graph
+        await cognee.cognify()
+        
+        # Query for insights using different search types:
+        
+        # 1. Natural language completion with graph context
+        insights = await cognee.search(
+            "What are the main themes?",
+            query_type=SearchType.GRAPH_COMPLETION
+        )
+        
+        # 2. Get entity relationships and connections
+        relationships = await cognee.search(
+            "connections between concepts",
+            query_type=SearchType.INSIGHTS
+        )
+        
+        # 3. Find relevant document chunks
+        chunks = await cognee.search(
+            "specific topic",
+            query_type=SearchType.CHUNKS
+        )
+        ```
+        
+    Advanced Usage:
+        ```python
+        # Custom domain model for scientific papers
+        class ScientificPaper(DataPoint):
+            title: str
+            authors: List[str]
+            methodology: str
+            findings: List[str]
+            
+        await cognee.cognify(
+            datasets=["research_papers"],
+            graph_model=ScientificPaper,
+            ontology_file_path="scientific_ontology.owl"
+        )
+        
+        # Background processing for large datasets
+        run_info = await cognee.cognify(
+            datasets=["large_corpus"],
+            run_in_background=True
+        )
+        # Check status later with run_info.pipeline_run_id
+        ```
+        
+        
+    Environment Variables:
+        Required:
+        - LLM_API_KEY: API key for your LLM provider
+        
+        Optional (same as add function):
+        - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
+        - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
+        - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
+        
+    Raises:
+        DatasetNotFoundError: If specified datasets don't exist
+        PermissionError: If user lacks processing rights
+        InvalidValueError: If LLM_API_KEY is not set
+        OntologyParsingError: If ontology file is malformed
+        ValueError: If chunks exceed max token limits (reduce chunk_size)
+        DatabaseNotCreatedError: If databases are not properly initialized
+    """
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
     if run_in_background:
