@@ -16,10 +16,12 @@ try:
     from cognee.infrastructure.databases.relational.config import get_relational_config
     from cognee.infrastructure.databases.vector.config import get_vectordb_config
     from cognee.infrastructure.databases.graph.config import get_graph_config
+
     _database_config_available = True
 except ImportError:
     # Handle cases where database configs might not be available during early initialization
     _database_config_available = False
+
 
 # Configure external library logging
 def configure_external_library_logging():
@@ -27,13 +29,15 @@ def configure_external_library_logging():
     # Configure LiteLLM logging to reduce verbosity
     try:
         import litellm
+
         litellm.set_verbose = False
-        
+
         # Suppress LiteLLM ERROR logging using standard logging
         logging.getLogger("litellm").setLevel(logging.CRITICAL)
     except ImportError:
         # LiteLLM not available, skip configuration
         pass
+
 
 # Export common log levels
 DEBUG = logging.DEBUG
@@ -177,7 +181,7 @@ def log_database_configuration(logger):
     if not _database_config_available:
         logger.debug("Database configuration logging skipped - imports not available")
         return
-        
+
     try:
         # Log relational database configuration
         relational_config = get_relational_config()
@@ -188,7 +192,7 @@ def log_database_configuration(logger):
         elif relational_config.db_provider == "sqlite":
             logger.info(f"SQLite path: {relational_config.db_path}")
             logger.info(f"SQLite database: {relational_config.db_name}")
-        
+
         # Log vector database configuration
         vector_config = get_vectordb_config()
         logger.info(f"Vector database: {vector_config.vector_db_provider}")
@@ -196,7 +200,7 @@ def log_database_configuration(logger):
             logger.info(f"Vector database path: {vector_config.vector_db_url}")
         else:
             logger.info(f"Vector database URL: {vector_config.vector_db_url}")
-            
+
         # Log graph database configuration
         graph_config = get_graph_config()
         logger.info(f"Graph database: {graph_config.graph_database_provider}")
@@ -204,7 +208,7 @@ def log_database_configuration(logger):
             logger.info(f"Graph database path: {graph_config.graph_file_path}")
         else:
             logger.info(f"Graph database URL: {graph_config.graph_database_url}")
-            
+
     except Exception as e:
         logger.warning(f"Could not retrieve database configuration: {str(e)}")
 

@@ -16,6 +16,7 @@ litellm.set_verbose = False
 
 # LiteLLM logging configuration is now handled by cognee.shared.logging_utils.configure_external_library_logging()
 
+
 class GenericAPIAdapter(LLMInterface):
     """
     Adapter for Generic API LLM provider API.
