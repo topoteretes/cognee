@@ -47,9 +47,6 @@ class SQLAlchemyAdapter:
                     self.temp_db_file = temp_file.name
                     connection_string = prefix + "///" + self.temp_db_file
 
-                # with open(self.temp_db_file, "w") as file:
-                #     file.write("")
-
                 run_sync(self.pull_from_s3())
 
         self.engine = create_async_engine(
@@ -475,12 +472,13 @@ class SQLAlchemyAdapter:
         Create the database if it does not exist, ensuring necessary directories are in place
         for SQLite.
         """
-        db_directory = path.dirname(self.db_path)
-        db_name = path.basename(self.db_path)
-        file_storage = get_file_storage(db_directory)
+        if self.engine.dialect.name == "sqlite":
+            db_directory = path.dirname(self.db_path)
+            db_name = path.basename(self.db_path)
+            file_storage = get_file_storage(db_directory)
 
-        if self.engine.dialect.name == "sqlite" and not await file_storage.file_exists(db_name):
-            await file_storage.ensure_directory_exists()
+            if not await file_storage.file_exists(db_name):
+                await file_storage.ensure_directory_exists()
 
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:
