@@ -107,7 +107,7 @@ class GenericAPIAdapter(LLMInterface):
         ) as error:
             if (
                 isinstance(error, InstructorRetryException)
-                and not "content management policy" in str(error).lower()
+                and "content management policy" not in str(error).lower()
             ):
                 raise error
 
@@ -141,7 +141,7 @@ class GenericAPIAdapter(LLMInterface):
             ) as error:
                 if (
                     isinstance(error, InstructorRetryException)
-                    and not "content management policy" in str(error).lower()
+                    and "content management policy" not in str(error).lower()
                 ):
                     raise error
                 else:

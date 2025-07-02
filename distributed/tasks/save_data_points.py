@@ -1,6 +1,7 @@
 # import json
 # import asyncio
 from pympler import asizeof
+
 # from cognee.modules.storage.utils import JSONEncoder
 from distributed.queues import save_data_points_queue
 # from cognee.modules.graph.utils import get_graph_from_model
@@ -62,6 +63,7 @@ async def save_data_points(data_points_and_relationships: tuple[list, list]):
 
     # graph_data_deduplication.reset()
 
+
 class GraphDataDeduplication:
     nodes_and_edges_map: dict
 
@@ -93,8 +95,11 @@ class GraphDataDeduplication:
 def try_pushing_nodes_to_queue(node_batch):
     try:
         save_data_points_queue.put((node_batch, []))
-    except Exception as e:
-        first_half, second_half = node_batch[:len(node_batch) // 2], node_batch[len(node_batch) // 2:]
+    except Exception:
+        first_half, second_half = (
+            node_batch[: len(node_batch) // 2],
+            node_batch[len(node_batch) // 2 :],
+        )
         save_data_points_queue.put((first_half, []))
         save_data_points_queue.put((second_half, []))
 
@@ -102,7 +107,10 @@ def try_pushing_nodes_to_queue(node_batch):
 def try_pushing_edges_to_queue(edge_batch):
     try:
         save_data_points_queue.put(([], edge_batch))
-    except Exception as e:
-        first_half, second_half = edge_batch[:len(edge_batch) // 2], edge_batch[len(edge_batch) // 2:]
+    except Exception:
+        first_half, second_half = (
+            edge_batch[: len(edge_batch) // 2],
+            edge_batch[len(edge_batch) // 2 :],
+        )
         save_data_points_queue.put(([], first_half))
         save_data_points_queue.put(([], second_half))

@@ -82,13 +82,15 @@ def record_graph_changes(func):
 
                 for node in nodes:
                     node_id = UUID(str(node.id))
-                    relationship_ledgers.append(GraphRelationshipLedger(
-                        id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
-                        source_node_id=node_id,
-                        destination_node_id=node_id,
-                        creator_function=f"{creator}.node",
-                        node_label=getattr(node, "name", None) or str(node.id),
-                    ))
+                    relationship_ledgers.append(
+                        GraphRelationshipLedger(
+                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
+                            source_node_id=node_id,
+                            destination_node_id=node_id,
+                            creator_function=f"{creator}.node",
+                            node_label=getattr(node, "name", None) or str(node.id),
+                        )
+                    )
 
                 try:
                     session.add_all(relationship_ledgers)
@@ -106,12 +108,14 @@ def record_graph_changes(func):
                     source_id = UUID(str(edge[0]))
                     target_id = UUID(str(edge[1]))
                     rel_type = str(edge[2])
-                    relationship_ledgers.append(GraphRelationshipLedger(
-                        id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
-                        source_node_id=source_id,
-                        destination_node_id=target_id,
-                        creator_function=f"{creator}.{rel_type}",
-                    ))
+                    relationship_ledgers.append(
+                        GraphRelationshipLedger(
+                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
+                            source_node_id=source_id,
+                            destination_node_id=target_id,
+                            creator_function=f"{creator}.{rel_type}",
+                        )
+                    )
 
                 try:
                     session.add_all(relationship_ledgers)

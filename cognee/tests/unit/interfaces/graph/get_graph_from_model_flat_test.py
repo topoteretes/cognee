@@ -68,7 +68,7 @@ async def get_graph_from_model_test():
     assert len(nodes) == 4
     assert len(edges) == 3
 
-    document_chunk_node = next(filter(lambda node: node.type is "DocumentChunk", nodes))
+    document_chunk_node = next(filter(lambda node: node.type == "DocumentChunk", nodes))
     assert not hasattr(document_chunk_node, "part_of"), "Expected part_of attribute to be removed"
 
 

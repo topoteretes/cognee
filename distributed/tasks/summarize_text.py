@@ -52,7 +52,10 @@ async def summarize_text(
     )
 
     graph_data_deduplication = GraphDataDeduplication()
-    deduplicated_nodes_and_edges = [graph_data_deduplication.deduplicate_nodes_and_edges(nodes, edges + relationships) for nodes, edges in nodes_and_edges]
+    deduplicated_nodes_and_edges = [
+        graph_data_deduplication.deduplicate_nodes_and_edges(nodes, edges + relationships)
+        for nodes, edges in nodes_and_edges
+    ]
 
     return deduplicated_nodes_and_edges
 

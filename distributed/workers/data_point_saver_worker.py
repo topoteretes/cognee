@@ -21,7 +21,9 @@ async def data_point_saver_worker():
                 return True
 
             if len(nodes_and_edges) == 2:
-                print(f"Processing {len(nodes_and_edges[0])} nodes and {len(nodes_and_edges[1])} edges.")
+                print(
+                    f"Processing {len(nodes_and_edges[0])} nodes and {len(nodes_and_edges[1])} edges."
+                )
                 nodes = nodes_and_edges[0]
                 edges = nodes_and_edges[1]
 
@@ -30,8 +32,8 @@ async def data_point_saver_worker():
 
                 if edges:
                     await graph_engine.add_edges(edges)
-                print(f"Finished processing nodes and edges.")
+                print("Finished processing nodes and edges.")
 
         else:
-            print(f"No jobs, go to sleep.")
+            print("No jobs, go to sleep.")
             await asyncio.sleep(5)
