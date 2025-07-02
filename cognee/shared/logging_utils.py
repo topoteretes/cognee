@@ -194,7 +194,7 @@ def log_database_configuration(logger):
         logger.info(f"Vector database: {vector_config.vector_db_provider}")
         if vector_config.vector_db_provider == "lancedb":
             logger.info(f"Vector database path: {vector_config.vector_db_url}")
-        elif vector_config.vector_db_provider in ["qdrant", "weaviate", "pgvector"]:
+        else:
             logger.info(f"Vector database URL: {vector_config.vector_db_url}")
             
         # Log graph database configuration
@@ -202,7 +202,7 @@ def log_database_configuration(logger):
         logger.info(f"Graph database: {graph_config.graph_database_provider}")
         if graph_config.graph_database_provider == "kuzu":
             logger.info(f"Graph database path: {graph_config.graph_file_path}")
-        elif graph_config.graph_database_provider in ["neo4j", "falkordb"]:
+        else:
             logger.info(f"Graph database URL: {graph_config.graph_database_url}")
             
     except Exception as e:
