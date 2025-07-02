@@ -1,6 +1,7 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
+from enum import Enum
 from typing import Optional, Any, List, Dict, Type, Tuple
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger, ERROR
@@ -22,6 +23,9 @@ from .neptune_analytics_utils import (
 
 logger = get_logger("NeptuneAnalyticsAdapter", level=ERROR)
 
+class SupportedLanguages(Enum):
+    OpenCypher = 1
+    Gremlin = 2
 
 class NeptuneAnalyticsAdapter(GraphDBInterface):
     """
@@ -343,25 +347,3 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         # TODO: Implement using aws_langchain Neptune Analytics connection retrieval
         logger.warning(f"Neptune Analytics get_connections method not yet implemented for node: {node_id}")
         return []
-
-    def serialize_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Serialize properties for Neptune Analytics storage.
-
-        Parameters:
-        -----------
-            - properties (Dict[str, Any]): Properties to serialize.
-
-        Returns:
-        --------
-            - Dict[str, Any]: Serialized properties.
-        """
-        serialized = {}
-        for key, value in properties.items():
-            if isinstance(value, (dict, list)):
-                serialized[key] = json.dumps(value)
-            elif isinstance(value, UUID):
-                serialized[key] = str(value)
-            else:
-                serialized[key] = value
-        return serialized

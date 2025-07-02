@@ -7,6 +7,8 @@ connection management, URL parsing, and Neptune-specific configurations.
 import re
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urlparse
+
+from cognee.infrastructure.databases.graph.neptune_analytics_driver.adapter import SupportedLanguages
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NeptuneAnalyticsUtils")
@@ -192,33 +194,6 @@ def format_neptune_error(error: Exception) -> str:
             return f"{friendly_msg} Original error: {error_msg}"
     
     return error_msg
-
-
-def get_supported_query_languages() -> list[str]:
-    """
-    Get the list of query languages supported by Neptune Analytics.
-    
-    Returns:
-    --------
-        - list[str]: List of supported query languages
-    """
-    return ["openCypher", "gremlin"]
-
-
-def is_query_language_supported(language: str) -> bool:
-    """
-    Check if a query language is supported by Neptune Analytics.
-    
-    Parameters:
-    -----------
-        - language (str): The query language to check
-        
-    Returns:
-    --------
-        - bool: True if the language is supported, False otherwise
-    """
-    return language.lower() in [lang.lower() for lang in get_supported_query_languages()]
-
 
 def get_default_query_timeout() -> int:
     """
