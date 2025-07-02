@@ -1,6 +1,7 @@
 import os
 import asyncio
 from os import path
+import tempfile
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
@@ -14,7 +15,7 @@ from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.storage import S3FileStorage, get_file_storage, get_storage_config
 
 from ..ModelBase import Base
 
@@ -32,18 +33,41 @@ class SQLAlchemyAdapter:
         self.db_path: str = None
         self.db_uri: str = connection_string
 
+        if "sqlite" in connection_string:
+            [prefix, db_path] = connection_string.split("///")
+            self.db_path = db_path
+
+            if "s3://" in self.db_path:
+                db_dir_path = path.dirname(self.db_path)
+                file_storage = get_file_storage(db_dir_path)
+
+                run_sync(file_storage.ensure_directory_exists())
+
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
+                    self.temp_db_file = temp_file.name
+                    connection_string = prefix + "///" + self.temp_db_file
+
+                # with open(self.temp_db_file, "w") as file:
+                #     file.write("")
+
+                run_sync(self.pull_from_s3())
+
         self.engine = create_async_engine(
             connection_string, poolclass=NullPool if "sqlite" in connection_string else None
         )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
-        if self.engine.dialect.name == "sqlite":
-            self.db_path = connection_string.split("///")[1]
+    async def push_to_s3(self) -> None:
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+            s3_file_storage = S3FileStorage("")
+            s3_file_storage.s3.put(self.temp_db_file, self.db_path, recursive=True)
 
-            db_dir_path = path.dirname(self.db_path)
-            file_storage = get_file_storage(db_dir_path)
-
-            run_sync(file_storage.ensure_directory_exists())
+    async def pull_from_s3(self) -> None:
+        s3_file_storage = S3FileStorage("")
+        try:
+            s3_file_storage.s3.get(self.db_path, self.temp_db_file, recursive=True)
+        except FileNotFoundError:
+            pass
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -451,11 +475,12 @@ class SQLAlchemyAdapter:
         Create the database if it does not exist, ensuring necessary directories are in place
         for SQLite.
         """
-        if self.engine.dialect.name == "sqlite" and not os.path.exists(self.db_path):
-            from cognee.infrastructure.files.storage import get_file_storage
+        db_directory = path.dirname(self.db_path)
+        db_name = path.basename(self.db_path)
+        file_storage = get_file_storage(db_directory)
 
-            db_directory = path.dirname(self.db_path)
-            await get_file_storage(db_directory).ensure_directory_exists()
+        if self.engine.dialect.name == "sqlite" and not await file_storage.file_exists(db_name):
+            await file_storage.ensure_directory_exists()
 
         async with self.engine.begin() as connection:
             if len(Base.metadata.tables.keys()) > 0:

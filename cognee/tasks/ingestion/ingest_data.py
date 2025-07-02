@@ -1,3 +1,4 @@
+import os
 import dlt
 import json
 import inspect
@@ -173,25 +174,26 @@ async def ingest_data(
 
     file_paths = await store_data_to_dataset(data, dataset_name, user, node_set, dataset_id)
 
-    # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
-    # can't be used inside the pipeline
-    if db_engine.engine.dialect.name == "sqlite":
-        # To use sqlite with dlt dataset_name must be set to "main".
-        # Sqlite doesn't support schemas
-        pipeline.run(
-            data_resources(file_paths, user),
-            table_name="file_metadata",
-            dataset_name="main",
-            write_disposition="merge",
-        )
-    else:
-        # Data should be stored in the same schema to allow deduplication
-        pipeline.run(
-            data_resources(file_paths, user),
-            table_name="file_metadata",
-            dataset_name="public",
-            write_disposition="merge",
-        )
+    if not os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+        # Note: DLT pipeline has its own event loop, therefore objects created in another event loop
+        # can't be used inside the pipeline
+        if db_engine.engine.dialect.name == "sqlite":
+            # To use sqlite with dlt dataset_name must be set to "main".
+            # Sqlite doesn't support schemas
+            pipeline.run(
+                data_resources(file_paths, user),
+                table_name="file_metadata",
+                dataset_name="main",
+                write_disposition="merge",
+            )
+        else:
+            # Data should be stored in the same schema to allow deduplication
+            pipeline.run(
+                data_resources(file_paths, user),
+                table_name="file_metadata",
+                dataset_name="public",
+                write_disposition="merge",
+            )
 
     datasets = await get_datasets_by_name(dataset_name, user.id)
 

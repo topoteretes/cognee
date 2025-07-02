@@ -1,7 +1,8 @@
 import json
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
@@ -131,6 +132,14 @@ async def run_tasks(
             dataset_id=dataset.id,
             dataset_name=dataset.name,
         )
+
+        graph_engine = await get_graph_engine()
+        if hasattr(graph_engine, "push_to_s3"):
+            await graph_engine.push_to_s3()
+
+        relational_engine = get_relational_engine()
+        if hasattr(relational_engine, "push_to_s3"):
+            await relational_engine.push_to_s3()
 
     except Exception as error:
         await log_pipeline_run_error(

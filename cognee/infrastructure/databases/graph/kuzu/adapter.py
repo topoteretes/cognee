@@ -1,20 +1,20 @@
 """Adapter for Kuzu graph database."""
 
-from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
-from cognee.shared.logging_utils import get_logger
-import json
 import os
-import shutil
+import json
 import asyncio
-from typing import Dict, Any, List, Union, Optional, Tuple, Type
-from datetime import datetime, timezone
+import tempfile
 from uuid import UUID
+from kuzu import Connection
+from kuzu.database import Database
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
-import kuzu
-from kuzu.database import Database
-from kuzu import Connection
+from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.utils.run_sync import run_sync
+from cognee.infrastructure.files.storage import S3FileStorage, get_file_storage
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
@@ -46,9 +46,16 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            # os.makedirs(self.db_path, exist_ok=True)
+            if "s3://" in self.db_path:
+                with tempfile.TemporaryDirectory() as temp_directory_path:
+                    self.temp_graph_directory = temp_directory_path
 
-            self.db = Database(self.db_path)
+                run_sync(self.pull_from_s3())
+
+                self.db = Database(self.temp_graph_directory)
+            else:
+                self.db = Database(self.db_path)
+
             self.db.init_database()
             self.connection = Connection(self.db)
             # Create node table with essential fields and timestamp
@@ -76,6 +83,18 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
             raise e
+
+    async def push_to_s3(self) -> None:
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+            s3_file_storage = S3FileStorage("")
+            s3_file_storage.s3.put(self.temp_graph_directory + "/", self.db_path, recursive=True)
+
+    async def pull_from_s3(self) -> None:
+        s3_file_storage = S3FileStorage("")
+        try:
+            s3_file_storage.s3.get(self.db_path, self.temp_graph_directory, recursive=True)
+        except FileNotFoundError:
+            pass
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
@@ -1385,36 +1404,6 @@ class KuzuAdapter(GraphDBInterface):
             "relationship_types": [rel[0] for rel in rel_types],
         }
 
-    async def get_node_labels_string(self) -> str:
-        """
-        Get all node labels as a string.
-
-        This method aggregates all unique node labels from the graph into a single string
-        representation, which can be helpful for overview and debugging purposes.
-
-        Returns:
-        --------
-
-            - str: A string of all distinct node labels, separated by '|'.
-        """
-        labels = await self.query("MATCH (n:Node) RETURN DISTINCT labels(n)")
-        return "|".join(sorted(set([label[0] for label in labels])))
-
-    async def get_relationship_labels_string(self) -> str:
-        """
-        Get all relationship types as a string.
-
-        This method aggregates all unique relationship types from the graph into a single string
-        representation, providing an overview of the relationships defined in the graph.
-
-        Returns:
-        --------
-
-            - str: A string of all distinct relationship types, separated by '|'.
-        """
-        types = await self.query("MATCH ()-[r:EDGE]->() RETURN DISTINCT r.relationship_name")
-        return "|".join(sorted(set([t[0] for t in types])))
-
     async def delete_graph(self) -> None:
         """
         Delete all data from the graph directory.
@@ -1432,8 +1421,13 @@ class KuzuAdapter(GraphDBInterface):
             if self.db:
                 self.db.close()
                 self.db = None
-            if os.path.exists(self.db_path):
-                shutil.rmtree(self.db_path)
+
+            db_dir = os.path.dirname(self.db_path)
+            db_name = os.path.basename(self.db_path)
+            file_storage = get_file_storage(db_dir)
+
+            if await file_storage.file_exists(db_name):
+                await file_storage.remove_all()
                 logger.info(f"Deleted Kuzu database files at {self.db_path}")
 
         except Exception as e:
@@ -1454,9 +1448,15 @@ class KuzuAdapter(GraphDBInterface):
             if self.db:
                 self.db.close()
                 self.db = None
-            if os.path.exists(self.db_path):
-                shutil.rmtree(self.db_path)
+
+            db_dir = os.path.dirname(self.db_path)
+            db_name = os.path.basename(self.db_path)
+            file_storage = get_file_storage(db_dir)
+
+            if await file_storage.file_exists(db_name):
+                await file_storage.remove_all()
                 logger.info(f"Deleted Kuzu database files at {self.db_path}")
+
             # Reinitialize the database
             self._initialize_connection()
             # Verify the database is empty
@@ -1470,61 +1470,6 @@ class KuzuAdapter(GraphDBInterface):
             logger.info("Database cleared successfully")
         except Exception as e:
             logger.error(f"Error during database clearing: {e}")
-            raise
-
-    async def save_graph_to_file(self, file_path: str) -> None:
-        """
-        Export the Kuzu database to a file.
-
-        This method exports the entire Kuzu graph database to a specified file path, utilizing
-        Kuzu's native export command. Ensure the directory exists prior to attempting the
-        export, and manage related exceptions as they arise.
-
-        Parameters:
-        -----------
-
-            - file_path (str): Path where to export the database.
-        """
-        try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-            # Use Kuzu's native EXPORT command, output is Parquet
-            export_query = f"EXPORT DATABASE '{file_path}'"
-            await self.query(export_query)
-
-            logger.info(f"Graph exported to {file_path}")
-
-        except Exception as e:
-            logger.error(f"Failed to export graph to file: {e}")
-            raise
-
-    async def load_graph_from_file(self, file_path: str) -> None:
-        """
-        Import a Kuzu database from a file.
-
-        This method imports a database from a specified file path, ensuring that the file exists
-        before attempting to import. Errors during the import process are managed accordingly,
-        allowing for smooth operation.
-
-        Parameters:
-        -----------
-
-            - file_path (str): Path to the exported database file.
-        """
-        try:
-            if not os.path.exists(file_path):
-                logger.warning(f"File {file_path} not found")
-                return
-
-            # Use Kuzu's native IMPORT command
-            import_query = f"IMPORT DATABASE '{file_path}'"
-            await self.query(import_query)
-
-            logger.info(f"Graph imported from {file_path}")
-
-        except Exception as e:
-            logger.error(f"Failed to import graph from file: {e}")
             raise
 
     async def get_document_subgraph(self, content_hash: str):

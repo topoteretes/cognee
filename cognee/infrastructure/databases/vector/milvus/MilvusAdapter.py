@@ -343,8 +343,6 @@ class MilvusAdapter(VectorDBInterface):
         """
         from pymilvus import MilvusException, exceptions
 
-        if limit <= 0:
-            return []
         client = self.get_milvus_client()
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")
