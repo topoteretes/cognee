@@ -24,28 +24,28 @@ async def test_local_file_deletion(data_text, file_location):
         data_hash = hashlib.md5(encoded_text).hexdigest()
         # Get data entry from database based on hash contents
         data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
-        assert os.path.isfile(
-            data.raw_data_location
-        ), f"Data location doesn't exist: {data.raw_data_location}"
+        assert os.path.isfile(data.raw_data_location), (
+            f"Data location doesn't exist: {data.raw_data_location}"
+        )
         # Test deletion of data along with local files created by cognee
         await engine.delete_data_entity(data.id)
-        assert not os.path.exists(
-            data.raw_data_location
-        ), f"Data location still exists after deletion: {data.raw_data_location}"
+        assert not os.path.exists(data.raw_data_location), (
+            f"Data location still exists after deletion: {data.raw_data_location}"
+        )
 
     async with engine.get_async_session() as session:
         # Get data entry from database based on file path
         data = (
             await session.scalars(select(Data).where(Data.raw_data_location == file_location))
         ).one()
-        assert os.path.isfile(
-            data.raw_data_location
-        ), f"Data location doesn't exist: {data.raw_data_location}"
+        assert os.path.isfile(data.raw_data_location), (
+            f"Data location doesn't exist: {data.raw_data_location}"
+        )
         # Test local files not created by cognee won't get deleted
         await engine.delete_data_entity(data.id)
-        assert os.path.exists(
-            data.raw_data_location
-        ), f"Data location doesn't exists: {data.raw_data_location}"
+        assert os.path.exists(data.raw_data_location), (
+            f"Data location doesn't exists: {data.raw_data_location}"
+        )
 
 
 async def test_getting_of_documents(dataset_name_1):
@@ -54,16 +54,16 @@ async def test_getting_of_documents(dataset_name_1):
 
     user = await get_default_user()
     document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
-    assert (
-        len(document_ids) == 1
-    ), f"Number of expected documents doesn't match {len(document_ids)} != 1"
+    assert len(document_ids) == 1, (
+        f"Number of expected documents doesn't match {len(document_ids)} != 1"
+    )
 
     # Test getting of documents for search when no dataset is provided
     user = await get_default_user()
     document_ids = await get_document_ids_for_user(user.id)
-    assert (
-        len(document_ids) == 2
-    ), f"Number of expected documents doesn't match {len(document_ids)} != 2"
+    assert len(document_ids) == 2, (
+        f"Number of expected documents doesn't match {len(document_ids)} != 2"
+    )
 
 
 async def main():

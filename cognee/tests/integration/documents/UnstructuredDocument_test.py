@@ -79,32 +79,32 @@ def test_UnstructuredDocument(mock_engine):
     for paragraph_data in pptx_document.read(chunker_cls=TextChunker, max_chunk_size=1024):
         assert 19 == paragraph_data.chunk_size, f" 19 != {paragraph_data.chunk_size = }"
         assert 104 == len(paragraph_data.text), f" 104 != {len(paragraph_data.text) = }"
-        assert (
-            "sentence_cut" == paragraph_data.cut_type
-        ), f" sentence_cut != {paragraph_data.cut_type = }"
+        assert "sentence_cut" == paragraph_data.cut_type, (
+            f" sentence_cut != {paragraph_data.cut_type = }"
+        )
 
     # Test DOCX
     for paragraph_data in docx_document.read(chunker_cls=TextChunker, max_chunk_size=1024):
         assert 16 == paragraph_data.chunk_size, f" 16 != {paragraph_data.chunk_size = }"
         assert 145 == len(paragraph_data.text), f" 145 != {len(paragraph_data.text) = }"
-        assert (
-            "sentence_end" == paragraph_data.cut_type
-        ), f" sentence_end != {paragraph_data.cut_type = }"
+        assert "sentence_end" == paragraph_data.cut_type, (
+            f" sentence_end != {paragraph_data.cut_type = }"
+        )
 
     # TEST CSV
     for paragraph_data in csv_document.read(chunker_cls=TextChunker, max_chunk_size=1024):
         assert 15 == paragraph_data.chunk_size, f" 15 != {paragraph_data.chunk_size = }"
-        assert (
-            "A A A A A A A A A,A A A A A A,A A" == paragraph_data.text
-        ), f"Read text doesn't match expected text: {paragraph_data.text}"
-        assert (
-            "sentence_cut" == paragraph_data.cut_type
-        ), f" sentence_cut != {paragraph_data.cut_type = }"
+        assert "A A A A A A A A A,A A A A A A,A A" == paragraph_data.text, (
+            f"Read text doesn't match expected text: {paragraph_data.text}"
+        )
+        assert "sentence_cut" == paragraph_data.cut_type, (
+            f" sentence_cut != {paragraph_data.cut_type = }"
+        )
 
     # Test XLSX
     for paragraph_data in xlsx_document.read(chunker_cls=TextChunker, max_chunk_size=1024):
         assert 36 == paragraph_data.chunk_size, f" 36 != {paragraph_data.chunk_size = }"
         assert 171 == len(paragraph_data.text), f" 171 != {len(paragraph_data.text) = }"
-        assert (
-            "sentence_cut" == paragraph_data.cut_type
-        ), f" sentence_cut != {paragraph_data.cut_type = }"
+        assert "sentence_cut" == paragraph_data.cut_type, (
+            f" sentence_cut != {paragraph_data.cut_type = }"
+        )

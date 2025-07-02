@@ -52,14 +52,14 @@ def test_metrics(metrics, actual, expected, expected_exact_score, expected_f1_ra
     test_case = MockTestCase(actual, expected)
 
     exact_match_score = metrics["exact_match"].measure(test_case)
-    assert (
-        exact_match_score == expected_exact_score
-    ), f"Exact match failed for '{actual}' vs '{expected}'"
+    assert exact_match_score == expected_exact_score, (
+        f"Exact match failed for '{actual}' vs '{expected}'"
+    )
 
     f1_score = metrics["f1"].measure(test_case)
-    assert (
-        expected_f1_range[0] <= f1_score <= expected_f1_range[1]
-    ), f"F1 score failed for '{actual}' vs '{expected}'"
+    assert expected_f1_range[0] <= f1_score <= expected_f1_range[1], (
+        f"F1 score failed for '{actual}' vs '{expected}'"
+    )
 
 
 class TestBootstrapCI(unittest.TestCase):

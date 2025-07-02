@@ -44,9 +44,9 @@ def test_adapter_can_instantiate_and_load(AdapterClass):
 
     corpus_list, qa_pairs = result
     assert isinstance(corpus_list, list), f"{AdapterClass.__name__} corpus_list is not a list."
-    assert isinstance(
-        qa_pairs, list
-    ), f"{AdapterClass.__name__} question_answer_pairs is not a list."
+    assert isinstance(qa_pairs, list), (
+        f"{AdapterClass.__name__} question_answer_pairs is not a list."
+    )
 
 
 @pytest.mark.parametrize("AdapterClass", ADAPTER_CLASSES)
@@ -71,9 +71,9 @@ def test_adapter_returns_some_content(AdapterClass):
     # We don't know how large the dataset is, but we expect at least 1 item
     assert len(corpus_list) > 0, f"{AdapterClass.__name__} returned an empty corpus_list."
     assert len(qa_pairs) > 0, f"{AdapterClass.__name__} returned an empty question_answer_pairs."
-    assert (
-        len(qa_pairs) <= limit
-    ), f"{AdapterClass.__name__} returned more QA items than requested limit={limit}."
+    assert len(qa_pairs) <= limit, (
+        f"{AdapterClass.__name__} returned more QA items than requested limit={limit}."
+    )
 
     for item in qa_pairs:
         assert "question" in item, f"{AdapterClass.__name__} missing 'question' key in QA pair."

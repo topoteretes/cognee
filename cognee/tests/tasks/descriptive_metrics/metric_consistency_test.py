@@ -12,9 +12,9 @@ async def check_graph_metrics_consistency_across_adapters(include_optional=False
         raise AssertionError(f"Metrics dictionaries have different keys: {diff_keys}")
 
     for key, neo4j_value in neo4j_metrics.items():
-        assert (
-            networkx_metrics[key] == neo4j_value
-        ), f"Difference in '{key}': got {neo4j_value} with neo4j and {networkx_metrics[key]} with networkx"
+        assert networkx_metrics[key] == neo4j_value, (
+            f"Difference in '{key}': got {neo4j_value} with neo4j and {networkx_metrics[key]} with networkx"
+        )
 
 
 if __name__ == "__main__":

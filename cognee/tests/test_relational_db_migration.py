@@ -112,9 +112,9 @@ async def relational_db_migration():
     else:
         raise ValueError(f"Unsupported graph database provider: {graph_db_provider}")
 
-    assert (
-        len(distinct_node_names) == 12
-    ), f"Expected 12 distinct node references, found {len(distinct_node_names)}"
+    assert len(distinct_node_names) == 12, (
+        f"Expected 12 distinct node references, found {len(distinct_node_names)}"
+    )
     assert len(found_edges) == 15, f"Expected 15 {relationship_label} edges, got {len(found_edges)}"
 
     expected_edges = {

@@ -71,6 +71,6 @@ async def assert_metrics(provider, include_optional=True):
         raise AssertionError(f"Metrics dictionaries have different keys: {diff_keys}")
 
     for key, ground_truth_value in ground_truth_metrics.items():
-        assert (
-            metrics[key] == ground_truth_value
-        ), f"Expected {ground_truth_value} for '{key}' with {provider}, got {metrics[key]}"
+        assert metrics[key] == ground_truth_value, (
+            f"Expected {ground_truth_value} for '{key}' with {provider}, got {metrics[key]}"
+        )

@@ -71,9 +71,9 @@ def run_chunking_test(test_text, expected_chunks, mock_engine):
 
     for expected_chunks_item, chunk in zip(expected_chunks, chunks):
         for key in ["text", "chunk_size", "cut_type"]:
-            assert (
-                chunk[key] == expected_chunks_item[key]
-            ), f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
+            assert chunk[key] == expected_chunks_item[key], (
+                f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
+            )
 
 
 def test_chunking_whole_text():

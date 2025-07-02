@@ -103,13 +103,13 @@ async def main():
             node_name=["nonexistent"],
         ).get_context("What is in the context?")
 
-        assert (
-            isinstance(context_nonempty, str) and context_nonempty != ""
-        ), f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
+        assert isinstance(context_nonempty, str) and context_nonempty != "", (
+            f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
+        )
 
-        assert (
-            context_empty == ""
-        ), f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
+        assert context_empty == "", (
+            f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
+        )
 
         await cognee.prune.prune_data()
         assert not os.path.isdir(data_directory_path), "Local data files are not deleted"

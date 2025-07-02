@@ -24,9 +24,9 @@ max_chunk_size_vals = [512, 1024, 4096]
 def test_chunk_by_paragraph_isomorphism(input_text, max_chunk_size, batch_paragraphs):
     chunks = chunk_by_paragraph(input_text, max_chunk_size, batch_paragraphs)
     reconstructed_text = "".join([chunk["text"] for chunk in chunks])
-    assert (
-        reconstructed_text == input_text
-    ), f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
+    assert reconstructed_text == input_text, (
+        f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,9 +54,9 @@ def test_paragraph_chunk_length(input_text, max_chunk_size, batch_paragraphs):
     )
 
     larger_chunks = chunk_lengths[chunk_lengths > max_chunk_size]
-    assert np.all(
-        chunk_lengths <= max_chunk_size
-    ), f"{max_chunk_size = }: {larger_chunks} are too large"
+    assert np.all(chunk_lengths <= max_chunk_size), (
+        f"{max_chunk_size = }: {larger_chunks} are too large"
+    )
 
 
 @pytest.mark.parametrize(
@@ -76,6 +76,6 @@ def test_chunk_by_paragraph_chunk_numbering(input_text, max_chunk_size, batch_pa
         batch_paragraphs=batch_paragraphs,
     )
     chunk_indices = np.array([chunk["chunk_index"] for chunk in chunks])
-    assert np.all(
-        chunk_indices == np.arange(len(chunk_indices))
-    ), f"{chunk_indices = } are not monotonically increasing"
+    assert np.all(chunk_indices == np.arange(len(chunk_indices))), (
+        f"{chunk_indices = } are not monotonically increasing"
+    )

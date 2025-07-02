@@ -57,9 +57,9 @@ class TestGraphCompletionRetriever:
         answer = await retriever.get_completion("Who works at Canva?")
 
         assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
-        assert all(
-            isinstance(item, str) and item.strip() for item in answer
-        ), "Answer must contain only non-empty strings"
+        assert all(isinstance(item, str) and item.strip() for item in answer), (
+            "Answer must contain only non-empty strings"
+        )
 
     @pytest.mark.asyncio
     async def test_graph_completion_extension_context_complex(self):
@@ -136,9 +136,9 @@ class TestGraphCompletionRetriever:
         answer = await retriever.get_completion("Who works at Figma?")
 
         assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
-        assert all(
-            isinstance(item, str) and item.strip() for item in answer
-        ), "Answer must contain only non-empty strings"
+        assert all(isinstance(item, str) and item.strip() for item in answer), (
+            "Answer must contain only non-empty strings"
+        )
 
     @pytest.mark.asyncio
     async def test_get_graph_completion_extension_context_on_empty_graph(self):
@@ -167,9 +167,9 @@ class TestGraphCompletionRetriever:
         answer = await retriever.get_completion("Who works at Figma?")
 
         assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
-        assert all(
-            isinstance(item, str) and item.strip() for item in answer
-        ), "Answer must contain only non-empty strings"
+        assert all(isinstance(item, str) and item.strip() for item in answer), (
+            "Answer must contain only non-empty strings"
+        )
 
 
 if __name__ == "__main__":
