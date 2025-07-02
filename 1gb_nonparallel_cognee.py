@@ -12,20 +12,24 @@ image = (
     modal.Image.from_dockerfile(path="Dockerfile_modal", force_build=False)
     .copy_local_file("pyproject.toml", "pyproject.toml")
     .copy_local_file("poetry.lock", "poetry.lock")
-    .env(
-        {
-            "ENV": os.getenv("ENV"),
-            "LLM_API_KEY": os.getenv("LLM_API_KEY"),
-            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
-            "AWS_ACCESS_KEY_ID": os.getenv("AWS_ACCESS_KEY_ID"),
-            "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY"),
-        }
+    .pip_install(
+        "protobuf",
+        "h2",
+        "deepeval",
+        "gdown",
+        "plotly",
+        "psycopg2-binary==2.9.10",
+        "asyncpg==0.30.0",
     )
-    .pip_install("protobuf", "h2", "deepeval", "gdown", "plotly")
 )
 
 
-@app.function(image=image, max_containers=1, timeout=86400, min_containers=1)
+@app.function(
+    image=image,
+    max_containers=1,
+    timeout=86400,
+    secrets=[modal.Secret.from_name("1gb_nonparallel_cognee")],
+)
 async def run_cognee_1gb():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
