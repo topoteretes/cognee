@@ -17,9 +17,7 @@ from cognee.infrastructure.llm.rate_limiter import (
 # Configure Litellm logging to reduce verbosity
 litellm.set_verbose = False
 
-# Suppress Litellm ERROR logging (using standard logging for external library configuration)
-logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
-logging.getLogger("litellm").setLevel(logging.CRITICAL)
+# LiteLLM logging configuration is now handled by cognee.shared.logging_utils.configure_external_library_logging()
 
 logger = get_logger()
 observe = get_observe()

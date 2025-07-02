@@ -19,12 +19,7 @@ from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 import logging
 
-# Configure Litellm logging to reduce verbosity
-litellm.set_verbose = False
-
-# Suppress Litellm ERROR logging using standard logging
-logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
-logging.getLogger("litellm").setLevel(logging.CRITICAL)
+# LiteLLM logging configuration is now handled by cognee.shared.logging_utils.configure_external_library_logging()
 
 observe = get_observe()
 

@@ -11,6 +11,30 @@ import importlib.metadata
 from cognee import __version__ as cognee_version
 from typing import Protocol
 
+# Import database configuration functions for logging
+try:
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+    _database_config_available = True
+except ImportError:
+    # Handle cases where database configs might not be available during early initialization
+    _database_config_available = False
+
+# Configure external library logging
+def configure_external_library_logging():
+    """Configure logging for external libraries to reduce verbosity"""
+    # Configure LiteLLM logging to reduce verbosity
+    try:
+        import litellm
+        litellm.set_verbose = False
+        
+        # Suppress LiteLLM ERROR logging using standard logging
+        logging.getLogger("litellm").setLevel(logging.CRITICAL)
+    except ImportError:
+        # LiteLLM not available, skip configuration
+        pass
+
 # Export common log levels
 DEBUG = logging.DEBUG
 INFO = logging.INFO
@@ -148,6 +172,43 @@ def get_logger(name=None, level=None) -> LoggerInterface:
         return logger
 
 
+def log_database_configuration(logger):
+    """Log the current database configuration for all database types"""
+    if not _database_config_available:
+        logger.debug("Database configuration logging skipped - imports not available")
+        return
+        
+    try:
+        # Log relational database configuration
+        relational_config = get_relational_config()
+        logger.info(f"Relational database: {relational_config.db_provider}")
+        if relational_config.db_provider == "postgres":
+            logger.info(f"Postgres host: {relational_config.db_host}:{relational_config.db_port}")
+            logger.info(f"Postgres database: {relational_config.db_name}")
+        elif relational_config.db_provider == "sqlite":
+            logger.info(f"SQLite path: {relational_config.db_path}")
+            logger.info(f"SQLite database: {relational_config.db_name}")
+        
+        # Log vector database configuration
+        vector_config = get_vectordb_config()
+        logger.info(f"Vector database: {vector_config.vector_db_provider}")
+        if vector_config.vector_db_provider == "lancedb":
+            logger.info(f"Vector database path: {vector_config.vector_db_url}")
+        elif vector_config.vector_db_provider in ["qdrant", "weaviate", "pgvector"]:
+            logger.info(f"Vector database URL: {vector_config.vector_db_url}")
+            
+        # Log graph database configuration
+        graph_config = get_graph_config()
+        logger.info(f"Graph database: {graph_config.graph_database_provider}")
+        if graph_config.graph_database_provider == "kuzu":
+            logger.info(f"Graph database path: {graph_config.graph_file_path}")
+        elif graph_config.graph_database_provider in ["neo4j", "falkordb"]:
+            logger.info(f"Graph database URL: {graph_config.graph_database_url}")
+            
+    except Exception as e:
+        logger.warning(f"Could not retrieve database configuration: {str(e)}")
+
+
 def cleanup_old_logs(logs_dir, max_files):
     """
     Removes old log files, keeping only the most recent ones.
@@ -192,6 +253,9 @@ def setup_logging(log_level=None, name=None):
     global _is_structlog_configured
 
     log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
+
+    # Configure external library logging early to suppress verbose output
+    configure_external_library_logging()
 
     def exception_handler(logger, method_name, event_dict):
         """Custom processor to handle uncaught exceptions."""
@@ -338,6 +402,9 @@ def setup_logging(log_level=None, name=None):
     )
 
     logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
+
+    # Log database configuration
+    log_database_configuration(logger)
 
     # Return the configured logger
     return logger

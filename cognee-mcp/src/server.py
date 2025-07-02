@@ -18,10 +18,7 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
-# Import database configuration functions for logging
-from cognee.infrastructure.databases.relational.config import get_relational_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
+# Database configuration logging is now handled by cognee.shared.logging_utils
 
 try:
     from codingagents.coding_rule_associations import (
@@ -544,37 +541,7 @@ def load_class(model_file, model_name):
     return model_class
 
 
-def log_database_configuration():
-    """Log the current database configuration for all database types"""
-    try:
-        # Log relational database configuration
-        relational_config = get_relational_config()
-        logger.info(f"Relational database: {relational_config.db_provider}")
-        if relational_config.db_provider == "postgres":
-            logger.info(f"Postgres host: {relational_config.db_host}:{relational_config.db_port}")
-            logger.info(f"Postgres database: {relational_config.db_name}")
-        elif relational_config.db_provider == "sqlite":
-            logger.info(f"SQLite path: {relational_config.db_path}")
-            logger.info(f"SQLite database: {relational_config.db_name}")
-        
-        # Log vector database configuration
-        vector_config = get_vectordb_config()
-        logger.info(f"Vector database: {vector_config.vector_db_provider}")
-        if vector_config.vector_db_provider == "lancedb":
-            logger.info(f"Vector database path: {vector_config.vector_db_url}")
-        elif vector_config.vector_db_provider in ["qdrant", "weaviate", "pgvector"]:
-            logger.info(f"Vector database URL: {vector_config.vector_db_url}")
-            
-        # Log graph database configuration
-        graph_config = get_graph_config()
-        logger.info(f"Graph database: {graph_config.graph_database_provider}")
-        if graph_config.graph_database_provider == "kuzu":
-            logger.info(f"Graph database path: {graph_config.graph_file_path}")
-        elif graph_config.graph_database_provider in ["neo4j", "falkordb"]:
-            logger.info(f"Graph database URL: {graph_config.graph_database_url}")
-            
-    except Exception as e:
-        logger.warning(f"Could not retrieve database configuration: {str(e)}")
+# Database configuration logging moved to cognee.shared.logging_utils.log_database_configuration()
 
 
 async def main():
@@ -589,9 +556,7 @@ async def main():
 
     args = parser.parse_args()
 
-    # Log database configurations
-    log_database_configuration()
-    
+    # Database configuration is now logged automatically by cognee.shared.logging_utils.setup_logging()
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
         await mcp.run_stdio_async()
