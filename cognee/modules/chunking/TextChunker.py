@@ -9,9 +9,9 @@ logger = get_logger()
 
 
 class TextChunker(Chunker):
-    def read(self):
+    async def read(self):
         paragraph_chunks = []
-        for content_text in self.get_text():
+        async for content_text in self.get_text():
             for chunk_data in chunk_by_paragraph(
                 content_text,
                 self.max_chunk_size,

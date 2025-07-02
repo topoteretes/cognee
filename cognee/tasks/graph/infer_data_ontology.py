@@ -13,7 +13,7 @@ import aiofiles
 import pandas as pd
 from pydantic import BaseModel
 
-from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
+from cognee.modules.graph.exceptions import EntityNotFoundError
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.get_llm_client import get_llm_client

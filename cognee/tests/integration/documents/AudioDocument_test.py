@@ -1,8 +1,11 @@
+import sys
 import uuid
+import pytest
 from unittest.mock import patch
+
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
-import sys
+from cognee.tests.integration.documents.async_gen_zip import async_gen_zip
 
 chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 
@@ -38,7 +41,8 @@ TEST_TEXT = """
 @patch.object(
     chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
 )
-def test_AudioDocument(mock_engine):
+@pytest.mark.asyncio
+async def test_AudioDocument(mock_engine):
     document = AudioDocument(
         id=uuid.uuid4(),
         name="audio-dummy-test",
@@ -47,7 +51,7 @@ def test_AudioDocument(mock_engine):
         mime_type="",
     )
     with patch.object(AudioDocument, "create_transcript", return_value=TEST_TEXT):
-        for ground_truth, paragraph_data in zip(
+        async for ground_truth, paragraph_data in async_gen_zip(
             GROUND_TRUTH,
             document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):

@@ -1,7 +1,6 @@
 from typing import BinaryIO, TypedDict
-import hashlib
 from .guess_file_type import guess_file_type
-from cognee.shared.utils import get_file_content_hash
+from ..utils.get_file_content_hash import get_file_content_hash
 
 
 class FileMetadata(TypedDict):
@@ -20,7 +19,7 @@ class FileMetadata(TypedDict):
     content_hash: str
 
 
-def get_file_metadata(file: BinaryIO) -> FileMetadata:
+async def get_file_metadata(file: BinaryIO) -> FileMetadata:
     """
     Retrieve metadata from a file object.
 
@@ -40,7 +39,7 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
           extension, and content hash.
     """
     file.seek(0)
-    content_hash = get_file_content_hash(file)
+    content_hash = await get_file_content_hash(file)
     file.seek(0)
 
     file_type = guess_file_type(file)
