@@ -49,12 +49,12 @@ def test_TextDocument(mock_engine, input_file, chunk_size):
         GROUND_TRUTH[input_file],
         document.read(chunker_cls=TextChunker, max_chunk_size=chunk_size),
     ):
-        assert ground_truth["word_count"] == paragraph_data.chunk_size, (
-            f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
-        )
-        assert ground_truth["len_text"] == len(paragraph_data.text), (
-            f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
-        )
-        assert ground_truth["cut_type"] == paragraph_data.cut_type, (
-            f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
-        )
+        assert (
+            ground_truth["word_count"] == paragraph_data.chunk_size
+        ), f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
+        assert ground_truth["len_text"] == len(
+            paragraph_data.text
+        ), f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
+        assert (
+            ground_truth["cut_type"] == paragraph_data.cut_type
+        ), f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'

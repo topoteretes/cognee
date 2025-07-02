@@ -157,15 +157,15 @@ def test_rate_limit_60_per_minute():
         if len(failures) > 0:
             first_failure_idx = int(failures[0].split()[1])
             print(f"First failure occurred at request index: {first_failure_idx}")
-            assert 58 <= first_failure_idx <= 62, (
-                f"Expected first failure around request #60, got #{first_failure_idx}"
-            )
+            assert (
+                58 <= first_failure_idx <= 62
+            ), f"Expected first failure around request #60, got #{first_failure_idx}"
 
         # Calculate requests per minute
         rate_per_minute = len(successes)
         print(f"Rate: {rate_per_minute} requests per minute")
 
         # Verify the rate is close to our target of 60 requests per minute
-        assert 58 <= rate_per_minute <= 62, (
-            f"Expected rate of ~60 requests per minute, got {rate_per_minute}"
-        )
+        assert (
+            58 <= rate_per_minute <= 62
+        ), f"Expected rate of ~60 requests per minute, got {rate_per_minute}"
