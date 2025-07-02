@@ -8,7 +8,6 @@ import re
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urlparse
 
-from cognee.infrastructure.databases.graph.neptune_analytics_driver.adapter import SupportedLanguages
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NeptuneAnalyticsUtils")

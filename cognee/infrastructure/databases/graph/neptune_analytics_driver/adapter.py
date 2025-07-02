@@ -23,9 +23,6 @@ from .neptune_analytics_utils import (
 
 logger = get_logger("NeptuneAnalyticsAdapter", level=ERROR)
 
-class SupportedLanguages(Enum):
-    OpenCypher = 1
-    Gremlin = 2
 
 class NeptuneAnalyticsAdapter(GraphDBInterface):
     """
