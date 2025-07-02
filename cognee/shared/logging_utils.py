@@ -1,11 +1,15 @@
 import os
 import sys
-import threading
 import logging
 import structlog
 import traceback
+import platform
 from datetime import datetime
 from pathlib import Path
+import importlib.metadata
+
+from cognee import __version__ as cognee_version
+from typing import Protocol
 
 # Export common log levels
 DEBUG = logging.DEBUG
@@ -23,11 +27,8 @@ log_levels = {
     "NOTSET": logging.NOTSET,
 }
 
-# Track if logging has been configured
-_is_configured = False
-
-# Create a lock for thread-safe initialization
-_setup_lock = threading.Lock()
+# Track if structlog logging has been configured
+_is_structlog_configured = False
 
 # Path to logs directory
 LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
@@ -35,6 +36,13 @@ LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
 
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
+
+# Version information
+PYTHON_VERSION = platform.python_version()
+STRUCTLOG_VERSION = structlog.__version__
+COGNEE_VERSION = cognee_version
+
+OS_INFO = f"{platform.system()} {platform.release()} ({platform.version()})"
 
 
 class PlainFileHandler(logging.FileHandler):
@@ -117,45 +125,27 @@ class PlainFileHandler(logging.FileHandler):
             self.flush()
 
 
-class LoggerInterface:
-    def info(self, msg, *args, **kwargs):
-        pass
-
-    def warning(self, msg, *args, **kwargs):
-        pass
-
-    def error(self, msg, *args, **kwargs):
-        pass
-
-    def critical(self, msg, *args, **kwargs):
-        pass
-
-    def debug(self, msg, *args, **kwargs):
-        pass
+class LoggerInterface(Protocol):
+    def info(self, msg: str, *args, **kwargs) -> None: ...
+    def warning(self, msg: str, *args, **kwargs) -> None: ...
+    def error(self, msg: str, *args, **kwargs) -> None: ...
+    def critical(self, msg: str, *args, **kwargs) -> None: ...
+    def debug(self, msg: str, *args, **kwargs) -> None: ...
 
 
 def get_logger(name=None, level=None) -> LoggerInterface:
-    """Get a configured structlog logger.
+    """Get a logger.
 
-    Args:
-        name: Logger name (default: None, uses __name__)
-        level: Logging level (default: None)
-
-    Returns:
-        A configured structlog logger instance
+    If `setup_logging()` has not been called, returns a standard Python logger.
+    If `setup_logging()` has been called, returns a structlog logger.
     """
-    global _is_configured
-
-    # Always first check if logger is already configured to not use threading lock if not necessary
-    if not _is_configured:
-        # Use threading lock to make sure setup_logging can be called only once
-        with _setup_lock:
-            # Unfortunately we also need a second check in case lock was entered twice at the same time
-            if not _is_configured:
-                setup_logging(level)
-                _is_configured = True
-
-    return structlog.get_logger(name if name else __name__)
+    if _is_structlog_configured:
+        return structlog.get_logger(name if name else __name__)
+    else:
+        logger = logging.getLogger(name if name else __name__)
+        if level is not None:
+            logger.setLevel(level)
+        return logger
 
 
 def cleanup_old_logs(logs_dir, max_files):
@@ -166,9 +156,8 @@ def cleanup_old_logs(logs_dir, max_files):
         logs_dir: Directory containing log files
         max_files: Maximum number of log files to keep
     """
+    logger = structlog.get_logger()
     try:
-        logger = structlog.get_logger()
-
         # Get all .log files in the directory (excluding README and other files)
         log_files = [f for f in logs_dir.glob("*.log") if f.is_file()]
 
@@ -200,6 +189,7 @@ def setup_logging(log_level=None, name=None):
     Returns:
         A configured structlog logger instance
     """
+    global _is_structlog_configured
 
     log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
 
@@ -249,8 +239,15 @@ def setup_logging(log_level=None, name=None):
 
         logger = structlog.get_logger()
         logger.error(
-            "Uncaught exception",
+            "Exception",
             exc_info=(exc_type, exc_value, traceback),
+        )
+        # Hand back to the original hook → prints traceback and exits
+        sys.__excepthook__(exc_type, exc_value, traceback)
+
+        logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
+        logger.info(
+            "Need help? Reach out to us on our Discord server: https://discord.gg/NQPKmU5CCg"
         )
 
     # Install exception handlers
@@ -314,6 +311,7 @@ def setup_logging(log_level=None, name=None):
 
     if log_level > logging.DEBUG:
         import warnings
+
         from sqlalchemy.exc import SAWarning
 
         warnings.filterwarnings(
@@ -326,12 +324,27 @@ def setup_logging(log_level=None, name=None):
     # Clean up old log files, keeping only the most recent ones
     cleanup_old_logs(LOGS_DIR, MAX_LOG_FILES)
 
-    # Return a configured logger
-    return structlog.get_logger(name if name else __name__)
+    # Mark logging as configured
+    _is_structlog_configured = True
+
+    # Get a configured logger and log system information
+    logger = structlog.get_logger(name if name else __name__)
+    logger.info(
+        "Logging initialized",
+        python_version=PYTHON_VERSION,
+        structlog_version=STRUCTLOG_VERSION,
+        cognee_version=COGNEE_VERSION,
+        os_info=OS_INFO,
+    )
+
+    logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
+
+    # Return the configured logger
+    return logger
 
 
 def get_log_file_location():
-    # Get the root logger
+    """Return the file path of the log file in use, if any."""
     root_logger = logging.getLogger()
 
     # Loop through handlers to find the FileHandler

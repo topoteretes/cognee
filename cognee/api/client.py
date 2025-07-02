@@ -1,12 +1,21 @@
 """FastAPI server for the Cognee API."""
 
 import os
+
 import uvicorn
-from cognee.shared.logging_utils import get_logger
 import sentry_sdk
+from traceback import format_exc
+from contextlib import asynccontextmanager
+from fastapi import Request
 from fastapi import FastAPI, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
+
+from cognee.exceptions import CogneeApiError
+from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -14,11 +23,7 @@ from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_
 from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
-from fastapi import Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
-from cognee.exceptions import CogneeApiError
-from traceback import format_exc
+from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -27,7 +32,6 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
 )
-from contextlib import asynccontextmanager
 
 logger = get_logger()
 
@@ -62,13 +66,44 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title="Cognee API",
+        version="1.0.0",
+        description="Cognee API with Bearer token and Cookie auth",
+        routes=app.routes,
+    )
+
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer"},
+        "CookieAuth": {
+            "type": "apiKey",
+            "in": "cookie",
+            "name": os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
+        },
+    }
+
+    openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+
+    app.openapi_schema = openapi_schema
+
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.exception_handler(RequestValidationError)
@@ -104,6 +139,22 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
 
 
+@app.get("/")
+async def root():
+    """
+    Root endpoint that returns a welcome message.
+    """
+    return {"message": "Hello, World, I am alive!"}
+
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint that returns the server status.
+    """
+    return Response(status_code=200)
+
+
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 
 app.include_router(
@@ -124,11 +175,11 @@ app.include_router(
     tags=["auth"],
 )
 
-app.include_router(
-    get_users_router(),
-    prefix="/api/v1/users",
-    tags=["users"],
-)
+app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
+
+app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
+
+app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
 app.include_router(
     get_permissions_router(),
@@ -136,30 +187,7 @@ app.include_router(
     tags=["permissions"],
 )
 
-
-@app.get("/")
-async def root():
-    """
-    Root endpoint that returns a welcome message.
-    """
-    return {"message": "Hello, World, I am alive!"}
-
-
-@app.get("/health")
-def health_check():
-    """
-    Health check endpoint that returns the server status.
-    """
-    return Response(status_code=200)
-
-
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
-
-app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
-
-app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
-
-app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
@@ -167,9 +195,17 @@ app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["vi
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
+app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
+
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
     app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])
+
+app.include_router(
+    get_users_router(),
+    prefix="/api/v1/users",
+    tags=["users"],
+)
 
 
 def start_api_server(host: str = "0.0.0.0", port: int = 8000):
@@ -190,4 +226,8 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
-    start_api_server()
+    logger = setup_logging()
+
+    start_api_server(
+        host=os.getenv("HTTP_API_HOST", "0.0.0.0"), port=int(os.getenv("HTTP_API_PORT", 8000))
+    )

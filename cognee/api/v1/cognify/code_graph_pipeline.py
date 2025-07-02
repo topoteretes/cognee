@@ -1,8 +1,7 @@
 import os
 import pathlib
 import asyncio
-from uuid import NAMESPACE_OID, uuid5
-from cognee.shared.logging_utils import get_logger
+from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.modules.observability.get_observe import get_observe
 
 from cognee.api.v1.search import SearchType, search
@@ -12,6 +11,7 @@ from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.modules.data.methods import create_dataset
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.ingestion import ingest_data
@@ -20,6 +20,7 @@ from cognee.tasks.repo_processor import get_non_py_files, get_repo_file_dependen
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.infrastructure.llm import get_max_chunk_tokens
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 observe = get_observe()
 
@@ -42,7 +43,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     tasks = [
         Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
-        Task(add_data_points, task_config={"batch_size": 500}),
+        Task(add_data_points, task_config={"batch_size": 30}),
     ]
 
     if include_docs:
@@ -64,16 +65,21 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
             ),
         ]
 
-    dataset_id = uuid5(NAMESPACE_OID, "codebase")
+    dataset_name = "codebase"
+
+    # Save dataset to database
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        dataset = await create_dataset(dataset_name, user, session)
 
     if include_docs:
         non_code_pipeline_run = run_tasks(
-            non_code_tasks, dataset_id, repo_path, user, "cognify_pipeline"
+            non_code_tasks, dataset.id, repo_path, user, "cognify_pipeline"
         )
         async for run_status in non_code_pipeline_run:
             yield run_status
 
-    async for run_status in run_tasks(tasks, dataset_id, repo_path, user, "cognify_code_pipeline"):
+    async for run_status in run_tasks(tasks, dataset.id, repo_path, user, "cognify_code_pipeline"):
         yield run_status
 
 
@@ -96,4 +102,5 @@ if __name__ == "__main__":
         for file in search_results:
             print(file["name"])
 
+    logger = setup_logging(name="code_graph_pipeline")
     asyncio.run(main())

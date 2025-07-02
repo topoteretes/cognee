@@ -33,9 +33,6 @@ COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --no-editable
 
-# Copy .env file first if it exists (for environment variables)
-COPY .env* /app/
-
 # Copy Alembic configuration
 COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic
@@ -47,6 +44,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

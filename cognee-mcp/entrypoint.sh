@@ -13,17 +13,22 @@ echo "Environment: $ENVIRONMENT"
 # inconsistencies and should cause the startup to fail. This check allows for
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
-MIGRATION_OUTPUT=$(uv run alembic upgrade head 2>&1) || {
-    if [[ $MIGRATION_OUTPUT == *"UserAlreadyExists"* ]] || [[ $MIGRATION_OUTPUT == *"User default_user@example.com already exists"* ]]; then
+
+MIGRATION_OUTPUT=$(alembic upgrade head)
+MIGRATION_EXIT_CODE=$?
+
+if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
+    if [[ "$MIGRATION_OUTPUT" == *"UserAlreadyExists"* ]] || [[ "$MIGRATION_OUTPUT" == *"User default_user@example.com already exists"* ]]; then
         echo "Warning: Default user already exists, continuing startup..."
     else
-        echo "Migration failed with unexpected error:"
-        echo "$MIGRATION_OUTPUT"
+        echo "Migration failed with unexpected error."
         exit 1
     fi
-}
+fi
 
-echo "Starting Cognee MCP Server"
+echo "Database migrations done."
+
+echo "Starting Cognee MCP Server..."
 
 # Add startup delay to ensure DB is ready
 sleep 2

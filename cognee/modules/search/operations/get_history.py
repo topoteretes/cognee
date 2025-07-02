@@ -16,7 +16,10 @@ async def get_history(user_id: UUID, limit: int = 10) -> list[Result]:
         Result.id, Result.value.label("text"), Result.created_at, literal("system").label("user")
     ).filter(Result.user_id == user_id)
 
-    history_query = queries_query.union(results_query).order_by("created_at").limit(limit)
+    history_query = queries_query.union(results_query).order_by("created_at")
+
+    if limit > 0:
+        history_query = history_query.limit(limit)
 
     async with db_engine.get_async_session() as session:
         history = (await session.execute(history_query)).all()

@@ -1,11 +1,12 @@
 """Adapter for Kuzu graph database."""
 
+from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 from cognee.shared.logging_utils import get_logger
 import json
 import os
 import shutil
 import asyncio
-from typing import Dict, Any, List, Union, Optional, Tuple
+from typing import Dict, Any, List, Union, Optional, Tuple, Type
 from datetime import datetime, timezone
 from uuid import UUID
 from contextlib import asynccontextmanager
@@ -25,7 +26,14 @@ logger = get_logger()
 
 
 class KuzuAdapter(GraphDBInterface):
-    """Adapter for Kuzu graph database operations with improved consistency and async support."""
+    """
+    Adapter for Kuzu graph database operations with improved consistency and async support.
+
+    This class facilitates operations for working with the Kuzu graph database, supporting
+    both direct database queries and a structured asynchronous interface for node and edge
+    management. It contains methods for querying, adding, and deleting nodes and edges as
+    well as for graph metrics and data extraction.
+    """
 
     def __init__(self, db_path: str):
         """Initialize Kuzu database connection and schema."""
@@ -39,6 +47,7 @@ class KuzuAdapter(GraphDBInterface):
         """Initialize the Kuzu database connection and schema."""
         try:
             os.makedirs(self.db_path, exist_ok=True)
+
             self.db = Database(self.db_path)
             self.db.init_database()
             self.connection = Connection(self.db)
@@ -66,10 +75,28 @@ class KuzuAdapter(GraphDBInterface):
             logger.debug("Kuzu database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
-            raise
+            raise e
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
-        """Execute a Kuzu query asynchronously with automatic reconnection."""
+        """
+        Execute a Kuzu query asynchronously with automatic reconnection.
+
+        This method runs a database query while managing potential reconnections. It handles
+        parameters in a dictionary and processes results to return structured data. The method
+        raises any exceptions encountered during query execution.
+
+        Parameters:
+        -----------
+
+            - query (str): The Kuzu query string to be executed.
+            - params (Optional[dict]): A dictionary of parameters for the query, if applicable.
+              (default None)
+
+        Returns:
+        --------
+
+            - List[Tuple]: A list of tuples representing the query results.
+        """
         loop = asyncio.get_running_loop()
         params = params or {}
 
@@ -99,9 +126,12 @@ class KuzuAdapter(GraphDBInterface):
 
     @asynccontextmanager
     async def get_session(self):
-        """Get a database session.
+        """
+        Get a database session.
 
-        Kuzu doesn't have session management like Neo4j, so this provides API compatibility.
+        This provides an API-compatible session management for Kuzu, even though it does not
+        have built-in session management like other databases. It yields the current connection
+        and on exit performs cleanup if necessary.
         """
         try:
             yield self.connection
@@ -165,13 +195,39 @@ class KuzuAdapter(GraphDBInterface):
     # Node Operations
 
     async def has_node(self, node_id: str) -> bool:
-        """Check if a node exists."""
+        """
+        Check if a node exists.
+
+        This method checks for the existence of a node in the database by its identifier. It
+        returns a boolean indicating whether the node is present or not.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node to check.
+
+        Returns:
+        --------
+
+            - bool: True if the node exists, False otherwise.
+        """
         query_str = "MATCH (n:Node) WHERE n.id = $id RETURN COUNT(n) > 0"
         result = await self.query(query_str, {"id": node_id})
         return result[0][0] if result else False
 
     async def add_node(self, node: DataPoint) -> None:
-        """Add a single node to the graph if it doesn't exist."""
+        """
+        Add a single node to the graph if it doesn't exist.
+
+        This method constructs and executes a query to add a node to the graph, ensuring that it
+        is not duplicated by checking its existence first. An error is raised if the operation
+        fails.
+
+        Parameters:
+        -----------
+
+            - node (DataPoint): The node to be added, represented as a DataPoint.
+        """
         try:
             properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
 
@@ -216,7 +272,19 @@ class KuzuAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
-        """Add multiple nodes to the graph in a batch operation."""
+        """
+        Add multiple nodes to the graph in a batch operation.
+
+        This method allows for the addition of multiple nodes in a single operation to enhance
+        performance. It processes a list of nodes and constructs the necessary query for
+        insertion. Errors encountered during the addition will be logged and raised.
+
+        Parameters:
+        -----------
+
+            - nodes (List[DataPoint]): A list of nodes to be added to the graph, each
+              represented as a DataPoint.
+        """
         if not nodes:
             return
 
@@ -272,17 +340,54 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def delete_node(self, node_id: str) -> None:
-        """Delete a node and its relationships."""
+        """
+        Delete a node and its relationships.
+
+        This method removes a node identified by its ID along with all associated relationships.
+        It encapsulates the delete operation for simplicity in usage.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node to be deleted.
+        """
         query_str = "MATCH (n:Node) WHERE n.id = $id DETACH DELETE n"
         await self.query(query_str, {"id": node_id})
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
-        """Delete multiple nodes at once."""
+        """
+        Delete multiple nodes at once.
+
+        This method facilitates the deletion of a list of nodes, identified by their IDs,
+        concurrently. It ensures efficiency by using a single query to detach deletes for all
+        nodes in the list.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of identifiers for the nodes to be deleted.
+        """
         query_str = "MATCH (n:Node) WHERE n.id IN $ids DETACH DELETE n"
         await self.query(query_str, {"ids": node_ids})
 
     async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Extract a node by its ID."""
+        """
+        Extract a node by its ID.
+
+        This method retrieves a node's data by its identifier and returns it as a dictionary. If
+        the node is not found or an error occurs, it returns None.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node to be extracted.
+
+        Returns:
+        --------
+
+            - Optional[Dict[str, Any]]: A dictionary of the node's properties if found,
+              otherwise None.
+        """
         query_str = """
         MATCH (n:Node)
         WHERE n.id = $id
@@ -304,7 +409,24 @@ class KuzuAdapter(GraphDBInterface):
             return None
 
     async def extract_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
-        """Extract multiple nodes by their IDs."""
+        """
+        Extract multiple nodes by their IDs.
+
+        This method retrieves a list of nodes identified by their IDs and returns their data as
+        a list of dictionaries. It handles possible retrieval errors internally and will return
+        an empty list if no nodes are found.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of identifiers for the nodes to be extracted.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries containing the properties of the
+              extracted nodes.
+        """
         query_str = """
         MATCH (n:Node)
         WHERE n.id IN $node_ids
@@ -327,7 +449,25 @@ class KuzuAdapter(GraphDBInterface):
     # Edge Operations
 
     async def has_edge(self, from_node: str, to_node: str, edge_label: str) -> bool:
-        """Check if an edge exists between nodes with the given relationship name."""
+        """
+        Check if an edge exists between nodes with the given relationship name.
+
+        This method verifies the existence of a directed edge defined by the relationship name
+        between two specified nodes. It returns a boolean value indicating presence or absence
+        of the edge.
+
+        Parameters:
+        -----------
+
+            - from_node (str): The identifier of the source node.
+            - to_node (str): The identifier of the target node.
+            - edge_label (str): The label of the edge representing the relationship name.
+
+        Returns:
+        --------
+
+            - bool: True if the edge exists, False otherwise.
+        """
         query_str = """
         MATCH (from:Node)-[r:EDGE]->(to:Node)
         WHERE from.id = $from_id AND to.id = $to_id AND r.relationship_name = $edge_label
@@ -339,7 +479,25 @@ class KuzuAdapter(GraphDBInterface):
         return result[0][0] if result else False
 
     async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
-        """Check if multiple edges exist in a batch operation."""
+        """
+        Check if multiple edges exist in a batch operation.
+
+        This method checks for the presence of specified edges in the database and returns a
+        list of edges that exist. It is beneficial for efficiency in checking multiple edges
+        simultaneously.
+
+        Parameters:
+        -----------
+
+            - edges (List[Tuple[str, str, str]]): A list of edges where each edge is represented
+              as a tuple of (from_node, to_node, edge_label).
+
+        Returns:
+        --------
+
+            - List[Tuple[str, str, str]]: A list of tuples representing the existing edges from
+              the provided list.
+        """
         if not edges:
             return []
 
@@ -383,7 +541,23 @@ class KuzuAdapter(GraphDBInterface):
         relationship_name: str,
         edge_properties: Dict[str, Any] = {},
     ) -> None:
-        """Add an edge between two nodes."""
+        """
+        Add an edge between two nodes.
+
+        This method constructs and executes a query to create a directed edge between two
+        specified nodes with certain properties. It will raise an error if the addition fails
+        during execution.
+
+        Parameters:
+        -----------
+
+            - from_node (str): The identifier of the source node from which the edge originates.
+            - to_node (str): The identifier of the target node to which the edge points.
+            - relationship_name (str): The label of the edge to be created, representing the
+              relationship name.
+            - edge_properties (Dict[str, Any]): A dictionary containing properties for the edge.
+              (default {})
+        """
         try:
             query, params = self._edge_query_and_params(
                 from_node, to_node, relationship_name, edge_properties
@@ -395,7 +569,19 @@ class KuzuAdapter(GraphDBInterface):
 
     @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
-        """Add multiple edges in a batch operation."""
+        """
+        Add multiple edges in a batch operation.
+
+        This method enables efficient insertion of multiple edges at once by processing a list
+        of edge details. It improves performance for batch operations compared to adding edges
+        individually. Errors during execution are logged and raised as necessary.
+
+        Parameters:
+        -----------
+
+            - edges (List[Tuple[str, str, str, Dict[str, Any]]]): A list of edges represented as
+              tuples of (from_node, to_node, relationship_name, edge_properties).
+        """
         if not edges:
             return
 
@@ -437,12 +623,23 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
-        """Get all edges connected to a node.
+        """
+        Get all edges connected to a node.
+
+        This method retrieves all edges that are linked to a specified node and returns them in
+        a structured format. If an error occurs or no edges exist, an empty list is returned.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node for which to retrieve edges.
 
         Returns:
-            List of tuples containing (source_node, relationship_name, target_node)
-            where source_node and target_node are dictionaries with node properties,
-            and relationship_name is a string.
+        --------
+
+            - List[Tuple[Dict[str, Any], str, Dict[str, Any]]]: A list of tuples where each
+              tuple contains (source_node, relationship_name, target_node), with source_node and
+              target_node as dictionaries of node properties.
         """
         query_str = """
         MATCH (n:Node)-[r]-(m:Node)
@@ -477,11 +674,44 @@ class KuzuAdapter(GraphDBInterface):
     # Neighbor Operations
 
     async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
-        """Get all neighboring nodes."""
+        """
+        Get all neighboring nodes.
+
+        This method simply calls the get_neighbours method for API compatibility and retrieves
+        connected nodes neighboring the specified node. It returns a list of neighbor nodes'
+        properties as dictionaries.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node for which to find neighbors.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries representing neighboring nodes'
+              properties.
+        """
         return await self.get_neighbours(node_id)
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Get a single node by ID."""
+        """
+        Get a single node by ID.
+
+        This method retrieves the properties of a node identified by its ID and returns them as
+        a dictionary. If the node does not exist, None is returned.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node to retrieve.
+
+        Returns:
+        --------
+
+            - Optional[Dict[str, Any]]: A dictionary containing the properties of the node if
+              found, otherwise None.
+        """
         query_str = """
         MATCH (n:Node)
         WHERE n.id = $id
@@ -502,7 +732,24 @@ class KuzuAdapter(GraphDBInterface):
             return None
 
     async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
-        """Get multiple nodes by their IDs."""
+        """
+        Get multiple nodes by their IDs.
+
+        This method retrieves properties for multiple nodes identified by their IDs and returns
+        them as a list of dictionaries. An empty list is returned if no nodes are found or an
+        error occurs.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of identifiers for the nodes to be retrieved.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries containing properties of each
+              retrieved node.
+        """
         query_str = """
         MATCH (n:Node)
         WHERE n.id IN $node_ids
@@ -521,7 +768,24 @@ class KuzuAdapter(GraphDBInterface):
             return []
 
     async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
-        """Get all neighbouring nodes."""
+        """
+        Get all neighbouring nodes.
+
+        This method retrieves all neighboring nodes connected to a specified node and returns
+        them as a list of dictionaries. It may return an empty list if no neighbors exist or an
+        error occurs.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node for which to find neighbors.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries representing neighboring nodes'
+              properties.
+        """
         query_str = """
         MATCH (n)-[r]-(m)
         WHERE n.id = $id
@@ -537,7 +801,26 @@ class KuzuAdapter(GraphDBInterface):
     async def get_predecessors(
         self, node_id: Union[str, UUID], edge_label: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get all predecessor nodes."""
+        """
+        Get all predecessor nodes.
+
+        This method retrieves all nodes that are predecessors of the specified node. If an edge
+        label is provided, it filters the results accordingly. It returns a list of dictionaries
+        containing properties of these predecessor nodes.
+
+        Parameters:
+        -----------
+
+            - node_id (Union[str, UUID]): The identifier of the specified node.
+            - edge_label (Optional[str]): An optional label to filter the edges by relationship
+              name. (default None)
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries representing all predecessor nodes'
+              properties.
+        """
         try:
             if edge_label:
                 query_str = """
@@ -562,7 +845,26 @@ class KuzuAdapter(GraphDBInterface):
     async def get_successors(
         self, node_id: Union[str, UUID], edge_label: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get all successor nodes."""
+        """
+        Get all successor nodes.
+
+        This method retrieves all nodes that are successors of the specified node. An edge label
+        can be provided to filter the results. It returns a list of dictionaries detailing these
+        successor nodes' properties.
+
+        Parameters:
+        -----------
+
+            - node_id (Union[str, UUID]): The identifier of the specified node.
+            - edge_label (Optional[str]): An optional label to filter the edges by relationship
+              name. (default None)
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: A list of dictionaries representing all successor nodes'
+              properties.
+        """
         try:
             if edge_label:
                 query_str = """
@@ -587,7 +889,25 @@ class KuzuAdapter(GraphDBInterface):
     async def get_connections(
         self, node_id: str
     ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
-        """Get all nodes connected to a given node."""
+        """
+        Get all nodes connected to a given node.
+
+        This method retrieves all nodes directly connected to a specified node along with the
+        relationships between them, returning structured data in a list of tuples. Each tuple
+        contains source and target node properties along with the relationship information.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The identifier of the node for which to retrieve connections.
+
+        Returns:
+        --------
+
+            - List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]}: A list of tuples
+              containing (source_node, relationship_name, target_node) with dictionaries for
+              source_node and target_node properties.
+        """
         query_str = """
         MATCH (n:Node)-[r:EDGE]-(m:Node)
         WHERE n.id = $node_id
@@ -635,7 +955,19 @@ class KuzuAdapter(GraphDBInterface):
     async def remove_connection_to_predecessors_of(
         self, node_ids: List[str], edge_label: str
     ) -> None:
-        """Remove all incoming edges of specified type for given nodes."""
+        """
+        Remove all incoming edges of specified type for given nodes.
+
+        This method disconnects predecessor relationships of a specific type for the specified
+        nodes, managing edges in a single operation effectively.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of identifiers for the nodes whose relationships to
+              be removed.
+            - edge_label (str): The label of the edge to be removed.
+        """
         query_str = """
         MATCH (n)<-[r:EDGE]-(m)
         WHERE n.id IN $node_ids AND r.relationship_name = $edge_label
@@ -646,7 +978,19 @@ class KuzuAdapter(GraphDBInterface):
     async def remove_connection_to_successors_of(
         self, node_ids: List[str], edge_label: str
     ) -> None:
-        """Remove all outgoing edges of specified type for given nodes."""
+        """
+        Remove all outgoing edges of specified type for given nodes.
+
+        This method disconnects successor relationships of a specified type for the specified
+        nodes in a single efficient operation.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of identifiers for the nodes whose relationships to
+              be removed.
+            - edge_label (str): The label of the edge to be removed.
+        """
         query_str = """
         MATCH (n)-[r:EDGE]->(m)
         WHERE n.id IN $node_ids AND r.relationship_name = $edge_label
@@ -659,7 +1003,20 @@ class KuzuAdapter(GraphDBInterface):
     async def get_graph_data(
         self,
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
-        """Get all nodes and edges in the graph."""
+        """
+        Get all nodes and edges in the graph.
+
+        This method fetches the entire graph's structure, including all nodes and their
+        properties as well as relationships and their details, returning them in a structured
+        format. Errors during query execution will result in raised exceptions.
+
+        Returns:
+        --------
+
+            - Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+              A tuple with two elements: a list of tuples of (node_id, properties) and a list of
+              tuples of (source_id, target_id, relationship_name, properties).
+        """
         try:
             nodes_query = """
             MATCH (n:Node)
@@ -688,7 +1045,7 @@ class KuzuAdapter(GraphDBInterface):
                 return [], []
 
             edges_query = """
-            MATCH (n:Node)-[r:EDGE]->(m:Node)
+            MATCH (n:Node)-[r]->(m:Node)
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edges = await self.query(edges_query)
@@ -728,10 +1085,108 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to get graph data: {e}")
             raise
 
+    async def get_nodeset_subgraph(
+        self, node_type: Type[Any], node_name: List[str]
+    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        """
+        Get subgraph for a set of nodes based on type and names.
+
+        This method queries for nodes of a specific type and their corresponding neighbors,
+        returning both nodes and edges connecting them. It's useful for analyzing a targeted
+        subset of the graph.
+
+        Parameters:
+        -----------
+
+            - node_type (Type[Any]): Type of nodes to retrieve as specified by the user.
+            - node_name (List[str]): List of names corresponding to the nodes to be retrieved.
+
+        Returns:
+        --------
+
+            - Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]}: A tuple
+              containing a list of nodes and a list of edges related to those nodes.
+        """
+        label = node_type.__name__
+        primary_query = """
+            UNWIND $names AS wantedName
+            MATCH (n:Node)
+            WHERE n.type = $label AND n.name = wantedName
+            RETURN DISTINCT n.id
+        """
+        primary_rows = await self.query(primary_query, {"names": node_name, "label": label})
+        primary_ids = [row[0] for row in primary_rows]
+        if not primary_ids:
+            return [], []
+
+        neighbor_query = """
+            MATCH (n:Node)-[:EDGE]-(nbr:Node)
+            WHERE n.id IN $ids
+            RETURN DISTINCT nbr.id
+        """
+        nbr_rows = await self.query(neighbor_query, {"ids": primary_ids})
+        neighbor_ids = [row[0] for row in nbr_rows]
+
+        all_ids = list({*primary_ids, *neighbor_ids})
+
+        nodes_query = """
+            MATCH (n:Node)
+            WHERE n.id IN $ids
+            RETURN n.id, n.name, n.type, n.properties
+        """
+        node_rows = await self.query(nodes_query, {"ids": all_ids})
+        nodes: List[Tuple[str, dict]] = []
+        for node_id, name, typ, props in node_rows:
+            data = {"id": node_id, "name": name, "type": typ}
+            if props:
+                try:
+                    data.update(json.loads(props))
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse JSON props for node {node_id}")
+            nodes.append((node_id, data))
+
+        edges_query = """
+            MATCH (a:Node)-[r:EDGE]-(b:Node)
+            WHERE a.id IN $ids AND b.id IN $ids
+            RETURN a.id, b.id, r.relationship_name, r.properties
+        """
+        edge_rows = await self.query(edges_query, {"ids": all_ids})
+        edges: List[Tuple[str, str, str, dict]] = []
+        for from_id, to_id, rel_type, props in edge_rows:
+            data = {}
+            if props:
+                try:
+                    data = json.loads(props)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse JSON props for edge {from_id}->{to_id}")
+
+            edges.append((from_id, to_id, rel_type, data))
+
+        return nodes, edges
+
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ):
-        """Get filtered nodes and relationships based on attributes."""
+        """
+        Get filtered nodes and relationships based on attributes.
+
+        This method accepts attribute filters and retrieves nodes and relationships that match
+        the specified conditions. It allows complex filtering across node properties and edge
+        attributes.
+
+        Parameters:
+        -----------
+
+            - attribute_filters (List[Dict[str, List[Union[str, int]]]]): A list of dictionaries
+              specifying attributes and their corresponding values for filtering nodes and
+              edges.
+
+        Returns:
+        --------
+
+            A tuple containing a list of filtered node properties and a list of filtered edge
+            properties.
+        """
 
         where_clauses = []
         params = {}
@@ -755,8 +1210,24 @@ class KuzuAdapter(GraphDBInterface):
         return ([n[0] for n in nodes], [e[0] for e in edges])
 
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
-        """For the definition of these metrics, please refer to
-        https://docs.cognee.ai/core_concepts/graph_generation/descriptive_metrics"""
+        """
+        Get metrics on graph structure and connectivity.
+
+        This method computes various metrics around the graph, such as node and edge counts,
+        mean degree, and connected component sizes. Optionally, it can include additional
+        metrics based on user request.
+
+        Parameters:
+        -----------
+
+            - include_optional: A boolean flag indicating whether to include optional metrics in
+              the output. (default False)
+
+        Returns:
+        --------
+
+            - Dict[str, Any]: A dictionary containing various metrics related to the graph.
+        """
 
         try:
             # Get basic graph data
@@ -871,7 +1342,18 @@ class KuzuAdapter(GraphDBInterface):
         return result[0][0] if result and result[0][0] is not None else -1
 
     async def get_disconnected_nodes(self) -> List[str]:
-        """Get nodes that are not connected to any other node."""
+        """
+        Get nodes that are not connected to any other node.
+
+        This method retrieves identifiers of nodes that lack any relationships in the graph,
+        indicating they are standalone. It will return an empty list if no disconnected nodes
+        exist.
+
+        Returns:
+        --------
+
+            - List[str]: A list of identifiers for disconnected nodes.
+        """
         query_str = """
         MATCH (n:Node)
         WHERE NOT EXISTS((n)-[]-())
@@ -883,7 +1365,19 @@ class KuzuAdapter(GraphDBInterface):
     # Graph Meta-Data Operations
 
     async def get_model_independent_graph_data(self) -> Dict[str, List[str]]:
-        """Get graph data independent of any specific data model."""
+        """
+        Get graph data independent of any specific data model.
+
+        This method returns a representation of the graph that includes distinct node labels and
+        relationship types, making it easier to analyze the graph's structure without tying it
+        to a specific implementation.
+
+        Returns:
+        --------
+
+            - Dict[str, List[str]]: A dictionary summarizing the node labels and relationship
+              types present in the graph.
+        """
         node_labels = await self.query("MATCH (n:Node) RETURN DISTINCT labels(n)")
         rel_types = await self.query("MATCH ()-[r:EDGE]->() RETURN DISTINCT r.relationship_name")
         return {
@@ -892,27 +1386,68 @@ class KuzuAdapter(GraphDBInterface):
         }
 
     async def get_node_labels_string(self) -> str:
-        """Get all node labels as a string."""
+        """
+        Get all node labels as a string.
+
+        This method aggregates all unique node labels from the graph into a single string
+        representation, which can be helpful for overview and debugging purposes.
+
+        Returns:
+        --------
+
+            - str: A string of all distinct node labels, separated by '|'.
+        """
         labels = await self.query("MATCH (n:Node) RETURN DISTINCT labels(n)")
         return "|".join(sorted(set([label[0] for label in labels])))
 
     async def get_relationship_labels_string(self) -> str:
-        """Get all relationship types as a string."""
+        """
+        Get all relationship types as a string.
+
+        This method aggregates all unique relationship types from the graph into a single string
+        representation, providing an overview of the relationships defined in the graph.
+
+        Returns:
+        --------
+
+            - str: A string of all distinct relationship types, separated by '|'.
+        """
         types = await self.query("MATCH ()-[r:EDGE]->() RETURN DISTINCT r.relationship_name")
         return "|".join(sorted(set([t[0] for t in types])))
 
     async def delete_graph(self) -> None:
-        """Delete all data from the graph while preserving the database structure."""
+        """
+        Delete all data from the graph directory.
+
+        This method deletes all nodes and relationships from the graph directory
+        It raises exceptions for failures occurring during deletion processes.
+        """
         try:
             # Use DETACH DELETE to remove both nodes and their relationships in one operation
             await self.query("MATCH (n:Node) DETACH DELETE n")
             logger.info("Cleared all data from graph while preserving structure")
+
+            if self.connection:
+                self.connection = None
+            if self.db:
+                self.db.close()
+                self.db = None
+            if os.path.exists(self.db_path):
+                shutil.rmtree(self.db_path)
+                logger.info(f"Deleted Kuzu database files at {self.db_path}")
+
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
             raise
 
     async def clear_database(self) -> None:
-        """Clear all data from the database by deleting the database files and reinitializing."""
+        """
+        Clear all data from the database by deleting the database files and reinitializing.
+
+        This method removes all files associated with the database and reinitializes the Kuzu
+        database structure, ensuring a completely empty state. It handles exceptions that might
+        occur during file deletions or initializations carefully.
+        """
         try:
             if self.connection:
                 self.connection = None
@@ -938,10 +1473,17 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def save_graph_to_file(self, file_path: str) -> None:
-        """Export the Kuzu database to a file.
+        """
+        Export the Kuzu database to a file.
 
-        Args:
-            file_path: Path where to export the database
+        This method exports the entire Kuzu graph database to a specified file path, utilizing
+        Kuzu's native export command. Ensure the directory exists prior to attempting the
+        export, and manage related exceptions as they arise.
+
+        Parameters:
+        -----------
+
+            - file_path (str): Path where to export the database.
         """
         try:
             # Ensure directory exists
@@ -958,10 +1500,17 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def load_graph_from_file(self, file_path: str) -> None:
-        """Import a Kuzu database from a file.
+        """
+        Import a Kuzu database from a file.
 
-        Args:
-            file_path: Path to the exported database file
+        This method imports a database from a specified file path, ensuring that the file exists
+        before attempting to import. Errors during the import process are managed accordingly,
+        allowing for smooth operation.
+
+        Parameters:
+        -----------
+
+            - file_path (str): Path to the exported database file.
         """
         try:
             if not os.path.exists(file_path):
@@ -979,7 +1528,24 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def get_document_subgraph(self, content_hash: str):
-        """Get all nodes that should be deleted when removing a document."""
+        """
+        Get all nodes that should be deleted when removing a document.
+
+        This method constructs a complex query that identifies all nodes related to a specified
+        document and returns a dictionary of these nodes. Ensures thorough checks for orphaned
+        entities and inaccurate relationships that should be removed alongside the document.
+
+        Parameters:
+        -----------
+
+            - content_hash (str): The identifier for the document to query against.
+
+        Returns:
+        --------
+
+            A dictionary containing details of the document and associated nodes that need to be
+            deleted, or None if no related nodes are found.
+        """
         query = """
         MATCH (doc:Node)
         WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.name = $content_hash
@@ -1034,7 +1600,23 @@ class KuzuAdapter(GraphDBInterface):
         }
 
     async def get_degree_one_nodes(self, node_type: str):
-        """Get all nodes that have only one connection."""
+        """
+        Get all nodes that have only one connection.
+
+        This method retrieves nodes which are connected to exactly one other node, identified by
+        their specific type. It raises a ValueError if the input type is invalid and processes
+        queries efficiently to return targeted results.
+
+        Parameters:
+        -----------
+
+            - node_type (str): The type of nodes to filter by, must be 'Entity' or 'EntityType'.
+
+        Returns:
+        --------
+
+            A list of nodes that have only one connection, as identified by the specified type.
+        """
         if not node_type or node_type not in ["Entity", "EntityType"]:
             raise ValueError("node_type must be either 'Entity' or 'EntityType'")
 

@@ -1,7 +1,7 @@
 import os
 import asyncio
 import pathlib
-from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.shared.logging_utils import setup_logging, ERROR
 
 import cognee
 from cognee.api.v1.search import SearchType
@@ -21,11 +21,11 @@ async def main():
     # and description of these files
     mp3_file_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent,
-        ".data/multimedia/text_to_speech.mp3",
+        "examples/data/multimedia/text_to_speech.mp3",
     )
     png_file_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent,
-        ".data/multimedia/example.png",
+        "examples/data/multimedia/example.png",
     )
 
     # Add the files, and make it available for cognify
@@ -46,7 +46,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = get_logger(level=ERROR)
+    logger = setup_logging(log_level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

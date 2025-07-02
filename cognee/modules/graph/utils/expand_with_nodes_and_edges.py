@@ -7,7 +7,6 @@ from cognee.modules.engine.utils import (
     generate_node_id,
     generate_node_name,
 )
-from owlready2 import Thing, ThingClass
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 
@@ -15,11 +14,14 @@ from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver: OntologyResolver = OntologyResolver(),
+    ontology_resolver: OntologyResolver = None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     if existing_edges_map is None:
         existing_edges_map = {}
+
+    if ontology_resolver is None:
+        ontology_resolver = OntologyResolver()
 
     added_nodes_map = {}
     added_ontology_nodes_map = {}
@@ -80,7 +82,7 @@ def expand_with_nodes_and_edges(
                     ont_node_id = generate_node_id(ontology_node_to_store.name)
                     ont_node_name = generate_node_name(ontology_node_to_store.name)
 
-                    if isinstance(ontology_node_to_store, ThingClass):
+                    if ontology_node_to_store.category == "classes":
                         ont_node_key = f"{ont_node_id}_type"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -92,7 +94,7 @@ def expand_with_nodes_and_edges(
                                 ontology_valid=True,
                             )
 
-                    elif isinstance(ontology_node_to_store, Thing):
+                    elif ontology_node_to_store.category == "individuals":
                         ont_node_key = f"{ont_node_id}_entity"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -102,6 +104,7 @@ def expand_with_nodes_and_edges(
                                 name=ont_node_name,
                                 description=ont_node_name,
                                 ontology_valid=True,
+                                belongs_to_set=data_chunk.belongs_to_set,
                             )
 
                 for source, relation, target in ontology_entity_type_edges:
@@ -156,6 +159,7 @@ def expand_with_nodes_and_edges(
                     is_a=type_node,
                     description=node.description,
                     ontology_valid=ontology_validated_source_ent,
+                    belongs_to_set=data_chunk.belongs_to_set,
                 )
 
                 added_nodes_map[entity_node_key] = entity_node
@@ -164,7 +168,7 @@ def expand_with_nodes_and_edges(
                     ont_node_id = generate_node_id(ontology_node_to_store.name)
                     ont_node_name = generate_node_name(ontology_node_to_store.name)
 
-                    if isinstance(ontology_node_to_store, ThingClass):
+                    if ontology_node_to_store.category == "classes":
                         ont_node_key = f"{ont_node_id}_type"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -176,7 +180,7 @@ def expand_with_nodes_and_edges(
                                 ontology_valid=True,
                             )
 
-                    elif isinstance(ontology_node_to_store, Thing):
+                    elif ontology_node_to_store.category == "individuals":
                         ont_node_key = f"{ont_node_id}_entity"
                         if (ont_node_key not in added_nodes_map) and (
                             ont_node_key not in added_ontology_nodes_map
@@ -186,6 +190,7 @@ def expand_with_nodes_and_edges(
                                 name=ont_node_name,
                                 description=ont_node_name,
                                 ontology_valid=True,
+                                belongs_to_set=data_chunk.belongs_to_set,
                             )
 
                 for source, relation, target in ontology_entity_edges:

@@ -21,7 +21,6 @@ runs:
       run: |
         python -m pip install --upgrade pip
         pip install poetry
-
     - name: Install dependencies
       shell: bash
       run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama -E dev

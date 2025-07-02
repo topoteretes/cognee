@@ -1,6 +1,6 @@
 import { fetch } from '@/utils';
 
-export default function getExplorationGraphUrl(dataset: { id: string }) {
+export default function getExplorationGraphUrl(/* dataset: { name: string } */) {
   return fetch('/v1/visualize')
       .then(async (response) => {
         if (response.status !== 200) {

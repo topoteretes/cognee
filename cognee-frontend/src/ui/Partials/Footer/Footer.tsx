@@ -1,25 +1,25 @@
-import Link from 'next/link';
-import { Stack } from 'ohmy-ui';
-import { DiscordIcon, GithubIcon } from '@/ui/Icons';
-// import { TextLogo } from '@/ui/App';
-import styles from './Footer.module.css';
+import Link from "next/link";
+import { DiscordIcon, GithubIcon } from "@/ui/Icons";
 
-export default function Footer() {
+interface FooterProps {
+  children?: React.ReactNode;
+}
+
+export default function Footer({ children }: FooterProps) {
   return (
-    <footer className={styles.footer}>
-      <Stack orientation="horizontal" gap="between">
-        <div className={styles.leftSide}>
-          {/* <TextLogo width={92} height={24} /> */}
-        </div>
-        <div className={styles.rightSide}>
-          <Link target="_blank" href="https://github.com/topoteretes/cognee">
-            <GithubIcon color="white" />
-          </Link>
-          <Link target="_blank" href="https://discord.gg/m63hxKsp4p">
-            <DiscordIcon color="white" />
-          </Link>
-        </div>
-      </Stack>
+    <footer className="pt-6 pb-6 flex flex-row items-center justify-between">
+      <div>
+        {children}
+      </div>
+
+      <div className="flex flex-row gap-4">
+        <Link target="_blank" href="https://github.com/topoteretes/cognee">
+          <GithubIcon color="black" />
+        </Link>
+        <Link target="_blank" href="https://discord.gg/m63hxKsp4p">
+          <DiscordIcon color="black" />
+        </Link>
+      </div>
     </footer>
   );
 }
