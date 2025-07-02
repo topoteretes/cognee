@@ -132,6 +132,23 @@ def create_graph_engine(
             graph_database_password=graph_database_password,
         )
 
+    elif graph_database_provider == "neptune":
+        if not (graph_database_url):
+            raise EnvironmentError("Missing Neptune endpoint.")
+
+        if graph_database_url.startswith("neptune-graph://"):
+            graph_identifier = graph_database_url.replace("neptune-graph://", "")
+
+            from .neptune_analytics_driver.adapter import NeptuneAnalyticsAdapter
+
+            return NeptuneAnalyticsAdapter(
+                graph_id=graph_identifier,
+            )
+
+        raise ValueError("Neptune endpoint must have the format neptune-graph://<GRAPH_ID>")
+
+
+
     from .networkx.adapter import NetworkXAdapter
 
     graph_client = NetworkXAdapter(filename=graph_file_path)
