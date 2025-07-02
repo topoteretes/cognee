@@ -18,7 +18,8 @@ async def main():
     """
 
     # Set up Amazon credentials in .env file and get the values from environment variables
-    endpoint_url = f"neptune-graph://{os.getenv('GRAPH_ID')}"
+    graph_id = os.getenv('GRAPH_ID', "")
+    endpoint_url = f"neptune-graph://{graph_id}"
 
     # Configure Neptune Analytics as the graph database provider
     cognee.config.set_graph_db_config(

@@ -54,10 +54,10 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         # Validate configuration
         if not validate_graph_id(graph_id):
-            raise NeptuneAnalyticsConfigurationError(f"Invalid graph ID: {graph_id}")
+            raise NeptuneAnalyticsConfigurationError(f"Invalid graph ID: \"{graph_id}\"")
         
         if region and not validate_aws_region(region):
-            raise NeptuneAnalyticsConfigurationError(f"Invalid AWS region: {region}")
+            raise NeptuneAnalyticsConfigurationError(f"Invalid AWS region: \"{region}\"")
         
         self.graph_id = graph_id
         self.region = region
@@ -77,7 +77,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         # TODO: Initialize Neptune Analytics client using aws_langchain
         # This will be implemented in subsequent tasks
         self._client = None
-        logger.info(f"Initialized Neptune Analytics adapter for graph: {graph_id} in region: {region}")
+        logger.info(f"Initialized Neptune Analytics adapter for graph: \"{graph_id}\" in region: \"{region}\"")
 
     async def query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Any]:
         """
