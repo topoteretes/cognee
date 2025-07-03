@@ -8,14 +8,41 @@ from ..vector_db_interface import VectorDBInterface
 
 class NeptuneAnalyticsAdapter(VectorDBInterface):
     name = "Neptune Analytics"
-    graph_id: str
 
     def __init__(self,
                  graph_id: Optional[str],
                  embedding_engine: EmbeddingEngine,
+                 region: Optional[str] = None,
+                 aws_access_key_id: Optional[str] = None,
+                 aws_secret_access_key: Optional[str] = None,
+                 aws_session_token: Optional[str] = None,
                  ):
+        """
+        Initialize the Neptune Analytics vector database adapter.
+
+        Parameters:
+        -----------
+            - graph_id (str): The Neptune Analytics graph identifier
+            - embedding_engine(EmbeddingEngine): The embedding engine instance to translate text to vector.
+            - region (Optional[str]): AWS region where the graph is located (default: us-east-1)
+            - aws_access_key_id (Optional[str]): AWS access key ID
+            - aws_secret_access_key (Optional[str]): AWS secret access key
+            - aws_session_token (Optional[str]): AWS session token for temporary credentials
+
+        Raises:
+        -------
+            - NeptuneAnalyticsConfigurationError: If configuration parameters are invalid
+        """
         self.graph_id = graph_id
         self.embedding_engine = embedding_engine
+        self.region = region
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
+        self.aws_session_token = aws_session_token
+
+        # TODO: Initialize Neptune Analytics client using aws_langchain
+        # This will be implemented in subsequent tasks
+        self._client = None
 
     async def has_collection(self, collection_name: str) -> bool:
         """
@@ -37,6 +64,10 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         self,
         collection_name: str,
         payload_schema: Optional[PayloadSchema] = None,
+            region: Optional[str] = None,
+            aws_access_key_id: Optional[str] = None,
+            aws_secret_access_key: Optional[str] = None,
+            aws_session_token: Optional[str] = None,
     ):
         """
         Create a new collection with an optional payload schema.
