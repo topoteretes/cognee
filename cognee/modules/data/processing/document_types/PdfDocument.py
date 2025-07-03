@@ -17,7 +17,7 @@ class PdfDocument(Document):
                 file = PdfReader(stream, strict=False)
             except Exception as e:
                 logger.warning(
-                    f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location} with error: {e}"  # TODO: Once incremental pipeline implementation is done this has to save pdf errored
+                    f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location} with error: {e}"  # TODO: Once incremental pipeline implementation is done this has to save pdf errored state into metastore
                 )
                 return
 
@@ -28,7 +28,7 @@ class PdfDocument(Document):
                         yield page_text
                 except Exception as e:
                     logger.warning(
-                        f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location} with error: {e}"  # TODO: Once incremental pipeline implementation is done this has to save pdf errored
+                        f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location} with error: {e}"  # TODO: Once incremental pipeline implementation is done this has to save pdf errored state into metastore
                     )
                     return
 
