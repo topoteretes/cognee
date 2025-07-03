@@ -3,7 +3,7 @@ from fastapi import status
 
 
 class PyPdfInternalError(CogneeApiError):
-    """Database returns nothing"""
+    """Internal pypdf error"""
 
     def __init__(
         self,
