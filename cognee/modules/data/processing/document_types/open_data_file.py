@@ -1,4 +1,6 @@
 from typing import IO, Optional
+from urllib.parse import urlparse
+import os
 from cognee.api.v1.add.config import get_s3_config
 
 
@@ -24,8 +26,16 @@ def open_data_file(
         else:
             return fs.open(file_path, mode=mode, encoding=encoding, **kwargs)
     elif file_path.startswith("file://"):
-        # Handle local file URLs by stripping the file:// prefix
-        file_path = file_path.replace("file://", "", 1)
-        return open(file_path, mode=mode, encoding=encoding, **kwargs)
+        # Handle local file URLs by properly parsing the URI
+        parsed_url = urlparse(file_path)
+        # On Windows, urlparse handles drive letters correctly
+        # Convert the path component to a proper file path
+        if os.name == "nt":  # Windows
+            # Remove leading slash from Windows paths like /C:/Users/...
+            local_path = parsed_url.path.lstrip("/")
+        else:  # Unix-like systems
+            local_path = parsed_url.path
+
+        return open(local_path, mode=mode, encoding=encoding, **kwargs)
     else:
         return open(file_path, mode=mode, encoding=encoding, **kwargs)
