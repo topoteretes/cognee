@@ -30,6 +30,16 @@ if get_llm_config().llm_provider.lower() == "gemini":
         target_node_id: str
         relationship_name: str
 
+    class NodeList(BaseModel):
+        """List of nodes in a knowledge graph."""
+
+        nodes: List[Node] = Field(..., default_factory=list)
+
+    class EdgeList(BaseModel):
+        """List of edges in a knowledge graph."""
+
+        edges: List[Edge] = Field(..., default_factory=list)
+
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
 
@@ -53,6 +63,16 @@ else:
         source_node_id: str
         target_node_id: str
         relationship_name: str
+
+    class NodeList(BaseModel):
+        """List of nodes in a knowledge graph."""
+
+        nodes: List[Node] = Field(..., default_factory=list)
+
+    class EdgeList(BaseModel):
+        """List of edges in a knowledge graph."""
+
+        edges: List[Edge] = Field(..., default_factory=list)
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""

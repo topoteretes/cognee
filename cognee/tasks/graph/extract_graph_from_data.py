@@ -4,6 +4,9 @@ from typing import Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.extraction.extract_content_graph_separated import (
+    extract_content_graph_separated,
+)
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
@@ -58,9 +61,18 @@ async def extract_graph_from_data(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
-    chunk_graphs = await asyncio.gather(
-        *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
-    )
+    low_level = False
+    if low_level:
+        chunk_graphs = await asyncio.gather(
+            *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        )
+    else:
+        chunk_graphs = await asyncio.gather(
+            *[
+                extract_content_graph_separated(content=chunk.text, node_rounds=1, edge_rounds=1)
+                for chunk in data_chunks
+            ]
+        )
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:

@@ -1,0 +1,15 @@
+Analyze the following text to identify relationships between entities in the knowledge graph.
+Build upon previously extracted edges, ensuring completeness and consistency.
+Return all the previously extracted edges **together** with the new ones that you extracted.
+This is round {{ round_number }} of {{ total_rounds }}.
+
+**Text:**
+{{ text }}
+
+**Previously Extracted Nodes:**
+{{ nodes }}
+
+**Relationships Identified in Previous Rounds:**
+{{ relationships }}
+
+Extract both explicit and implicit relationships between the nodes, building upon previous findings while ensuring completeness and consistency.
