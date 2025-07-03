@@ -29,9 +29,6 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             - aws_secret_access_key (Optional[str]): AWS secret access key
             - aws_session_token (Optional[str]): AWS session token for temporary credentials
 
-        Raises:
-        -------
-            - NeptuneAnalyticsConfigurationError: If configuration parameters are invalid
         """
         self.graph_id = graph_id
         self.embedding_engine = embedding_engine
