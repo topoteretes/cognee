@@ -94,7 +94,7 @@ async def search(
         system_prompt_path: Custom system prompt file for LLM-based search types.
                           Defaults to "answer_simple_question.txt".
 
-        top_k: Maximum number of results to return (1-100).
+        top_k: Maximum number of results to return (1-N)
               Higher values provide more comprehensive but potentially noisy results.
 
         node_type: Filter results to specific entity types (for advanced filtering).
