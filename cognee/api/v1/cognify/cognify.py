@@ -77,7 +77,7 @@ async def cognify(
         - **Ontology Integration**: Use `ontology_file_path` for predefined vocabularies
 
     Args:
-        datasets: Dataset name(s) to process. Processes all available data if None.
+        datasets: Dataset name(s) or dataset uuid to process. Processes all available data if None.
             - Single dataset: "my_dataset"
             - Multiple datasets: ["docs", "research", "reports"]
             - None: Process all datasets for the user
