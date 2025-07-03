@@ -11,11 +11,6 @@ from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_r
 from cognee.shared.logging_utils import get_logger
 import litellm
 
-# Configure Litellm logging to reduce verbosity
-litellm.set_verbose = False
-
-# LiteLLM logging configuration is now handled by cognee.shared.logging_utils.configure_external_library_logging()
-
 
 class GenericAPIAdapter(LLMInterface):
     """

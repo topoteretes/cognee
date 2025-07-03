@@ -16,10 +16,6 @@ from cognee.infrastructure.llm.rate_limiter import (
     sleep_and_retry_sync,
 )
 from cognee.modules.observability.get_observe import get_observe
-from cognee.shared.logging_utils import get_logger
-import logging
-
-# LiteLLM logging configuration is now handled by cognee.shared.logging_utils.configure_external_library_logging()
 
 observe = get_observe()
 

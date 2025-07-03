@@ -30,12 +30,12 @@ def open_data_file(
         parsed_url = urlparse(file_path)
         # On Windows, urlparse handles drive letters correctly
         # Convert the path component to a proper file path
-        if os.name == 'nt':  # Windows
+        if os.name == "nt":  # Windows
             # Remove leading slash from Windows paths like /C:/Users/...
-            local_path = parsed_url.path.lstrip('/')
+            local_path = parsed_url.path.lstrip("/")
         else:  # Unix-like systems
             local_path = parsed_url.path
-        
+
         return open(local_path, mode=mode, encoding=encoding, **kwargs)
     else:
         return open(file_path, mode=mode, encoding=encoding, **kwargs)

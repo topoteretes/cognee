@@ -18,7 +18,6 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
-# Database configuration logging is now handled by cognee.shared.logging_utils
 
 try:
     from codingagents.coding_rule_associations import (
@@ -541,9 +540,6 @@ def load_class(model_file, model_name):
     return model_class
 
 
-# Database configuration logging moved to cognee.shared.logging_utils.log_database_configuration()
-
-
 async def main():
     parser = argparse.ArgumentParser()
 
@@ -556,7 +552,6 @@ async def main():
 
     args = parser.parse_args()
 
-    # Database configuration is now logged automatically by cognee.shared.logging_utils.setup_logging()
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
         await mcp.run_stdio_async()

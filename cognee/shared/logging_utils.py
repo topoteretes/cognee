@@ -11,17 +11,6 @@ import importlib.metadata
 from cognee import __version__ as cognee_version
 from typing import Protocol
 
-# Import database configuration functions for logging
-try:
-    from cognee.infrastructure.databases.relational.config import get_relational_config
-    from cognee.infrastructure.databases.vector.config import get_vectordb_config
-    from cognee.infrastructure.databases.graph.config import get_graph_config
-
-    _database_config_available = True
-except ImportError:
-    # Handle cases where database configs might not be available during early initialization
-    _database_config_available = False
-
 
 # Configure external library logging
 def configure_external_library_logging():
@@ -178,9 +167,10 @@ def get_logger(name=None, level=None) -> LoggerInterface:
 
 def log_database_configuration(logger):
     """Log the current database configuration for all database types"""
-    if not _database_config_available:
-        logger.debug("Database configuration logging skipped - imports not available")
-        return
+    # NOTE: Has to be imporated at runtime to avoid circular import
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
 
     try:
         # Log relational database configuration
