@@ -16,8 +16,10 @@ class PdfDocument(Document):
             logger.info(f"Reading PDF:{self.raw_data_location}")
             try:
                 file = PdfReader(stream, strict=False)
-            except PdfReadError:
-                logger.warning(f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location}")
+            except Exception as e:
+                logger.warning(
+                    f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location} with error: {e}"
+                )
                 return
 
             def get_text():
@@ -25,8 +27,10 @@ class PdfDocument(Document):
                     for page in file.pages:
                         page_text = page.extract_text()
                         yield page_text
-                except PdfReadError:
-                    logger.warning(f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location}")
+                except Exception as e:
+                    logger.warning(
+                        f"PyPDF couldn’t open PDF—skipping: {self.raw_data_location} with error: {e}"
+                    )
                     return
 
             chunker = chunker_cls(self, get_text=get_text, max_chunk_size=max_chunk_size)
