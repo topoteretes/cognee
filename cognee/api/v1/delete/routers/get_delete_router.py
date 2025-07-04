@@ -37,6 +37,7 @@ def get_delete_router() -> APIRouter:
             # Handle each file in the list
             results = []
             for file in data:
+                # TODO: Add check if HTTP Requests are enabled before allowing requests and git clone
                 if file.filename.startswith("http"):
                     if "github" in file.filename:
                         # For GitHub repos, we need to get the content hash of each file
