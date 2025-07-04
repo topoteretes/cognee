@@ -411,7 +411,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         for edge in edges:
             (node_from, node_to, relationship, *props) = edge
-            await self.add_edge(node_from, node_to, relationship, **(props[0] if props else {}))
+            await self.add_edge(str(node_from), str(node_to), relationship, props[0] if props else {})
 
     async def delete_graph(self) -> None:
         """
