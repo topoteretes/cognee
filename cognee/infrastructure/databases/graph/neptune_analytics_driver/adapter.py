@@ -171,10 +171,12 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Execute the query using the Neptune Analytics client
             # The langchain_aws NeptuneAnalyticsGraph supports openCypher queries
+            if params is None:
+                params = {}
             logger.warning(f"executing na query:\nquery={query}\nparams={params}\n")
             result = self._client.query(query, params)
             
-            # Convert result to list format expected by the interface
+            # Convert the result to list format expected by the interface
             if isinstance(result, list):
                 return result
             elif isinstance(result, dict):
@@ -207,7 +209,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
             query = f"""
             MERGE (n:{node_label} {{`~id`: $node_id}})
-            ON CREATE SET n = $properties, n.created_at = timestamp()
+            ON CREATE SET n = $properties, n.updated_at = timestamp()
             ON MATCH SET n = $properties, n.updated_at = timestamp()
             RETURN n
             """
@@ -254,11 +256,16 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to delete the node and all its relationships
             query = f"""
-            MATCH (n {{id: '{node_id}'}})
+            MATCH (n)
+            WHERE id(n) = $node_id
             DETACH DELETE n
             """
+
+            params = {
+                "node_id": node_id
+            }
             
-            result = await self.query(query)
+            result = await self.query(query, params)
             logger.debug(f"Successfully deleted node: {node_id}")
             
         except Exception as e:
@@ -276,6 +283,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         # TODO: Implement bulk node deletion using aws_langchain
         logger.warning(f"Neptune Analytics delete_nodes method not yet implemented for {len(node_ids)} nodes")
+
+        [await self.delete_node(node) for node in node_ids]
 
     async def get_node(self, node_id: str) -> Optional[NodeData]:
         """
@@ -359,36 +368,28 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to create the edge
             # First ensure both nodes exist, then create the relationship
-            
+
             # Prepare edge properties
             edge_props = properties or {}
-            
-            # Build property assignments for the edge
-            prop_assignments = []
-            for key, value in edge_props.items():
-                if isinstance(value, str):
-                    prop_assignments.append(f"r.{key} = '{value}'")
-                elif isinstance(value, (int, float, bool)):
-                    prop_assignments.append(f"r.{key} = {value}")
-                else:
-                    # For complex types, serialize to JSON string
-                    json_value = json.dumps(value)
-                    prop_assignments.append(f"r.{key} = '{json_value}'")
-            
-            # Add timestamp
-            prop_assignments.append("r.created_at = timestamp()")
-            
-            properties_clause = ", ".join(prop_assignments) if prop_assignments else "r.created_at = timestamp()"
-            
+            serialized_properties = self.serialize_properties(edge_props)
+
             query = f"""
-            MATCH (source {{id: '{source_id}'}}), (target {{id: '{target_id}'}})
-            MERGE (source)-[r:{relationship_name}]->(target)
-            ON CREATE SET {properties_clause}
-            ON MATCH SET {properties_clause}
+            MATCH (source)
+            WHERE id(source) = $source_id 
+            MATCH (target) 
+            WHERE id(target) = $target_id 
+            MERGE (source)-[r:{relationship_name}]->(target) 
+            ON CREATE SET r = $properties, r.updated_at = timestamp() 
+            ON MATCH SET r = $properties, r.updated_at = timestamp() 
             RETURN r
             """
-            
-            result = await self.query(query)
+
+            params = {
+                "source_id": source_id,
+                "target_id": target_id,
+                "properties": serialized_properties,
+            }
+            result = await self.query(query, params)
             logger.debug(f"Successfully added edge: {source_id} -[{relationship_name}]-> {target_id}")
             
         except Exception as e:
@@ -397,7 +398,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             raise Exception(f"Failed to add edge: {error_msg}")
 
     @record_graph_changes
-    async def add_edges(self, edges: List[EdgeData]) -> None:
+    async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
         """
         Add multiple edges to the graph in a single operation.
 
@@ -409,14 +410,31 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         logger.warning(f"Neptune Analytics add_edges method not yet implemented for {len(edges)} edges")
 
         for edge in edges:
-            await self.add_edge(edge.source_id, edge.target_id, edge.relationship, {})
+            (node_from, node_to, relationship, *props) = edge
+            await self.add_edge(node_from, node_to, relationship, **(props[0] if props else {}))
 
     async def delete_graph(self) -> None:
         """
-        Remove the entire graph, including all nodes and edges.
+        Delete all nodes and edges from the graph database.
+
+        Returns:
+        --------
+            The result of the query execution, typically indicating success or failure.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics graph deletion
-        logger.warning("Neptune Analytics delete_graph method not yet implemented")
+        if not self._client:
+            logger.error("Neptune Analytics client not initialized")
+            return
+
+        try:
+            # Build openCypher query to delete the graph
+            result = await self.query("MATCH (n) DETACH DELETE n")
+            logger.debug(f"Successfully deleted all edges and nodes from the graph")
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to delete graph: {error_msg}")
+            raise Exception(f"Failed to delete graph: {error_msg}")
+
 
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """
@@ -467,11 +485,20 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to check if the edge exists
             query = f"""
-            MATCH (source {{id: '{source_id}'}})-[r:{relationship_name}]->(target {{id: '{target_id}'}})
+            MATCH (source) 
+            WHERE id(source) = $source_id 
+            MATCH (target) 
+            WHERE id(target) = $target_id 
+            MATCH (source)-[r:{relationship_name}]->(target)
             RETURN COUNT(r) > 0 AS edge_exists
             """
+
+            params = {
+                "source_id": source_id,
+                "target_id": target_id,
+            }
             
-            result = await self.query(query)
+            result = await self.query(query, params)
             
             if result and len(result) > 0:
                 edge_exists = result[0].get('edge_exists', False)
@@ -506,20 +533,18 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Check each edge individually
             for edge in edges:
-                source_id, target_id, relationship_name, properties = edge
-                
+                (source_id, target_id, relationship_name, *props) = edge
                 edge_exists = await self.has_edge(source_id, target_id, relationship_name)
-                
                 if edge_exists:
                     existing_edges.append(edge)
-            
-            logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
-            return existing_edges
             
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edges existence: {error_msg}")
             return []
+
+        logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
+        return existing_edges
 
     async def get_edges(self, node_id: str) -> List[EdgeData]:
         """

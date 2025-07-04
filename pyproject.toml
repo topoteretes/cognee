@@ -68,6 +68,7 @@ api = [
 weaviate = ["weaviate-client==4.9.6"]
 qdrant = ["qdrant-client>=1.9.0,<2"]
 neo4j = ["neo4j>=5.20.0,<6"]
+neptune = ["langchain_aws>=0.2.27"]
 postgres = [
     "psycopg2>=2.9.10,<3",
     "pgvector>=0.3.5,<0.4",
