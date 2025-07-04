@@ -1114,14 +1114,14 @@ uvicorn = {version = ">=0.18.3", extras = ["standard"]}
 
 [[package]]
 name = "click"
-version = "8.2.1"
+version = "8.1.8"
 description = "Composable command line interface toolkit"
 optional = false
-python-versions = ">=3.10"
+python-versions = ">=3.7"
 groups = ["main"]
 files = [
-    {file = "click-8.2.1-py3-none-any.whl", hash = "sha256:61a3265b914e850b85317d0b3109c7f8cd35a670f963866005d6ef1d5175a12b"},
-    {file = "click-8.2.1.tar.gz", hash = "sha256:27c491cc05d968d271d5a1db13e3b5a184636d9d930f148c50b038f0d0646202"},
+    {file = "click-8.1.8-py3-none-any.whl", hash = "sha256:63c132bbbed01578a06712a2d1f497bb62d9c1c0d329b7903a866228027263b2"},
+    {file = "click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a"},
 ]
 
 [package.dependencies]
@@ -5841,26 +5841,25 @@ type = ["mypy (==1.14.1)"]
 
 [[package]]
 name = "modal"
-version = "0.74.15"
+version = "1.0.5"
 description = "Python client library for Modal"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 markers = "extra == \"distributed\""
 files = [
-    {file = "modal-0.74.15-py3-none-any.whl", hash = "sha256:084e898ab202ccd698fd277d9dc9e9cec8d4b0954a1c09d4ba529f0446ab3526"},
-    {file = "modal-0.74.15.tar.gz", hash = "sha256:95512811ebd42a52fa03724f60d0d1c32259788351e798d0d695974d94b2e49c"},
+    {file = "modal-1.0.5-py3-none-any.whl", hash = "sha256:e575414b7e10c5ad97ae0a77149456f021e9f2c457559bb4a5af70771f481c09"},
+    {file = "modal-1.0.5.tar.gz", hash = "sha256:1c6927dd5eb9bd8d86d83ee499b87d64366525f1dd3e5b31d1ac1ed62090f72a"},
 ]
 
 [package.dependencies]
 aiohttp = "*"
 certifi = "*"
-click = ">=8.1.0"
-fastapi = "*"
-grpclib = "0.4.7"
-protobuf = ">=3.19,<4.24.0 || >4.24.0,<6.0"
+click = ">=8.1.0,<8.2.0"
+grpclib = ">=0.4.7,<0.4.9"
+protobuf = ">=3.19,<4.24.0 || >4.24.0,<7.0"
 rich = ">=12.0.0"
-synchronicity = ">=0.9.10,<0.10.0"
+synchronicity = ">=0.9.15,<0.10.0"
 toml = "*"
 typer = ">=0.9"
 types-certifi = "*"
@@ -10492,15 +10491,15 @@ dev = ["hypothesis (>=6.70.0)", "pytest (>=7.1.0)"]
 
 [[package]]
 name = "synchronicity"
-version = "0.9.12"
+version = "0.9.16"
 description = "Export blocking and async library versions from a single async implementation"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "extra == \"distributed\""
 files = [
-    {file = "synchronicity-0.9.12-py3-none-any.whl", hash = "sha256:b006f57bd216d55e578316096a11b6dc16016d6b48e2766bcffabe40c88f9793"},
-    {file = "synchronicity-0.9.12.tar.gz", hash = "sha256:977f3ed8f6e35de4d1a3f0aeee4937143ba8d913f531d33e8df7c539b2792fb8"},
+    {file = "synchronicity-0.9.16-py3-none-any.whl", hash = "sha256:79dd3451c063a06489d466b0585808e1d5d257fc3c2304f5f733a142ef269e97"},
+    {file = "synchronicity-0.9.16.tar.gz", hash = "sha256:bc174b756d12330b1e6027f8293c3b944cf3684dec241af009cb7bb169a0072f"},
 ]
 
 [package.dependencies]
@@ -12237,4 +12236,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "963b6d6541a74c8d063e8acc529489f3876c38cab3616a12a17cbe4e48fa40b6"
+content-hash = "ca2a3e8260092933419793efe202d50ae7b1c6ce738750876fd5f64a31718790"

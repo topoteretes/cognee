@@ -69,7 +69,7 @@ api = [
     "websockets>=15.0.1"
 ]
 distributed = [
-    "modal==0.74.15",
+    "modal==1.0.5",
 ]
 weaviate = ["weaviate-client==4.9.6"]
 qdrant = ["qdrant-client>=1.14.2,<2"]

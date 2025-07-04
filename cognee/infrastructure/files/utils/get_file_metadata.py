@@ -1,3 +1,4 @@
+import io
 from typing import BinaryIO, TypedDict
 from .guess_file_type import guess_file_type
 from cognee.shared.utils import get_file_content_hash
@@ -38,9 +39,14 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
         - FileMetadata: A dictionary containing the file's name, path, MIME type, file
           extension, and content hash.
     """
-    file.seek(0)
-    content_hash = get_file_content_hash(file)
-    file.seek(0)
+    try:
+        file.seek(0)
+        content_hash = get_file_content_hash(file)
+        file.seek(0)
+    except io.UnsupportedOperation as error:
+        raise Exception(
+            f"Error retrieving metadata from file: {file.name} \n{str(error)}\n\n"
+        ) from error
 
     file_type = guess_file_type(file)
 

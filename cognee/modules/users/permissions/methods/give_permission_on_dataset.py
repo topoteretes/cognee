@@ -1,11 +1,20 @@
-from sqlalchemy.future import select
-from cognee.infrastructure.databases.relational import get_relational_engine
-from ...models import Principal, ACL, Permission
 from uuid import UUID
+from sqlalchemy.future import select
+from asyncpg import UniqueViolationError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.permissions import PERMISSION_TYPES
 from cognee.modules.users.exceptions import PermissionNotFoundError
 
+from ...models import Principal, ACL, Permission
 
+
+@retry(
+    retry=retry_if_exception_type(UniqueViolationError),
+    stop=stop_after_attempt(3),
+    sleep=1,
+)
 async def give_permission_on_dataset(
     principal: Principal,
     dataset_id: UUID,

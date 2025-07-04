@@ -1,4 +1,4 @@
-FROM python:3.12-bookworm-slim
+FROM python:3.11-slim
 
 # Set environment variables
 ENV PIP_NO_CACHE_DIR=true
@@ -6,6 +6,7 @@ ENV PATH="${PATH}:/root/.poetry/bin"
 ENV PYTHONPATH=/app
 ENV RUN_MODE=modal
 ENV SKIP_MIGRATIONS=true
+ENV COGNEE_DISTRIBUTED=true
 
 # System dependencies
 RUN apt-get update && apt-get install -y \
@@ -24,7 +25,7 @@ RUN pip install poetry
 
 RUN poetry config virtualenvs.create false
 
-RUN poetry install --extras neo4j --extras postgres --no-root
+RUN poetry install --extras neo4j --extras postgres --extras aws --extras distributed --no-root
 
 COPY cognee/ /app/cognee
 COPY distributed/ /app/distributed

@@ -1,21 +1,27 @@
 """Neo4j Adapter for Graph Database"""
 
 import json
-from cognee.shared.logging_utils import get_logger, ERROR
 import asyncio
-from textwrap import dedent
-from typing import Optional, Any, List, Dict, Type, Tuple
-from contextlib import asynccontextmanager
 from uuid import UUID
+from textwrap import dedent
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
+from contextlib import asynccontextmanager
+from typing import Optional, Any, List, Dict, Type, Tuple
+
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.infrastructure.databases.graph.utils import override_distributed
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
 )
 from cognee.modules.storage.utils import JSONEncoder
+
+from distributed.tasks.queued_add_nodes import queued_add_nodes
+from distributed.tasks.queued_add_edges import queued_add_edges
+
 from .neo4j_metrics_utils import (
     get_avg_clustering,
     get_edge_density,
@@ -166,6 +172,7 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     @record_graph_changes
+    @override_distributed(queued_add_nodes)
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         """
         Add multiple nodes to the database in a single query.
@@ -404,6 +411,7 @@ class Neo4jAdapter(GraphDBInterface):
         return await self.query(query, params)
 
     @record_graph_changes
+    @override_distributed(queued_add_edges)
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         """
         Add multiple edges between nodes in a single query.
