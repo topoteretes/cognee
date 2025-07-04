@@ -1,7 +1,5 @@
 from modal import Queue
 
 
-# Create (or get) queues:
-# - save_data_points_queue: Stores messages produced by the producer functions.
-
-save_data_points_queue = Queue.from_name("save_data_points_queue", create_if_missing=True)
+add_nodes_and_edges_queue = Queue.from_name("add_nodes_and_edges_queue", create_if_missing=True)
+add_data_points_queue = Queue.from_name("add_data_points_queue", create_if_missing=True)

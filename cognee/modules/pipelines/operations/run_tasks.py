@@ -35,7 +35,6 @@ def override_run_tasks(new_gen):
             default_distributed_value = os.getenv("COGNEE_DISTRIBUTED", "False").lower() == "true"
             distributed = default_distributed_value if distributed is None else distributed
 
-            print(f"run_tasks_distributed: {distributed}")
             if distributed:
                 async for run_info in new_gen(*args, **kwargs):
                     yield run_info

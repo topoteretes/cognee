@@ -66,9 +66,6 @@ async def run_tasks_distributed(tasks, dataset_id, data, user, pipeline_name, co
 
     data_count = len(data) if isinstance(data, list) else 1
 
-    print(f"Data count: {data_count}")
-    print(f"Data item to process: {type(data)} - {data}")
-
     arguments = [
         [tasks] * data_count,
         [[data_item] for data_item in data[:data_count]] if data_count > 1 else [data],

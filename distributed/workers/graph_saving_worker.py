@@ -4,29 +4,29 @@ import asyncio
 
 from distributed.app import app
 from distributed.modal_image import image
-from distributed.queues import save_data_points_queue
+from distributed.queues import add_nodes_and_edges_queue
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 
 
-logger = get_logger("data_point_saver_worker")
+logger = get_logger("graph_saving_worker")
 
 
 @app.function(
     image=image,
     timeout=86400,
-    max_containers=100,
+    max_containers=5,
     secrets=[modal.Secret.from_name("distributed_cognee")],
 )
-async def data_point_saver_worker():
+async def graph_saving_worker():
     print("Started processing of nodes and edges; starting graph engine queue.")
     graph_engine = await get_graph_engine()
 
     while True:
-        if await save_data_points_queue.len.aio() != 0:
+        if await add_nodes_and_edges_queue.len.aio() != 0:
             try:
-                nodes_and_edges = await save_data_points_queue.get.aio(block=False)
+                nodes_and_edges = await add_nodes_and_edges_queue.get.aio(block=False)
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")
                 continue
@@ -37,7 +37,7 @@ async def data_point_saver_worker():
 
             if len(nodes_and_edges) == 2:
                 print(
-                    f"Processing {len(nodes_and_edges[0])} nodes and {len(nodes_and_edges[1])} edges."
+                    f"Adding {len(nodes_and_edges[0])} nodes and {len(nodes_and_edges[1])} edges."
                 )
                 nodes = nodes_and_edges[0]
                 edges = nodes_and_edges[1]
@@ -47,7 +47,7 @@ async def data_point_saver_worker():
 
                 if edges:
                     await graph_engine.add_edges(edges, distributed=False)
-                print("Finished processing nodes and edges.")
+                print("Finished adding nodes and edges.")
 
         else:
             print("No jobs, go to sleep.")

@@ -12,13 +12,13 @@ from typing import Optional, Any, List, Dict, Type, Tuple
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger, ERROR
-from cognee.infrastructure.databases.graph.utils import override_distributed
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
 )
 from cognee.modules.storage.utils import JSONEncoder
 
+from distributed.utils import override_distributed
 from distributed.tasks.queued_add_nodes import queued_add_nodes
 from distributed.tasks.queued_add_edges import queued_add_edges
 

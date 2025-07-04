@@ -1,20 +1,21 @@
 import asyncio
-from uuid import UUID, uuid4
-from sqlalchemy.inspection import inspect
 from typing import List, Optional, Union, get_type_hints
-
+from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
-from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from tenacity import retry, retry_if_exception_type, stop_after_attempt
+from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
 from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine
+
+from distributed.utils import override_distributed
+from distributed.tasks.queued_add_data_points import queued_add_data_points
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
@@ -160,6 +161,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(3),
         sleep=1,
     )
+    @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
