@@ -50,10 +50,10 @@ async def main():
     dataset_name = "neptune_example"
 
     # Add sample text to the dataset
-    sample_text_1 = """Neptune Analytics is a memory-optimized graph database engine for analytics. With Neptune
-    Analytics, you can get insights and find trends by processing large amounts of graph data in seconds. To analyze
-    graph data quickly and easily, Neptune Analytics stores large graph datasets in memory. It supports a library of
-    optimized graph analytic algorithms, low-latency graph queries, and vector search capabilities within graph
+    sample_text_1 = """Neptune Analytics is a memory-optimized graph database engine for analytics. With Neptune 
+    Analytics, you can get insights and find trends by processing large amounts of graph data in seconds. To analyze 
+    graph data quickly and easily, Neptune Analytics stores large graph datasets in memory. It supports a library of 
+    optimized graph analytic algorithms, low-latency graph queries, and vector search capabilities within graph 
     traversals.
     """
 

@@ -223,12 +223,59 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         Parameters:
         -----------
-            - nodes (List[Node]): A list of Node objects to be added to the graph.
+            - nodes (List[DataPoint]): A list of DataPoint objects to be added to the graph.
         """
-        # TODO: Implement bulk node creation using aws_langchain
-        logger.warning(f"Neptune Analytics add_nodes method not yet implemented for {len(nodes)} nodes")
+        if not self._client:
+            logger.error("Neptune Analytics client not initialized")
+            return
 
-        [await self.add_node(node) for node in nodes]
+        if not nodes:
+            logger.debug("No nodes to add")
+            return
+
+        try:
+            # Build bulk node creation query using UNWIND
+            query = """
+            UNWIND $nodes AS node
+            MERGE (n {`~id`: node.node_id})
+            ON CREATE SET n = node.properties, n.updated_at = timestamp()
+            ON MATCH SET n = node.properties, n.updated_at = timestamp()
+            WITH n, node.label AS label
+            CALL {
+                WITH n, label
+                CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
+                RETURN labeledNode
+            }
+            RETURN count(n) AS nodes_processed
+            """
+
+            # Prepare nodes data for bulk operation
+            nodes_data = [
+                {
+                    "node_id": str(node.id),
+                    "label": type(node).__name__,
+                    "properties": self.serialize_properties(node.model_dump()),
+                }
+                for node in nodes
+            ]
+
+            params = {"nodes": nodes_data}
+            result = await self.query(query, params)
+
+            processed_count = result[0].get('nodes_processed', 0) if result else 0
+            logger.debug(f"Successfully processed {processed_count} nodes in bulk operation")
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to add nodes in bulk: {error_msg}")
+            # Fallback to individual node creation
+            logger.info("Falling back to individual node creation")
+            for node in nodes:
+                try:
+                    await self.add_node(node)
+                except Exception as node_error:
+                    logger.error(f"Failed to add individual node {node.id}: {format_neptune_error(node_error)}")
+                    continue
 
     async def delete_node(self, node_id: str) -> None:
         """
@@ -266,10 +313,38 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - node_ids (List[str]): A list of unique identifiers for the nodes to delete.
         """
-        # TODO: Implement bulk node deletion using aws_langchain
-        logger.warning(f"Neptune Analytics delete_nodes method not yet implemented for {len(node_ids)} nodes")
+        if not self._client:
+            logger.error("Neptune Analytics client not initialized")
+            return
 
-        [await self.delete_node(node) for node in node_ids]
+        if not node_ids:
+            logger.debug("No nodes to delete")
+            return
+
+        try:
+            # Build bulk node deletion query using UNWIND
+            query = """
+            UNWIND $node_ids AS node_id
+            MATCH (n)
+            WHERE id(n) = node_id
+            DETACH DELETE n
+            """
+
+            params = {"node_ids": node_ids}
+            result = await self.query(query, params)
+            logger.debug(f"Successfully deleted {len(node_ids)} nodes in bulk operation")
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to delete nodes in bulk: {error_msg}")
+            # Fallback to individual node deletion
+            logger.info("Falling back to individual node deletion")
+            for node_id in node_ids:
+                try:
+                    await self.delete_node(node_id)
+                except Exception as node_error:
+                    logger.error(f"Failed to delete individual node {node_id}: {format_neptune_error(node_error)}")
+                    continue
 
     async def get_node(self, node_id: str) -> Optional[NodeData]:
         """
@@ -323,10 +398,52 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[NodeData]: A list of node data for the found nodes.
         """
-        # TODO: Implement bulk node retrieval using aws_langchain
-        logger.warning(f"Neptune Analytics get_nodes method not yet implemented for {len(node_ids)} nodes")
+        if not self._client:
+            logger.error("Neptune Analytics client not initialized")
+            return []
 
-        return [await self.get_node(node_id) for node_id in node_ids]
+        if not node_ids:
+            logger.debug("No node IDs provided")
+            return []
+
+        try:
+            # Build bulk node retrieval query using UNWIND
+            query = """
+            UNWIND $node_ids AS node_id
+            MATCH (n)
+            WHERE id(n) = node_id
+            RETURN n
+            """
+
+            params = {"node_ids": node_ids}
+            result = await self.query(query, params)
+
+            # Extract node data from results
+            nodes = []
+            if result:
+                for record in result:
+                    node_data = record.get('n', {})
+                    if node_data:
+                        nodes.append(node_data)
+
+            logger.debug(f"Successfully retrieved {len(nodes)} nodes out of {len(node_ids)} requested")
+            return nodes
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get nodes in bulk: {error_msg}")
+            # Fallback to individual node retrieval
+            logger.info("Falling back to individual node retrieval")
+            nodes = []
+            for node_id in node_ids:
+                try:
+                    node_data = await self.get_node(node_id)
+                    if node_data:
+                        nodes.append(node_data)
+                except Exception as node_error:
+                    logger.error(f"Failed to get individual node {node_id}: {format_neptune_error(node_error)}")
+                    continue
+            return nodes
 
     async def add_edge(
         self,
@@ -386,12 +503,69 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - edges (List[EdgeData]): A list of EdgeData objects representing edges to be added.
         """
-        # TODO: Implement bulk edge creation using aws_langchain
-        logger.warning(f"Neptune Analytics add_edges method not yet implemented for {len(edges)} edges")
+        if not self._client:
+            logger.error("Neptune Analytics client not initialized")
+            return
 
-        for edge in edges:
-            (node_from, node_to, relationship, *props) = edge
-            await self.add_edge(str(node_from), str(node_to), relationship, props[0] if props else {})
+        if not edges:
+            logger.debug("No edges to add")
+            return
+
+        try:
+            # Build bulk edge creation query using UNWIND
+            query = """
+            UNWIND $edges AS edge
+            MATCH (source)
+            WHERE id(source) = edge.from_node
+            MATCH (target)
+            WHERE id(target) = edge.to_node
+            CALL {
+                WITH source, target, edge
+                CALL apoc.merge.relationship(
+                    source,
+                    edge.relationship_name,
+                    {
+                        source_node_id: edge.from_node,
+                        target_node_id: edge.to_node
+                    },
+                    edge.properties,
+                    target
+                ) YIELD rel
+                RETURN rel
+            }
+            RETURN count(*) AS edges_processed
+            """
+
+            # Prepare edges data for bulk operation
+            edges_data = [
+                {
+                    "from_node": str(edge[0]),
+                    "to_node": str(edge[1]),
+                    "relationship_name": edge[2],
+                    "properties": self.serialize_properties(edge[3] if len(edge) > 3 and edge[3] else {}),
+                }
+                for edge in edges
+            ]
+
+            params = {"edges": edges_data}
+            result = await self.query(query, params)
+
+            processed_count = result[0].get('edges_processed', 0) if result else 0
+            logger.debug(f"Successfully processed {processed_count} edges in bulk operation")
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to add edges in bulk: {error_msg}")
+            # Fallback to individual edge creation
+            logger.info("Falling back to individual edge creation")
+            for edge in edges:
+                try:
+                    source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
+                    properties = edge[3] if len(edge) > 3 else {}
+                    await self.add_edge(source_id, target_id, relationship_name, properties)
+                except Exception as edge_error:
+                    logger.error(f"Failed to add individual edge {edge[0]} -> {edge[1]}: {format_neptune_error(edge_error)}")
+                    continue
 
     async def delete_graph(self) -> None:
         """
@@ -763,7 +937,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
                         }
                     )
                 )
-            
+
             logger.debug(f"Retrieved {len(connections)} connections for node: {node_id}")
             return connections
 
