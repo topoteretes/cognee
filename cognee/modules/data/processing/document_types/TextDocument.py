@@ -5,6 +5,7 @@ from .open_data_file import open_data_file
 
 class TextDocument(Document):
     type: str = "text"
+    mime_type: str = "text/plain"
 
     def read(self, chunker_cls: Chunker, max_chunk_size: int):
         def get_text():

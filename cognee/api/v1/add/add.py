@@ -139,7 +139,7 @@ async def add(
         InvalidValueError: If LLM_API_KEY is not set or invalid
     """
     tasks = [
-        Task(resolve_data_directories),
+        Task(resolve_data_directories, include_subdirectories=True),
         Task(ingest_data, dataset_name, user, node_set, dataset_id),
     ]
 
