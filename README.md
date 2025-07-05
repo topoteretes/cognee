@@ -15,6 +15,8 @@
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
   ·
   <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
+  .
+  <a href="https://www.docs.cognee.ai">Docs</a>
   </p>
 
 
