@@ -19,6 +19,37 @@ class KnowledgeGraph {
     edges Edge[]
 }
 
+// Summarization classes
+class SummarizedContent {
+    summary string
+    description string
+}
+
+class SummarizedFunction {
+    name string
+    description string
+    inputs string[]?
+    outputs string[]?
+    decorators string[]?
+}
+
+class SummarizedClass {
+    name string
+    description string
+    methods SummarizedFunction[]?
+    decorators string[]?
+}
+
+class SummarizedCode {
+    high_level_summary string
+    key_features string[]
+    imports string[]
+    constants string[]
+    classes SummarizedClass[]
+    functions SummarizedFunction[]
+    workflow_description string?
+}
+
 // Simple template for basic extraction (fast, good quality)
 template_string ExtractContentGraphPrompt() #"
     You are an advanced algorithm that extracts structured data into a knowledge graph.
@@ -48,6 +79,28 @@ template_string ExtractContentGraphPrompt() #"
 
     5. **Strict Compliance**
     - Follow these rules exactly. Non-compliance results in termination.
+"#
+
+// Summarization prompt template
+template_string SummarizeContentPrompt() #"
+    You are a top-tier summarization engine. Your task is to summarize text and make it versatile.
+    Be brief and concise, but keep the important information and the subject.
+    Use synonym words where possible in order to change the wording but keep the meaning.
+"#
+
+// Code summarization prompt template
+template_string SummarizeCodePrompt() #"
+    You are an expert code analyst. Analyze the provided source code and extract key information:
+
+    1. Provide a high-level summary of what the code does
+    2. List key features and functionality
+    3. Identify imports and dependencies
+    4. List constants and global variables
+    5. Summarize classes with their methods
+    6. Summarize standalone functions
+    7. Describe the overall workflow if applicable
+
+    Be precise and technical while remaining clear and concise.
 "#
 
 // Detailed template for complex extraction (slower, higher quality)
@@ -325,6 +378,33 @@ function ExtractContentGraphWithAnthropic(
     "#
 }
 
+// Summarization functions
+function SummarizeContent(content: string) -> SummarizedContent {
+    client OpenAIClientWithEnvModel
+
+    prompt #"
+        {{ SummarizeContentPrompt() }}
+
+        {{ ctx.output_format(prefix="Answer in this schema:\n") }}
+
+        {{ _.role('user') }}
+        {{ content }}
+    "#
+}
+
+function SummarizeCode(content: string) -> SummarizedCode {
+    client OpenAIClientWithEnvModel
+
+    prompt #"
+        {{ SummarizeCodePrompt() }}
+
+        {{ ctx.output_format(prefix="Answer in this schema:\n") }}
+
+        {{ _.role('user') }}
+        {{ content }}
+    "#
+}
+
 test ExtractPersonExample {
     functions [ExtractContentGraph]
     args {
@@ -363,5 +443,33 @@ test ExtractGenericExample {
             React is a JavaScript library for building user interfaces, developed by Facebook.
         "#
         mode "simple"
+    }
+}
+
+test SummarizeContentExample {
+    functions [SummarizeContent]
+    args {
+        content #"
+            Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.
+            It deals with the interaction between computers and human language, in particular how to program computers to process and analyze large amounts of natural language data.
+        "#
+    }
+}
+
+test SummarizeCodeExample {
+    functions [SummarizeCode]
+    args {
+        content #"
+            def fibonacci(n):
+                if n <= 1:
+                    return n
+                return fibonacci(n-1) + fibonacci(n-2)
+            
+            def main():
+                print(fibonacci(10))
+            
+            if __name__ == "__main__":
+                main()
+        "#
     }
 }

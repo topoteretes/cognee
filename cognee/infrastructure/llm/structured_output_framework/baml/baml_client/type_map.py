@@ -25,5 +25,17 @@ type_map = {
     "types.Node": types.Node,
     "stream_types.Node": stream_types.Node,
 
+    "types.SummarizedClass": types.SummarizedClass,
+    "stream_types.SummarizedClass": stream_types.SummarizedClass,
+
+    "types.SummarizedCode": types.SummarizedCode,
+    "stream_types.SummarizedCode": stream_types.SummarizedCode,
+
+    "types.SummarizedContent": types.SummarizedContent,
+    "stream_types.SummarizedContent": stream_types.SummarizedContent,
+
+    "types.SummarizedFunction": types.SummarizedFunction,
+    "stream_types.SummarizedFunction": stream_types.SummarizedFunction,
+
 
 }

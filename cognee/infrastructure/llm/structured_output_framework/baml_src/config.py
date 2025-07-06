@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, ClassVar
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
@@ -48,18 +48,19 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
-    baml_registry = ClientRegistry()
+    baml_registry: ClassVar[ClientRegistry] = ClientRegistry()
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
-
-    baml_registry.add_llm_client(name=llm_provider, provider=llm_provider, options={
-        "model": llm_model,
-        "temperature": llm_temperature,
-        "api_key": llm_api_key
-    })
-    # Sets MyAmazingClient as the primary client
-    baml_registry.set_primary('openai')
+    def model_post_init(self, __context) -> None:
+        """Initialize the BAML registry after the model is created."""
+        self.baml_registry.add_llm_client(name=self.llm_provider, provider=self.llm_provider, options={
+            "model": self.llm_model,
+            "temperature": self.llm_temperature,
+            "api_key": self.llm_api_key
+        })
+        # Sets the primary client
+        self.baml_registry.set_primary(self.llm_provider)
 
     @model_validator(mode="after")
     def ensure_env_vars_for_ollama(self) -> "LLMConfig":

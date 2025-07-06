@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (3)
+# Generated classes (7)
 # #########################################################################
 
 class Edge(BaseModel):
@@ -44,6 +44,32 @@ class Node(BaseModel):
     name: typing.Optional[str] = None
     type: typing.Optional[str] = None
     description: typing.Optional[str] = None
+
+class SummarizedClass(BaseModel):
+    name: typing.Optional[str] = None
+    description: typing.Optional[str] = None
+    methods: typing.Optional[typing.List["SummarizedFunction"]] = None
+    decorators: typing.Optional[typing.List[str]] = None
+
+class SummarizedCode(BaseModel):
+    high_level_summary: typing.Optional[str] = None
+    key_features: typing.List[str]
+    imports: typing.List[str]
+    constants: typing.List[str]
+    classes: typing.List["SummarizedClass"]
+    functions: typing.List["SummarizedFunction"]
+    workflow_description: typing.Optional[str] = None
+
+class SummarizedContent(BaseModel):
+    summary: typing.Optional[str] = None
+    description: typing.Optional[str] = None
+
+class SummarizedFunction(BaseModel):
+    name: typing.Optional[str] = None
+    description: typing.Optional[str] = None
+    inputs: typing.Optional[typing.List[str]] = None
+    outputs: typing.Optional[typing.List[str]] = None
+    decorators: typing.Optional[typing.List[str]] = None
 
 # #########################################################################
 # Generated type aliases (0)

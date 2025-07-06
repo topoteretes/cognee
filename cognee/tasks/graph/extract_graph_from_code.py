@@ -9,8 +9,10 @@ from cognee.base_config import get_base_config
 base = get_base_config()
 
 if base.structured_output_framework == 'BAML':
+    print(f"Using BAML framework: {base.structured_output_framework}")
     from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import extract_content_graph
 else:
+    print(f"Using llitellm_instructor framework: {base.structured_output_framework}")
     from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_content_graph
 
 async def extract_graph_from_code(

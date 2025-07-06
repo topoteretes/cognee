@@ -1,8 +1,8 @@
 import os
 from typing import Type
 from pydantic import BaseModel
-from cognee.infrastructure.llm.structured_output_framework.baml.async_client import b
-from cognee.infrastructure.llm.structured_output_framework.baml.type_builder import TypeBuilder
+from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import b
+from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type_builder import TypeBuilder
 from cognee.infrastructure.llm.structured_output_framework.baml_src.config import get_llm_config
 
 from cognee.shared.logging_utils import get_logger, setup_logging

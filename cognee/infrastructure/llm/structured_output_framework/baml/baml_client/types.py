@@ -41,7 +41,7 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 
 # #########################################################################
-# Generated classes (3)
+# Generated classes (7)
 # #########################################################################
 
 class Edge(BaseModel):
@@ -62,6 +62,32 @@ class Node(BaseModel):
     name: str
     type: str
     description: str
+
+class SummarizedClass(BaseModel):
+    name: str
+    description: str
+    methods: typing.Optional[typing.List["SummarizedFunction"]] = None
+    decorators: typing.Optional[typing.List[str]] = None
+
+class SummarizedCode(BaseModel):
+    high_level_summary: str
+    key_features: typing.List[str]
+    imports: typing.List[str]
+    constants: typing.List[str]
+    classes: typing.List["SummarizedClass"]
+    functions: typing.List["SummarizedFunction"]
+    workflow_description: typing.Optional[str] = None
+
+class SummarizedContent(BaseModel):
+    summary: str
+    description: str
+
+class SummarizedFunction(BaseModel):
+    name: str
+    description: str
+    inputs: typing.Optional[typing.List[str]] = None
+    outputs: typing.Optional[typing.List[str]] = None
+    decorators: typing.Optional[typing.List[str]] = None
 
 # #########################################################################
 # Generated type aliases (0)

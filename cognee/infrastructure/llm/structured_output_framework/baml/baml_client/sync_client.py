@@ -113,6 +113,20 @@ class BamlSyncClient:
             "content": content,"prompt_override": prompt_override,
         })
         return typing.cast(types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__))
+    def SummarizeCode(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.SummarizedCode:
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="SummarizeCode", args={
+            "content": content,
+        })
+        return typing.cast(types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__))
+    def SummarizeContent(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.SummarizedContent:
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="SummarizeContent", args={
+            "content": content,
+        })
+        return typing.cast(types.SummarizedContent, result.cast_to(types, types, stream_types, False, __runtime__))
     
 
 
@@ -170,6 +184,30 @@ class BamlStreamClient:
           lambda x: typing.cast(types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def SummarizeCode(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.SummarizedCode, types.SummarizedCode]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="SummarizeCode", args={
+            "content": content,
+        })
+        return baml_py.BamlSyncStream[stream_types.SummarizedCode, types.SummarizedCode](
+          result,
+          lambda x: typing.cast(stream_types.SummarizedCode, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.SummarizedCode, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def SummarizeContent(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.SummarizedContent, types.SummarizedContent]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="SummarizeContent", args={
+            "content": content,
+        })
+        return baml_py.BamlSyncStream[stream_types.SummarizedContent, types.SummarizedContent](
+          result,
+          lambda x: typing.cast(stream_types.SummarizedContent, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.SummarizedContent, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     
 
 class BamlHttpRequestClient:
@@ -206,6 +244,20 @@ class BamlHttpRequestClient:
             "content": content,"prompt_override": prompt_override,
         }, mode="request")
         return result
+    def SummarizeCode(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeCode", args={
+            "content": content,
+        }, mode="request")
+        return result
+    def SummarizeContent(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeContent", args={
+            "content": content,
+        }, mode="request")
+        return result
     
 
 class BamlHttpStreamRequestClient:
@@ -240,6 +292,20 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractContentGraphWithEnvPrompt", args={
             "content": content,"prompt_override": prompt_override,
+        }, mode="stream")
+        return result
+    def SummarizeCode(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeCode", args={
+            "content": content,
+        }, mode="stream")
+        return result
+    def SummarizeContent(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeContent", args={
+            "content": content,
         }, mode="stream")
         return result
     

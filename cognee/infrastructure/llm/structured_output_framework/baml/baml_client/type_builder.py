@@ -18,7 +18,7 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["Edge","KnowledgeGraph","Node",]
+          ["Edge","KnowledgeGraph","Node","SummarizedClass","SummarizedCode","SummarizedContent","SummarizedFunction",]
         ), enums=set(
           []
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
@@ -29,7 +29,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 3
+    # Generated classes 7
     # #########################################################################
 
     @property
@@ -44,6 +44,22 @@ class TypeBuilder(type_builder.TypeBuilder):
     def Node(self) -> "NodeBuilder":
         return NodeBuilder(self)
 
+    @property
+    def SummarizedClass(self) -> "SummarizedClassViewer":
+        return SummarizedClassViewer(self)
+
+    @property
+    def SummarizedCode(self) -> "SummarizedCodeViewer":
+        return SummarizedCodeViewer(self)
+
+    @property
+    def SummarizedContent(self) -> "SummarizedContentViewer":
+        return SummarizedContentViewer(self)
+
+    @property
+    def SummarizedFunction(self) -> "SummarizedFunctionViewer":
+        return SummarizedFunctionViewer(self)
+
 
 
 # #########################################################################
@@ -52,7 +68,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated classes 3
+# Generated classes 7
 # #########################################################################
 
 class EdgeAst:
@@ -203,6 +219,218 @@ class NodeProperties:
     @property
     def description(self) -> baml_py.ClassPropertyBuilder:
         return self.__bldr.property("description")
+    
+    
+
+
+class SummarizedClassAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("SummarizedClass")
+        self._properties: typing.Set[str] = set([  "name",  "description",  "methods",  "decorators",  ])
+        self._props = SummarizedClassProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "SummarizedClassProperties":
+        return self._props
+
+
+class SummarizedClassViewer(SummarizedClassAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class SummarizedClassProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def name(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("name"))
+    
+    @property
+    def description(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
+    
+    @property
+    def methods(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("methods"))
+    
+    @property
+    def decorators(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("decorators"))
+    
+    
+
+
+class SummarizedCodeAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("SummarizedCode")
+        self._properties: typing.Set[str] = set([  "high_level_summary",  "key_features",  "imports",  "constants",  "classes",  "functions",  "workflow_description",  ])
+        self._props = SummarizedCodeProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "SummarizedCodeProperties":
+        return self._props
+
+
+class SummarizedCodeViewer(SummarizedCodeAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class SummarizedCodeProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def high_level_summary(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("high_level_summary"))
+    
+    @property
+    def key_features(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("key_features"))
+    
+    @property
+    def imports(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("imports"))
+    
+    @property
+    def constants(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("constants"))
+    
+    @property
+    def classes(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("classes"))
+    
+    @property
+    def functions(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("functions"))
+    
+    @property
+    def workflow_description(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("workflow_description"))
+    
+    
+
+
+class SummarizedContentAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("SummarizedContent")
+        self._properties: typing.Set[str] = set([  "summary",  "description",  ])
+        self._props = SummarizedContentProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "SummarizedContentProperties":
+        return self._props
+
+
+class SummarizedContentViewer(SummarizedContentAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class SummarizedContentProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def summary(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("summary"))
+    
+    @property
+    def description(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
+    
+    
+
+
+class SummarizedFunctionAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("SummarizedFunction")
+        self._properties: typing.Set[str] = set([  "name",  "description",  "inputs",  "outputs",  "decorators",  ])
+        self._props = SummarizedFunctionProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "SummarizedFunctionProperties":
+        return self._props
+
+
+class SummarizedFunctionViewer(SummarizedFunctionAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class SummarizedFunctionProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def name(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("name"))
+    
+    @property
+    def description(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
+    
+    @property
+    def inputs(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("inputs"))
+    
+    @property
+    def outputs(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("outputs"))
+    
+    @property
+    def decorators(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("decorators"))
     
     
 
