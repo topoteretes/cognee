@@ -23,7 +23,7 @@ async def main():
     await add_nodes_and_edges_queue.clear.aio()
 
     number_of_graph_saving_workers = 1  # Total number of graph_saving_worker to spawn
-    number_of_data_point_saving_workers = 2  # Total number of graph_saving_worker to spawn
+    number_of_data_point_saving_workers = 5  # Total number of graph_saving_worker to spawn
 
     results = []
     consumer_futures = []
@@ -44,7 +44,8 @@ async def main():
         worker_future = data_point_saving_worker.spawn()
         consumer_futures.append(worker_future)
 
-    s3_bucket_name = "s3://s3-test-laszlo/Database for KG v1"
+    # s3_bucket_name = "s3://s3-test-laszlo/Database for KG v1"
+    s3_bucket_name = "s3://s3-test-laszlo/Pdf"
 
     await cognee.add(s3_bucket_name, dataset_name="s3-files")
 

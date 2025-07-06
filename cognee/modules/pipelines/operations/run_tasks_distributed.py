@@ -27,7 +27,7 @@ if modal:
     @app.function(
         image=image,
         timeout=86400,
-        max_containers=100,
+        max_containers=50,
         secrets=[modal.Secret.from_name("distributed_cognee")],
     )
     async def run_tasks_on_modal(tasks, data_item, user, pipeline_name, context):

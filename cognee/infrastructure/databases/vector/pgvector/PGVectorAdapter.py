@@ -5,7 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from tenacity import retry, retry_if_exception_type, stop_after_attempt
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
 from cognee.exceptions import InvalidValueError
@@ -113,9 +113,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 return False
 
     @retry(
-        retry=retry_if_exception_type(Union[DuplicateTableError, UniqueViolationError]),
+        retry=retry_if_exception_type((DuplicateTableError, UniqueViolationError)),
         stop=stop_after_attempt(3),
-        sleep=1,
+        wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
         data_point_types = get_type_hints(DataPoint)
@@ -159,7 +159,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     @retry(
         retry=retry_if_exception_type(DeadlockDetectedError),
         stop=stop_after_attempt(3),
-        sleep=1,
+        wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
@@ -204,26 +204,26 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
             for data_index, data_point in enumerate(data_points):
                 # Check to see if data should be updated or a new data item should be created
-                data_point_db = (
-                    await session.execute(
-                        select(PGVectorDataPoint).filter(PGVectorDataPoint.id == data_point.id)
-                    )
-                ).scalar_one_or_none()
+                # data_point_db = (
+                #     await session.execute(
+                #         select(PGVectorDataPoint).filter(PGVectorDataPoint.id == data_point.id)
+                #     )
+                # ).scalar_one_or_none()
 
                 # If data point exists update it, if not create a new one
-                if data_point_db:
-                    data_point_db.id = data_point.id
-                    data_point_db.vector = data_vectors[data_index]
-                    data_point_db.payload = serialize_data(data_point.model_dump())
-                    pgvector_data_points.append(data_point_db)
-                else:
-                    pgvector_data_points.append(
-                        PGVectorDataPoint(
-                            id=data_point.id,
-                            vector=data_vectors[data_index],
-                            payload=serialize_data(data_point.model_dump()),
-                        )
+                # if data_point_db:
+                #     data_point_db.id = data_point.id
+                #     data_point_db.vector = data_vectors[data_index]
+                #     data_point_db.payload = serialize_data(data_point.model_dump())
+                #     pgvector_data_points.append(data_point_db)
+                # else:
+                pgvector_data_points.append(
+                    PGVectorDataPoint(
+                        id=data_point.id,
+                        vector=data_vectors[data_index],
+                        payload=serialize_data(data_point.model_dump()),
                     )
+                )
 
             def to_dict(obj):
                 return {

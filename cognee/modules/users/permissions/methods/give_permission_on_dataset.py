@@ -1,7 +1,7 @@
 from uuid import UUID
 from sqlalchemy.future import select
-from asyncpg import UniqueViolationError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt
+from sqlalchemy.exc import IntegrityError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.permissions import PERMISSION_TYPES
@@ -10,10 +10,14 @@ from cognee.modules.users.exceptions import PermissionNotFoundError
 from ...models import Principal, ACL, Permission
 
 
+class GivePermissionOnDatasetError(Exception):
+    message: str = "Failed to give permission on dataset"
+
+
 @retry(
-    retry=retry_if_exception_type(UniqueViolationError),
+    retry=retry_if_exception_type(GivePermissionOnDatasetError),
     stop=stop_after_attempt(3),
-    sleep=1,
+    wait=wait_exponential(multiplier=2, min=1, max=6),
 )
 async def give_permission_on_dataset(
     principal: Principal,
@@ -50,6 +54,11 @@ async def give_permission_on_dataset(
 
         # If no existing ACL entry is found, proceed to add a new one
         if existing_acl is None:
-            acl = ACL(principal_id=principal.id, dataset_id=dataset_id, permission=permission)
-            session.add(acl)
-            await session.commit()
+            try:
+                acl = ACL(principal_id=principal.id, dataset_id=dataset_id, permission=permission)
+                session.add(acl)
+                await session.commit()
+            except IntegrityError:
+                session.rollback()
+
+                raise GivePermissionOnDatasetError()
