@@ -3,7 +3,9 @@
 from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
+    read_query_prompt,
+)
 
 
 class LLMInterface(Protocol):

@@ -1,6 +1,8 @@
 import litellm
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

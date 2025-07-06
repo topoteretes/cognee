@@ -6,12 +6,18 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.base_config import get_base_config
 
 base = get_base_config()
-if base.structured_output_framework == 'BAML':
+if base.structured_output_framework == "BAML":
     print(f"Using BAML framework for code summarization: {base.structured_output_framework}")
-    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import extract_code_summary
+    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import (
+        extract_code_summary,
+    )
 else:
-    print(f"Using llitellm_instructor framework for code summarization: {base.structured_output_framework}")
-    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_code_summary
+    print(
+        f"Using llitellm_instructor framework for code summarization: {base.structured_output_framework}"
+    )
+    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+        extract_code_summary,
+    )
 
 from .models import CodeSummary
 

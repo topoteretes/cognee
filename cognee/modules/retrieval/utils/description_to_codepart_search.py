@@ -9,7 +9,9 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee.modules.search.methods import search
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
 
 logger = get_logger(level=ERROR)
 

@@ -5,12 +5,18 @@ from pydantic import BaseModel
 from cognee.base_config import get_base_config
 
 base = get_base_config()
-if base.structured_output_framework == 'BAML':
+if base.structured_output_framework == "BAML":
     print(f"Using BAML framework for text summarization: {base.structured_output_framework}")
-    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import extract_summary
+    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import (
+        extract_summary,
+    )
 else:
-    print(f"Using llitellm_instructor framework for text summarization: {base.structured_output_framework}")
-    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_summary
+    print(
+        f"Using llitellm_instructor framework for text summarization: {base.structured_output_framework}"
+    )
+    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+        extract_summary,
+    )
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config

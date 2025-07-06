@@ -3,7 +3,9 @@ import logging
 import cognee
 import asyncio
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
 from dotenv import load_dotenv
 from cognee.api.v1.search import SearchType
 from cognee.modules.engine.models import NodeSet

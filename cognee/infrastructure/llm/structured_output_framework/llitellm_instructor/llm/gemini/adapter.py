@@ -6,8 +6,12 @@ from litellm import acompletion, JSONSchemaValidationError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability.get_observe import get_observe
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import LLMInterface
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
+    LLMInterface,
+)
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
+    read_query_prompt,
+)
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
     rate_limit_async,
     sleep_and_retry_async,

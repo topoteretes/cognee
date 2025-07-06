@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
 from baml_py import ClientRegistry
 
+
 class LLMConfig(BaseSettings):
     """
     Configuration settings for the LLM (Large Language Model) provider and related options.
@@ -54,11 +55,15 @@ class LLMConfig(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
-        self.baml_registry.add_llm_client(name=self.llm_provider, provider=self.llm_provider, options={
-            "model": self.llm_model,
-            "temperature": self.llm_temperature,
-            "api_key": self.llm_api_key
-        })
+        self.baml_registry.add_llm_client(
+            name=self.llm_provider,
+            provider=self.llm_provider,
+            options={
+                "model": self.llm_model,
+                "temperature": self.llm_temperature,
+                "api_key": self.llm_api_key,
+            },
+        )
         # Sets the primary client
         self.baml_registry.set_primary(self.llm_provider)
 

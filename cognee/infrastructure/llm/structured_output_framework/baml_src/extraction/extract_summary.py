@@ -14,22 +14,22 @@ logger = get_logger("extract_summary_baml")
 async def extract_summary(content: str, response_model: Type[BaseModel]):
     """
     Extract summary using BAML framework.
-    
+
     Args:
         content: The content to summarize
         response_model: The Pydantic model type for the response
-        
+
     Returns:
         BaseModel: The summarized content in the specified format
     """
     config = get_llm_config()
-    
+
     # Use BAML's SummarizeContent function
     summary_result = await b.SummarizeContent(content, baml_options={"tb": config.baml_registry})
-    
+
     # Convert BAML result to the expected response model
     if response_model is SummarizedCode:
-        # If it's asking for SummarizedCode but we got SummarizedContent, 
+        # If it's asking for SummarizedCode but we got SummarizedContent,
         # we need to use SummarizeCode instead
         code_result = await b.SummarizeCode(content, baml_options={"tb": config.baml_registry})
         return code_result
@@ -41,10 +41,10 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
 async def extract_code_summary(content: str):
     """
     Extract code summary using BAML framework with mocking support.
-    
+
     Args:
         content: The code content to summarize
-        
+
     Returns:
         SummarizedCode: The summarized code information
     """
@@ -61,7 +61,9 @@ async def extract_code_summary(content: str):
             config = get_llm_config()
             result = await b.SummarizeCode(content, baml_options={"tb": config.baml_registry})
         except Exception as e:
-            logger.error("Failed to extract code summary with BAML, falling back to mock summary", exc_info=e)
+            logger.error(
+                "Failed to extract code summary with BAML, falling back to mock summary", exc_info=e
+            )
             result = get_mock_summarized_code()
 
         return result

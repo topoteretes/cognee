@@ -1,8 +1,13 @@
 from typing import List
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import render_prompt, read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
+    render_prompt,
+    read_query_prompt,
+)
 from cognee.root_dir import get_absolute_path
 
 

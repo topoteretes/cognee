@@ -1,7 +1,9 @@
 from typing import Type
 from pydantic import BaseModel
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import LLMInterface
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
+    LLMInterface,
+)
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
     rate_limit_async,
     rate_limit_sync,

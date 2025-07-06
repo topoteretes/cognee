@@ -24,7 +24,9 @@ class GeminiTokenizer(TokenizerInterface):
 
         # Get LLM API key from config
         from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import get_llm_config
+        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import (
+            get_llm_config,
+        )
 
         config = get_embedding_config()
         llm_config = get_llm_config()

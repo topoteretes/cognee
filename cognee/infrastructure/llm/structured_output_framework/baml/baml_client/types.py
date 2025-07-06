@@ -20,22 +20,29 @@ from pydantic import BaseModel, ConfigDict
 
 import baml_py
 
-CheckT = typing_extensions.TypeVar('CheckT')
-CheckName = typing_extensions.TypeVar('CheckName', bound=str)
+CheckT = typing_extensions.TypeVar("CheckT")
+CheckName = typing_extensions.TypeVar("CheckName", bound=str)
+
 
 class Check(BaseModel):
     name: str
     expression: str
     status: str
+
+
 class Checked(BaseModel, typing.Generic[CheckT, CheckName]):
     value: CheckT
     checks: typing.Dict[CheckName, Check]
 
+
 def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
     return list(checks.values())
 
+
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
+
+
 # #########################################################################
 # Generated enums (0)
 # #########################################################################
@@ -43,6 +50,7 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 # Generated classes (7)
 # #########################################################################
+
 
 class Edge(BaseModel):
     # doc string for edge
@@ -52,22 +60,26 @@ class Edge(BaseModel):
     target_node_id: str
     relationship_name: str
 
+
 class KnowledgeGraph(BaseModel):
     nodes: typing.List["Node"]
     edges: typing.List["Edge"]
 
+
 class Node(BaseModel):
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
     id: str
     name: str
     type: str
     description: str
+
 
 class SummarizedClass(BaseModel):
     name: str
     description: str
     methods: typing.Optional[typing.List["SummarizedFunction"]] = None
     decorators: typing.Optional[typing.List[str]] = None
+
 
 class SummarizedCode(BaseModel):
     high_level_summary: str
@@ -78,9 +90,11 @@ class SummarizedCode(BaseModel):
     functions: typing.List["SummarizedFunction"]
     workflow_description: typing.Optional[str] = None
 
+
 class SummarizedContent(BaseModel):
     summary: str
     description: str
+
 
 class SummarizedFunction(BaseModel):
     name: str
@@ -88,6 +102,7 @@ class SummarizedFunction(BaseModel):
     inputs: typing.Optional[typing.List[str]] = None
     outputs: typing.Optional[typing.List[str]] = None
     decorators: typing.Optional[typing.List[str]] = None
+
 
 # #########################################################################
 # Generated type aliases (0)

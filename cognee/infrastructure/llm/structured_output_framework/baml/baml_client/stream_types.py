@@ -18,13 +18,18 @@ import baml_py
 
 from . import types
 
-StreamStateValueT = typing.TypeVar('StreamStateValueT')
+StreamStateValueT = typing.TypeVar("StreamStateValueT")
+
+
 class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
+
+
 # #########################################################################
 # Generated classes (7)
 # #########################################################################
+
 
 class Edge(BaseModel):
     # doc string for edge
@@ -34,22 +39,26 @@ class Edge(BaseModel):
     target_node_id: typing.Optional[str] = None
     relationship_name: typing.Optional[str] = None
 
+
 class KnowledgeGraph(BaseModel):
     nodes: typing.List["types.Node"]
     edges: typing.List["Edge"]
 
+
 class Node(BaseModel):
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
     id: typing.Optional[str] = None
     name: typing.Optional[str] = None
     type: typing.Optional[str] = None
     description: typing.Optional[str] = None
+
 
 class SummarizedClass(BaseModel):
     name: typing.Optional[str] = None
     description: typing.Optional[str] = None
     methods: typing.Optional[typing.List["SummarizedFunction"]] = None
     decorators: typing.Optional[typing.List[str]] = None
+
 
 class SummarizedCode(BaseModel):
     high_level_summary: typing.Optional[str] = None
@@ -60,9 +69,11 @@ class SummarizedCode(BaseModel):
     functions: typing.List["SummarizedFunction"]
     workflow_description: typing.Optional[str] = None
 
+
 class SummarizedContent(BaseModel):
     summary: typing.Optional[str] = None
     description: typing.Optional[str] = None
+
 
 class SummarizedFunction(BaseModel):
     name: typing.Optional[str] = None
@@ -70,6 +81,7 @@ class SummarizedFunction(BaseModel):
     inputs: typing.Optional[typing.List[str]] = None
     outputs: typing.Optional[typing.List[str]] = None
     decorators: typing.Optional[typing.List[str]] = None
+
 
 # #########################################################################
 # Generated type aliases (0)

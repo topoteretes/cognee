@@ -1,5 +1,10 @@
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import read_query_prompt, render_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
+    read_query_prompt,
+    render_prompt,
+)
 
 
 async def generate_completion(

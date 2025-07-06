@@ -5,8 +5,12 @@ from typing import Type
 from instructor.exceptions import InstructorRetryException
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
+    read_query_prompt,
+)
 from cognee.shared.data_models import SummarizedCode
 from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 
