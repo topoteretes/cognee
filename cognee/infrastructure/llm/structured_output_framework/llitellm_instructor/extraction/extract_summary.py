@@ -12,9 +12,21 @@ from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.l
     read_query_prompt,
 )
 from cognee.shared.data_models import SummarizedCode
-from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 
 logger = get_logger("extract_summary")
+
+
+def get_mock_summarized_code():
+    """Local mock function to avoid circular imports."""
+    return SummarizedCode(
+        high_level_summary="Mock code summary",
+        key_features=["Mock feature 1", "Mock feature 2"],
+        imports=["mock_import"],
+        constants=["MOCK_CONSTANT"],
+        classes=[],
+        functions=[],
+        workflow_description="Mock workflow description",
+    )
 
 
 async def extract_summary(content: str, response_model: Type[BaseModel]):
