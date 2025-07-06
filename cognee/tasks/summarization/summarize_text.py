@@ -2,8 +2,13 @@ import asyncio
 from typing import Type
 from uuid import uuid5
 from pydantic import BaseModel
-from cognee.base_config import get_base_config
 
+from cognee.base_config import get_base_config
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.cognify.config import get_cognify_config
+from .models import TextSummary
+
+# Framework selection
 base = get_base_config()
 if base.structured_output_framework == "BAML":
     print(f"Using BAML framework for text summarization: {base.structured_output_framework}")
@@ -17,10 +22,6 @@ else:
     from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
         extract_summary,
     )
-
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.cognify.config import get_cognify_config
-from .models import TextSummary
 
 
 async def summarize_text(

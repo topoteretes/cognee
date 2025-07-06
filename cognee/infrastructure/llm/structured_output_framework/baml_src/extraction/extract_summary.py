@@ -4,11 +4,22 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import b
 from cognee.infrastructure.llm.structured_output_framework.baml_src.config import get_llm_config
 from cognee.shared.data_models import SummarizedCode
-from cognee.tasks.summarization.mock_summary import get_mock_summarized_code
 from cognee.shared.logging_utils import get_logger
-from instructor.exceptions import InstructorRetryException
 
 logger = get_logger("extract_summary_baml")
+
+
+def get_mock_summarized_code():
+    """Local mock function to avoid circular imports."""
+    return SummarizedCode(
+        high_level_summary="Mock code summary",
+        key_features=["Mock feature 1", "Mock feature 2"],
+        imports=["mock_import"],
+        constants=["MOCK_CONSTANT"],
+        classes=[],
+        functions=[],
+        workflow_description="Mock workflow description",
+    )
 
 
 async def extract_summary(content: str, response_model: Type[BaseModel]):

@@ -4,7 +4,9 @@ from uuid import uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.base_config import get_base_config
+from .models import CodeSummary
 
+# Framework selection
 base = get_base_config()
 if base.structured_output_framework == "BAML":
     print(f"Using BAML framework for code summarization: {base.structured_output_framework}")
@@ -18,8 +20,6 @@ else:
     from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
         extract_code_summary,
     )
-
-from .models import CodeSummary
 
 
 async def summarize_code(

@@ -7,7 +7,14 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.base_config import get_base_config
+from cognee.modules.graph.utils import (
+    expand_with_nodes_and_edges,
+    retrieve_existing_edges,
+)
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.tasks.storage import add_data_points
 
+# Framework selection
 base = get_base_config()
 if base.structured_output_framework == "BAML":
     print(f"Using BAML framework: {base.structured_output_framework}")
@@ -19,13 +26,6 @@ else:
     from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
         extract_content_graph,
     )
-
-from cognee.modules.graph.utils import (
-    expand_with_nodes_and_edges,
-    retrieve_existing_edges,
-)
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.storage import add_data_points
 
 
 async def integrate_chunk_graphs(

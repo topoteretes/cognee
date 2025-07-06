@@ -1,15 +1,13 @@
 import asyncio
 from typing import Type, List
 from pydantic import BaseModel
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
-    extract_content_graph,
-)
+
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.tasks.storage import add_data_points
 from cognee.base_config import get_base_config
 
+# Framework selection
 base = get_base_config()
-
 if base.structured_output_framework == "BAML":
     print(f"Using BAML framework: {base.structured_output_framework}")
     from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import (
