@@ -17,6 +17,8 @@
   <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
   .
   <a href="https://www.docs.cognee.ai">Docs</a>
+  .
+  <a href="https://github.com/topoteretes/cognee-community">cognee community repo</a>
   </p>
 
 
