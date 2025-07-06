@@ -21,6 +21,7 @@ from cognee.modules.users.permissions.methods import (
 )
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.data.models import FileProcessingStatus
 
 logger = get_logger()
 
@@ -66,6 +67,14 @@ class GraphDTO(OutDTO):
 
 class DatasetCreationPayload(InDTO):
     name: str
+
+
+class FileProcessingStatusResponse(BaseModel):
+    file_id: UUID
+    filename: str
+    processing_status: str
+    created_at: str
+    updated_at: Optional[str] = None
 
 
 def get_datasets_router() -> APIRouter:
@@ -241,5 +250,140 @@ def get_datasets_router() -> APIRouter:
             )
 
         return data.raw_data_location
+
+    @router.get("/{dataset_id}/files/{file_id}/status", response_model=FileProcessingStatusResponse)
+    async def get_file_processing_status(
+        dataset_id: UUID,
+        file_id: UUID,
+        user: User = Depends(get_authenticated_user)
+    ):
+        """Get the processing status of a specific file in a dataset."""
+        try:
+            from cognee.modules.data.methods import get_dataset, get_file_with_status
+            
+            # Verify user has access to the dataset
+            dataset = await get_dataset(user.id, dataset_id)
+            if dataset is None:
+                raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
+            
+            # Get the file with its processing status
+            file_data = await get_file_with_status(file_id, dataset_id)
+            
+            if not file_data:
+                raise HTTPException(status_code=404, detail="File not found in the specified dataset")
+            
+            return FileProcessingStatusResponse(
+                file_id=file_data.id,
+                filename=file_data.name,
+                processing_status=file_data.processing_status.value if file_data.processing_status else FileProcessingStatus.UNPROCESSED.value,
+                created_at=file_data.created_at.isoformat(),
+                updated_at=file_data.updated_at.isoformat() if file_data.updated_at else None,
+            )
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.error(f"Error getting file processing status: {error}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    @router.get("/{dataset_id}/files/status", response_model=List[FileProcessingStatusResponse])
+    async def get_dataset_files_processing_status(
+        dataset_id: UUID,
+        status: Optional[str] = Query(None, description="Filter by processing status (UNPROCESSED, PROCESSING, PROCESSED, ERROR)"),
+        limit: Optional[int] = Query(None, description="Limit number of results", ge=1, le=1000),
+        offset: int = Query(0, description="Offset for pagination", ge=0),
+        user: User = Depends(get_authenticated_user)
+    ):
+        """Get all files in a dataset with their processing status, optionally filtered by status."""
+        try:
+            from cognee.modules.data.methods import get_dataset, get_dataset_files_with_status
+            
+            # Verify user has access to the dataset
+            dataset = await get_dataset(user.id, dataset_id)
+            if dataset is None:
+                raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
+            
+            # Convert string status to enum if provided
+            status_enum = None
+            if status:
+                try:
+                    status_enum = FileProcessingStatus(status.upper())
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Invalid status. Must be one of: {[s.value for s in FileProcessingStatus]}"
+                    )
+            
+            # Get files with their processing status
+            files = await get_dataset_files_with_status(dataset_id, status_enum, limit, offset)
+            
+            return [
+                FileProcessingStatusResponse(
+                    file_id=file_data.id,
+                    filename=file_data.name,
+                    processing_status=file_data.processing_status.value if file_data.processing_status else FileProcessingStatus.UNPROCESSED.value,
+                    created_at=file_data.created_at.isoformat(),
+                    updated_at=file_data.updated_at.isoformat() if file_data.updated_at else None,
+                ) for file_data in files
+            ]
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.error(f"Error getting dataset files processing status: {error}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    @router.post("/{dataset_id}/files/reset-status")
+    async def reset_dataset_files_processing_status(
+        dataset_id: UUID,
+        file_ids: List[UUID] = Query(..., description="List of file IDs to reset"),
+        user: User = Depends(get_authenticated_user)
+    ):
+        """Reset the processing status of files in a dataset to UNPROCESSED for reprocessing."""
+        try:
+            from cognee.modules.data.methods import (
+                get_dataset, 
+                validate_files_in_dataset, 
+                reset_file_processing_status
+            )
+            
+            # Input validation
+            if not file_ids:
+                raise HTTPException(status_code=400, detail="file_ids parameter is required")
+            
+            if len(file_ids) > 100:  # Reasonable limit
+                raise HTTPException(status_code=400, detail="Cannot reset more than 100 files at once")
+            
+            # Verify user has access to the dataset
+            dataset = await get_dataset(user.id, dataset_id)
+            if dataset is None:
+                raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
+            
+            # Verify all files belong to the dataset
+            valid_file_ids = await validate_files_in_dataset(file_ids, dataset_id)
+            
+            if len(valid_file_ids) != len(file_ids):
+                invalid_ids = set(file_ids) - set(valid_file_ids)
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Files not found in dataset: {list(invalid_ids)}"
+                )
+            
+            reset_result = await reset_file_processing_status(file_ids)
+            
+            if reset_result["errors"]:
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Reset failed with errors: {reset_result['errors']}"
+                )
+            
+            return {
+                "message": f"Successfully reset processing status for {reset_result['reset_count']} files",
+                "file_ids": file_ids,
+                "new_status": FileProcessingStatus.UNPROCESSED.value
+            }
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.error(f"Error resetting file processing status: {error}")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
     return router

@@ -22,6 +22,11 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
+from cognee.modules.data.models import FileProcessingStatus
+from cognee.modules.data.methods import (
+    prepare_files_for_tracking,
+    set_files_processing_status,
+)
 
 logger = get_logger("cognify")
 
@@ -211,22 +216,46 @@ async def run_cognify_blocking(
     graph_db_config: dict = None,
     vector_db_config: dict = False,
 ):
+    if not datasets:
+        raise ValueError("Datasets parameter is required")
+    
     total_run_info = {}
-
-    async for run_info in cognee_pipeline(
-        tasks=tasks,
-        datasets=datasets,
-        user=user,
-        pipeline_name="cognify_pipeline",
-        graph_db_config=graph_db_config,
-        vector_db_config=vector_db_config,
-    ):
-        if run_info.dataset_id:
-            total_run_info[run_info.dataset_id] = run_info
-        else:
-            total_run_info = run_info
-
-    return total_run_info
+    
+    # Normalize datasets to list
+    if isinstance(datasets, str):
+        datasets = [datasets]
+    
+    # Get file data for tracking
+    file_data_items = await prepare_files_for_tracking(datasets, user.id)
+    
+    try:
+        # Set files to PROCESSING status at pipeline start
+        await set_files_processing_status(file_data_items, FileProcessingStatus.PROCESSING)
+        
+        # Execute pipeline
+        async for run_info in cognee_pipeline(
+            tasks=tasks,
+            datasets=datasets,
+            user=user,
+            pipeline_name="cognify_pipeline",
+            graph_db_config=graph_db_config,
+            vector_db_config=vector_db_config,
+        ):
+            if run_info.dataset_id:
+                total_run_info[run_info.dataset_id] = run_info
+            else:
+                total_run_info = run_info
+        
+        # Set files to PROCESSED status on successful completion
+        await set_files_processing_status(file_data_items, FileProcessingStatus.PROCESSED)
+        
+        return total_run_info
+        
+    except Exception as error:
+        logger.error(f"Cognify pipeline failed: {error}")
+        # Set files to ERROR status on pipeline failure
+        await set_files_processing_status(file_data_items, FileProcessingStatus.ERROR)
+        raise
 
 
 async def run_cognify_as_background_process(
@@ -236,24 +265,61 @@ async def run_cognify_as_background_process(
     graph_db_config: dict = None,
     vector_db_config: dict = False,
 ):
+    if not datasets:
+        raise ValueError("Datasets parameter is required")
+    
+    # Normalize datasets to list
+    if isinstance(datasets, str):
+        datasets = [datasets]
+    
+    # Get file data for tracking
+    file_data_items = await prepare_files_for_tracking(datasets, user.id)
+    
+    # Set files to PROCESSING status at pipeline start
+    await set_files_processing_status(file_data_items, FileProcessingStatus.PROCESSING)
+    
     # Store pipeline status for all pipelines
     pipeline_run_started_info = []
 
     async def handle_rest_of_the_run(pipeline_list):
         # Execute all provided pipelines one by one to avoid database write conflicts
-        for pipeline in pipeline_list:
-            while True:
+        pipeline_success = True
+        try:
+            for pipeline in pipeline_list:
                 try:
-                    pipeline_run_info = await anext(pipeline)
+                    while True:
+                        try:
+                            pipeline_run_info = await anext(pipeline)
 
-                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                            push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
 
-                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
-                        pipeline_run_info, PipelineRunErrored
-                    ):
-                        break
-                except StopAsyncIteration:
-                    break
+                            if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
+                                pipeline_run_info, PipelineRunErrored
+                            ):
+                                if isinstance(pipeline_run_info, PipelineRunErrored):
+                                    pipeline_success = False
+                                break
+                        except StopAsyncIteration:
+                            break
+                except Exception as error:
+                    logger.error(f"Background cognify pipeline failed: {error}")
+                    pipeline_success = False
+        except Exception as error:
+            logger.error(f"Background cognify process failed: {error}")
+            pipeline_success = False
+        
+        # Set final status based on pipeline success
+        try:
+            final_status = FileProcessingStatus.PROCESSED if pipeline_success else FileProcessingStatus.ERROR
+            await set_files_processing_status(file_data_items, final_status)
+            logger.info(f"Background cognify completed with status: {final_status.value}")
+        except Exception as error:
+            logger.error(f"Failed to set final status in background process: {error}")
+            # Ensure files are marked as ERROR if we can't set final status
+            try:
+                await set_files_processing_status(file_data_items, FileProcessingStatus.ERROR)
+            except Exception:
+                logger.error("Failed to set ERROR status as fallback")
 
     # Start all pipelines to get started status
     pipeline_list = []
@@ -272,7 +338,14 @@ async def run_cognify_as_background_process(
         pipeline_list.append(pipeline_run)
 
     # Send all started pipelines to execute one by one in background
-    asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
+    # Create task and store reference to prevent garbage collection
+    background_task = asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
+    
+    # Add task to background tasks set to prevent garbage collection
+    if not hasattr(asyncio, '_background_tasks'):
+        asyncio._background_tasks = set()
+    asyncio._background_tasks.add(background_task)
+    background_task.add_done_callback(lambda t: asyncio._background_tasks.discard(t))
 
     return pipeline_run_started_info
 
