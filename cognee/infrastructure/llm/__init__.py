@@ -10,4 +10,6 @@ from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.l
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.utils import (
     test_embedding_connection,
 )
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm import rate_limiter
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm import (
+    rate_limiter,
+)
