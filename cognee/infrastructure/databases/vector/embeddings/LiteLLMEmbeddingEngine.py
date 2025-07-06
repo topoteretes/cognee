@@ -7,11 +7,11 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
-from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
-from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
-from cognee.infrastructure.llm.embedding_rate_limiter import (
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.tokenizer.Gemini import GeminiTokenizer
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.tokenizer import MistralTokenizer
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.embedding_rate_limiter import (
     embedding_rate_limit_async,
     embedding_sleep_and_retry_async,
 )

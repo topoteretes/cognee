@@ -1,6 +1,6 @@
-from typing import List, Tuple
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
+from typing import List
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import render_prompt, read_query_prompt
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.root_dir import get_absolute_path
 

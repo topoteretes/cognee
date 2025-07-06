@@ -1,4 +1,4 @@
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
 from cognee.modules.chunking.Chunker import Chunker
 
 from .Document import Document

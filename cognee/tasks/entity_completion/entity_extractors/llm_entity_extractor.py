@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.models.EntityType import EntityType
-from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import read_query_prompt, render_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
 
 logger = get_logger("llm_entity_extractor")
 

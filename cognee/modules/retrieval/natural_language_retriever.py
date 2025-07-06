@@ -2,8 +2,8 @@ from typing import Any, Optional
 import logging
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.prompts import render_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface

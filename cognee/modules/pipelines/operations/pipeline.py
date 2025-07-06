@@ -1,6 +1,6 @@
 import asyncio
 from typing import Union
-from uuid import NAMESPACE_OID, uuid5, UUID
+from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -69,7 +69,7 @@ async def cognee_pipeline(
         cognee_pipeline.first_run = True
 
     if cognee_pipeline.first_run:
-        from cognee.infrastructure.llm.utils import test_llm_connection, test_embedding_connection
+        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.utils import test_llm_connection, test_embedding_connection
 
         # Test LLM and Embedding configuration once before running Cognee
         await test_llm_connection()

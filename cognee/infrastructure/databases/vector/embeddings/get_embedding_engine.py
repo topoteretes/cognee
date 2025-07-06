@@ -1,5 +1,5 @@
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
-from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import get_llm_config
 from .EmbeddingEngine import EmbeddingEngine
 from functools import lru_cache
 

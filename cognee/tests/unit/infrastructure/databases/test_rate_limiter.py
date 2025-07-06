@@ -1,10 +1,8 @@
 """Tests for the LLM rate limiter."""
 
 import pytest
-import asyncio
-import time
 from unittest.mock import patch
-from cognee.infrastructure.llm.rate_limiter import (
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
     llm_rate_limiter,
     rate_limit_async,
     rate_limit_sync,

@@ -1,10 +1,17 @@
 import asyncio
 from typing import Type, List
 from pydantic import BaseModel
-from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_content_graph
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.tasks.storage import add_data_points
+from cognee.base_config import get_base_config
 
+base = get_base_config()
+
+if base.structured_output_framework == 'BAML':
+    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import extract_content_graph
+else:
+    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_content_graph
 
 async def extract_graph_from_code(
     data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]

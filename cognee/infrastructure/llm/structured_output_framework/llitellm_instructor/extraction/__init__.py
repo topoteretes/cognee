@@ -1,0 +1,1 @@
+from .knowledge_graph.extract_content_graph import extract_content_graph

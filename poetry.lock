@@ -630,6 +630,24 @@ files = [
 extras = ["regex"]
 
 [[package]]
+name = "baml-py"
+version = "0.201.0"
+description = "BAML python bindings (pyproject.toml)"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "baml_py-0.201.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:83228d2af2b0e845bbbb4e14f7cbd3376cec385aee01210ac522ab6076e07bec"},
+    {file = "baml_py-0.201.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:2a9d016139e3ae5b5ce98c7b05b5fbd53d5d38f04dc810ec4d70fb17dd6c10e4"},
+    {file = "baml_py-0.201.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b5058505b1a3c5f04fc1679aec4d730fa9bef2cbd96209b3ed50152f60b96baf"},
+    {file = "baml_py-0.201.0-cp38-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:36289d548581ba4accd5eaaab3246872542dd32dc6717e537654fa0cad884071"},
+    {file = "baml_py-0.201.0-cp38-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:5ab70e7bd6481d71edca8a33313347b29faccec78b9960138aa437522813ac9a"},
+    {file = "baml_py-0.201.0-cp38-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:7efc5c693a7142c230a4f3d6700415127fee0b9f5fdbb36db63e04e27ac4c0f1"},
+    {file = "baml_py-0.201.0-cp38-abi3-win_amd64.whl", hash = "sha256:56499857b7a27ae61a661c8ce0dddd0fb567a45c0b826157e44048a14cf586f9"},
+    {file = "baml_py-0.201.0-cp38-abi3-win_arm64.whl", hash = "sha256:1e52dc1151db84a302b746590fe2bc484bdd794f83fa5da7216d9394c559f33a"},
+]
+
+[[package]]
 name = "banks"
 version = "2.1.3"
 description = "A prompt programming language"
@@ -12100,4 +12118,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "c33c4bc9654072b74c2f768c6d4bf9da7b1a814b50046539fceb78a5541d30ee"
+content-hash = "87a986dbcdedbbe7e00ccd052af0f74faa195b466247c0c003c49efdc942ec7b"

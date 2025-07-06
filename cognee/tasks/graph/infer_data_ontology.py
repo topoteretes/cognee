@@ -13,16 +13,16 @@ import aiofiles
 import pandas as pd
 from pydantic import BaseModel
 
-from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
+from cognee.modules.graph.exceptions import EntityNotFoundError
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
-from cognee.modules.data.extraction.knowledge_graph.add_model_class_to_graph import (
+from cognee.modules.data.methods.add_model_class_to_graph import (
     add_model_class_to_graph,
 )
 from cognee.tasks.graph.models import NodeModel, GraphOntology

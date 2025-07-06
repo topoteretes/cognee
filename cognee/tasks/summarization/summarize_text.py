@@ -2,7 +2,7 @@ import asyncio
 from typing import Type
 from uuid import uuid5
 from pydantic import BaseModel
-from cognee.modules.data.extraction.extract_summary import extract_summary
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_summary
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
 from .models import TextSummary

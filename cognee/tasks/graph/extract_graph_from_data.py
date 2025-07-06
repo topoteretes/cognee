@@ -1,12 +1,18 @@
 import asyncio
-from typing import Type, List, Optional
+from typing import Type, List
 
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
+from cognee.base_config import get_base_config
+base = get_base_config()
+if base.structured_output_framework == 'BAML':
+    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import extract_content_graph
+else:
+    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import extract_content_graph
+
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,
     retrieve_existing_edges,

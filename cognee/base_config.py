@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     monitoring_tool: object = Observer.LANGFUSE
+    structured_output_framework: str = os.getenv("STRUCTURED_OUTPUT_FRAMEWORK")
     graphistry_username: Optional[str] = os.getenv("GRAPHISTRY_USERNAME")
     graphistry_password: Optional[str] = os.getenv("GRAPHISTRY_PASSWORD")
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
