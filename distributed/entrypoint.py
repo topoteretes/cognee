@@ -21,6 +21,7 @@ os.environ["COGNEE_DISTRIBUTED"] = "True"
 async def main():
     # Clear queues
     await add_nodes_and_edges_queue.clear.aio()
+    await add_data_points_queue.clear.aio()
 
     number_of_graph_saving_workers = 1  # Total number of graph_saving_worker to spawn
     number_of_data_point_saving_workers = 5  # Total number of graph_saving_worker to spawn

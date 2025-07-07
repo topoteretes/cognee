@@ -296,13 +296,13 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
-            task_config={"batch_size": 25},
+            task_config={"batch_size": 10},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
-            task_config={"batch_size": 25},
+            task_config={"batch_size": 10},
         ),
-        Task(add_data_points, task_config={"batch_size": 25}),
+        Task(add_data_points, task_config={"batch_size": 10}),
     ]
 
     return default_tasks

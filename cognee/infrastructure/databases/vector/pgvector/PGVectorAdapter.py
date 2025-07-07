@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
@@ -113,8 +114,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 return False
 
     @retry(
-        retry=retry_if_exception_type((DuplicateTableError, UniqueViolationError)),
-        stop=stop_after_attempt(3),
+        retry=retry_if_exception_type(
+            (DuplicateTableError, UniqueViolationError, ProgrammingError)
+        ),
+        stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
