@@ -190,7 +190,11 @@ async def specific_search_by_context(
         search_results = await specific_search(
             query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
         )
-        return {dataset.name: search_results}
+        return {
+            "search_result": search_results,
+            "dataset_id": dataset.id,
+            "dataset_name": dataset.name,
+        }
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
