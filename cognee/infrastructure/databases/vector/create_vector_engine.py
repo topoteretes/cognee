@@ -137,10 +137,10 @@ def create_vector_engine(
 
     elif vector_db_provider == "neptune":
         try:
-            import boto3
+            from langchain_aws import NeptuneAnalyticsGraph, NeptuneGraph
         except ImportError:
             raise ImportError(
-                "Boto3 is not installed. Please install it with 'pip install boto3'"
+                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
             )
 
         if not vector_db_url:
