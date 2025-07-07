@@ -41,6 +41,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
     Adapter for interacting with Amazon Neptune Analytics graph store.
     This class provides methods for querying, adding, deleting nodes and edges using the aws_langchain library.
     """
+    _GRAPH_NODE_LABEL = "COGNEE_GRAPH_NODE"
 
     def __init__(
         self,
@@ -203,12 +204,11 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             return
         
         try:
-            # Prepare node properties with the ID
+            # Prepare node properties with the ID and graph type
             serialized_properties = self.serialize_properties(node.model_dump())
-            node_label = type(node).__name__
 
             query = f"""
-            MERGE (n:{node_label} {{`~id`: $node_id}})
+            MERGE (n:{self._GRAPH_NODE_LABEL} {{`~id`: $node_id}})
             ON CREATE SET n = $properties, n.updated_at = timestamp()
             ON MATCH SET n = $properties, n.updated_at = timestamp()
             RETURN n
@@ -256,7 +256,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to delete the node and all its relationships
             query = f"""
-            MATCH (n)
+            MATCH (n:{self._GRAPH_NODE_LABEL})
             WHERE id(n) = $node_id
             DETACH DELETE n
             """
@@ -305,7 +305,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to retrieve the node
             query = f"""
-            MATCH (n)
+            MATCH (n:{self._GRAPH_NODE_LABEL})
             WHERE id(n) = $node_id
             RETURN n
             """
@@ -374,9 +374,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             serialized_properties = self.serialize_properties(edge_props)
 
             query = f"""
-            MATCH (source)
+            MATCH (source:{self._GRAPH_NODE_LABEL})
             WHERE id(source) = $source_id 
-            MATCH (target) 
+            MATCH (target:{self._GRAPH_NODE_LABEL}) 
             WHERE id(target) = $target_id 
             MERGE (source)-[r:{relationship_name}]->(target) 
             ON CREATE SET r = $properties, r.updated_at = timestamp() 
@@ -427,7 +427,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         try:
             # Build openCypher query to delete the graph
-            result = await self.query("MATCH (n) DETACH DELETE n")
+            result = await self.query(f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n")
             logger.debug(f"Successfully deleted all edges and nodes from the graph")
 
         except Exception as e:
@@ -485,9 +485,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to check if the edge exists
             query = f"""
-            MATCH (source) 
+            MATCH (source:{self._GRAPH_NODE_LABEL}) 
             WHERE id(source) = $source_id 
-            MATCH (target) 
+            MATCH (target:{self._GRAPH_NODE_LABEL}) 
             WHERE id(target) = $target_id 
             MATCH (source)-[r:{relationship_name}]->(target)
             RETURN COUNT(r) > 0 AS edge_exists
