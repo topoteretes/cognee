@@ -57,7 +57,7 @@ async def search(
     """
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
-        return await permissions_search(
+        return await authorized_search(
             query_text, query_type, user, dataset_ids, system_prompt_path, top_k
         )
 
@@ -143,7 +143,7 @@ async def specific_search(
     return results
 
 
-async def permissions_search(
+async def authorized_search(
     query_text: str,
     query_type: SearchType,
     user: User = None,
