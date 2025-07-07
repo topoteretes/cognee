@@ -1,9 +1,28 @@
 from typing import List, Optional
 from langchain_aws import NeptuneAnalyticsGraph, NeptuneGraph
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.storage.utils import get_own_properties
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.PayloadSchema import PayloadSchema
 from ..vector_db_interface import VectorDBInterface
+
+class IndexSchema(DataPoint):
+    """
+    Represents a schema for an index data point containing an ID and text.
+
+    Attributes:
+
+    - id: A string representing the unique identifier for the data point.
+    - text: A string representing the content of the data point.
+    - metadata: A dictionary with default index fields for the schema, currently configured
+    to include 'text'.
+    """
+
+    id: str
+    text: str
+
+    metadata: dict = {"index_fields": ["text"]}
+
 
 
 class NeptuneAnalyticsAdapter(VectorDBInterface):
@@ -120,19 +139,36 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             - data_points (List[DataPoint]): A list of data points to be added to the
               collection.
         """
-        for item in data_points:
-            node_id = item.id
-            embedding = [0.0] * 1536
+        for data_point in data_points:
+
+
+            node_id = data_point.id
+            # Generate embedding
+            text_content = DataPoint.get_embeddable_data(data_point)
+            data_vectors = await self.embedding_engine.embed_text([text_content])
+
+            # Fetch properties
+            # properties = get_own_properties(data_point)
+            properties = {"test": "value"}
+
+            params = {
+                "node_id": node_id,
+                "properties": properties
+            }
+
+
+            # Composite the query and send
             query_string = (
-                    f"MERGE (n"
+                    f"CREATE (n"
                     f":{self.VECTOR_NODE_IDENTIFIER} "
                     f":{self.COLLECTION_PREFIX}{collection_name} "
-                    f"{{`~id`: '{node_id}'}}) "
+                    f" $properties ) "
+                    # f"{{`~id`: '{node_id}'}}) "
                     f"WITH n "
-                    f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
+                    f"CALL neptune.algo.vectors.upsert('{node_id}', {data_vectors}) "
                     f"YIELD success "
                     f"RETURN success ")
-            self._client.query(query_string)
+            self._client.query(query_string, params)
         pass
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):

@@ -3,7 +3,7 @@ import pathlib
 import asyncio
 import cognee
 from cognee.modules.search.types import SearchType
-
+from cognee.infrastructure.databases.vector import get_vector_engine
 
 async def main():
     """
@@ -65,6 +65,14 @@ async def main():
 
     # Process the added document to extract knowledge
     await cognee.cognify([dataset_name])
+
+    engine = get_vector_engine()
+
+    item = "test"
+    collection = "DocumentChunk_text"
+    result = await engine.retrieve(collection, [item])
+
+    print(result)
 
     # Now let's perform some searches
     # 1. Search for insights related to "Neptune Analytics"
