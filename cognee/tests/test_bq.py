@@ -1,5 +1,5 @@
 import pytest
-from cognee.infrastructure.engine import DataPoint
+# from cognee.infrastructure.engine import DataPoint
 
 
 async def main():
@@ -21,19 +21,19 @@ async def main():
     #                             f"DETACH DELETE n")
 
 
-    # result = (f"MERGE (n"
-    #             f":{VECTOR_NODE_IDENTIFIER} "
-    #             f":{COLLECITON_PREFIX}{collection_name}) "
-    #             f"{{~id: '{node_id}'}} "
-    #             f"WITH n "
-    #             f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
-    #             f"YIELD node, embedding, success "
-    #             f"RETURN node, embedding, success ")
-    # print(result)
+    result = (f"MERGE (n"
+                f":{VECTOR_NODE_IDENTIFIER} "
+                f":{COLLECITON_PREFIX}{collection_name}) "
+                f"{{~id: '{node_id}'}} "
+                f"WITH n "
+                f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
+                f"YIELD success "
+                f"RETURN success ")
+    print(result)
     #
-    data = DataPoint()
+    # data = DataPoint()
 
-    print(data)
+    # print(data)
 
 
 if __name__ == "__main__":

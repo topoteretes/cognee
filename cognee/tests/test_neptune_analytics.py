@@ -3,6 +3,7 @@ import pytest
 import cognee
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.vector.neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsAdapter
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -30,7 +31,7 @@ async def main():
     # await engine.delete_data_points("test", ["Bob", "Carol"])
     # await engine.has_collection("test_new")
 
-    await engine.create_data_points("test", ["Bob", "Carol"])
+    await engine.create_data_points("test", [DataPoint(k="value")])
 
 
 

@@ -132,18 +132,21 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
               collection.
         """
 
+
+
         for item in data_points:
-            print(item)
-            # query_string = (
-            #         f"MERGE (n"
-            #         f":{VECTOR_NODE_IDENTIFIER} "
-            #         f":{COLLECITON_PREFIX}{collection_name}) "
-            #         f"{{~id: '{node_id}'}} "
-            #         f"WITH n "
-            #         f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
-            #         f"YIELD node, embedding, success "
-            #         f"RETURN node, embedding, success ")
-            # result = self._client.query(query_string)
+            node_id = item.id
+            embedding = [0.0] * 1536
+            query_string = (
+                    f"MERGE (n"
+                    f":{self.VECTOR_NODE_IDENTIFIER} "
+                    f":{self.COLLECITON_PREFIX}{collection_name} "
+                    f"{{`~id`: '{node_id}'}}) "
+                    f"WITH n "
+                    f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
+                    f"YIELD success "
+                    f"RETURN success ")
+            self._client.query(query_string)
         pass
 
 
@@ -159,6 +162,8 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             - data_point_ids (list[str]): A list of IDs of the data points to retrieve.
         """
         pass
+
+
 
     """ Search """
 
