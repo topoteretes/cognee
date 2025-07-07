@@ -128,6 +128,7 @@ async def main():
         "write",
         test_user.id,
     )
+
     # Add new data to test_users dataset from default_user
     await cognee.add(
         [explanation_file_path],
@@ -136,6 +137,14 @@ async def main():
         user=default_user,
     )
     await cognee.cognify(datasets=[test_user_dataset_id], user=default_user)
+
+    # Actually give permission to default_user to read on test_users dataset
+    await authorized_give_permission_on_datasets(
+        default_user.id,
+        [test_user_dataset_id],
+        "read",
+        test_user.id,
+    )
 
     # Check if default_user can see from test_users datasets now
     search_results = await cognee.search(
@@ -164,7 +173,28 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    # TODO: Add test for delete permissions once it's reworked
+    # Try deleting data from test_user dataset with default_user without delete permission
+    delete_error = False
+    try:
+        await cognee.delete([text], dataset_id=test_user_dataset_id, user=default_user)
+    except PermissionDeniedError:
+        delete_error = True
+
+    assert delete_error, "PermissionDeniedError was not raised during delete operation as expected"
+
+    # Try deleting data from test_user dataset with test_user
+    await cognee.delete([text], dataset_id=test_user_dataset_id, user=test_user)
+
+    # Actually give permission to default_user to delete data for test_users dataset
+    await authorized_give_permission_on_datasets(
+        default_user.id,
+        [test_user_dataset_id],
+        "delete",
+        test_user.id,
+    )
+
+    # Try deleting data from test_user dataset with default_user after getting delete permission
+    await cognee.delete([explanation_file_path], dataset_id=test_user_dataset_id, user=default_user)
 
 
 if __name__ == "__main__":
