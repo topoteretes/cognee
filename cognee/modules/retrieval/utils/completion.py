@@ -13,6 +13,10 @@ async def generate_completion(
     user_prompt = render_prompt(user_prompt_path, args)
     system_prompt = read_query_prompt(system_prompt_path)
 
+    with open("/home/haopn2/cognee-starter/results/check_prompt.txt", "w", encoding="utf-8") as f:
+        f.write(f"User Prompt:\n{user_prompt}\n\n")
+        f.write(f"System Prompt:\n{system_prompt}\n")
+
     llm_client = get_llm_client()
     return await llm_client.acreate_structured_output(
         text_input=user_prompt,

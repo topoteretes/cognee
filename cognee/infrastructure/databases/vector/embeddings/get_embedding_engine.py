@@ -93,6 +93,15 @@ def create_embedding_engine(
             huggingface_tokenizer=huggingface_tokenizer,
         )
 
+    if embedding_provider.lower() == "flagembedding":
+        from .FlagEmbeddingEngine import FlagEmbeddingEngine
+
+        return FlagEmbeddingEngine(
+            model=embedding_model,
+            dimensions=embedding_dimensions,
+            max_tokens=embedding_max_tokens,
+        )
+
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 
     return LiteLLMEmbeddingEngine(

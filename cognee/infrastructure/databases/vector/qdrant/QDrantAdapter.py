@@ -1,4 +1,3 @@
-import os
 from typing import Dict, List, Optional
 from qdrant_client import AsyncQdrantClient, models
 
@@ -148,17 +147,19 @@ class QDrantAdapter(VectorDBInterface):
 
         Returns:
         --------
+
             - AsyncQdrantClient: An instance of AsyncQdrantClient configured for database
               operations.
         """
-        is_prod = os.getenv("ENV").lower() == "prod"
-
         if self.qdrant_path is not None:
-            return AsyncQdrantClient(path=self.qdrant_path, port=6333, https=is_prod)
+            return AsyncQdrantClient(path=self.qdrant_path, port=6333)
         elif self.url is not None:
-            return AsyncQdrantClient(url=self.url, api_key=self.api_key, port=6333, https=is_prod)
+            return AsyncQdrantClient(url=self.url, port=6333)
+            # return AsyncQdrantClient(url=self.url, path="/mnt/disk1/hao_workspace/cognee/db",
+            #                         port=6333)
 
-        return AsyncQdrantClient(location=":memory:")
+        # return AsyncQdrantClient(location=":memory:")
+        return AsyncQdrantClient(path="/home/haopn2/cognee-starter/db")
 
     async def embed_data(self, data: List[str]) -> List[float]:
         """
@@ -391,7 +392,13 @@ class QDrantAdapter(VectorDBInterface):
         if query_text is None and query_vector is None:
             raise InvalidValueError(message="One of query_text or query_vector must be provided!")
 
+        if limit <= 0:
+            return []
+
         if not await self.has_collection(collection_name):
+            logger.warning(
+                f"Collection '{collection_name}' not found in QdrantAdapter.search; returning []."
+            )
             return []
 
         if query_vector is None:
@@ -399,8 +406,6 @@ class QDrantAdapter(VectorDBInterface):
 
         try:
             client = self.get_qdrant_client()
-            if limit == 0:
-                collection_size = await client.count(collection_name=collection_name)
 
             results = await client.search(
                 collection_name=collection_name,
@@ -410,7 +415,7 @@ class QDrantAdapter(VectorDBInterface):
                     if query_vector is not None
                     else (await self.embed_data([query_text]))[0],
                 ),
-                limit=limit if limit > 0 else collection_size.count,
+                limit=limit if limit > 0 else None,
                 with_vectors=with_vector,
             )
 
@@ -427,6 +432,13 @@ class QDrantAdapter(VectorDBInterface):
                 )
                 for result in results
             ]
+        except UnexpectedResponse as error:
+            if "Collection not found" in str(error):
+                raise CollectionNotFoundError(
+                    message=f"Collection {collection_name} not found!"
+                ) from error
+            else:
+                raise error
         finally:
             await client.close()
 

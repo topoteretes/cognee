@@ -95,6 +95,8 @@ class LocalStorage(Storage):
 
         If the directory already exists, no action is taken.
 
+        Create *file_path* if not empty. If *file_path* == '' (no directory component),
+        silently skip the current working directory always exists.
         Parameters:
         -----------
 
@@ -102,7 +104,10 @@ class LocalStorage(Storage):
         """
         if not os.path.exists(file_path):
             os.makedirs(file_path, exist_ok=True)
-
+        if not os.path.isdir(file_path):
+            raise NotADirectoryError(f"{file_path} is not a directory")
+        os.makedirs(file_path, exist_ok=True)
+        
     @staticmethod
     def remove(file_path: str):
         """

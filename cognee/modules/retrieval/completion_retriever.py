@@ -50,7 +50,10 @@ class CompletionRetriever(BaseRetriever):
 
         try:
             found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
-
+            with open("/home/haopn2/cognee-starter/results/check.txt", "w", encoding="utf-8") as f:
+                f.write(f"Found chunks: {len(found_chunks)}\n")
+                for chunk in found_chunks:
+                    f.write(f"Chunk ID: {chunk.id}, Text: {chunk.payload['text']}\n")
             if len(found_chunks) == 0:
                 return ""
 

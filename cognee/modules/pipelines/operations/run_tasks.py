@@ -93,6 +93,11 @@ async def run_tasks(
         from cognee.modules.data.models import Dataset
 
         dataset = await session.get(Dataset, dataset_id)
+        if dataset is None:
+            # tuỳ nhu cầu bạn muốn đặt tên/metadata ra sao
+            dataset = Dataset(id=dataset_id, name=f"Testing")
+            session.add(dataset)
+            await session.commit()
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
 

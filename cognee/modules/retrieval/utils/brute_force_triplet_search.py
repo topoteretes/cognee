@@ -61,7 +61,6 @@ async def get_memory_fragment(
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     graph_engine = await get_graph_engine()
     memory_fragment = CogneeGraph()
-
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
@@ -72,6 +71,9 @@ async def get_memory_fragment(
             edge_properties_to_project=["relationship_name"],
             node_type=node_type,
             node_name=node_name,
+        )
+        memory_fragment.dump_metadata_txt(
+            file_path="/home/haopn2/cognee-starter/results/memory_fragment.txt", also_print=False
         )
     except EntityNotFoundError:
         pass
@@ -125,8 +127,6 @@ async def brute_force_search(
         collections (Optional[List[str]]): List of collections to query.
         properties_to_project (Optional[List[str]]): List of properties to project.
         memory_fragment (Optional[CogneeGraph]): Existing memory fragment to reuse.
-        node_type: node type to filter
-        node_name: node name to filter
 
     Returns:
         list: The top triplet results.
@@ -135,11 +135,14 @@ async def brute_force_search(
         raise ValueError("The query must be a non-empty string.")
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
-
+    
+    import time
+    start_time = time.time()
     if memory_fragment is None:
         memory_fragment = await get_memory_fragment(
             properties_to_project, node_type=node_type, node_name=node_name
         )
+    print("\n Initialized memory fragment in %.2f seconds" % (time.time() - start_time))
 
     if collections is None:
         collections = [
@@ -150,7 +153,9 @@ async def brute_force_search(
         ]
 
     try:
+        start_time = time.time()
         vector_engine = get_vector_engine()
+        print(f"Vector engine initialized in {time.time() - start_time:.2f} seconds")
     except Exception as e:
         logger.error("Failed to initialize vector engine: %s", e)
         raise RuntimeError("Initialization error") from e
@@ -160,25 +165,63 @@ async def brute_force_search(
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
-                collection_name=collection_name, query_text=query, limit=0
+                collection_name=collection_name, query_text=query, limit=10
             )
         except CollectionNotFoundError:
             return []
 
     try:
+        time_start = time.time()
         results = await asyncio.gather(
             *[search_in_collection(collection_name) for collection_name in collections]
         )
+        print(f"Vector search took {time.time() - time_start:.2f} seconds")
 
         if all(not item for item in results):
             return []
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
-
+        start_time = time.time()
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-        await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
+        print(f"Mapped vector distances to graph nodes in {time.time() - start_time:.2f} seconds")
 
+        start_time = time.time()
+        await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
+        print(f"Mapped vector distances to graph edges in {time.time() - start_time:.2f} seconds")
+
+        # memory_fragment.dump_metadata_txt(file_path="/mnt/disk1/hao_workspace/cognee/memory_fragment.txt", also_print=False)
+        start_time = time.time()
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
+        print(f"Calculated top triplet importances in {time.time() - start_time:.2f} seconds")
+        with open("/home/haopn2/cognee-starter/results/cognee_brute_force_results.txt", "a", encoding="utf-8") as f:
+            f.write(f"\n🔍 Searching for: '{query}'\n")
+            f.write(f"Found {len(results)} results:\n")
+            for result in results:
+                f.write(f"  - {str(result)}\n")
+        
+        for edge in results:
+            node1 = edge.node1 # source node
+            node2 = edge.node2 # target node
+            edge_attributes = edge.attributes # relationship attributes between node1 and node2
+            limit = 5
+            # memory_fragment.write_related_chunks_to_file(entity_id=node1.id, file_path="/mnt/disk1/hao_workspace/cognee/related_chunks.txt")
+
+            edges_e = memory_fragment.get_edges_from_node(node2.id)
+            related_chunks = []
+
+            for e in edges_e:
+                if e.attributes.get("relationship_type"):
+                    other = e.node1 if e.node2.id == node2.id else e.node2
+                    if other.attributes.get("type") == "DocumentChunk":
+                        related_chunks.append(other)
+
+            with open("/home/haopn2/cognee-starter/results/related_chunks.txt", "a", encoding="utf-8") as f:
+                f.write("=========================================================================")
+                for chunk in related_chunks[:limit]:
+                    f.write(f"Chunk ID: {chunk.id}, Name: {chunk.attributes.get('name')},\n")
+                    f.write(f"Text: {chunk.attributes.get('text')}\n")
+                    f.write(f"Type: {chunk.attributes.get('type')}\n\n")
+                    f.write("-" * 40 + "\n")
 
         send_telemetry("cognee.brute_force_triplet_search EXECUTION COMPLETED", user.id)
 

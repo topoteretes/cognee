@@ -29,3 +29,6 @@ from cognee.modules.visualization.cognee_network_visualization import (
 
 # Pipelines
 from .modules import pipelines
+
+
+diff -run /home/haopn2/miniconda3/envs/agentic/lib/python3.11/site-packages/cognee

@@ -1,5 +1,5 @@
 from typing import Union, BinaryIO, Any
-
+import os
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 
@@ -15,13 +15,28 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], datase
     elif hasattr(data_item, "file"):
         file_path = save_data_to_file(data_item.file, filename=data_item.filename)
 
+    # elif isinstance(data_item, str):
+    #     if data_item.startswith("s3://"):
+    #         file_path = data_item
+    #     # data is a file path
+    #     elif data_item.startswith("file://") or data_item.startswith("/"):
+    #         file_path = data_item.replace("file://", "")
+    #     # data is text
+    #     else:
+    #         file_path = save_data_to_file(data_item)
     elif isinstance(data_item, str):
+        # ---------- NEW, SAFER ROUTING ----------
         if data_item.startswith("s3://"):
             file_path = data_item
-        # data is a file path
-        elif data_item.startswith("file://") or data_item.startswith("/"):
-            file_path = data_item.replace("file://", "")
-        # data is text
+
+        elif data_item.startswith("file://"):
+            local = data_item.replace("file://", "")
+            # chỉ coi là file nếu thật sự tồn tại
+            file_path = local if os.path.isfile(local) else save_data_to_file(data_item)
+
+        elif data_item.startswith("/"):
+            file_path = data_item if os.path.isfile(data_item) else save_data_to_file(data_item)
+
         else:
             file_path = save_data_to_file(data_item)
     else:

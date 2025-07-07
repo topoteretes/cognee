@@ -27,6 +27,72 @@ class CogneeGraph(CogneeAbstractGraph):
         self.nodes = {}
         self.edges = []
         self.directed = directed
+    
+    def __repr__(self):
+        return f"CogneeGraph(directed={self.directed}, nodes={len(self.nodes)}, edges={len(self.edges)})"
+    
+    def dump_metadata_txt(self, file_path: str = "cognee_metadata.txt", also_print: bool = False):
+        """Ghi toàn bộ metadata của graph ra file văn bản thuần (.txt).
+
+        Args:
+            file_path (str): đường dẫn file muốn ghi (mặc định cùng thư mục hiện tại).
+            also_print (bool): True ➜ vẫn in ra console; False ➜ chỉ ghi file.
+        """
+        # import pprint, pathlib, io
+
+        # buf = io.StringIO()
+        # # pformat = lambda obj: pprint.pformat(obj, compact=True, width=120)
+
+        # # -------- NODES --------
+        # buf.write("=== NODES ===\n")
+        # for n in self.nodes.values():
+        #     buf.write(f"\nNode {n.id}\n")
+        #     buf.write(pformat(n.attributes) + "\n")
+
+        # # -------- EDGES --------
+        # buf.write("\n=== EDGES ===\n")
+        # for e in self.edges:
+        #     edge_info = {"from": e.node1.id, "to": e.node2.id, **e.attributes}
+        #     buf.write(pformat(edge_info) + "\n")
+
+        # # Ghi ra file
+        # pathlib.Path(file_path).write_text(buf.getvalue(), encoding="utf-8")
+
+        # if also_print:
+        #     print(buf.getvalue())
+
+        # buf.close()
+        pass
+
+    def write_related_chunks_to_file(
+        self,
+        entity_id: str,
+        file_path: str = "/home/haopn2/cognee-starter/results/related_chunks.txt",
+        limit = 5,
+    ) -> None:
+        """
+        Write related chunks of a given entity to a text file.
+
+        Args:
+            entity_id (str): The ID of the entity to find related chunks for.
+            file_path (str): The path to the output text file.
+        """
+        edges = self.get_edges_from_node(entity_id)
+        related_chunks = []
+
+        for e in edges:
+            if e.attributes.get("relationship_type"):
+                other = e.node1 if e.node2.id == entity_id else e.node2
+                if other.attributes.get("type") == "DocumentChunk":
+                    related_chunks.append(other)
+
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write("=========================================================================")
+            for chunk in related_chunks[:limit]:
+                f.write(f"Chunk ID: {chunk.id}, Name: {chunk.attributes.get('name')},\n")
+                f.write(f"Text: {chunk.attributes.get('text')}\n")
+                f.write(f"Type: {chunk.attributes.get('type')}\n\n")
+                f.write("-" * 40 + "\n")
 
     def add_node(self, node: Node) -> None:
         if node.id not in self.nodes:
@@ -150,7 +216,7 @@ class CogneeGraph(CogneeAbstractGraph):
             for edge in self.edges:
                 relationship_type = edge.attributes.get("relationship_type")
                 if not relationship_type or relationship_type not in embedding_map:
-                    print(f"Edge {edge} has an unknown or missing relationship type.")
+                    # print(f"Edge {edge} has an unknown or missing relationship type.")
                     continue
 
                 edge.attributes["vector_distance"] = embedding_map[relationship_type]

@@ -8,9 +8,6 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger()
 
 
 class GraphCompletionRetriever(BaseRetriever):
@@ -53,7 +50,7 @@ class GraphCompletionRetriever(BaseRetriever):
                         content = text
                     else:
                         name = node.attributes.get("name", "Unnamed Node")
-                        content = node.attributes.get("description", name)
+                        content = name
                     nodes[node.id] = {"node": node, "name": name, "content": content}
         return nodes
 
@@ -98,7 +95,8 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         subclasses = get_all_subclasses(DataPoint)
         vector_index_collections = []
-
+        import time
+        start_time = time.time()
         for subclass in subclasses:
             if "metadata" in subclass.model_fields:
                 metadata_field = subclass.model_fields["metadata"]
@@ -115,7 +113,8 @@ class GraphCompletionRetriever(BaseRetriever):
             node_type=self.node_type,
             node_name=self.node_name,
         )
-
+        end_time = time.time()
+        print(f"\n GraphCompletionRetriever.get_triplets took {end_time - start_time:.2f} seconds \n ")
         return found_triplets
 
     async def get_context(self, query: str) -> str:
@@ -136,7 +135,6 @@ class GraphCompletionRetriever(BaseRetriever):
         triplets = await self.get_triplets(query)
 
         if len(triplets) == 0:
-            logger.warning("Empty context was provided to the completion")
             return ""
 
         return await self.resolve_edges_to_text(triplets)
@@ -159,13 +157,17 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         if context is None:
             context = await self.get_context(query)
-
+        
+        import time
+        start_time = time.time()
         completion = await generate_completion(
             query=query,
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
         )
+        end_time = time.time()
+        print(f"GraphCompletionRetriever.get_completion took {end_time - start_time:.2f} seconds")
         return [completion]
 
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
