@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 async def main():
-    cognee.config.set_vector_db_provider("neptune")
+    # cognee.config.set_vector_db_provider("neptune")
     #
     # # When URL is absent
     # cognee.config.set_vector_db_url(None)
@@ -26,12 +26,20 @@ async def main():
     engine = get_vector_engine()
     assert isinstance(engine, NeptuneAnalyticsAdapter)
 
+    await engine.has_collection("test_new")
+
+
     # await engine.prune()
 
     # await engine.delete_data_points("test", ["Bob", "Carol"])
-    # await engine.has_collection("test_new")
 
-    await engine.create_data_points("test", [DataPoint(k="value")])
+
+    # await engine.create_data_points("test", [DataPoint(k="value")])
+    # result = await engine.retrieve("test", ["556c794c-0f3b-44d8-aeec-4a882f300749",
+    #                                "556c794c-0f3b-44d8-aeec-4a882f300749",
+    #                                "556c794c-0f3b-44d8-aeec-4a882f300749"])
+
+    print(result)
 
 
 

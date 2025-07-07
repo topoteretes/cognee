@@ -21,15 +21,19 @@ async def main():
     #                             f"DETACH DELETE n")
 
 
-    result = (f"MERGE (n"
-                f":{VECTOR_NODE_IDENTIFIER} "
-                f":{COLLECITON_PREFIX}{collection_name}) "
-                f"{{~id: '{node_id}'}} "
-                f"WITH n "
-                f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
-                f"YIELD success "
-                f"RETURN success ")
-    print(result)
+    # Insert
+    # result = (f"MERGE (n"
+    #             f":{VECTOR_NODE_IDENTIFIER} "
+    #             f":{COLLECITON_PREFIX}{collection_name}) "
+    #             f"{{~id: '{node_id}'}} "
+    #             f"WITH n "
+    #             f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
+    #             f"YIELD success "
+    #             f"RETURN success ")
+
+    # Read from ID
+
+    # print(result)
     #
     # data = DataPoint()
 

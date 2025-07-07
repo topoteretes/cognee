@@ -10,7 +10,7 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
     name = "Neptune Analytics"
 
     VECTOR_NODE_IDENTIFIER = "COGNEE_VECTOR_NODE"
-    COLLECITON_PREFIX = "VECTOR_COLLECTION_"
+    COLLECTION_PREFIX = "VECTOR_COLLECTION_"
 
     def __init__(self,
                  graph_id: Optional[str],
@@ -41,67 +41,15 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         self.aws_session_token = aws_session_token
         self._client = NeptuneAnalyticsGraph(graph_id)
 
-    async def prune(self):
-        """
-        Remove obsolete or unnecessary data from the database.
-        """
-
-        # result = self._client.query(f"MATCH (n:{self.VECTOR_NODE_IDENTIFIER}) RETURN n")
-
-        # Run actual truncate
-        result = self._client.query(f"MATCH (n:{self.VECTOR_NODE_IDENTIFIER}) DETACH DELETE n")
-        pass
-
-
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
-        """
-        Delete specified data points from a collection.
-
-        Parameters:
-        -----------
-
-            - collection_name (str): The name of the collection from which to delete data
-              points.
-            - data_point_ids (list[str]): A list of IDs of the data points to delete.
-        """
-        query_string = (f"MATCH (n"
-                        f":{self.VECTOR_NODE_IDENTIFIER} "
-                        f":{self.COLLECITON_PREFIX}{collection_name}) "
-                        f"WHERE id(n) IN {data_point_ids} "
-                        f"DETACH DELETE n")
-        print(query_string)
-        result = self._client.query(query_string)
-        pass
-
-
-    async def create_collection(
-        self,
-        collection_name: str,
-        payload_schema: Optional[PayloadSchema] = None,
-    ):
-        """
-        Create a new collection with an optional payload schema.
-
-        Parameters:
-        -----------
-
-            - collection_name (str): The name of the new collection to create.
-            - payload_schema (Optional[PayloadSchema]): An optional schema for the payloads
-              within this collection. (default None)
-        """
-
-        # In Neptune Analytics, node's label is being used to represent collection,
-        # hence there is no-op to create collection when there is no element belongs to it.
-        pass
-
+    """ Collection related """
 
     async def has_collection(self, collection_name: str) -> bool:
         """
-        Check if a specified collection exists.
+        Check if a specified collection exists,
+        by issuing an Opencypher query to check any vector node has the collection label.
 
         Parameters:
         -----------
-
             - collection_name (str): The name of the collection to check for existence.
 
         Returns:
@@ -111,36 +59,74 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         """
         query_string = (f"MATCH (n"
                         f":{self.VECTOR_NODE_IDENTIFIER} "
-                        f":{self.COLLECITON_PREFIX}{collection_name}) "
-                        f"RETURN true as collection_exist LIMIT 1")
+                        f":{self.COLLECTION_PREFIX}{collection_name}) "
+                        f"RETURN COUNT(n) > 0 as collection_exist LIMIT 1")
         result = self._client.query(query_string)
-        pass
+        return result[0]['collection_exist']
 
 
-
-    """ Data points """
-
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_collection(
+        self,
+        collection_name: str,
+        payload_schema: Optional[PayloadSchema] = None,
+    ):
         """
-        Insert new data points into the specified collection.
+        In Neptune Analytics, node's label is being used to represent collection,
+        hence this method will be no-op,
+        has_collection() will return True when one or more vector being inserted,
+        and False otherwise.
 
         Parameters:
         -----------
 
+            - collection_name (str): The name of the new collection to create.
+            - payload_schema (Optional[PayloadSchema]): An optional schema for the payloads
+              within this collection. (default None)
+        """
+        pass
+
+
+
+
+    """ Node operations """
+
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+        """
+        Delete specified data points from a collection, by executing an OpenCypher query,
+        with matching [vector_label, collection_label, node_id] combination.
+
+        Parameters:
+        -----------
+            - collection_name (str): The name of the collection from which to delete data
+              points.
+            - data_point_ids (list[str]): A list of IDs of the data points to delete.
+        """
+        query_string = (f"MATCH (n"
+                        f":{self.VECTOR_NODE_IDENTIFIER} "
+                        f":{self.COLLECTION_PREFIX}{collection_name}) "
+                        f"WHERE id(n) IN {data_point_ids} "
+                        f"DETACH DELETE n")
+        self._client.query(query_string)
+        pass
+
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        """
+        Insert new data points into the specified collection, by first inserting the node itself on the graph,
+        then execute neptune.algo.vectors.upsert() to insert the corresponded embedding.
+
+        Parameters:
+        -----------
             - collection_name (str): The name of the collection where data points will be added.
             - data_points (List[DataPoint]): A list of data points to be added to the
               collection.
         """
-
-
-
         for item in data_points:
             node_id = item.id
             embedding = [0.0] * 1536
             query_string = (
                     f"MERGE (n"
                     f":{self.VECTOR_NODE_IDENTIFIER} "
-                    f":{self.COLLECITON_PREFIX}{collection_name} "
+                    f":{self.COLLECTION_PREFIX}{collection_name} "
                     f"{{`~id`: '{node_id}'}}) "
                     f"WITH n "
                     f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
@@ -149,19 +135,42 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             self._client.query(query_string)
         pass
 
-
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """
         Retrieve data points from a collection using their IDs.
 
         Parameters:
         -----------
-
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (list[str]): A list of IDs of the data points to retrieve.
         """
+        result_set = []
+
+        # Do the fetch for each node
+        for node_id in data_point_ids:
+            # Composite query
+            query_string = (f"MATCH( n "
+                            f":{self.VECTOR_NODE_IDENTIFIER} "
+                            f":{self.COLLECTION_PREFIX}{collection_name} "
+                            f"{{`~id`: '{node_id}'}}) "
+                            f"CALL neptune.algo.vectors.get(n) "
+                            f"YIELD embedding RETURN id(n), embedding")
+            result = self._client.query(query_string)
+            result_set.append(result)
+        return result_set
+
+
+    """ Graph operation """
+
+    async def prune(self):
+        """
+        Remove obsolete or unnecessary data from the database.
+        """
+        # Run actual truncate
+        self._client.query(f"MATCH (n:{self.VECTOR_NODE_IDENTIFIER}) DETACH DELETE n")
         pass
+
 
 
 
