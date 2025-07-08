@@ -156,7 +156,7 @@ def create_vector_engine(
                 embedding_engine=embedding_engine,
             )
 
-        raise ValueError("Neptune endpoint must have the format neptune-graph://<GRAPH_ID>")
+        raise ValueError("Neptune endpoint must have the format 'neptune-graph://<GRAPH_ID>'")
 
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
