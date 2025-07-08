@@ -25,6 +25,7 @@ if modal:
     from distributed.modal_image import image
 
     @app.function(
+        retries=3,
         image=image,
         timeout=86400,
         max_containers=50,

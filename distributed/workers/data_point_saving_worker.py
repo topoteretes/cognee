@@ -40,6 +40,7 @@ def is_deadlock_error(error):
 
 
 @app.function(
+    retries=3,
     image=image,
     timeout=86400,
     max_containers=5,
