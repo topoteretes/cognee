@@ -159,7 +159,6 @@ async def ingest_data(
                 session.add(dataset)
 
             if len(new_datapoints) > 0:
-                session.add_all(new_datapoints)
                 dataset.data.extend(new_datapoints)
 
             if len(existing_data_points) > 0:
@@ -167,8 +166,6 @@ async def ingest_data(
                     await session.merge(data_point)
 
             if len(dataset_new_data_points) > 0:
-                for data_point in dataset_new_data_points:
-                    await session.merge(data_point)
                 dataset.data.extend(dataset_new_data_points)
 
             await session.merge(dataset)
