@@ -39,7 +39,7 @@ async def test_circular_reference_extraction():
     repo = Repository(path="repo1")
 
     code_file_1 = CodeFile(
-        id=uuid5(NAMESPACE_OID, f"file_0"),
+        id=uuid5(NAMESPACE_OID, "file_0"),
         source_code="source code",
         part_of=repo,
         contains=[],

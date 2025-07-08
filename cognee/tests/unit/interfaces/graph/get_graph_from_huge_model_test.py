@@ -71,9 +71,21 @@ async def test_circular_reference_extraction():
         for file_index in range(1500)
     ]
 
-    for code_file in code_files:
+    for index, code_file in enumerate(code_files):
+        first_index = index
+        second_index = index
+
+        while first_index == index:
+            first_index = random.randint(0, len(code_files) - 1)
+
+        while second_index == index:
+            second_index = random.randint(0, len(code_files) - 1)
+
         code_file.depends_on.extend(
-            [code_files[random.randint(0, len(code_files) - 1)] for _ in range(2)]
+            [
+                code_files[first_index],
+                code_files[second_index],
+            ]
         )
         code_file.contains.extend(
             [
