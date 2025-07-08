@@ -1,7 +1,6 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from enum import Enum
 from typing import Optional, Any, List, Dict, Type, Tuple
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger, ERROR
@@ -12,6 +11,9 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
     EdgeData,
     Node,
 )
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.infrastructure.engine import DataPoint
+
 from .exceptions import (
     NeptuneAnalyticsConfigurationError,
 )
@@ -19,16 +21,24 @@ from .neptune_analytics_utils import (
     validate_graph_id,
     validate_aws_region,
     build_neptune_config,
+    format_neptune_error,
 )
 
 logger = get_logger("NeptuneAnalyticsAdapter", level=ERROR)
 
+try:
+    from langchain_aws import NeptuneAnalyticsGraph
+    LANGCHAIN_AWS_AVAILABLE = True
+except ImportError:
+    logger.warning("langchain_aws not available. Neptune Analytics functionality will be limited.")
+    LANGCHAIN_AWS_AVAILABLE = False
 
 class NeptuneAnalyticsAdapter(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
     This class provides methods for querying, adding, deleting nodes and edges using the aws_langchain library.
     """
+    _GRAPH_NODE_LABEL = "COGNEE_GRAPH_NODE"
 
     def __init__(
         self,
@@ -53,6 +63,10 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -------
             - NeptuneAnalyticsConfigurationError: If configuration parameters are invalid
         """
+        # validate import
+        if not LANGCHAIN_AWS_AVAILABLE:
+            raise ImportError("langchain_aws is not available. Please install it to use Neptune Analytics.")
+
         # Validate configuration
         if not validate_graph_id(graph_id):
             raise NeptuneAnalyticsConfigurationError(f"Invalid graph ID: \"{graph_id}\"")
@@ -68,17 +82,72 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         
         # Build configuration
         self.config = build_neptune_config(
-            graph_id=graph_id,
-            region=region,
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token,
+            graph_id=self.graph_id,
+            region=self.region,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_session_token=self.aws_session_token,
         )
         
-        # TODO: Initialize Neptune Analytics client using aws_langchain
-        # This will be implemented in subsequent tasks
-        self._client = None
-        logger.info(f"Initialized Neptune Analytics adapter for graph: \"{graph_id}\" in region: \"{region}\"")
+        # Initialize Neptune Analytics client using langchain_aws
+        self._client: NeptuneAnalyticsGraph = self._initialize_client()
+        logger.info(f"Initialized Neptune Analytics adapter for graph: \"{graph_id}\" in region: \"{self.region}\"")
+
+    def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
+        """
+        Initialize the Neptune Analytics client using langchain_aws.
+        
+        Returns:
+        --------
+            - Optional[Any]: The Neptune Analytics client or None if not available
+        """
+        try:
+            # Initialize the Neptune Analytics Graph client
+            client_config = {
+                "graph_identifier": self.graph_id,
+            }
+            # Add AWS credentials if provided
+            if self.region:
+                client_config["region_name"] = self.region
+            if self.aws_access_key_id:
+                client_config["aws_access_key_id"] = self.aws_access_key_id
+            if self.aws_secret_access_key:
+                client_config["aws_secret_access_key"] = self.aws_secret_access_key
+            if self.aws_session_token:
+                client_config["aws_session_token"] = self.aws_session_token
+            
+            client = NeptuneAnalyticsGraph(**client_config)
+            logger.info("Successfully initialized Neptune Analytics client")
+            return client
+            
+        except Exception as e:
+            raise NeptuneAnalyticsConfigurationError(f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}")
+
+    @staticmethod
+    def serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Serialize properties for Neptune Analytics storage.
+        Parameters:
+        -----------
+            - properties (Dict[str, Any]): Properties to serialize.
+        Returns:
+        --------
+            - Dict[str, Any]: Serialized properties.
+        """
+        serialized_properties = {}
+
+        for property_key, property_value in properties.items():
+            if isinstance(property_value, UUID):
+                serialized_properties[property_key] = str(property_value)
+                continue
+
+            if isinstance(property_value, dict):
+                serialized_properties[property_key] = json.dumps(property_value, cls=JSONEncoder)
+                continue
+
+            serialized_properties[property_key] = property_value
+
+        return serialized_properties
 
     async def query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Any]:
         """
@@ -93,11 +162,28 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[Any]: A list of results from the query execution.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics query functionality
-        logger.warning("Neptune Analytics query method not yet implemented")
-        return []
+        try:
+            # Execute the query using the Neptune Analytics client
+            # The langchain_aws NeptuneAnalyticsGraph supports openCypher queries
+            if params is None:
+                params = {}
+            logger.debug(f"executing na query:\nquery={query}\n")
+            result = self._client.query(query, params)
+            
+            # Convert the result to list format expected by the interface
+            if isinstance(result, list):
+                return result
+            elif isinstance(result, dict):
+                return [result]
+            else:
+                return [{"result": result}]
+                
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Neptune Analytics query failed: {error_msg}")
+            raise Exception(f"Query execution failed: {error_msg}")
 
-    async def add_node(self, node_id: str, properties: Dict[str, Any]) -> None:
+    async def add_node(self, node: DataPoint) -> None:
         """
         Add a single node with specified properties to the graph.
 
@@ -106,11 +192,32 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             - node_id (str): Unique identifier for the node being added.
             - properties (Dict[str, Any]): A dictionary of properties associated with the node.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics node creation
-        logger.warning(f"Neptune Analytics add_node method not yet implemented for node: {node_id}")
+        try:
+            # Prepare node properties with the ID and graph type
+            serialized_properties = self.serialize_properties(node.model_dump())
+
+            query = f"""
+            MERGE (n:{self._GRAPH_NODE_LABEL} {{`~id`: $node_id}})
+            ON CREATE SET n = $properties, n.updated_at = timestamp()
+            ON MATCH SET n = $properties, n.updated_at = timestamp()
+            RETURN n
+            """
+
+            params = {
+                "node_id": str(node.id),
+                "properties": serialized_properties,
+            }
+            
+            result = await self.query(query, params)
+            logger.debug(f"Successfully added/updated node: {node.id}")
+            
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to add node {node.id}: {error_msg}")
+            raise Exception(f"Failed to add node: {error_msg}")
 
     @record_graph_changes
-    async def add_nodes(self, nodes: List[Node]) -> None:
+    async def add_nodes(self, nodes: List[DataPoint]) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
@@ -121,6 +228,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         # TODO: Implement bulk node creation using aws_langchain
         logger.warning(f"Neptune Analytics add_nodes method not yet implemented for {len(nodes)} nodes")
 
+        [await self.add_node(node) for node in nodes]
+
     async def delete_node(self, node_id: str) -> None:
         """
         Delete a specified node from the graph by its ID.
@@ -129,8 +238,25 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - node_id (str): Unique identifier for the node to delete.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics node deletion
-        logger.warning(f"Neptune Analytics delete_node method not yet implemented for node: {node_id}")
+        try:
+            # Build openCypher query to delete the node and all its relationships
+            query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            WHERE id(n) = $node_id
+            DETACH DELETE n
+            """
+
+            params = {
+                "node_id": node_id
+            }
+            
+            await self.query(query, params)
+            logger.debug(f"Successfully deleted node: {node_id}")
+            
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to delete node {node_id}: {error_msg}")
+            raise Exception(f"Failed to delete node: {error_msg}")
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
         """
@@ -142,6 +268,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         # TODO: Implement bulk node deletion using aws_langchain
         logger.warning(f"Neptune Analytics delete_nodes method not yet implemented for {len(node_ids)} nodes")
+
+        [await self.delete_node(node) for node in node_ids]
 
     async def get_node(self, node_id: str) -> Optional[NodeData]:
         """
@@ -155,9 +283,33 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Optional[NodeData]: The node data if found, None otherwise.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics node retrieval
-        logger.warning(f"Neptune Analytics get_node method not yet implemented for node: {node_id}")
-        return None
+        try:
+            # Build openCypher query to retrieve the node
+            query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            WHERE id(n) = $node_id
+            RETURN n
+            """
+            params = {'node_id': node_id}
+
+            result = await self.query(query, params)
+            
+            if result and len(result) == 1:
+                # Extract node properties from the result
+                node_data = result.pop().get('n', {})
+                logger.debug(f"Successfully retrieved node: {node_id}")
+                return node_data
+            else:
+                if not result:
+                    logger.debug(f"Node not found: {node_id}")
+                elif len(result) > 1:
+                    logger.debug(f"Only one node expected, multiple returned: {node_id}")
+                return None
+                
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get node {node_id}: {error_msg}")
+            raise Exception(f"Failed to get node: {error_msg}")
 
     async def get_nodes(self, node_ids: List[str]) -> List[NodeData]:
         """
@@ -173,7 +325,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         # TODO: Implement bulk node retrieval using aws_langchain
         logger.warning(f"Neptune Analytics get_nodes method not yet implemented for {len(node_ids)} nodes")
-        return []
+
+        return [await self.get_node(node_id) for node_id in node_ids]
 
     async def add_edge(
         self,
@@ -192,11 +345,40 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             - relationship_name (str): The name of the relationship to be established by the edge.
             - properties (Optional[Dict[str, Any]]): Optional dictionary of properties associated with the edge.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics edge creation
-        logger.warning(f"Neptune Analytics add_edge method not yet implemented for edge: {source_id} -> {target_id}")
+        try:
+            # Build openCypher query to create the edge
+            # First ensure both nodes exist, then create the relationship
+
+            # Prepare edge properties
+            edge_props = properties or {}
+            serialized_properties = self.serialize_properties(edge_props)
+
+            query = f"""
+            MATCH (source:{self._GRAPH_NODE_LABEL})
+            WHERE id(source) = $source_id 
+            MATCH (target:{self._GRAPH_NODE_LABEL}) 
+            WHERE id(target) = $target_id 
+            MERGE (source)-[r:{relationship_name}]->(target) 
+            ON CREATE SET r = $properties, r.updated_at = timestamp() 
+            ON MATCH SET r = $properties, r.updated_at = timestamp() 
+            RETURN r
+            """
+
+            params = {
+                "source_id": source_id,
+                "target_id": target_id,
+                "properties": serialized_properties,
+            }
+            await self.query(query, params)
+            logger.debug(f"Successfully added edge: {source_id} -[{relationship_name}]-> {target_id}")
+            
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
+            raise Exception(f"Failed to add edge: {error_msg}")
 
     @record_graph_changes
-    async def add_edges(self, edges: List[EdgeData]) -> None:
+    async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
         """
         Add multiple edges to the graph in a single operation.
 
@@ -207,12 +389,29 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         # TODO: Implement bulk edge creation using aws_langchain
         logger.warning(f"Neptune Analytics add_edges method not yet implemented for {len(edges)} edges")
 
+        for edge in edges:
+            (node_from, node_to, relationship, *props) = edge
+            await self.add_edge(str(node_from), str(node_to), relationship, props[0] if props else {})
+
     async def delete_graph(self) -> None:
         """
-        Remove the entire graph, including all nodes and edges.
+        Delete all nodes and edges from the graph database.
+
+        Returns:
+        --------
+            The result of the query execution, typically indicating success or failure.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics graph deletion
-        logger.warning("Neptune Analytics delete_graph method not yet implemented")
+        try:
+            # Build openCypher query to delete the graph
+            query = f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n"
+            await self.query(query)
+            logger.debug(f"Successfully deleted all edges and nodes from the graph")
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to delete graph: {error_msg}")
+            raise Exception(f"Failed to delete graph: {error_msg}")
+
 
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """
@@ -224,7 +423,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         # TODO: Implement using aws_langchain Neptune Analytics graph data retrieval
         logger.warning("Neptune Analytics get_graph_data method not yet implemented")
-        return ([], [])
+        return [], []
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
@@ -256,9 +455,33 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - bool: True if the edge exists, False otherwise.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics edge existence check
-        logger.warning(f"Neptune Analytics has_edge method not yet implemented for edge: {source_id} -> {target_id}")
-        return False
+        try:
+            # Build openCypher query to check if the edge exists
+            query = f"""
+            MATCH (source)-[r:{relationship_name}]->(target)
+            WHERE id(source) = $source_id AND id(target) = $target_id
+            RETURN COUNT(r) > 0 AS edge_exists
+            """
+
+            params = {
+                "source_id": source_id,
+                "target_id": target_id,
+            }
+            
+            result = await self.query(query, params)
+            
+            if result and len(result) > 0:
+                edge_exists = result.pop().get('edge_exists', False)
+                logger.debug(f"Edge existence check for "
+                             f"{source_id} -[{relationship_name}]-> {target_id}: {edge_exists}")
+                return edge_exists
+            else:
+                return False
+                
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to check edge existence {source_id} -> {target_id}: {error_msg}")
+            return False
 
     async def has_edges(self, edges: List[EdgeData]) -> List[EdgeData]:
         """
@@ -272,9 +495,24 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[EdgeData]: A list of EdgeData objects that exist in the graph.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics bulk edge existence check
-        logger.warning(f"Neptune Analytics has_edges method not yet implemented for {len(edges)} edges")
-        return []
+
+        existing_edges = []
+        
+        try:
+            # Check each edge individually
+            for edge in edges:
+                (source_id, target_id, relationship_name, *props) = edge
+                edge_exists = await self.has_edge(source_id, target_id, relationship_name)
+                if edge_exists:
+                    existing_edges.append(edge)
+            
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to check edges existence: {error_msg}")
+            return []
+
+        logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
+        return existing_edges
 
     async def get_edges(self, node_id: str) -> List[EdgeData]:
         """
