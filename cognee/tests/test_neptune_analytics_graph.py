@@ -23,7 +23,6 @@ def setup():
     #     complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load
     #     the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's
     #     stored in Amazon S3.
-    #
 
     document = TextDocument(
         name='text.txt',
@@ -146,6 +145,25 @@ async def main():
         print(f"found edges: {len(has_edges)} (expected: {len(edges)})")
     else:
         print(f"no edges found (expected: {len(edges)})")
+
+    print("------GET GRAPH-------")
+    all_nodes, all_edges = await na_adapter.get_graph_data()
+    print(f"found {len(all_nodes)} nodes and found {len(all_edges)} edges")
+
+    print("------NEIGHBORS-------")
+    neighbors =  await na_adapter.get_neighbors(str(nodes[2].id))
+    print(f"found {len(neighbors)} neighbors for node \"{nodes[2].name}\"")
+    for neighbor in neighbors:
+        print(neighbor)
+
+    print("------SUBGRAPH-------")
+    node_names = ["neptune analytics", "amazon neptune database"]
+    subgraph_nodes, subgraph_edges = await na_adapter.get_nodeset_subgraph(Entity, node_names)
+    print(f"found {len(subgraph_nodes)} nodes and  {len(subgraph_edges)} edges in the subgraph around {node_names}")
+    for subgraph_node in subgraph_nodes:
+        print(subgraph_node)
+    for subgraph_edge in subgraph_edges:
+        print(subgraph_edge)
 
     print("------DELETE-------")
     # delete all nodes and edges:

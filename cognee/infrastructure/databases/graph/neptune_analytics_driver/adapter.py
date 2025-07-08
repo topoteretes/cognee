@@ -421,9 +421,50 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Tuple[List[Node], List[EdgeData]]: A tuple containing all nodes and edges in the graph.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics graph data retrieval
-        logger.warning("Neptune Analytics get_graph_data method not yet implemented")
-        return [], []
+        try:
+            # Query to get all nodes
+            nodes_query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            RETURN id(n) AS node_id, properties(n) AS properties
+            """
+
+            # Query to get all edges
+            edges_query = f"""
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+            RETURN id(source) AS source_id, id(target) AS target_id, type(r) AS relationship_name, properties(r) AS properties
+            """
+
+            # Execute both queries
+            nodes_result = await self.query(nodes_query)
+            edges_result = await self.query(edges_query)
+
+            # Format nodes as (node_id, properties) tuples
+            nodes = [
+                (
+                    result["node_id"],
+                    result["properties"]
+                )
+                for result in nodes_result
+            ]
+
+            # Format edges as (source_id, target_id, relationship_name, properties) tuples
+            edges = [
+                (
+                    result["source_id"],
+                    result["target_id"],
+                    result["relationship_name"],
+                    result["properties"]
+                )
+                for result in edges_result
+            ]
+
+            logger.debug(f"Retrieved {len(nodes)} nodes and {len(edges)} edges from graph")
+            return (nodes, edges)
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get graph data: {error_msg}")
+            raise Exception(f"Failed to get graph data: {error_msg}")
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
@@ -437,9 +478,67 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Dict[str, Any]: A dictionary containing graph metrics and statistics.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics metrics retrieval
-        logger.warning("Neptune Analytics get_graph_metrics method not yet implemented")
-        return {}
+        try:
+            from .neptune_analytics_metrics_utils import (
+                get_node_count,
+                get_edge_count,
+                get_edge_density,
+                get_num_connected_components,
+                get_size_of_connected_components,
+                count_self_loops,
+                get_shortest_path_lengths,
+                get_avg_clustering,
+                get_node_degree_distribution
+            )
+
+            # Get basic metrics
+            num_nodes = await get_node_count(self)
+            num_edges = await get_edge_count(self)
+
+            # Calculate mean degree
+            mean_degree = (2 * num_edges) / num_nodes if num_nodes > 0 else 0
+
+            # Get mandatory metrics
+            mandatory_metrics = {
+                "num_nodes": num_nodes,
+                "num_edges": num_edges,
+                "mean_degree": mean_degree,
+                "edge_density": await get_edge_density(self),
+                "num_connected_components": await get_num_connected_components(self),
+                "sizes_of_connected_components": await get_size_of_connected_components(self),
+            }
+
+            if include_optional:
+                # Get optional metrics
+                shortest_path_lengths = await get_shortest_path_lengths(self)
+                degree_distribution = await get_node_degree_distribution(self)
+
+                optional_metrics = {
+                    "num_selfloops": await count_self_loops(self),
+                    "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
+                    "avg_shortest_path_length": (
+                        sum(shortest_path_lengths) / len(shortest_path_lengths)
+                        if shortest_path_lengths else -1
+                    ),
+                    "avg_clustering": await get_avg_clustering(self),
+                    "degree_distribution": degree_distribution,
+                }
+            else:
+                optional_metrics = {
+                    "num_selfloops": -1,
+                    "diameter": -1,
+                    "avg_shortest_path_length": -1,
+                    "avg_clustering": -1,
+                }
+
+            metrics = {**mandatory_metrics, **optional_metrics}
+            logger.debug(f"Retrieved graph metrics: {metrics}")
+            return metrics
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get graph metrics: {error_msg}")
+            raise Exception(f"Failed to get graph metrics: {error_msg}")
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """
@@ -526,9 +625,34 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[EdgeData]: A list of EdgeData objects representing edges connected to the node.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics edge retrieval
-        logger.warning(f"Neptune Analytics get_edges method not yet implemented for node: {node_id}")
-        return []
+        try:
+            # Query to get all edges connected to the node (both incoming and outgoing)
+            query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})-[r]-(m:{self._GRAPH_NODE_LABEL})
+            WHERE id(n) = $node_id
+            RETURN 
+                id(n) AS source_id,
+                id(m) AS target_id,
+                type(r) AS relationship_name,
+                properties(r) AS properties
+            """
+
+            params = {"node_id": node_id}
+            result = await self.query(query, params)
+
+            # Format edges as EdgeData tuples: (source_id, target_id, relationship_name, properties)
+            edges = [
+                (record["source_id"], record["target_id"], record["relationship_name"], record["properties"])
+                for record in result
+            ]
+
+            logger.debug(f"Retrieved {len(edges)} edges for node: {node_id}")
+            return edges
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get edges for node {node_id}: {error_msg}")
+            raise Exception(f"Failed to get edges: {error_msg}")
 
     async def get_neighbors(self, node_id: str) -> List[NodeData]:
         """
@@ -542,12 +666,38 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[NodeData]: A list of NodeData objects representing neighboring nodes.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics neighbor retrieval
-        logger.warning(f"Neptune Analytics get_neighbors method not yet implemented for node: {node_id}")
-        return []
+        try:
+            # Query to get all neighboring nodes (both incoming and outgoing connections)
+            query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})-[r]-(neighbor:{self._GRAPH_NODE_LABEL})
+            WHERE id(n) = $node_id
+            RETURN DISTINCT id(neighbor) AS neighbor_id, properties(neighbor) AS properties
+            """
+
+            params = {"node_id": node_id}
+            result = await self.query(query, params)
+
+            # Format neighbors as NodeData objects
+            neighbors = [
+                {
+                    "id": neighbor["neighbor_id"],
+                    **neighbor["properties"]
+                }
+                for neighbor in result
+            ]
+
+            logger.debug(f"Retrieved {len(neighbors)} neighbors for node: {node_id}")
+            return neighbors
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get neighbors for node {node_id}: {error_msg}")
+            raise Exception(f"Failed to get neighbors: {error_msg}")
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+            self,
+            node_type: Type[Any],
+            node_name: List[str]
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
@@ -561,9 +711,68 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]: A tuple containing nodes and edges of the subgraph.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics subgraph retrieval
-        logger.warning(f"Neptune Analytics get_nodeset_subgraph method not yet implemented for node type: {node_type}")
-        return ([], [])
+        try:
+            # Query to get nodes by name and their connected subgraph
+            query = f"""
+            UNWIND $names AS wantedName
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            WHERE n.name = wantedName AND n.type = $type
+            WITH collect(DISTINCT n) AS primary
+            UNWIND primary AS p
+            OPTIONAL MATCH (p)-[r]-(nbr:{self._GRAPH_NODE_LABEL})
+            WITH primary, collect(DISTINCT nbr) AS nbrs, collect(DISTINCT r) AS rels
+            WITH primary + nbrs AS nodelist, rels
+            UNWIND nodelist AS node
+            WITH collect(DISTINCT node) AS nodes, rels
+            MATCH (a)-[r]-(b)
+            WHERE a IN nodes AND b IN nodes
+            WITH nodes, collect(DISTINCT r) AS all_rels
+            RETURN
+              [n IN nodes | {{
+                id: id(n),
+                properties: properties(n)
+              }}] AS rawNodes,
+              [r IN all_rels | {{
+                source_id: id(startNode(r)),
+                target_id: id(endNode(r)),
+                type: type(r),
+                properties: properties(r)
+              }}] AS rawRels
+            """
+
+            params = {
+                "names": node_name,
+                "type": node_type.__name__
+            }
+
+            result = await self.query(query, params)
+
+            if not result:
+                logger.debug(f"No subgraph found for node type {node_type} with names {node_name}")
+                return ([], [])
+
+            raw_nodes = result[0]["rawNodes"]
+            raw_rels = result[0]["rawRels"]
+
+            # Format nodes as (node_id, properties) tuples
+            nodes = [
+                (n["id"], n["properties"])
+                for n in raw_nodes
+            ]
+
+            # Format edges as (source_id, target_id, relationship_name, properties) tuples
+            edges = [
+                (r["source_id"], r["target_id"], r["type"], r["properties"])
+                for r in raw_rels
+            ]
+
+            logger.debug(f"Retrieved subgraph with {len(nodes)} nodes and {len(edges)} edges for type {node_type.__name__}")
+            return (nodes, edges)
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get nodeset subgraph for type {node_type}: {error_msg}")
+            raise Exception(f"Failed to get nodeset subgraph: {error_msg}")
 
     async def get_connections(
         self, node_id: str
@@ -579,6 +788,59 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[Tuple[NodeData, Dict[str, Any], NodeData]]: A list of tuples containing connected nodes and relationship details.
         """
-        # TODO: Implement using aws_langchain Neptune Analytics connection retrieval
-        logger.warning(f"Neptune Analytics get_connections method not yet implemented for node: {node_id}")
-        return []
+        try:
+            # Query to get all connections (both incoming and outgoing)
+            query = f"""
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r]-(target:{self._GRAPH_NODE_LABEL})
+            WHERE id(source) = $node_id OR id(target) = $node_id
+            RETURN 
+                id(source) AS source_id,
+                properties(source) AS source_props,
+                id(target) AS target_id,
+                properties(target) AS target_props,
+                type(r) AS relationship_name,
+                properties(r) AS relationship_props
+            """
+
+            params = {"node_id": node_id}
+            result = await self.query(query, params)
+
+            connections = []
+            for record in result:
+                # Determine which node is the current node and which is the connected node
+                if record["source_id"] == node_id:
+                    # Outgoing connection: current -> connected
+                    current_node = {
+                        "id": record["source_id"],
+                        **record["source_props"]
+                    }
+                    connected_node = {
+                        "id": record["target_id"],
+                        **record["target_props"]
+                    }
+                else:
+                    # Incoming connection: connected -> current
+                    current_node = {
+                        "id": record["target_id"],
+                        **record["target_props"]
+                    }
+                    connected_node = {
+                        "id": record["source_id"],
+                        **record["source_props"]
+                    }
+
+                relationship_details = {
+                    "relationship_name": record["relationship_name"],
+                    **record["relationship_props"]
+                }
+
+                # Return as (current_node, relationship, connected_node)
+                connections.append((current_node, relationship_details, connected_node))
+
+            logger.debug(f"Retrieved {len(connections)} connections for node: {node_id}")
+            return connections
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get connections for node {node_id}: {error_msg}")
+            raise Exception(f"Failed to get connections: {error_msg}")
