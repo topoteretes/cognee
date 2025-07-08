@@ -1,7 +1,5 @@
-from grpclib import GRPCError
-
-
 async def queued_add_data_points(collection_name, data_points_batch):
+    from grpclib import GRPCError
     from ..queues import add_data_points_queue
 
     try:

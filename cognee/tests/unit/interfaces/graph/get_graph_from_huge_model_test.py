@@ -1,8 +1,10 @@
-import asyncio
-import random
 import time
+import random
+import pytest
+import asyncio
 from typing import List
 from uuid import NAMESPACE_OID, uuid5
+
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils import get_graph_from_model
@@ -55,6 +57,7 @@ def nanoseconds_to_largest_unit(nanoseconds):
     return nanoseconds, "nanoseconds"
 
 
+@pytest.mark.asyncio
 async def test_circular_reference_extraction():
     repo = Repository(path="repo1")
 

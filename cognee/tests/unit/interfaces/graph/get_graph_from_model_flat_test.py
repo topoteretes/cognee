@@ -1,6 +1,8 @@
+import pytest
 import asyncio
 from typing import List
 from uuid import NAMESPACE_OID, uuid5
+
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils import get_graph_from_model
@@ -32,6 +34,7 @@ class Entity(DataPoint):
 DocumentChunk.model_rebuild()
 
 
+@pytest.mark.asyncio
 async def get_graph_from_model_test():
     document = Document(path="file_path")
 

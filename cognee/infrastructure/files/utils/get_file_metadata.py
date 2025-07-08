@@ -1,7 +1,11 @@
 import io
 from typing import BinaryIO, TypedDict
-from .guess_file_type import guess_file_type
+
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import get_file_content_hash
+from .guess_file_type import guess_file_type
+
+logger = get_logger("FileMetadata")
 
 
 class FileMetadata(TypedDict):
@@ -44,9 +48,7 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
         content_hash = get_file_content_hash(file)
         file.seek(0)
     except io.UnsupportedOperation as error:
-        raise Exception(
-            f"Error retrieving metadata from file: {file.name} \n{str(error)}\n\n"
-        ) from error
+        logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
 
     file_type = guess_file_type(file)
 

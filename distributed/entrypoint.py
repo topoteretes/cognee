@@ -1,5 +1,5 @@
-import asyncio
 import os
+import asyncio
 
 import cognee
 from cognee.api.v1.prune import prune
@@ -45,10 +45,10 @@ async def main():
         worker_future = data_point_saving_worker.spawn()
         consumer_futures.append(worker_future)
 
-    # s3_bucket_name = "s3://s3-test-laszlo/Database for KG v1"
-    s3_bucket_name = "s3://s3-test-laszlo/Pdf"
+    s3_bucket_path = os.getenv("S3_BUCKET_PATH")
+    s3_data_path = "s3://" + s3_bucket_path
 
-    await cognee.add(s3_bucket_name, dataset_name="s3-files")
+    await cognee.add(s3_data_path, dataset_name="s3-files")
 
     await cognee.cognify(datasets=["s3-files"])
 

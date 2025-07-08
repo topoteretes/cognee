@@ -85,29 +85,6 @@ async def run_tasks_distributed(tasks, dataset_id, data, user, pipeline_name, co
             payload=result,
         )
 
-    # producer_futures = []
-
-    # for data_item in data[:5]:
-    #     producer_future = run_tasks_distributed(
-    #         run_tasks_with_telemetry, tasks, [data_item], user, pipeline_name, context
-    #     )
-    #     producer_futures.append(producer_future)
-
-    # batch_results = []
-    # for producer_future in producer_futures:
-    #     try:
-    #         result = producer_future.get()
-    #     except Exception as e:
-    #         result = e
-    #     batch_results.append(result)
-
-    # yield PipelineRunYield(
-    #     pipeline_run_id=pipeline_run_id,
-    #     dataset_id=dataset.id,
-    #     dataset_name=dataset.name,
-    #     payload=result,
-    # )
-
     await log_pipeline_run_complete(pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data)
 
     yield PipelineRunCompleted(

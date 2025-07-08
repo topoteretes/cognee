@@ -1,7 +1,5 @@
-from grpclib import GRPCError
-
-
 async def queued_add_nodes(node_batch):
+    from grpclib import GRPCError
     from ..queues import add_nodes_and_edges_queue
 
     try:
