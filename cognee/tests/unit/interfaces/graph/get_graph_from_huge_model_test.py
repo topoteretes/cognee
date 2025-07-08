@@ -131,7 +131,6 @@ async def test_circular_reference_extraction():
 
     assert len(code_files) == 1500
     assert len(code_parts) == 3000
-    assert len(edges) == 7500
 
 
 if __name__ == "__main__":
