@@ -13,7 +13,6 @@ load_dotenv()
 graph_id = os.getenv('GRAPH_ID', "")
 
 na_adapter = NeptuneAnalyticsAdapter(graph_id)
-na_adapter._initialize_client()
 
 def setup():
     # Define nodes data before the main function

@@ -1,7 +1,6 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from enum import Enum
 from typing import Optional, Any, List, Dict, Type, Tuple
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger, ERROR
@@ -23,7 +22,6 @@ from .neptune_analytics_utils import (
     validate_aws_region,
     build_neptune_config,
     format_neptune_error,
-    get_default_query_timeout,
 )
 
 logger = get_logger("NeptuneAnalyticsAdapter", level=ERROR)
@@ -34,7 +32,6 @@ try:
 except ImportError:
     logger.warning("langchain_aws not available. Neptune Analytics functionality will be limited.")
     LANGCHAIN_AWS_AVAILABLE = False
-
 
 class NeptuneAnalyticsAdapter(GraphDBInterface):
     """
@@ -66,6 +63,10 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -------
             - NeptuneAnalyticsConfigurationError: If configuration parameters are invalid
         """
+        # validate import
+        if not LANGCHAIN_AWS_AVAILABLE:
+            raise ImportError("langchain_aws is not available. Please install it to use Neptune Analytics.")
+
         # Validate configuration
         if not validate_graph_id(graph_id):
             raise NeptuneAnalyticsConfigurationError(f"Invalid graph ID: \"{graph_id}\"")
@@ -81,15 +82,15 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         
         # Build configuration
         self.config = build_neptune_config(
-            graph_id=graph_id,
+            graph_id=self.graph_id,
             region=self.region,
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_session_token=self.aws_session_token,
         )
         
         # Initialize Neptune Analytics client using langchain_aws
-        self._client: Optional[NeptuneAnalyticsGraph] = self._initialize_client()
+        self._client: NeptuneAnalyticsGraph = self._initialize_client()
         logger.info(f"Initialized Neptune Analytics adapter for graph: \"{graph_id}\" in region: \"{self.region}\"")
 
     def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
@@ -100,10 +101,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Optional[Any]: The Neptune Analytics client or None if not available
         """
-        if not LANGCHAIN_AWS_AVAILABLE:
-            logger.error("langchain_aws is not available. Please install it to use Neptune Analytics.")
-            return None
-        
         try:
             # Initialize the Neptune Analytics Graph client
             client_config = {
@@ -124,10 +121,10 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             return client
             
         except Exception as e:
-            logger.error(f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}")
-            return None
+            raise NeptuneAnalyticsConfigurationError(f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}")
 
-    def serialize_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
         """
         Serialize properties for Neptune Analytics storage.
         Parameters:
@@ -165,10 +162,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[Any]: A list of results from the query execution.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return []
-
         try:
             # Execute the query using the Neptune Analytics client
             # The langchain_aws NeptuneAnalyticsGraph supports openCypher queries
@@ -190,7 +183,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             logger.error(f"Neptune Analytics query failed: {error_msg}")
             raise Exception(f"Query execution failed: {error_msg}")
 
-    async def add_node(self, node: DataPoint) -> Node:
+    async def add_node(self, node: DataPoint) -> None:
         """
         Add a single node with specified properties to the graph.
 
@@ -199,10 +192,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             - node_id (str): Unique identifier for the node being added.
             - properties (Dict[str, Any]): A dictionary of properties associated with the node.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-        
         try:
             # Prepare node properties with the ID and graph type
             serialized_properties = self.serialize_properties(node.model_dump())
@@ -249,10 +238,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - node_id (str): Unique identifier for the node to delete.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-        
         try:
             # Build openCypher query to delete the node and all its relationships
             query = f"""
@@ -265,7 +250,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
                 "node_id": node_id
             }
             
-            result = await self.query(query, params)
+            await self.query(query, params)
             logger.debug(f"Successfully deleted node: {node_id}")
             
         except Exception as e:
@@ -298,10 +283,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Optional[NodeData]: The node data if found, None otherwise.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return None
-        
         try:
             # Build openCypher query to retrieve the node
             query = f"""
@@ -313,13 +294,16 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
             result = await self.query(query, params)
             
-            if result and len(result) > 0:
+            if result and len(result) == 1:
                 # Extract node properties from the result
-                node_data = result[0].get('n', {})
+                node_data = result.pop().get('n', {})
                 logger.debug(f"Successfully retrieved node: {node_id}")
                 return node_data
             else:
-                logger.debug(f"Node not found: {node_id}")
+                if not result:
+                    logger.debug(f"Node not found: {node_id}")
+                elif len(result) > 1:
+                    logger.debug(f"Only one node expected, multiple returned: {node_id}")
                 return None
                 
         except Exception as e:
@@ -361,10 +345,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             - relationship_name (str): The name of the relationship to be established by the edge.
             - properties (Optional[Dict[str, Any]]): Optional dictionary of properties associated with the edge.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-        
         try:
             # Build openCypher query to create the edge
             # First ensure both nodes exist, then create the relationship
@@ -389,7 +369,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
                 "target_id": target_id,
                 "properties": serialized_properties,
             }
-            result = await self.query(query, params)
+            await self.query(query, params)
             logger.debug(f"Successfully added edge: {source_id} -[{relationship_name}]-> {target_id}")
             
         except Exception as e:
@@ -421,13 +401,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             The result of the query execution, typically indicating success or failure.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-
         try:
             # Build openCypher query to delete the graph
-            result = await self.query(f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n")
+            await self.query(f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n")
             logger.debug(f"Successfully deleted all edges and nodes from the graph")
 
         except Exception as e:
@@ -446,7 +422,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         # TODO: Implement using aws_langchain Neptune Analytics graph data retrieval
         logger.warning("Neptune Analytics get_graph_data method not yet implemented")
-        return ([], [])
+        return [], []
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
@@ -478,10 +454,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - bool: True if the edge exists, False otherwise.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return False
-        
         try:
             # Build openCypher query to check if the edge exists
             query = f"""
@@ -501,8 +473,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             result = await self.query(query, params)
             
             if result and len(result) > 0:
-                edge_exists = result[0].get('edge_exists', False)
-                logger.debug(f"Edge existence check for {source_id} -[{relationship_name}]-> {target_id}: {edge_exists}")
+                edge_exists = result.pop().get('edge_exists', False)
+                logger.debug(f"Edge existence check for "
+                             f"{source_id} -[{relationship_name}]-> {target_id}: {edge_exists}")
                 return edge_exists
             else:
                 return False
@@ -524,10 +497,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[EdgeData]: A list of EdgeData objects that exist in the graph.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return []
-        
+
         existing_edges = []
         
         try:
