@@ -121,7 +121,7 @@ async def run_pipeline(
     check_dataset_name(dataset.name)
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
-    await set_database_global_context_variables(dataset.name, user.id)
+    await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     # Ugly hack, but no easier way to do this.
     if pipeline_name == "add_pipeline":

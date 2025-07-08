@@ -180,10 +180,12 @@ async def ingest_data(
 
                     await session.commit()
 
-        await give_permission_on_dataset(user, dataset.id, "read")
-        await give_permission_on_dataset(user, dataset.id, "write")
-        await give_permission_on_dataset(user, dataset.id, "delete")
-        await give_permission_on_dataset(user, dataset.id, "share")
+        # Only give permission if dataset owner is same as user (to avoid giving delete and share permission to non owner users)
+        if dataset.owner_id == user.id:
+            await give_permission_on_dataset(user, dataset.id, "read")
+            await give_permission_on_dataset(user, dataset.id, "write")
+            await give_permission_on_dataset(user, dataset.id, "delete")
+            await give_permission_on_dataset(user, dataset.id, "share")
 
         return file_paths
 

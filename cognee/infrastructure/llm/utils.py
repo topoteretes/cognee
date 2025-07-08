@@ -1,8 +1,7 @@
-from cognee.shared.logging_utils import get_logger
 import litellm
 
-from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -22,6 +21,9 @@ def get_max_chunk_tokens():
           the smaller value of the embedding engine's max tokens and half of the LLM's
           maximum tokens.
     """
+    # NOTE: Import must be done in function to avoid circular import issue
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
     # Calculate max chunk size based on the following formula
     embedding_engine = get_vector_engine().embedding_engine
     llm_client = get_llm_client()
@@ -93,6 +95,9 @@ async def test_embedding_connection():
     the exception if the connection to the embedding handler cannot be established.
     """
     try:
+        # NOTE: Vector engine import must be done in function to avoid circular import issue
+        from cognee.infrastructure.databases.vector import get_vector_engine
+
         await get_vector_engine().embedding_engine.embed_text("test")
     except Exception as e:
         logger.error(e)
