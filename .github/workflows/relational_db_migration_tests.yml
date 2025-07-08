@@ -123,7 +123,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E postgres -E kuzu
+          poetry install -E postgres
 
       - name: Run PostgreSQL Script to create test data (Chinook_PostgreSql.sql)
         env:

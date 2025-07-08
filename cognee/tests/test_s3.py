@@ -19,15 +19,14 @@ async def main():
     await cognee.cognify()
 
     graph_engine = await get_graph_engine()
-    graph = await graph_engine.get_graph()
+    graph = await graph_engine.get_graph_data()
 
-    type_counts = Counter(
-        node_data["type"] for _, node_data in graph.nodes(data=True) if "type" in node_data
-    )
+    type_counts = Counter(node_data[1].get("type", {}) for node_data in graph[0])
 
-    edge_type_counts = Counter(edge_type for _, _, edge_type in graph.edges(keys=True))
+    edge_type_counts = Counter(edge_type[2] for edge_type in graph[1])
 
     logging.info(type_counts)
+    logging.info(edge_type_counts)
 
     # Assert there is exactly one PdfDocument.
     assert type_counts.get("PdfDocument", 0) == 1, (

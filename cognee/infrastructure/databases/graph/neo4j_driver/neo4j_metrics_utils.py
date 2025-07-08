@@ -57,9 +57,9 @@ async def get_num_connected_components(adapter: Neo4jAdapter, graph_name: str):
         found.
     """
     query = f"""
-    CALL gds.wcc.stream('{graph_name}')
-    YIELD componentId
-    RETURN count(DISTINCT componentId) AS num_connected_components;
+    CALL gds.wcc.stats('{graph_name}')
+    YIELD componentCount
+    RETURN componentCount AS num_connected_components;
     """
 
     result = await adapter.query(query)
@@ -181,9 +181,9 @@ async def get_avg_clustering(adapter: Neo4jAdapter, graph_name: str):
         The average clustering coefficient as a float, or 0 if no results are available.
     """
     query = f"""
-    CALL gds.localClusteringCoefficient.stream('{graph_name}')
-    YIELD localClusteringCoefficient
-    RETURN avg(localClusteringCoefficient) AS avg_clustering;
+    CALL gds.localClusteringCoefficient.stats('{graph_name}')
+    YIELD averageClusteringCoefficient
+    RETURN averageClusteringCoefficient AS avg_clustering;
     """
 
     result = await adapter.query(query)

@@ -58,13 +58,18 @@ class MemgraphAdapter(GraphDBInterface):
     def __init__(
         self,
         graph_database_url: str,
-        graph_database_username: str,
-        graph_database_password: str,
+        graph_database_username: Optional[str] = None,
+        graph_database_password: Optional[str] = None,
         driver: Optional[Any] = None,
     ):
+        # Only use auth if both username and password are provided
+        auth = None
+        if graph_database_username and graph_database_password:
+            auth = (graph_database_username, graph_database_password)
+
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
-            auth=(graph_database_username, graph_database_password),
+            auth=auth,
             max_connection_lifetime=120,
         )
 
@@ -614,7 +619,7 @@ class MemgraphAdapter(GraphDBInterface):
 
             return [result["successor"] for result in results]
 
-    async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
         """
         Get both predecessors and successors of a node.
 
@@ -633,6 +638,25 @@ class MemgraphAdapter(GraphDBInterface):
         )
 
         return predecessors + successors
+
+    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single node by ID."""
+        query = """
+        MATCH (node {id: $node_id})
+        RETURN node
+        """
+        results = await self.query(query, {"node_id": node_id})
+        return results[0]["node"] if results else None
+
+    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get multiple nodes by their IDs."""
+        query = """
+        UNWIND $node_ids AS id
+        MATCH (node {id: id})
+        RETURN node
+        """
+        results = await self.query(query, {"node_ids": node_ids})
+        return [result["node"] for result in results]
 
     async def get_connections(self, node_id: UUID) -> list:
         """

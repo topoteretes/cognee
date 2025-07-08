@@ -231,6 +231,10 @@ class LanceDBAdapter(VectorDBInterface):
         if limit == 0:
             limit = await collection.count_rows()
 
+        # LanceDB search will break if limit is 0 so we must return
+        if limit == 0:
+            return []
+
         results = await collection.vector_search(query_vector).limit(limit).to_pandas()
 
         result_values = list(results.to_dict("index").values())

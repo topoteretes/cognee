@@ -15,6 +15,10 @@
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
   ·
   <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
+  .
+  <a href="https://www.docs.cognee.ai">Docs</a>
+  .
+  <a href="https://github.com/topoteretes/cognee-community">cognee community repo</a>
   </p>
 
 
@@ -25,11 +29,21 @@
   [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
   [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
   [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
+  <a href="https://github.com/sponsors/topoteretes"><img src="https://img.shields.io/badge/Sponsor-❤️-ff69b4.svg" alt="Sponsor"></a>
 
-<a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+<p>
+  <a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank" style="display:inline-block; margin-right:10px;">
+    <img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" width="250" height="54" />
+  </a>
 
-<a href="https://trendshift.io/repositories/13955" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13955" alt="topoteretes%2Fcognee | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/13955" target="_blank" style="display:inline-block;">
+    <img src="https://trendshift.io/api/badge/repositories/13955" alt="topoteretes%2Fcognee | Trendshift" width="250" height="55" />
+  </a>
+</p>
 
+
+
+**🚀 We are launching Cognee SaaS: Sign up [here](https://www.cognee.ai/waitlist) for the hosted beta!**
 
 Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
@@ -39,13 +53,13 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
   🌐 Available Languages
   :
   <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> | 
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">français</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
   </p>
 

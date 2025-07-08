@@ -4,6 +4,10 @@ set -e  # Exit on error
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
+# Set default transport mode if not specified
+TRANSPORT_MODE=${TRANSPORT_MODE:-"stdio"}
+echo "Transport mode: $TRANSPORT_MODE"
+
 # Run Alembic migrations with proper error handling.
 # Note on UserAlreadyExists error handling:
 # During database migrations, we attempt to create a default user. If this user
@@ -14,7 +18,7 @@ echo "Environment: $ENVIRONMENT"
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
 
-MIGRATION_OUTPUT=$(alembic upgrade head 2>&1)
+MIGRATION_OUTPUT=$(alembic upgrade head)
 MIGRATION_EXIT_CODE=$?
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
@@ -28,19 +32,31 @@ fi
 
 echo "Database migrations done."
 
-echo "Starting Cognee MCP Server..."
+echo "Starting Cognee MCP Server with transport mode: $TRANSPORT_MODE"
 
 # Add startup delay to ensure DB is ready
 sleep 2
 
-# Modified Gunicorn startup with error handling
+# Modified startup with transport mode selection and error handling
 if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee
+        if [ "$TRANSPORT_MODE" = "sse" ]; then
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport sse
+        else
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport stdio
+        fi
     else
-        exec cognee
+        if [ "$TRANSPORT_MODE" = "sse" ]; then
+            exec cognee --transport sse
+        else
+            exec cognee --transport stdio
+        fi
     fi
 else
-    exec cognee
+    if [ "$TRANSPORT_MODE" = "sse" ]; then
+        exec cognee --transport sse
+    else
+        exec cognee --transport stdio
+    fi
 fi

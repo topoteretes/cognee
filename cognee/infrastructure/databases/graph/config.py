@@ -3,6 +3,8 @@
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import pydantic
+from pydantic import Field
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.root_dir import get_absolute_path
 
@@ -29,18 +31,33 @@ class GraphConfig(BaseSettings):
     - model_config
     """
 
-    graph_filename: str = "cognee_graph.pkl"
-    graph_database_provider: str = "NETWORKX"
+    # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
+    # and determine default graph db file and path based on this parameter if no values are provided
+    graph_database_provider: str = Field("kuzu", env="GRAPH_DATABASE_PROVIDER")
+
     graph_database_url: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = 123
-    graph_file_path: str = os.path.join(
-        os.path.join(get_absolute_path(".cognee_system"), "databases"), graph_filename
-    )
+    graph_file_path: str = ""
+    graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+
+    # Model validator updates graph_filename and path dynamically after class creation based on current database provider
+    # If no specific graph_filename or path are provided
+    @pydantic.model_validator(mode="after")
+    def fill_derived(cls, values):
+        provider = values.graph_database_provider.lower()
+        # Set filename based on graph database provider if no filename is provided
+        if not values.graph_filename:
+            values.graph_filename = f"cognee_graph_{provider}"
+        # Set file path based on graph database provider if no file path is provided
+        if not values.graph_file_path:
+            base = os.path.join(get_absolute_path(".cognee_system"), "databases")
+            values.graph_file_path = os.path.join(base, values.graph_filename)
+        return values
 
     def to_dict(self) -> dict:
         """
@@ -105,3 +122,14 @@ def get_graph_config():
         - GraphConfig: A GraphConfig instance containing the graph configuration settings.
     """
     return GraphConfig()
+
+
+def get_graph_context_config():
+    """This function will get the appropriate graph db config based on async context.
+    This allows the use of multiple graph databases for different threads, async tasks and parallelization
+    """
+    from cognee.context_global_variables import graph_db_config
+
+    if graph_db_config.get():
+        return graph_db_config.get()
+    return get_graph_config().to_hashable_dict()

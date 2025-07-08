@@ -1,4 +1,5 @@
 import asyncio
+
 import cognee
 import os
 
@@ -56,18 +57,28 @@ async def main():
     home_dir = os.path.expanduser("~")
     destination_file_path = os.path.join(home_dir, "graph_visualization.html")
 
-    # test.html is a file with visualized data migration
-    print("Adding html visualization of graph database after migration.")
-    await visualize_graph(destination_file_path)
-    print(f"Visualization can be found at: {destination_file_path}")
-
     # Make sure to set top_k at a high value for a broader search, the default value is only 10!
+    # top_k represent the number of graph tripplets to supply to the LLM to answer your question
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What kind of data do you contain?",
         top_k=1000,
     )
     print(f"Search results: {search_results}")
+
+    # Having a top_k value set to too high might overwhelm the LLM context when specific questions need to be answered.
+    # For this kind of question we've set the top_k to 30
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_COT,
+        query_text="What invoices are related to Leonie Köhler?",
+        top_k=30,
+    )
+    print(f"Search results: {search_results}")
+
+    # test.html is a file with visualized data migration
+    print("Adding html visualization of graph database after migration.")
+    await visualize_graph(destination_file_path)
+    print(f"Visualization can be found at: {destination_file_path}")
 
 
 if __name__ == "__main__":

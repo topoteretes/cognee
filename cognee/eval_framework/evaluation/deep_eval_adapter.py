@@ -7,16 +7,48 @@ from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 from cognee.eval_framework.evaluation.metrics.context_coverage import ContextCoverageMetric
 from typing import Any, Dict, List
 from deepeval.metrics import ContextualRelevancyMetric
+import time
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class DeepEvalAdapter(BaseEvalAdapter):
     def __init__(self):
+        self.n_retries = 5
         self.g_eval_metrics = {
             "correctness": self.g_eval_correctness(),
             "EM": ExactMatchMetric(),
             "f1": F1ScoreMetric(),
             "contextual_relevancy": ContextualRelevancyMetric(),
             "context_coverage": ContextCoverageMetric(),
+        }
+
+    def _calculate_metric(self, metric: str, test_case: LLMTestCase) -> Dict[str, Any]:
+        """Calculate a single metric for a test case with retry logic."""
+        metric_to_calculate = self.g_eval_metrics[metric]
+
+        for attempt in range(self.n_retries):
+            try:
+                metric_to_calculate.measure(test_case)
+                return {
+                    "score": metric_to_calculate.score,
+                    "reason": metric_to_calculate.reason,
+                }
+            except Exception as e:
+                logger.warning(
+                    f"Attempt {attempt + 1}/{self.n_retries} failed for metric '{metric}': {e}"
+                )
+                if attempt < self.n_retries - 1:
+                    time.sleep(2**attempt)  # Exponential backoff
+                else:
+                    logger.error(
+                        f"All {self.n_retries} attempts failed for metric '{metric}'. Returning None values."
+                    )
+
+        return {
+            "score": None,
+            "reason": None,
         }
 
     async def evaluate_answers(
@@ -40,12 +72,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
             )
             metric_results = {}
             for metric in evaluator_metrics:
-                metric_to_calculate = self.g_eval_metrics[metric]
-                metric_to_calculate.measure(test_case)
-                metric_results[metric] = {
-                    "score": metric_to_calculate.score,
-                    "reason": metric_to_calculate.reason,
-                }
+                metric_results[metric] = self._calculate_metric(metric, test_case)
             results.append({**answer, "metrics": metric_results})
 
         return results

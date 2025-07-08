@@ -36,7 +36,7 @@ jobs:
   docker-ci-test:
     name: Docker CI test
     needs: [basic-tests, e2e-tests]
-    uses: ./.github/workflows/ci.yaml
+    uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
   graph-db-tests:
@@ -45,9 +45,15 @@ jobs:
     uses: ./.github/workflows/graph_db_tests.yml
     secrets: inherit
 
+  search-db-tests:
+    name: Search Test on Different DBs
+    needs: [basic-tests, e2e-tests, graph-db-tests]
+    uses: ./.github/workflows/search_db_tests.yml
+    secrets: inherit
+
   relational-db-migration-tests:
     name: Relational DB Migration Tests
-    needs: [ basic-tests, e2e-tests ]
+    needs: [ basic-tests, e2e-tests, graph-db-tests]
     uses: ./.github/workflows/relational_db_migration_tests.yml
     secrets: inherit
 
@@ -61,6 +67,8 @@ jobs:
     name: Python Version Tests
     needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/python_version_tests.yml
+    with:
+      python-versions: '["3.10.x", "3.11.x", "3.12.x"]'
     secrets: inherit
 
   # Matrix-based vector database tests
@@ -77,9 +85,15 @@ jobs:
     uses: ./.github/workflows/examples_tests.yml
     secrets: inherit
 
+  mcp-test:
+    name: Example Tests
+    needs: [ basic-tests, e2e-tests ]
+    uses: ./.github/workflows/test_mcp.yml
+    secrets: inherit
+
   db-examples-tests:
     name: DB Examples Tests
-    needs: [vector-db-tests]
+    needs: [vector-db-tests, graph-db-tests, relational-db-migration-tests]
     uses: ./.github/workflows/db_examples_tests.yml
     secrets: inherit
 
@@ -102,6 +116,7 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
+      mcp-test,
       relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,
@@ -120,6 +135,7 @@ jobs:
       vector-db-tests,
       example-tests,
       db-examples-tests,
+      mcp-test,
       gemini-tests,
       ollama-tests,
       relational-db-migration-tests,

@@ -4,7 +4,8 @@ import sys
 import argparse
 import cognee
 import asyncio
-from cognee.shared.logging_utils import get_logger, get_log_file_location
+
+from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -17,10 +18,21 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
+try:
+    from codingagents.coding_rule_associations import (
+        add_rule_associations,
+        get_existing_rules,
+    )
+except ModuleNotFoundError:
+    from .codingagents.coding_rule_associations import (
+        add_rule_associations,
+        get_existing_rules,
+    )
+
+
 mcp = FastMCP("Cognee")
 
 logger = get_logger()
-log_file = get_log_file_location()
 
 
 @mcp.tool()
@@ -75,7 +87,7 @@ async def cognee_add_developer_rules(
         with redirect_stdout(sys.stderr):
             logger.info(f"Starting cognify for: {file_path}")
             try:
-                await cognee.add(file_path, nodeset="developer_rules")
+                await cognee.add(file_path, node_set=["developer_rules"])
                 model = KnowledgeGraph
                 if graph_model_file and graph_model_name:
                     model = load_class(graph_model_file, graph_model_name)
@@ -83,6 +95,7 @@ async def cognee_add_developer_rules(
                 logger.info(f"Cognify finished for: {file_path}")
             except Exception as e:
                 logger.error(f"Cognify failed for {file_path}: {str(e)}")
+                raise ValueError(f"Failed to cognify: {str(e)}")
 
     tasks = []
     for rel_path in developer_rule_paths:
@@ -91,7 +104,7 @@ async def cognee_add_developer_rules(
             tasks.append(asyncio.create_task(cognify_task(abs_path)))
         else:
             logger.warning(f"Skipped missing developer rule file: {abs_path}")
-
+    log_file = get_log_file_location()
     return [
         types.TextContent(
             type="text",
@@ -173,10 +186,69 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
         )
     )
 
+    log_file = get_log_file_location()
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
         f"To check current cognify status use the cognify_status tool\n"
         f"or check the log file at: {log_file}"
+    )
+
+    return [
+        types.TextContent(
+            type="text",
+            text=text,
+        )
+    ]
+
+
+@mcp.tool(
+    name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
+)
+async def save_interaction(data: str) -> list:
+    """
+    Transform and save a user-agent interaction into structured knowledge.
+
+    Parameters
+    ----------
+    data : str
+        The input string containing user queries and corresponding agent answers.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with information about the background task launch.
+    """
+
+    async def save_user_agent_interaction(data: str) -> None:
+        """Build knowledge graph from the interaction data"""
+        with redirect_stdout(sys.stderr):
+            logger.info("Save interaction process starting.")
+
+            await cognee.add(data, node_set=["user_agent_interaction"])
+
+            try:
+                await cognee.cognify()
+                logger.info("Save interaction process finished.")
+                logger.info("Generating associated rules from interaction data.")
+
+                await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+
+                logger.info("Associated rules generated from interaction data.")
+
+            except Exception as e:
+                logger.error("Save interaction process failed.")
+                raise ValueError(f"Failed to Save interaction: {str(e)}")
+
+    asyncio.create_task(
+        save_user_agent_interaction(
+            data=data,
+        )
+    )
+
+    log_file = get_log_file_location()
+    text = (
+        f"Background process launched to process the user-agent interaction.\n"
+        f"To check the current status, use the cognify_status tool or check the log file at: {log_file}"
     )
 
     return [
@@ -234,6 +306,7 @@ async def codify(repo_path: str) -> list:
 
     asyncio.create_task(codify_task(repo_path))
 
+    log_file = get_log_file_location()
     text = (
         f"Background process launched due to MCP timeout limitations.\n"
         f"To check current codify status use the codify_status tool\n"
@@ -315,6 +388,41 @@ async def search(search_query: str, search_type: str) -> list:
 
     search_results = await search_task(search_query, search_type)
     return [types.TextContent(type="text", text=search_results)]
+
+
+@mcp.tool()
+async def get_developer_rules() -> list:
+    """
+    Retrieve all developer rules that were generated based on previous interactions.
+
+    This tool queries the Cognee knowledge graph and returns a list of developer
+    rules.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with the retrieved developer rules.
+        The format is plain text containing the developer rules in bulletpoints.
+
+    Notes
+    -----
+    - The specific logic for fetching rules is handled internally.
+    - This tool does not accept any parameters and is intended for simple rule inspection use cases.
+    """
+
+    async def fetch_rules_from_cognee() -> str:
+        """Collect all developer rules from Cognee"""
+        with redirect_stdout(sys.stderr):
+            developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
+            return developer_rules
+
+    rules_text = await fetch_rules_from_cognee()
+
+    return [types.TextContent(type="text", text=rules_text)]
 
 
 @mcp.tool()
@@ -454,6 +562,8 @@ async def main():
 
 
 if __name__ == "__main__":
+    logger = setup_logging()
+
     try:
         asyncio.run(main())
     except Exception as e:

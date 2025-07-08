@@ -3,7 +3,7 @@ import difflib
 from cognee.shared.logging_utils import get_logger
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any
-from owlready2 import get_ontology, ClassConstruct, Ontology, Thing
+from rdflib import Graph, URIRef, RDF, RDFS, OWL
 
 from cognee.modules.ontology.exceptions import (
     OntologyInitializationError,
@@ -14,46 +14,85 @@ from cognee.modules.ontology.exceptions import (
 logger = get_logger("OntologyAdapter")
 
 
+class AttachedOntologyNode:
+    """Lightweight wrapper to be able to parse any ontology solution and generalize cognee interface."""
+
+    def __init__(self, uri: URIRef, category: str):
+        self.uri = uri
+        self.name = self._extract_name(uri)
+        self.category = category
+
+    @staticmethod
+    def _extract_name(uri: URIRef) -> str:
+        uri_str = str(uri)
+        if "#" in uri_str:
+            return uri_str.split("#")[-1]
+        return uri_str.rstrip("/").split("/")[-1]
+
+    def __repr__(self):
+        return f"AttachedOntologyNode(name={self.name}, category={self.category})"
+
+
 class OntologyResolver:
-    def __init__(
-        self,
-        ontology_file: Optional[str] = None,
-        fallback_url: str = "http://example.org/empty_ontology",
-    ):
+    def __init__(self, ontology_file: Optional[str] = None):
         self.ontology_file = ontology_file
         try:
             if ontology_file and os.path.exists(ontology_file):
-                self.ontology: Ontology = get_ontology(ontology_file).load()
+                self.graph = Graph()
+                self.graph.parse(ontology_file)
                 logger.info("Ontology loaded successfully from file: %s", ontology_file)
             else:
-                logger.warning(
-                    "Ontology file '%s' not found. Using fallback ontology at %s",
+                logger.info(
+                    "Ontology file '%s' not found. No owl ontology will be attached to the graph.",
                     ontology_file,
-                    fallback_url,
                 )
-                self.ontology = get_ontology(fallback_url)
+                self.graph = None
             self.build_lookup()
         except Exception as e:
             logger.error("Failed to load ontology", exc_info=e)
             raise OntologyInitializationError() from e
 
+    def _uri_to_key(self, uri: URIRef) -> str:
+        uri_str = str(uri)
+        if "#" in uri_str:
+            name = uri_str.split("#")[-1]
+        else:
+            name = uri_str.rstrip("/").split("/")[-1]
+        return name.lower().replace(" ", "_").strip()
+
     def build_lookup(self):
         try:
-            self.lookup: Dict[str, Dict[str, Thing]] = {
-                "classes": {
-                    cls.name.lower().replace(" ", "_").strip(): cls
-                    for cls in self.ontology.classes()
-                },
-                "individuals": {
-                    ind.name.lower().replace(" ", "_").strip(): ind
-                    for ind in self.ontology.individuals()
-                },
+            classes: Dict[str, URIRef] = {}
+            individuals: Dict[str, URIRef] = {}
+
+            if not self.graph:
+                self.lookup: Dict[str, Dict[str, URIRef]] = {
+                    "classes": classes,
+                    "individuals": individuals,
+                }
+
+                return None
+
+            for cls in self.graph.subjects(RDF.type, OWL.Class):
+                key = self._uri_to_key(cls)
+                classes[key] = cls
+
+            for subj, _, obj in self.graph.triples((None, RDF.type, None)):
+                if obj in classes.values():
+                    key = self._uri_to_key(subj)
+                    individuals[key] = subj
+
+            self.lookup = {
+                "classes": classes,
+                "individuals": individuals,
             }
             logger.info(
                 "Lookup built: %d classes, %d individuals",
-                len(self.lookup["classes"]),
-                len(self.lookup["individuals"]),
+                len(classes),
+                len(individuals),
             )
+
+            return None
         except Exception as e:
             logger.error("Failed to build lookup dictionary: %s", str(e))
             raise RuntimeError("Lookup build failed") from e
@@ -77,64 +116,90 @@ class OntologyResolver:
             logger.error("Error in find_closest_match: %s", str(e))
             raise FindClosestMatchError() from e
 
+    def _get_category(self, uri: URIRef) -> str:
+        if uri in self.lookup.get("classes", {}).values():
+            return "classes"
+        if uri in self.lookup.get("individuals", {}).values():
+            return "individuals"
+        return "unknown"
+
     def get_subgraph(
-        self, node_name: str, node_type: str = "individuals"
+        self, node_name: str, node_type: str = "individuals", directed: bool = True
     ) -> Tuple[List[Any], List[Tuple[str, str, str]], Optional[Any]]:
         nodes_set = set()
         edges: List[Tuple[str, str, str]] = []
-        visited_nodes = set()
+        visited = set()
         queue = deque()
 
         try:
             closest_match = self.find_closest_match(name=node_name, category=node_type)
             if not closest_match:
                 logger.info("No close match found for '%s' in category '%s'", node_name, node_type)
-                return list(nodes_set), edges, None
+                return [], [], None
 
             node = self.lookup[node_type].get(closest_match)
             if node is None:
                 logger.info("Node '%s' not found in lookup.", closest_match)
-                return list(nodes_set), edges, None
+                return [], [], None
 
-            logger.info("%s match was found for found for '%s' node", node.name, node_name)
+            logger.info("%s match was found for found for '%s' node", node, node_name)
 
             queue.append(node)
-            visited_nodes.add(node)
+            visited.add(node)
             nodes_set.add(node)
 
+            obj_props = set(self.graph.subjects(RDF.type, OWL.ObjectProperty))
+
             while queue:
-                current_node = queue.popleft()
+                current = queue.popleft()
+                current_label = self._uri_to_key(current)
 
-                if hasattr(current_node, "is_a"):
-                    for parent in current_node.is_a:
-                        if isinstance(parent, ClassConstruct):
-                            if hasattr(parent, "value") and hasattr(parent.value, "name"):
-                                parent = parent.value
-                            else:
-                                continue
-                        edges.append((current_node.name, "is_a", parent.name))
-                        nodes_set.add(parent)
-                        if parent not in visited_nodes:
-                            visited_nodes.add(parent)
+                if node_type == "individuals":
+                    for parent in self.graph.objects(current, RDF.type):
+                        parent_label = self._uri_to_key(parent)
+                        edges.append((current_label, "is_a", parent_label))
+                        if parent not in visited:
+                            visited.add(parent)
                             queue.append(parent)
+                        nodes_set.add(parent)
 
-                for prop in self.ontology.object_properties():
-                    for target in prop[current_node]:
-                        edges.append((current_node.name, prop.name, target.name))
-                        nodes_set.add(target)
-                        if target not in visited_nodes:
-                            visited_nodes.add(target)
+                for parent in self.graph.objects(current, RDFS.subClassOf):
+                    parent_label = self._uri_to_key(parent)
+                    edges.append((current_label, "is_a", parent_label))
+                    if parent not in visited:
+                        visited.add(parent)
+                        queue.append(parent)
+                    nodes_set.add(parent)
+
+                for prop in obj_props:
+                    prop_label = self._uri_to_key(prop)
+                    for target in self.graph.objects(current, prop):
+                        target_label = self._uri_to_key(target)
+                        edges.append((current_label, prop_label, target_label))
+                        if target not in visited:
+                            visited.add(target)
                             queue.append(target)
-
-                    for source in prop.range:
-                        if current_node in prop[source]:
-                            edges.append((source.name, prop.name, current_node.name))
-                            nodes_set.add(source)
-                            if source not in visited_nodes:
-                                visited_nodes.add(source)
+                        nodes_set.add(target)
+                    if not directed:
+                        for source in self.graph.subjects(prop, current):
+                            source_label = self._uri_to_key(source)
+                            edges.append((source_label, prop_label, current_label))
+                            if source not in visited:
+                                visited.add(source)
                                 queue.append(source)
+                            nodes_set.add(source)
 
-            return list(nodes_set), edges, node
+            rdf_nodes = [
+                AttachedOntologyNode(uri=uri, category=self._get_category(uri))
+                for uri in list(nodes_set)
+            ]
+            rdf_root = (
+                AttachedOntologyNode(uri=node, category=self._get_category(node))
+                if node is not None
+                else None
+            )
+
+            return rdf_nodes, edges, rdf_root
         except Exception as e:
             logger.error("Error in get_subgraph: %s", str(e))
             raise GetSubgraphError() from e
