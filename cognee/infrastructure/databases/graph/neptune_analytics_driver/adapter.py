@@ -403,7 +403,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         """
         try:
             # Build openCypher query to delete the graph
-            await self.query(f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n")
+            query = f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n"
+            await self.query(query)
             logger.debug(f"Successfully deleted all edges and nodes from the graph")
 
         except Exception as e:
@@ -457,11 +458,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to check if the edge exists
             query = f"""
-            MATCH (source:{self._GRAPH_NODE_LABEL}) 
-            WHERE id(source) = $source_id 
-            MATCH (target:{self._GRAPH_NODE_LABEL}) 
-            WHERE id(target) = $target_id 
             MATCH (source)-[r:{relationship_name}]->(target)
+            WHERE id(source) = $source_id AND id(target) = $target_id
             RETURN COUNT(r) > 0 AS edge_exists
             """
 
