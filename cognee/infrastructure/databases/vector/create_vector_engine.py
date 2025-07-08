@@ -137,7 +137,7 @@ def create_vector_engine(
 
     elif vector_db_provider == "neptune":
         try:
-            from langchain_aws import NeptuneAnalyticsGraph, NeptuneGraph
+            from langchain_aws import NeptuneAnalyticsGraph
         except ImportError:
             raise ImportError(
                  "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
