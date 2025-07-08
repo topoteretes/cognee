@@ -1,4 +1,4 @@
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils import generate_node_id
 from cognee.shared.data_models import KnowledgeGraph
@@ -7,12 +7,12 @@ from cognee.shared.data_models import KnowledgeGraph
 async def retrieve_existing_edges(
     data_chunks: list[DataPoint],
     chunk_graphs: list[KnowledgeGraph],
-    graph_engine: GraphDBInterface,
 ) -> dict[str, bool]:
     processed_nodes = {}
     type_node_edges = []
     entity_node_edges = []
     type_entity_edges = []
+    graph_engine = await get_graph_engine()
 
     for index, data_chunk in enumerate(data_chunks):
         graph = chunk_graphs[index]

@@ -1,5 +1,5 @@
 import pytest
-from typing import List, Optional
+from typing import List
 from cognee.infrastructure.engine import DataPoint
 
 from cognee.modules.graph.utils import get_graph_from_model

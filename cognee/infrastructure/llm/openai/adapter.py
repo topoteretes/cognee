@@ -4,11 +4,15 @@ import litellm
 import instructor
 from typing import Type
 from pydantic import BaseModel
+from openai import ContentFilterFinishReasonError
+from litellm.exceptions import ContentPolicyViolationError
+from instructor.exceptions import InstructorRetryException
 
-from cognee.modules.data.processing.document_types.open_data_file import open_data_file
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.llm_interface import LLMInterface
+from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.modules.data.processing.document_types.open_data_file import open_data_file
 from cognee.infrastructure.llm.rate_limiter import (
     rate_limit_async,
     rate_limit_sync,
@@ -59,6 +63,9 @@ class OpenAIAdapter(LLMInterface):
         transcription_model: str,
         max_tokens: int,
         streaming: bool = False,
+        fallback_model: str = None,
+        fallback_api_key: str = None,
+        fallback_endpoint: str = None,
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
         self.client = instructor.from_litellm(litellm.completion)
@@ -69,6 +76,10 @@ class OpenAIAdapter(LLMInterface):
         self.api_version = api_version
         self.max_tokens = max_tokens
         self.streaming = streaming
+
+        self.fallback_model = fallback_model
+        self.fallback_api_key = fallback_api_key
+        self.fallback_endpoint = fallback_endpoint
 
     @observe(as_type="generation")
     @sleep_and_retry_async()
@@ -97,24 +108,73 @@ class OpenAIAdapter(LLMInterface):
               BaseModel.
         """
 
-        return await self.aclient.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"""{text_input}""",
-                },
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-            ],
-            api_key=self.api_key,
-            api_base=self.endpoint,
-            api_version=self.api_version,
-            response_model=response_model,
-            max_retries=self.MAX_RETRIES,
-        )
+        try:
+            return await self.aclient.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"""{text_input}""",
+                    },
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                response_model=response_model,
+                max_retries=self.MAX_RETRIES,
+            )
+        except (
+            ContentFilterFinishReasonError,
+            ContentPolicyViolationError,
+            InstructorRetryException,
+        ) as error:
+            if (
+                isinstance(error, InstructorRetryException)
+                and "content management policy" not in str(error).lower()
+            ):
+                raise error
+
+            if not (self.fallback_model and self.fallback_api_key):
+                raise ContentPolicyFilterError(
+                    f"The provided input contains content that is not aligned with our content policy: {text_input}"
+                )
+
+            try:
+                return await self.aclient.chat.completions.create(
+                    model=self.fallback_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
+                        },
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                    ],
+                    api_key=self.fallback_api_key,
+                    # api_base=self.fallback_endpoint,
+                    response_model=response_model,
+                    max_retries=self.MAX_RETRIES,
+                )
+            except (
+                ContentFilterFinishReasonError,
+                ContentPolicyViolationError,
+                InstructorRetryException,
+            ) as error:
+                if (
+                    isinstance(error, InstructorRetryException)
+                    and "content management policy" not in str(error).lower()
+                ):
+                    raise error
+                else:
+                    raise ContentPolicyFilterError(
+                        f"The provided input contains content that is not aligned with our content policy: {text_input}"
+                    )
 
     @observe
     @sleep_and_retry_sync()
