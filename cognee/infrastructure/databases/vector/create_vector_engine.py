@@ -134,6 +134,30 @@ def create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+
+    elif vector_db_provider == "neptune":
+        try:
+            from langchain_aws import NeptuneAnalyticsGraph
+        except ImportError:
+            raise ImportError(
+                 "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
+            )
+
+        if not vector_db_url:
+            raise EnvironmentError("Missing Neptune endpoint.")
+
+        if vector_db_url.startswith("neptune-graph://"):
+            graph_identifier = vector_db_url.replace("neptune-graph://", "")
+
+            from .neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsAdapter
+
+            return NeptuneAnalyticsAdapter(
+                graph_id=graph_identifier,
+                embedding_engine=embedding_engine,
+            )
+
+        raise ValueError("Neptune endpoint must have the format 'neptune-graph://<GRAPH_ID>'")
+
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 
