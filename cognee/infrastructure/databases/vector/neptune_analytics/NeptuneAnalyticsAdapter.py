@@ -106,8 +106,6 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         pass
 
 
-
-
     """ Node operations """
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
@@ -189,12 +187,13 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
                             f"{{`~id`: '{node_id}'}}) "
                             f"RETURN id(n) as id , n as payload ")
             result = self._client.query(query_string)
-            result_set.append(
-                ScoredResult(
-                    id=result[0]["id"],
-                    payload=result[0]["payload"],
-                    score=0,
-            ))
+            if len(result) == 1:
+                result_set.append(
+                    ScoredResult(
+                        id=result[0]["id"],
+                        payload=result[0]["payload"],
+                        score=0,
+                ))
         return result_set
 
 
@@ -207,8 +206,6 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         # Run actual truncate
         self._client.query(f"MATCH (n:{self.VECTOR_NODE_IDENTIFIER}) DETACH DELETE n")
         pass
-
-
 
 
     """ Search """
