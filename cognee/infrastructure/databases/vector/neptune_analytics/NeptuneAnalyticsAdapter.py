@@ -4,6 +4,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import get_own_properties
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.PayloadSchema import PayloadSchema
+from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
 class IndexSchema(DataPoint):
@@ -140,30 +141,26 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
               collection.
         """
         for data_point in data_points:
-
-
             node_id = data_point.id
             # Generate embedding
             text_content = DataPoint.get_embeddable_data(data_point)
-            data_vectors = await self.embedding_engine.embed_text([text_content])
+            data_vectors = (await self.embedding_engine.embed_text([text_content]))[0]
 
             # Fetch properties
-            # properties = get_own_properties(data_point)
-            properties = {"test": "value"}
+            properties = get_own_properties(data_point)
 
             params = {
                 "node_id": node_id,
                 "properties": properties
             }
 
-
             # Composite the query and send
             query_string = (
-                    f"CREATE (n"
+                    f"MERGE (n"
                     f":{self.VECTOR_NODE_IDENTIFIER} "
                     f":{self.COLLECTION_PREFIX}{collection_name} "
-                    f" $properties ) "
-                    # f"{{`~id`: '{node_id}'}}) "
+                    f"{{`~id`: $node_id}}) "
+                    f"SET n = $properties "
                     f"WITH n "
                     f"CALL neptune.algo.vectors.upsert('{node_id}', {data_vectors}) "
                     f"YIELD success "
@@ -190,10 +187,14 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
                             f":{self.VECTOR_NODE_IDENTIFIER} "
                             f":{self.COLLECTION_PREFIX}{collection_name} "
                             f"{{`~id`: '{node_id}'}}) "
-                            f"CALL neptune.algo.vectors.get(n) "
-                            f"YIELD embedding RETURN id(n), embedding")
+                            f"RETURN id(n) as id , n as payload ")
             result = self._client.query(query_string)
-            result_set.append(result)
+            result_set.append(
+                ScoredResult(
+                    id=result[0]["id"],
+                    payload=result[0]["payload"],
+                    score=0,
+            ))
         return result_set
 
 

@@ -28,8 +28,12 @@ async def main():
     assert isinstance(engine, NeptuneAnalyticsAdapter)
 
     # await engine.has_collection("test_new")
-    datapoint = IndexSchema(id="test_id", text="Hello world")
+    datapoint = IndexSchema(id="78a28770-2cd5-41f8-9b65-065a34f16aff", text="Hello world")
     await engine.create_data_points("test", [datapoint])
+
+    result = await engine.retrieve("test", ["78a28770-2cd5-41f8-9b65-065a34f16aff"])
+
+    print(result)
     # await engine.delete_data_points("test", [datapoint])
 
     # await engine.prune()

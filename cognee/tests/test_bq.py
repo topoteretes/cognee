@@ -1,4 +1,7 @@
 import pytest
+from langchain_aws import NeptuneAnalyticsGraph
+
+
 # from cognee.infrastructure.engine import DataPoint
 
 
@@ -7,7 +10,7 @@ async def main():
     print ("test")
 
     VECTOR_NODE_IDENTIFIER = "COGNEE_VECTOR_NODE"
-    COLLECITON_PREFIX = "VECTOR_COLLECTION_"
+    COLLECTION_PREFIX = "VECTOR_COLLECTION_"
     collection_name = "test"
     node_id = "node_id"
 
@@ -30,6 +33,28 @@ async def main():
     #             f"CALL neptune.algo.vectors.upsert('{node_id}', {embedding}) "
     #             f"YIELD success "
     #             f"RETURN success ")
+
+    data_vectors = [0.0] * 3072
+    properties = {"test_key": "key_value"}
+    params = {
+        "node_id": node_id,
+        "properties": properties
+    }
+
+    query_string = (
+        f"MERGE (n"
+        f":{VECTOR_NODE_IDENTIFIER} "
+        f":{COLLECTION_PREFIX}{collection_name} "
+        f"{{`~id`: $node_id}}) "
+        f"SET n = $properties "
+        f"WITH n "
+        f"CALL neptune.algo.vectors.upsert('{node_id}', {data_vectors}) "
+        f"YIELD success "
+        f"RETURN success ")
+
+
+    client = NeptuneAnalyticsGraph("g-3eu7qmuf9a")
+    client.query(query_string, params)
 
     # Read from ID
 
