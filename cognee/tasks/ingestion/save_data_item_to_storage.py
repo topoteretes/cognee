@@ -20,6 +20,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], datase
             file_path = data_item
         # data is a file path
         elif data_item.startswith("file://") or data_item.startswith("/"):
+            # TODO: Add check if ACCEPT_LOCAL_FILE_PATH is enabled, if it's not raise an error
             file_path = data_item.replace("file://", "")
         # data is text
         else:

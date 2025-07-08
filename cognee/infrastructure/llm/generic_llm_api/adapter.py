@@ -1,5 +1,6 @@
 """Adapter for Generic API LLM provider API"""
 
+import logging
 from typing import Type
 
 from pydantic import BaseModel
@@ -7,6 +8,7 @@ import instructor
 from cognee.infrastructure.llm.llm_interface import LLMInterface
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_retry_async
+from cognee.shared.logging_utils import get_logger
 import litellm
 
 
