@@ -151,10 +151,21 @@ async def main():
     print(f"found {len(all_nodes)} nodes and found {len(all_edges)} edges")
 
     print("------NEIGHBORS-------")
-    neighbors =  await na_adapter.get_neighbors(str(nodes[2].id))
-    print(f"found {len(neighbors)} neighbors for node \"{nodes[2].name}\"")
+    center_node = nodes[2]
+    neighbors = await na_adapter.get_neighbors(str(center_node.id))
+    print(f"found {len(neighbors)} neighbors for node \"{center_node.name}\"")
     for neighbor in neighbors:
         print(neighbor)
+
+    print("------GET CONNECTIONS-------")
+    connections = await na_adapter.get_connections(str(center_node.id))
+    print(f"found {len(connections)} connections for node \"{center_node.name}\"")
+    for connection in connections:
+        src, relationship, tgt = connection
+        src = src["name"]
+        relationship = relationship["relationship_name"]
+        tgt = tgt["name"]
+        print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
 
     print("------SUBGRAPH-------")
     node_names = ["neptune analytics", "amazon neptune database"]
@@ -165,13 +176,15 @@ async def main():
     for subgraph_edge in subgraph_edges:
         print(subgraph_edge)
 
+
+
     print("------DELETE-------")
     # delete all nodes and edges:
-    # await na_adapter.delete_graph()
+    await na_adapter.delete_graph()
 
     # delete all nodes by node id
-    node_ids = [str(node.id) for node in nodes]
-    await na_adapter.delete_nodes(node_ids)
+    # node_ids = [str(node.id) for node in nodes]
+    # await na_adapter.delete_nodes(node_ids)
 
     has_edges = await na_adapter.has_edges(edges)
     if len(has_edges) == 0:
