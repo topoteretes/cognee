@@ -73,10 +73,7 @@ async def test_circular_reference_extraction():
 
     for code_file in code_files:
         code_file.depends_on.extend(
-            [
-                code_files[random.randint(0, len(code_files) - 1)]
-                for _ in range(2)
-            ]
+            [code_files[random.randint(0, len(code_files) - 1)] for _ in range(2)]
         )
         code_file.contains.extend(
             [
