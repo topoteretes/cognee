@@ -35,6 +35,7 @@ async def get_graph_from_model(
             if property_key in visited_properties:
                 continue
 
+            visited_properties[property_key] = True
             properties_to_visit.add(field_name)
 
             continue
@@ -52,6 +53,7 @@ async def get_graph_from_model(
                 if property_key in visited_properties:
                     continue
 
+                visited_properties[property_key] = True
                 properties_to_visit.add(f"{field_name}.{index}")
 
             continue
@@ -98,6 +100,9 @@ async def get_graph_from_model(
         if str(field_value.id) in added_nodes:
             continue
 
+        property_key = str(data_point.id) + field_name + str(field_value.id)
+        visited_properties[property_key] = True
+
         property_nodes, property_edges = await get_graph_from_model(
             field_value,
             include_root=True,
@@ -111,9 +116,6 @@ async def get_graph_from_model(
 
         for edge in property_edges:
             edges.append(edge)
-
-        property_key = str(data_point.id) + field_name + str(field_value.id)
-        visited_properties[property_key] = True
 
     return nodes, edges
 
