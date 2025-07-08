@@ -155,7 +155,7 @@ class MemgraphAdapter(GraphDBInterface):
         MERGE (node {id: $node_id})
         ON CREATE SET node:$node_label, node += $properties, node.updated_at = timestamp()
         ON MATCH SET node:$node_label, node += $properties, node.updated_at = timestamp()
-        RETURN ID(node) AS internal_id,node.id AS nodeId
+        RETURN ID(node) AS internal_id, node.id AS nodeId
         """
 
         params = {
@@ -845,8 +845,8 @@ class MemgraphAdapter(GraphDBInterface):
         result = await self.query(query)
         edges = [
             (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
+                record["source"],
+                record["target"],
                 record["type"],
                 record["properties"],
             )

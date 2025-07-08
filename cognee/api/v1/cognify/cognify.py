@@ -1,6 +1,7 @@
 import asyncio
 from pydantic import BaseModel
 from typing import Union, Optional
+from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -29,7 +30,7 @@ update_status_lock = asyncio.Lock()
 
 
 async def cognify(
-    datasets: Union[str, list[str]] = None,
+    datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,

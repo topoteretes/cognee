@@ -55,7 +55,7 @@ async def delete(
 
     # Handle different input types
     if isinstance(data, str):
-        if data.startswith("file://"):  # It's a file path
+        if data.startswith("file://") or data.startswith("/"):  # It's a file path
             with open(data.replace("file://", ""), mode="rb") as file:
                 classified_data = classify(file)
                 content_hash = classified_data.get_metadata()["content_hash"]
@@ -77,7 +77,7 @@ async def delete(
         # Handle list of inputs sequentially
         results = []
         for item in data:
-            result = await delete(item, dataset_name, dataset[0].id, mode)
+            result = await delete(item, dataset_name, dataset[0].id, mode, user=user)
             results.append(result)
         return {"status": "success", "message": "Multiple documents deleted", "results": results}
     else:  # It's already a BinaryIO
