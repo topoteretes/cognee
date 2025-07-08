@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.storage.utils import copy_model
 
 
@@ -27,36 +27,48 @@ async def get_graph_from_model(
         if field_name == "metadata":
             continue
 
-        if isinstance(field_value, DataPoint):
+        # Check if field_value is a tuple with Edge metadata
+        edge_metadata = None
+        actual_field_value = field_value
+        
+        if isinstance(field_value, tuple) and len(field_value) == 2:
+            first_element, second_element = field_value
+            if isinstance(first_element, Edge):
+                edge_metadata = first_element
+                actual_field_value = second_element
+
+        if isinstance(actual_field_value, DataPoint):
             excluded_properties.add(field_name)
 
-            property_key = str(data_point.id) + field_name + str(field_value.id)
+            property_key = str(data_point.id) + field_name + str(actual_field_value.id)
 
             if property_key in visited_properties:
                 continue
 
-            properties_to_visit.add(field_name)
+            properties_to_visit.add((field_name, edge_metadata))
 
             continue
 
         if (
-            isinstance(field_value, list)
-            and len(field_value) > 0
-            and isinstance(field_value[0], DataPoint)
+            isinstance(actual_field_value, list)
+            and len(actual_field_value) > 0
+            and isinstance(actual_field_value[0], DataPoint)
         ):
             excluded_properties.add(field_name)
 
-            for index, item in enumerate(field_value):
+            for index, item in enumerate(actual_field_value):
                 property_key = str(data_point.id) + field_name + str(item.id)
 
                 if property_key in visited_properties:
                     continue
 
-                properties_to_visit.add(f"{field_name}.{index}")
+                properties_to_visit.add((f"{field_name}.{index}", edge_metadata))
 
             continue
 
-        data_point_properties[field_name] = field_value
+        # Only add to properties if it's not a tuple with Edge metadata
+        if not (isinstance(field_value, tuple) and len(field_value) == 2 and isinstance(field_value[0], Edge)):
+            data_point_properties[field_name] = field_value
 
     if include_root and str(data_point.id) not in added_nodes:
         SimpleDataPointModel = copy_model(
@@ -66,13 +78,24 @@ async def get_graph_from_model(
         nodes.append(SimpleDataPointModel(**data_point_properties))
         added_nodes[str(data_point.id)] = True
 
-    for field_name in properties_to_visit:
+    for property_item in properties_to_visit:
+        if isinstance(property_item, tuple):
+            field_name_with_index, edge_metadata = property_item
+        else:
+            # Handle legacy case where properties_to_visit contains just field names
+            field_name_with_index, edge_metadata = property_item, None
+            
         index = None
+        field_name = field_name_with_index
 
-        if "." in field_name:
-            field_name, index = field_name.split(".")
+        if "." in field_name_with_index:
+            field_name, index = field_name_with_index.split(".")
 
         field_value = getattr(data_point, field_name)
+        
+        # If field_value is a tuple with Edge metadata, extract the actual value
+        if isinstance(field_value, tuple) and len(field_value) == 2 and isinstance(field_value[0], Edge):
+            _, field_value = field_value
 
         if index is not None:
             field_value = field_value[int(index)]
@@ -80,17 +103,24 @@ async def get_graph_from_model(
         edge_key = str(data_point.id) + str(field_value.id) + field_name
 
         if str(edge_key) not in added_edges:
+            # Build edge properties
+            edge_properties = {
+                "source_node_id": data_point.id,
+                "target_node_id": field_value.id,
+                "relationship_name": field_name,
+                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            
+            # Add edge metadata if present
+            if edge_metadata:
+                edge_properties.update(edge_metadata.to_dict())
+            
             edges.append(
                 (
                     data_point.id,
                     field_value.id,
                     field_name,
-                    {
-                        "source_node_id": data_point.id,
-                        "target_node_id": field_value.id,
-                        "relationship_name": field_name,
-                        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                    },
+                    edge_properties,
                 )
             )
             added_edges[str(edge_key)] = True
