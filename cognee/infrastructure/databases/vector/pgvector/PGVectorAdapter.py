@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Optional, Union, get_type_hints
+from typing import List, Optional, get_type_hints
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
