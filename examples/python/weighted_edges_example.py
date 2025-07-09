@@ -35,9 +35,7 @@ async def main():
 
     # Create object with simple relationship to clothes
     object1 = Object(
-        name="Closet", 
-        description="A wooden closet", 
-        has_clothes=[item1, item2, item3]
+        name="Closet", description="A wooden closet", has_clothes=[item1, item2, item3]
     )
 
     # Create people with various weighted relationships
@@ -48,60 +46,66 @@ async def main():
         has_items=(Edge(weight=0.8, relationship_type="owns"), [item1, item2]),
         # Simple relationship without weights
         has_objects=(Edge(relationship_type="stores_in"), [object1]),
-        knows=[]
+        knows=[],
     )
 
     person2 = Person(
         name="Alice",
         description="A designer",
         # Multiple weights on edge
-        has_items=(Edge(
-            weights={
-                "ownership": 0.9,
-                "frequency_of_use": 0.7,
-                "emotional_attachment": 0.8,
-                "monetary_value": 0.6
-            },
-            relationship_type="owns"
-        ), [item3]),
+        has_items=(
+            Edge(
+                weights={
+                    "ownership": 0.9,
+                    "frequency_of_use": 0.7,
+                    "emotional_attachment": 0.8,
+                    "monetary_value": 0.6,
+                },
+                relationship_type="owns",
+            ),
+            [item3],
+        ),
         has_objects=(Edge(relationship_type="uses"), [object1]),
-        knows=[]
+        knows=[],
     )
 
     person3 = Person(
         name="Bob",
         description="A friend",
         # Mixed: single weight + multiple weights
-        has_items=(Edge(
-            weight=0.5,  # Default weight
-            weights={
-                "trust_level": 0.9,
-                "communication_frequency": 0.6
-            },
-            relationship_type="borrows"
-        ), [item1]),
+        has_items=(
+            Edge(
+                weight=0.5,  # Default weight
+                weights={"trust_level": 0.9, "communication_frequency": 0.6},
+                relationship_type="borrows",
+            ),
+            [item1],
+        ),
         has_objects=[],
-        knows=[]
+        knows=[],
     )
 
     # Create relationships between people with multiple weights
-    person1.knows = (Edge(
-        weights={
-            "friendship_strength": 0.9,
-            "trust_level": 0.8,
-            "years_known": 0.7,
-            "shared_interests": 0.6
-        },
-        relationship_type="friend"
-    ), [person2, person3])
+    person1.knows = (
+        Edge(
+            weights={
+                "friendship_strength": 0.9,
+                "trust_level": 0.8,
+                "years_known": 0.7,
+                "shared_interests": 0.6,
+            },
+            relationship_type="friend",
+        ),
+        [person2, person3],
+    )
 
-    person2.knows = (Edge(
-        weights={
-            "professional_collaboration": 0.8,
-            "personal_friendship": 0.6
-        },
-        relationship_type="colleague"
-    ), [person1])
+    person2.knows = (
+        Edge(
+            weights={"professional_collaboration": 0.8, "personal_friendship": 0.6},
+            relationship_type="colleague",
+        ),
+        [person1],
+    )
 
     all_data_points = [item1, item2, item3, object1, person1, person2, person3]
 
@@ -109,7 +113,9 @@ async def main():
     await add_data_points(all_data_points)
 
     # Visualize the graph
-    graph_visualization_path = path.join(path.dirname(__file__), "weighted_graph_visualization.html")
+    graph_visualization_path = path.join(
+        path.dirname(__file__), "weighted_graph_visualization.html"
+    )
     await visualize_graph(graph_visualization_path)
 
     print("Graph with multiple weighted edges has been created and visualized!")
@@ -123,4 +129,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

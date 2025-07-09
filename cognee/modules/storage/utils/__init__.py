@@ -34,12 +34,8 @@ def copy_model(model: DataPoint, include_fields: dict = {}, exclude_fields: list
         model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # Create the model inheriting from the configured base
-    new_model = create_model(
-        model.__name__, 
-        __base__=ConfiguredBase,
-        **final_fields
-    )
-    
+    new_model = create_model(model.__name__, __base__=ConfiguredBase, **final_fields)
+
     new_model.model_rebuild()
     return new_model
 

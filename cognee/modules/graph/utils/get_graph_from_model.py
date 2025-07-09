@@ -30,7 +30,7 @@ async def get_graph_from_model(
         # Check if field_value is a tuple with Edge metadata
         edge_metadata = None
         actual_field_value = field_value
-        
+
         if isinstance(field_value, tuple) and len(field_value) == 2:
             first_element, second_element = field_value
             if isinstance(first_element, Edge):
@@ -62,12 +62,18 @@ async def get_graph_from_model(
                 if property_key in visited_properties:
                     continue
 
-                properties_to_visit.append((f"{field_name}.{index}", edge_metadata))  # Changed from add to append
+                properties_to_visit.append(
+                    (f"{field_name}.{index}", edge_metadata)
+                )  # Changed from add to append
 
             continue
 
         # Only add to properties if it's not a tuple with Edge metadata
-        if not (isinstance(field_value, tuple) and len(field_value) == 2 and isinstance(field_value[0], Edge)):
+        if not (
+            isinstance(field_value, tuple)
+            and len(field_value) == 2
+            and isinstance(field_value[0], Edge)
+        ):
             data_point_properties[field_name] = field_value
 
     if include_root and str(data_point.id) not in added_nodes:
@@ -84,7 +90,7 @@ async def get_graph_from_model(
         else:
             # Handle legacy case where properties_to_visit contains just field names
             field_name_with_index, edge_metadata = property_item, None
-            
+
         index = None
         field_name = field_name_with_index
 
@@ -92,9 +98,13 @@ async def get_graph_from_model(
             field_name, index = field_name_with_index.split(".")
 
         field_value = getattr(data_point, field_name)
-        
+
         # If field_value is a tuple with Edge metadata, extract the actual value
-        if isinstance(field_value, tuple) and len(field_value) == 2 and isinstance(field_value[0], Edge):
+        if (
+            isinstance(field_value, tuple)
+            and len(field_value) == 2
+            and isinstance(field_value[0], Edge)
+        ):
             _, field_value = field_value
 
         if index is not None:
@@ -110,11 +120,11 @@ async def get_graph_from_model(
                 "relationship_name": field_name,
                 "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             }
-            
+
             # Add edge metadata if present
             if edge_metadata:
                 edge_properties.update(edge_metadata.to_dict())
-            
+
             edges.append(
                 (
                     data_point.id,

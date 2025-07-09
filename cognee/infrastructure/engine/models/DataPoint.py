@@ -33,7 +33,7 @@ class DataPoint(BaseModel):
     - to_dict
     - from_dict
     """
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: UUID = Field(default_factory=uuid4)

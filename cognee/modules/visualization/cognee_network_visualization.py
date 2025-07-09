@@ -53,38 +53,38 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         target = str(target)
         G.add_edge(source, target)
         edge_labels[(source, target)] = relation
-        
+
         # Extract edge metadata including all weights
         all_weights = {}
         primary_weight = None
-        
+
         if edge_info:
             # Single weight (backward compatibility)
             if "weight" in edge_info:
                 all_weights["default"] = edge_info["weight"]
                 primary_weight = edge_info["weight"]
-            
+
             # Multiple weights
             if "weights" in edge_info and isinstance(edge_info["weights"], dict):
                 all_weights.update(edge_info["weights"])
                 # Use the first weight as primary for visual thickness if no default weight
                 if primary_weight is None and edge_info["weights"]:
                     primary_weight = next(iter(edge_info["weights"].values()))
-            
+
             # Individual weight fields (weight_strength, weight_confidence, etc.)
             for key, value in edge_info.items():
                 if key.startswith("weight_") and isinstance(value, (int, float)):
                     weight_name = key[7:]  # Remove "weight_" prefix
                     all_weights[weight_name] = value
-        
+
         link_data = {
-            "source": source, 
-            "target": target, 
+            "source": source,
+            "target": target,
             "relation": relation,
             "weight": primary_weight,  # Primary weight for backward compatibility
             "all_weights": all_weights,  # All weights for display
             "relationship_type": edge_info.get("relationship_type") if edge_info else None,
-            "edge_info": edge_info if edge_info else {}
+            "edge_info": edge_info if edge_info else {},
         }
         links_list.append(link_data)
 
