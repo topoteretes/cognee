@@ -24,7 +24,7 @@ runs:
     
     - name: Rebuild Poetry lock file
       shell: bash
-      run: poetry lock --no-update
+      run: poetry lock
     
     - name: Install dependencies
       shell: bash
