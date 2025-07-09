@@ -2055,17 +2055,19 @@ tests = ["asttokens (>=2.1.0)", "coverage", "coverage-enable-subprocess", "ipyth
 
 [[package]]
 name = "falkordb"
-version = "1.0.9"
+version = "1.2.0"
 description = "Python client for interacting with FalkorDB database"
 optional = true
 python-versions = "<4.0,>=3.8"
 groups = ["main"]
 markers = "extra == \"falkordb\""
 files = [
-    {file = "falkordb-1.0.9.tar.gz", hash = "sha256:177008e63c7e4d9ebbdfeb8cad24b0e49175bb0f6e96cac9b4ffb641c0eff0f1"},
+    {file = "falkordb-1.2.0-py3-none-any.whl", hash = "sha256:7572d9cc377735d22efc52fe6fe73c7a435422c827b6ea3ca223a850a77be12e"},
+    {file = "falkordb-1.2.0.tar.gz", hash = "sha256:ce57365b86722d538e75aa5d438de67ecd8eb9478da612506d9812cd7f182d0b"},
 ]
 
 [package.dependencies]
+python-dateutil = ">=2.9.0,<3.0.0"
 redis = ">=5.0.1,<6.0.0"
 
 [[package]]
@@ -12239,4 +12241,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "ca2a3e8260092933419793efe202d50ae7b1c6ce738750876fd5f64a31718790"
+content-hash = "53cce0f82f9d995bd0d7acc82d80fd6eae3bd03cfe8fe3c0dcfc7a65a9ad62d6"
