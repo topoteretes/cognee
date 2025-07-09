@@ -125,6 +125,6 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
     file_type = filetype.guess(file)
 
     if file_type is None:
-        raise FileTypeException("Unknown file detected.")
+        raise FileTypeException(f"Unknown file detected: {file.name}.")
 
     return file_type
