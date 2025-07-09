@@ -34,7 +34,7 @@ async def retrieve_existing_edges(
     Note:
         - The function generates several types of edges for checking:
           * Type node edges: (chunk_id, type_node_id, "exists_in")
-          * Entity node edges: (chunk_id, entity_node_id, "mentioned_in")  
+          * Entity node edges: (chunk_id, entity_node_id, "mentioned_in")
           * Type-entity edges: (entity_node_id, type_node_id, "is_a")
           * Graph node edges: extracted from the knowledge graph relationships
         - Uses generate_node_id() to ensure consistent node ID formatting

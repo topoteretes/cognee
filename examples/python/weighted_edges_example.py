@@ -32,7 +32,7 @@ async def main():
     # Clear the database for a clean state
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    
+
     # Create clothes items
     item1 = Clothes(name="Shirt", description="A blue shirt")
     item2 = Clothes(name="Pants", description="Black pants")
