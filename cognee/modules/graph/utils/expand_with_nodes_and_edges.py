@@ -18,6 +18,7 @@ def expand_with_nodes_and_edges(
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     """
+    - LLM generated docstring
     Expand knowledge graphs with validated nodes and edges, integrating ontology information.
 
     This function processes document chunks and their associated knowledge graphs to create
@@ -49,6 +50,7 @@ def expand_with_nodes_and_edges(
         - Ontology validation is performed to map entities to canonical ontology terms
         - Duplicate nodes and edges are prevented using internal mapping and the existing_edges_map
         - The function modifies data_chunks in-place by adding entities to their 'contains' attribute
+    
     """
     if existing_edges_map is None:
         existing_edges_map = {}
