@@ -14,6 +14,7 @@ async def check_falkordb_connection():
     """Check if FalkorDB is available at localhost:6379"""
     try:
         from falkordb import FalkorDB
+
         client = FalkorDB(host="localhost", port=6379)
         # Try to list graphs to check connection
         client.list_graphs()
@@ -130,7 +131,7 @@ async def main():
     # For FalkorDB vector engine, check if collections are empty
     # Since FalkorDB is a hybrid adapter, we can check if the graph is empty
     # as the vector data is stored in the same graph
-    if hasattr(vector_engine, 'driver'):
+    if hasattr(vector_engine, "driver"):
         # This is FalkorDB - check if graphs exist
         collections = vector_engine.driver.list_graphs()
         # The graph should be deleted, so either no graphs or empty graph
@@ -138,7 +139,9 @@ async def main():
             # Graph exists but should be empty
             vector_graph_data = await vector_engine.get_graph_data()
             vector_nodes, vector_edges = vector_graph_data
-            assert len(vector_nodes) == 0 and len(vector_edges) == 0, "FalkorDB vector database is not empty"
+            assert len(vector_nodes) == 0 and len(vector_edges) == 0, (
+                "FalkorDB vector database is not empty"
+            )
     else:
         # Fallback for other vector engines like LanceDB
         connection = await vector_engine.get_connection()
@@ -153,7 +156,7 @@ async def main():
 
     # For FalkorDB, check if the graph database is empty
     from cognee.infrastructure.databases.graph import get_graph_engine
-    
+
     graph_engine = get_graph_engine()
     graph_data = await graph_engine.get_graph_data()
     nodes, edges = graph_data
@@ -161,7 +164,7 @@ async def main():
 
     print("🎉 FalkorDB test completed successfully!")
     print("   ✓ Data ingestion worked")
-    print("   ✓ Cognify processing worked") 
+    print("   ✓ Cognify processing worked")
     print("   ✓ Search operations worked")
     print("   ✓ Cleanup worked")
 
