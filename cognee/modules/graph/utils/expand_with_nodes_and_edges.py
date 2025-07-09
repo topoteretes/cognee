@@ -17,6 +17,39 @@ def expand_with_nodes_and_edges(
     ontology_resolver: OntologyResolver = None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
+    """
+    Expand knowledge graphs with validated nodes and edges, integrating ontology information.
+
+    This function processes document chunks and their associated knowledge graphs to create
+    a comprehensive graph structure with entity nodes, entity type nodes, and their relationships.
+    It validates entities against an ontology resolver and adds ontology-derived nodes and edges
+    to enhance the knowledge representation.
+
+    Args:
+        data_chunks (list[DocumentChunk]): List of document chunks that contain the source data.
+            Each chunk should have metadata about what entities it contains.
+        chunk_graphs (list[KnowledgeGraph]): List of knowledge graphs corresponding to each
+            data chunk. Each graph contains nodes (entities) and edges (relationships) extracted
+            from the chunk content.
+        ontology_resolver (OntologyResolver, optional): Resolver for validating entities and
+            types against an ontology. If None, a default OntologyResolver is created.
+            Defaults to None.
+        existing_edges_map (dict[str, bool], optional): Mapping of existing edge keys to prevent
+            duplicate edge creation. Keys are formatted as "{source_id}_{target_id}_{relation}".
+            If None, an empty dictionary is created. Defaults to None.
+
+    Returns:
+        tuple[list, list]: A tuple containing:
+            - graph_nodes (list): Combined list of data chunks and ontology nodes (EntityType and Entity objects)
+            - graph_edges (list): List of edge tuples in format (source_id, target_id, relationship_name, properties)
+
+    Note:
+        - Entity nodes are created for each entity found in the knowledge graphs
+        - EntityType nodes are created for each unique entity type
+        - Ontology validation is performed to map entities to canonical ontology terms
+        - Duplicate nodes and edges are prevented using internal mapping and the existing_edges_map
+        - The function modifies data_chunks in-place by adding entities to their 'contains' attribute
+    """
     if existing_edges_map is None:
         existing_edges_map = {}
 

@@ -6,6 +6,7 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.tasks.storage import add_data_points
+import cognee
 
 
 class Clothes(DataPoint):
@@ -28,6 +29,10 @@ class Person(DataPoint):
 
 
 async def main():
+    # Clear the database for a clean state
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    
     # Create clothes items
     item1 = Clothes(name="Shirt", description="A blue shirt")
     item2 = Clothes(name="Pants", description="Black pants")
