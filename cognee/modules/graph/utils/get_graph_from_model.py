@@ -21,7 +21,7 @@ async def get_graph_from_model(
         "type": type(data_point).__name__,
     }
     excluded_properties = set()
-    properties_to_visit = set()
+    properties_to_visit = []  # Changed from set to list
 
     for field_name, field_value in data_point:
         if field_name == "metadata":
@@ -45,7 +45,7 @@ async def get_graph_from_model(
             if property_key in visited_properties:
                 continue
 
-            properties_to_visit.add((field_name, edge_metadata))
+            properties_to_visit.append((field_name, edge_metadata))  # Changed from add to append
 
             continue
 
@@ -62,7 +62,7 @@ async def get_graph_from_model(
                 if property_key in visited_properties:
                     continue
 
-                properties_to_visit.add((f"{field_name}.{index}", edge_metadata))
+                properties_to_visit.append((f"{field_name}.{index}", edge_metadata))  # Changed from add to append
 
             continue
 
