@@ -9,6 +9,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.modules.ingestion.methods import get_s3_fs, open_data_file
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_dataset_data,
@@ -16,9 +17,6 @@ from cognee.modules.data.methods import (
 )
 
 from .save_data_item_to_storage import save_data_item_to_storage
-
-
-from cognee.api.v1.add.config import get_s3_config
 
 
 async def ingest_data(
@@ -31,22 +29,7 @@ async def ingest_data(
     if not user:
         user = await get_default_user()
 
-    s3_config = get_s3_config()
-
-    fs = None
-    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
-        import s3fs
-
-        fs = s3fs.S3FileSystem(
-            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
-        )
-
-    def open_data_file(file_path: str):
-        if file_path.startswith("s3://"):
-            return fs.open(file_path, mode="rb")
-        else:
-            local_path = file_path.replace("file://", "")
-            return open(local_path, mode="rb")
+    fs = get_s3_fs()
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
@@ -95,7 +78,7 @@ async def ingest_data(
             file_path = await save_data_item_to_storage(data_item, dataset_name)
 
             # Ingest data and add metadata
-            with open_data_file(file_path) as file:
+            with open_data_file(file_path, s3fs=fs) as file:
                 classified_data = ingestion.classify(file, s3fs=fs)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data

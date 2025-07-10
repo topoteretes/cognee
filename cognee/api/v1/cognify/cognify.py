@@ -242,6 +242,7 @@ async def run_cognify_as_background_process(
 
     async def handle_rest_of_the_run(pipeline_list):
         # Execute all provided pipelines one by one to avoid database write conflicts
+        # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
         for pipeline in pipeline_list:
             while True:
                 try:

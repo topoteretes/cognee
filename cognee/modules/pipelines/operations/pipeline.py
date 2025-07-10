@@ -2,6 +2,7 @@ import asyncio
 from typing import Union
 from uuid import NAMESPACE_OID, uuid5, UUID
 
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
@@ -26,6 +27,7 @@ from cognee.modules.data.methods import (
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunStarted,
+    PipelineRunErrored,
 )
 
 from cognee.infrastructure.databases.relational import (
