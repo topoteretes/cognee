@@ -60,7 +60,6 @@ dependencies = [
     "onnxruntime<=1.21.1",
     "pylance==0.22.0",
     "kuzu==0.9.0",
-    "falkordb (>=1.2.0,<2.0.0)"
 ]
 
 [project.optional-dependencies]
