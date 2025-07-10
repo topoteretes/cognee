@@ -83,3 +83,48 @@ jobs:
           GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
           GRAPH_DATABASE_USERNAME: "neo4j"
         run: poetry run python ./cognee/tests/test_neo4j.py
+
+  run-falkordb-tests:
+    name: FalkorDB Tests
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'falkordb') }}
+    services:
+      falkordb:
+        image: falkordb/falkordb:edge
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install specific db dependency
+        run: |
+          poetry install -E falkordb
+
+      - name: Run FalkorDB Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: "falkordb"
+          GRAPH_DATABASE_URL: "localhost"
+          GRAPH_DATABASE_PORT: 6379
+        run: poetry run python ./cognee/tests/test_falkordb.py
