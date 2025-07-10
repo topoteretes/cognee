@@ -103,6 +103,9 @@ async def get_repo_file_dependencies(
           extraction of dependencies (default is False). (default False)
     """
 
+    if isinstance(repo_path, list) and len(repo_path) == 1:
+        repo_path = repo_path[0]
+
     if not os.path.exists(repo_path):
         raise FileNotFoundError(f"Repository path {repo_path} does not exist.")
 

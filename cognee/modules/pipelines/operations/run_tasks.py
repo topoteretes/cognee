@@ -95,29 +95,29 @@ async def run_tasks(
 
         # TODO: Convert to async gather task instead of for loop (just make sure it can work there were some issues when async gathering datasets)
         for data_item in data:
-            # If data is being added to Cognee for the first time calculate the id of the data
-            if not isinstance(data_item, Data):
-                data = await resolve_data_directories(data)
-                file_path = await save_data_item_to_storage(data_item, dataset.name)
-                # Ingest data and add metadata
-                with open_data_file(file_path, s3fs=fs) as file:
-                    classified_data = ingestion.classify(file, s3fs=fs)
-                    # data_id is the hash of file contents + owner id to avoid duplicate data
-                    data_id = ingestion.identify(classified_data, user)
-            else:
-                # If data was already processed by Cognee get data id
-                data_id = data_item.id
-
-            # If incremental_loading is set to True don't process documents already processed by pipeline
+            # If incremental_loading of data is set to True don't process documents already processed by pipeline
             if incremental_loading:
-                # Check pipeline status, if Data already processed for pipeline before skip current processing
-                async with db_engine.get_async_session() as session:
-                    data_point = (
-                        await session.execute(select(Data).filter(Data.id == data_id))
-                    ).scalar_one_or_none()
-                    if data_point:
-                        if data_point.pipeline_status.get(pipeline_name) == "Completed":
-                            break
+                # If data is being added to Cognee for the first time calculate the id of the data
+                if not isinstance(data_item, Data):
+                    data = await resolve_data_directories(data)
+                    file_path = await save_data_item_to_storage(data_item, dataset.name)
+                    # Ingest data and add metadata
+                    with open_data_file(file_path, s3fs=fs) as file:
+                        classified_data = ingestion.classify(file, s3fs=fs)
+                        # data_id is the hash of file contents + owner id to avoid duplicate data
+                        data_id = ingestion.identify(classified_data, user)
+                else:
+                    # If data was already processed by Cognee get data id
+                    data_id = data_item.id
+
+                    # Check pipeline status, if Data already processed for pipeline before skip current processing
+                    async with db_engine.get_async_session() as session:
+                        data_point = (
+                            await session.execute(select(Data).filter(Data.id == data_id))
+                        ).scalar_one_or_none()
+                        if data_point:
+                            if data_point.pipeline_status.get(pipeline_name) == "Completed":
+                                break
 
             try:
                 async for result in run_tasks_with_telemetry(
@@ -134,23 +134,24 @@ async def run_tasks(
                         payload=result,
                     )
 
-                data_items_pipeline_run_info[data_id] = {
-                    "run_info": PipelineRunCompleted(
-                        pipeline_run_id=pipeline_run_id,
-                        dataset_id=dataset.id,
-                        dataset_name=dataset.name,
-                    ),
-                    "data_id": data_id,
-                }
+                if incremental_loading:
+                    data_items_pipeline_run_info[data_id] = {
+                        "run_info": PipelineRunCompleted(
+                            pipeline_run_id=pipeline_run_id,
+                            dataset_id=dataset.id,
+                            dataset_name=dataset.name,
+                        ),
+                        "data_id": data_id,
+                    }
 
-                # Update pipeline status for Data element
-                async with db_engine.get_async_session() as session:
-                    data_point = (
-                        await session.execute(select(Data).filter(Data.id == data_id))
-                    ).scalar_one_or_none()
-                    data_point.pipeline_status[pipeline_name] = "Completed"
-                    await session.merge(data_point)
-                    await session.commit()
+                    # Update pipeline status for Data element
+                    async with db_engine.get_async_session() as session:
+                        data_point = (
+                            await session.execute(select(Data).filter(Data.id == data_id))
+                        ).scalar_one_or_none()
+                        data_point.pipeline_status[pipeline_name] = "Completed"
+                        await session.merge(data_point)
+                        await session.commit()
 
             except Exception as error:
                 # Temporarily swallow error and try to process rest of documents first, then re-raise error at end of data ingestion pipeline
@@ -158,16 +159,16 @@ async def run_tasks(
                 logger.error(
                     f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
                 )
-
-                data_items_pipeline_run_info = {
-                    "run_info": PipelineRunErrored(
-                        pipeline_run_id=pipeline_run_id,
-                        payload=error,
-                        dataset_id=dataset.id,
-                        dataset_name=dataset.name,
-                    ),
-                    "data_id": data_id,
-                }
+                if incremental_loading:
+                    data_items_pipeline_run_info = {
+                        "run_info": PipelineRunErrored(
+                            pipeline_run_id=pipeline_run_id,
+                            payload=error,
+                            dataset_id=dataset.id,
+                            dataset_name=dataset.name,
+                        ),
+                        "data_id": data_id,
+                    }
 
         # re-raise error found during data ingestion
         if ingestion_error:
