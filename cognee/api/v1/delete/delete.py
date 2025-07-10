@@ -44,10 +44,10 @@ async def delete(
 
     # Verify user has delete permission on the dataset
     dataset_list = await get_authorized_existing_datasets([dataset_id], "delete", user)
-    
+
     if not dataset_list:
         raise DatasetNotFoundError(f"Dataset not found or access denied: {dataset_id}")
-    
+
     dataset = dataset_list[0]
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
@@ -68,23 +68,19 @@ async def delete(
         dataset_data_link = (
             await session.execute(
                 select(DatasetData).filter(
-                    DatasetData.data_id == data_id,
-                    DatasetData.dataset_id == dataset_id
+                    DatasetData.data_id == data_id, DatasetData.dataset_id == dataset_id
                 )
             )
         ).scalar_one_or_none()
 
         if dataset_data_link is None:
-            raise DocumentNotFoundError(
-                f"Data {data_id} not found in dataset {dataset_id}"
-            )
+            raise DocumentNotFoundError(f"Data {data_id} not found in dataset {dataset_id}")
 
         # Get the content hash for deletion
         content_hash = data_point.content_hash
 
     # Use the existing comprehensive deletion logic
     return await delete_single_document(content_hash, dataset.id, mode)
-
 
 
 async def delete_single_document(content_hash: str, dataset_id: UUID = None, mode: str = "soft"):
