@@ -93,13 +93,15 @@ async def run_tasks(
         if not isinstance(data, list):
             data = [data]
 
+        if incremental_loading:
+            data = await resolve_data_directories(data)
+
         # TODO: Convert to async gather task instead of for loop (just make sure it can work there were some issues when async gathering datasets)
         for data_item in data:
             # If incremental_loading of data is set to True don't process documents already processed by pipeline
             if incremental_loading:
                 # If data is being added to Cognee for the first time calculate the id of the data
                 if not isinstance(data_item, Data):
-                    data = await resolve_data_directories(data)
                     file_path = await save_data_item_to_storage(data_item, dataset.name)
                     # Ingest data and add metadata
                     with open_data_file(file_path, s3fs=fs) as file:
