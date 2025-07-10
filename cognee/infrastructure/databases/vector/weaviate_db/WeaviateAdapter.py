@@ -1,16 +1,33 @@
 from typing import List, Optional
 
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
 from cognee.shared.logging_utils import get_logger
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
+from distributed.utils import override_distributed
+from distributed.tasks.queued_add_data_points import queued_add_data_points
+
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("WeaviateAdapter")
+
+
+def is_retryable_request(error):
+    from weaviate.exceptions import UnexpectedStatusCodeException
+    from requests.exceptions import RequestException
+
+    if isinstance(error, UnexpectedStatusCodeException):
+        # Retry on conflict, service unavailable, internal error
+        return error.status_code in {409, 503, 500}
+    if isinstance(error, RequestException):
+        return True  # Includes timeout, connection error, etc.
+    return False
 
 
 class IndexSchema(DataPoint):
@@ -124,6 +141,11 @@ class WeaviateAdapter(VectorDBInterface):
         client = await self.get_client()
         return await client.collections.exists(collection_name)
 
+    @retry(
+        retry=retry_if_exception(is_retryable_request),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
     async def create_collection(
         self,
         collection_name: str,
@@ -184,6 +206,12 @@ class WeaviateAdapter(VectorDBInterface):
         client = await self.get_client()
         return client.collections.get(collection_name)
 
+    @retry(
+        retry=retry_if_exception(is_retryable_request),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
+    @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """
         Create or update data points in the specified collection in the Weaviate database.
