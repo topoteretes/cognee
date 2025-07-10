@@ -4,6 +4,7 @@ import cognee.modules.ingestion as ingestion
 from uuid import UUID
 from typing import Any
 from functools import wraps
+from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
@@ -60,6 +61,7 @@ async def run_tasks(
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
+    incremental_loading: bool = True,
 ):
     if not user:
         user = get_default_user()
@@ -106,6 +108,17 @@ async def run_tasks(
                 # If data was already processed by Cognee get data id
                 data_id = data_item.id
 
+            # If incremental_loading is set to True don't process documents already processed by pipeline
+            if incremental_loading:
+                # Check pipeline status, if Data already processed for pipeline before skip current processing
+                async with db_engine.get_async_session() as session:
+                    data_point = (
+                        await session.execute(select(Data).filter(Data.id == data_id))
+                    ).scalar_one_or_none()
+                    if data_point:
+                        if data_point.pipeline_status.get(pipeline_name) == "Completed":
+                            break
+
             try:
                 async for result in run_tasks_with_telemetry(
                     tasks=tasks,
@@ -129,6 +142,15 @@ async def run_tasks(
                     ),
                     "data_id": data_id,
                 }
+
+                # Update pipeline status for Data element
+                async with db_engine.get_async_session() as session:
+                    data_point = (
+                        await session.execute(select(Data).filter(Data.id == data_id))
+                    ).scalar_one_or_none()
+                    data_point.pipeline_status[pipeline_name] = "Completed"
+                    await session.merge(data_point)
+                    await session.commit()
 
             except Exception as error:
                 # Temporarily swallow error and try to process rest of documents first, then re-raise error at end of data ingestion pipeline

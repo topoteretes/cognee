@@ -131,6 +131,7 @@ async def ingest_data(
                         content_hash=file_metadata["content_hash"],
                         external_metadata=ext_metadata,
                         node_set=json.dumps(node_set) if node_set else None,
+                        pipeline_status={},
                         token_count=-1,
                     )
 

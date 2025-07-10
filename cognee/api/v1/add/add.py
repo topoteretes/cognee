@@ -15,6 +15,7 @@ async def add(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     dataset_id: UUID = None,
+    incremental_loading: bool = True,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -153,6 +154,7 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
+        incremental_loading=incremental_loading,
     ):
         pipeline_run_info = run_info
 
