@@ -119,7 +119,7 @@ async def run_tasks(
                         ).scalar_one_or_none()
                         if data_point:
                             if data_point.pipeline_status.get(pipeline_name) == "Completed":
-                                break
+                                continue
 
             try:
                 async for result in run_tasks_with_telemetry(
