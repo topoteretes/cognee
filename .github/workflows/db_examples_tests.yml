@@ -87,10 +87,11 @@ jobs:
     name: "Kuzu DB Example Test"
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
-
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -115,6 +116,52 @@ jobs:
           GRAPH_DATABASE_PROVIDER: "kuzu"
         run: |
           poetry run python examples/database_examples/kuzu_example.py
+
+  run-db-example-falkordb:
+    name: "FalkorDB Example Test"
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'falkordb') }}
+    services:
+      falkordb:
+        image: falkordb/falkordb:edge
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install FalkorDB extra
+        run: |
+          poetry install -E falkordb
+
+      - name: Run FalkorDB Example
+        env:
+          ENV: dev
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: "falkordb"
+          GRAPH_DATABASE_URL: "localhost"
+          GRAPH_DATABASE_PORT: 6379
+        run: |
+          poetry run python examples/database_examples/falkordb_example.py
 
   run-db-example-milvus:
     name: "Milvus DB Example Test"
