@@ -4,7 +4,6 @@ from typing import Union, BinaryIO
 from tempfile import SpooledTemporaryFile
 
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.ingestion.data_types.S3BinaryData import S3BinaryData
 from .data_types import TextData, BinaryData, S3BinaryData
 
 
