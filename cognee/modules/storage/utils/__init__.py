@@ -3,7 +3,7 @@ from uuid import UUID
 from decimal import Decimal
 from datetime import datetime
 from pydantic_core import PydanticUndefined
-from pydantic import create_model
+from pydantic import create_model, ConfigDict, BaseModel
 
 from cognee.infrastructure.engine import DataPoint
 
@@ -29,9 +29,15 @@ def copy_model(model: DataPoint, include_fields: dict = {}, exclude_fields: list
 
     final_fields = {**fields, **include_fields}
 
-    model = create_model(model.__name__, **final_fields)
-    model.model_rebuild()
-    return model
+    # Create a base class with the same configuration as DataPoint
+    class ConfiguredBase(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # Create the model inheriting from the configured base
+    new_model = create_model(model.__name__, __base__=ConfiguredBase, **final_fields)
+
+    new_model.model_rebuild()
+    return new_model
 
 
 def get_own_properties(data_point: DataPoint):

@@ -184,3 +184,5 @@ jobs:
 
       - name: Run Graph Tests
         run: poetry run python ./examples/python/code_graph_example.py --repo_path ./cognee/tasks/graph
+
+

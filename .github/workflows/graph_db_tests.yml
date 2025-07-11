@@ -50,6 +50,20 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: poetry run python ./cognee/tests/test_kuzu.py
 
+      - name: Run Weighted Edges Tests with Kuzu
+        env:
+          ENV: 'dev'
+          GRAPH_DATABASE_PROVIDER: "kuzu"
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
+
   run-neo4j-tests:
     name: Neo4j Tests
     runs-on: ubuntu-22.04
@@ -83,3 +97,20 @@ jobs:
           GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
           GRAPH_DATABASE_USERNAME: "neo4j"
         run: poetry run python ./cognee/tests/test_neo4j.py
+
+      - name: Run Weighted Edges Tests with Neo4j
+        env:
+          ENV: 'dev'
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
+          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
+          GRAPH_DATABASE_USERNAME: "neo4j"
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v

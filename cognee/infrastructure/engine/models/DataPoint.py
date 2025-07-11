@@ -1,6 +1,6 @@
 import pickle
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing_extensions import TypedDict
 from typing import Optional, Any, Dict, List
@@ -33,6 +33,8 @@ class DataPoint(BaseModel):
     - to_dict
     - from_dict
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(

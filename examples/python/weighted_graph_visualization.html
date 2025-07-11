@@ -1,94 +1,4 @@
-import os
-import json
-import networkx
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.files.storage import LocalStorage
-
-logger = get_logger()
-
-
-async def cognee_network_visualization(graph_data, destination_file_path: str = None):
-    nodes_data, edges_data = graph_data
-
-    G = networkx.DiGraph()
-
-    nodes_list = []
-    color_map = {
-        "Entity": "#f47710",
-        "EntityType": "#6510f4",
-        "DocumentChunk": "#801212",
-        "TextSummary": "#1077f4",
-        "TableRow": "#f47710",
-        "TableType": "#6510f4",
-        "ColumnValue": "#13613a",
-        "default": "#D3D3D3",
-    }
-
-    for node_id, node_info in nodes_data:
-        node_info = node_info.copy()
-        node_info["id"] = str(node_id)
-        node_info["color"] = color_map.get(node_info.get("type", "default"), "#D3D3D3")
-        node_info["name"] = node_info.get("name", str(node_id))
-
-        try:
-            del node_info[
-                "updated_at"
-            ]  #:TODO: We should decide what properties to show on the nodes and edges, we dont necessarily need all.
-        except KeyError:
-            pass
-
-        try:
-            del node_info["created_at"]
-        except KeyError:
-            pass
-
-        nodes_list.append(node_info)
-        G.add_node(node_id, **node_info)
-
-    edge_labels = {}
-    links_list = []
-    for source, target, relation, edge_info in edges_data:
-        source = str(source)
-        target = str(target)
-        G.add_edge(source, target)
-        edge_labels[(source, target)] = relation
-
-        # Extract edge metadata including all weights
-        all_weights = {}
-        primary_weight = None
-
-        if edge_info:
-            # Single weight (backward compatibility)
-            if "weight" in edge_info:
-                all_weights["default"] = edge_info["weight"]
-                primary_weight = edge_info["weight"]
-
-            # Multiple weights
-            if "weights" in edge_info and isinstance(edge_info["weights"], dict):
-                all_weights.update(edge_info["weights"])
-                # Use the first weight as primary for visual thickness if no default weight
-                if primary_weight is None and edge_info["weights"]:
-                    primary_weight = next(iter(edge_info["weights"].values()))
-
-            # Individual weight fields (weight_strength, weight_confidence, etc.)
-            for key, value in edge_info.items():
-                if key.startswith("weight_") and isinstance(value, (int, float)):
-                    weight_name = key[7:]  # Remove "weight_" prefix
-                    all_weights[weight_name] = value
-
-        link_data = {
-            "source": source,
-            "target": target,
-            "relation": relation,
-            "weight": primary_weight,  # Primary weight for backward compatibility
-            "all_weights": all_weights,  # All weights for display
-            "relationship_type": edge_info.get("relationship_type") if edge_info else None,
-            "edge_info": edge_info if edge_info else {},
-        }
-        links_list.append(link_data)
-
-    html_template = """
     <!DOCTYPE html>
     <html>
     <head>
@@ -127,8 +37,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         <svg></svg>
         <div class="tooltip" id="tooltip"></div>
         <script>
-            var nodes = {nodes};
-            var links = {links};
+            var nodes = [{"name": "Shirt", "type": "Clothes", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "A blue shirt", "id": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "color": "#D3D3D3"}, {"name": "Pants", "type": "Clothes", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "Black pants", "id": "e06a052c-7cb7-45ff-93eb-7f56140c7255", "color": "#D3D3D3"}, {"name": "Jacket", "type": "Clothes", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "Leather jacket", "id": "3c22e5da-03ee-43d1-9af4-aec275db4095", "color": "#D3D3D3"}, {"name": "Closet", "type": "Object", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "A wooden closet", "id": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "color": "#D3D3D3"}, {"name": "John", "type": "Person", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "A software engineer", "id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "color": "#D3D3D3"}, {"name": "Alice", "type": "Person", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "A designer", "id": "203b1b54-251c-4e4b-9be8-49b71f268896", "color": "#D3D3D3"}, {"name": "Bob", "type": "Person", "ontology_valid": false, "version": 1, "topological_rank": 0, "metadata": {"index_fields": []}, "belongs_to_set": null, "description": "A friend", "has_objects": [], "knows": [], "id": "5d35c959-2fae-4304-ae92-3f53c9ad2d6c", "color": "#D3D3D3"}];
+            var links = [{"source": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "target": "3c22e5da-03ee-43d1-9af4-aec275db4095", "relation": "has_clothes", "weight": null, "all_weights": {}, "relationship_type": null, "edge_info": {"source_node_id": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "target_node_id": "3c22e5da-03ee-43d1-9af4-aec275db4095", "relationship_name": "has_clothes", "updated_at": "2025-07-11 15:50:20"}}, {"source": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "target": "e06a052c-7cb7-45ff-93eb-7f56140c7255", "relation": "has_clothes", "weight": null, "all_weights": {}, "relationship_type": null, "edge_info": {"source_node_id": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "target_node_id": "e06a052c-7cb7-45ff-93eb-7f56140c7255", "relationship_name": "has_clothes", "updated_at": "2025-07-11 15:50:20"}}, {"source": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "target": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "relation": "has_clothes", "weight": null, "all_weights": {}, "relationship_type": null, "edge_info": {"source_node_id": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "target_node_id": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "relationship_name": "has_clothes", "updated_at": "2025-07-11 15:50:20"}}, {"source": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "relation": "has_objects", "weight": null, "all_weights": {}, "relationship_type": "stores_in", "edge_info": {"source_node_id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target_node_id": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "relationship_name": "has_objects", "updated_at": "2025-07-11 15:50:20", "relationship_type": "stores_in"}}, {"source": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target": "e06a052c-7cb7-45ff-93eb-7f56140c7255", "relation": "has_items", "weight": 0.8, "all_weights": {"default": 0.8}, "relationship_type": "owns", "edge_info": {"source_node_id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target_node_id": "e06a052c-7cb7-45ff-93eb-7f56140c7255", "relationship_name": "has_items", "updated_at": "2025-07-11 15:50:20", "weight": 0.8, "relationship_type": "owns"}}, {"source": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "relation": "has_items", "weight": 0.8, "all_weights": {"default": 0.8}, "relationship_type": "owns", "edge_info": {"source_node_id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target_node_id": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "relationship_name": "has_items", "updated_at": "2025-07-11 15:50:20", "weight": 0.8, "relationship_type": "owns"}}, {"source": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target": "203b1b54-251c-4e4b-9be8-49b71f268896", "relation": "knows", "weight": 0.9, "all_weights": {"friendship_strength": 0.9, "trust_level": 0.8, "years_known": 0.7, "shared_interests": 0.6}, "relationship_type": "friend", "edge_info": {"source_node_id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target_node_id": "203b1b54-251c-4e4b-9be8-49b71f268896", "relationship_name": "knows", "updated_at": "2025-07-11 15:50:20", "weights": {"friendship_strength": 0.9, "trust_level": 0.8, "years_known": 0.7, "shared_interests": 0.6}, "relationship_type": "friend", "weight_friendship_strength": 0.9, "weight_trust_level": 0.8, "weight_years_known": 0.7, "weight_shared_interests": 0.6}}, {"source": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target": "5d35c959-2fae-4304-ae92-3f53c9ad2d6c", "relation": "knows", "weight": 0.9, "all_weights": {"friendship_strength": 0.9, "trust_level": 0.8, "years_known": 0.7, "shared_interests": 0.6}, "relationship_type": "friend", "edge_info": {"source_node_id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "target_node_id": "5d35c959-2fae-4304-ae92-3f53c9ad2d6c", "relationship_name": "knows", "updated_at": "2025-07-11 15:50:20", "weights": {"friendship_strength": 0.9, "trust_level": 0.8, "years_known": 0.7, "shared_interests": 0.6}, "relationship_type": "friend", "weight_friendship_strength": 0.9, "weight_trust_level": 0.8, "weight_years_known": 0.7, "weight_shared_interests": 0.6}}, {"source": "203b1b54-251c-4e4b-9be8-49b71f268896", "target": "3c22e5da-03ee-43d1-9af4-aec275db4095", "relation": "has_items", "weight": 0.9, "all_weights": {"ownership": 0.9, "frequency_of_use": 0.7, "emotional_attachment": 0.8, "monetary_value": 0.6}, "relationship_type": "owns", "edge_info": {"source_node_id": "203b1b54-251c-4e4b-9be8-49b71f268896", "target_node_id": "3c22e5da-03ee-43d1-9af4-aec275db4095", "relationship_name": "has_items", "updated_at": "2025-07-11 15:50:20", "weights": {"ownership": 0.9, "frequency_of_use": 0.7, "emotional_attachment": 0.8, "monetary_value": 0.6}, "relationship_type": "owns", "weight_ownership": 0.9, "weight_frequency_of_use": 0.7, "weight_emotional_attachment": 0.8, "weight_monetary_value": 0.6}}, {"source": "203b1b54-251c-4e4b-9be8-49b71f268896", "target": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "relation": "has_objects", "weight": null, "all_weights": {}, "relationship_type": "uses", "edge_info": {"source_node_id": "203b1b54-251c-4e4b-9be8-49b71f268896", "target_node_id": "016e32bb-4f80-4b0f-8cd5-4c2e5c62b362", "relationship_name": "has_objects", "updated_at": "2025-07-11 15:50:20", "relationship_type": "uses"}}, {"source": "203b1b54-251c-4e4b-9be8-49b71f268896", "target": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "relation": "knows", "weight": 0.8, "all_weights": {"professional_collaboration": 0.8, "personal_friendship": 0.6}, "relationship_type": "colleague", "edge_info": {"source_node_id": "203b1b54-251c-4e4b-9be8-49b71f268896", "target_node_id": "abef7ab9-a0b4-4e66-a982-6163ccb95276", "relationship_name": "knows", "updated_at": "2025-07-11 15:50:20", "weights": {"professional_collaboration": 0.8, "personal_friendship": 0.6}, "relationship_type": "colleague", "weight_professional_collaboration": 0.8, "weight_personal_friendship": 0.6}}, {"source": "5d35c959-2fae-4304-ae92-3f53c9ad2d6c", "target": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "relation": "has_items", "weight": 0.5, "all_weights": {"default": 0.5, "trust_level": 0.9, "communication_frequency": 0.6}, "relationship_type": "borrows", "edge_info": {"source_node_id": "5d35c959-2fae-4304-ae92-3f53c9ad2d6c", "target_node_id": "ed20655c-7c58-4e55-a7a1-845dd3869d9c", "relationship_name": "has_items", "updated_at": "2025-07-11 15:50:20", "weight": 0.5, "weights": {"trust_level": 0.9, "communication_frequency": 0.6}, "relationship_type": "borrows", "weight_trust_level": 0.9, "weight_communication_frequency": 0.6}}];
 
             var svg = d3.select("svg"),
                 width = window.innerWidth,
@@ -299,20 +209,4 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         </svg>
     </body>
     </html>
-    """
-
-    html_content = html_template.replace("{nodes}", json.dumps(nodes_list))
-    html_content = html_content.replace("{links}", json.dumps(links_list))
-
-    if not destination_file_path:
-        home_dir = os.path.expanduser("~")
-        destination_file_path = os.path.join(home_dir, "graph_visualization.html")
-
-    LocalStorage.ensure_directory_exists(os.path.dirname(destination_file_path))
-
-    with open(destination_file_path, "w") as f:
-        f.write(html_content)
-
-    logger.info(f"Graph visualization saved as {destination_file_path}")
-
-    return html_content
+    
