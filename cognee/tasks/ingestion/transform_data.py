@@ -4,7 +4,7 @@ from cognee.modules.ingestion import save_data_to_file
 from typing import Union
 
 
-def get_data_from_llama_index(data_point: Union[Document, ImageDocument], dataset_name: str) -> str:
+async def get_data_from_llama_index(data_point: Union[Document, ImageDocument]) -> str:
     """
     Retrieve the file path based on the data point type.
 
@@ -17,7 +17,6 @@ def get_data_from_llama_index(data_point: Union[Document, ImageDocument], datase
 
         - data_point (Union[Document, ImageDocument]): An instance of Document or
           ImageDocument to extract data from.
-        - dataset_name (str): The name of the dataset associated with the data point.
 
     Returns:
     --------
@@ -29,11 +28,11 @@ def get_data_from_llama_index(data_point: Union[Document, ImageDocument], datase
     if isinstance(data_point, Document) and type(data_point) is Document:
         file_path = data_point.metadata.get("file_path")
         if file_path is None:
-            file_path = save_data_to_file(data_point.text)
+            file_path = await save_data_to_file(data_point.text)
             return file_path
         return file_path
     elif isinstance(data_point, ImageDocument) and type(data_point) is ImageDocument:
         if data_point.image_path is None:
-            file_path = save_data_to_file(data_point.text)
+            file_path = await save_data_to_file(data_point.text)
             return file_path
         return data_point.image_path

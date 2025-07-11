@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -78,7 +79,8 @@ async def main():
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+    data_root_directory = get_storage_config()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     # Assert relational, vector and graph databases have been cleaned properly
     await cognee.prune.prune_system(metadata=True)
@@ -89,9 +91,14 @@ async def main():
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    with open(get_relational_engine().db_path, "r") as file:
-        content = file.read()
-        assert content == "", "SQLite relational database is not empty"
+    db_path = get_relational_engine().db_path
+    dir_path = os.path.dirname(db_path)
+    file_path = os.path.basename(db_path)
+    file_storage = get_file_storage(dir_path)
+
+    assert not await file_storage.file_exists(file_path), (
+        "SQLite relational database is not deleted"
+    )
 
     from cognee.infrastructure.databases.graph import get_graph_config
 

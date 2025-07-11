@@ -33,8 +33,8 @@ class LangchainChunker(Chunker):
             length_function=lambda text: len(text.split()),
         )
 
-    def read(self):
-        for content_text in self.get_text():
+    async def read(self):
+        async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
                 embedding_engine = get_vector_engine().embedding_engine
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)

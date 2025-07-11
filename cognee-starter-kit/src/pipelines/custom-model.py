@@ -3,7 +3,6 @@ import asyncio
 import pathlib
 from cognee import config, add, cognify, search, SearchType, prune, visualize_graph
 
-# from cognee.shared.utils import render_graph
 from cognee.low_level import DataPoint
 
 
@@ -49,10 +48,6 @@ async def main():
 
     # Cognify the text data.
     await cognify(graph_model=ProgrammingLanguage)
-
-    # # Get a graphistry url (Register for a free account at https://www.graphistry.com)
-    # url = await render_graph()
-    # print(f"Graphistry URL: {url}")
 
     # Or use our simple graph preview
     graph_file_path = str(

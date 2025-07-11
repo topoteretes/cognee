@@ -1,4 +1,5 @@
 import asyncio
+from os import path
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -7,7 +8,7 @@ from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.infrastructure.files.storage import LocalStorage
+from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
@@ -310,7 +311,9 @@ class LanceDBAdapter(VectorDBInterface):
             await connection.drop_table(collection_name)
 
         if self.url.startswith("/"):
-            LocalStorage.remove_all(self.url)
+            db_dir_path = path.dirname(self.url)
+            db_file_name = path.basename(self.url)
+            await get_file_storage(db_dir_path).remove_all(db_file_name)
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []

@@ -5,7 +5,6 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-from cognee.shared.utils import render_graph
 from cognee.low_level import DataPoint
 
 logger = get_logger()
@@ -56,9 +55,6 @@ async def main():
     await cognee.add(text)
 
     await cognee.cognify(graph_model=ProgrammingLanguage)
-
-    url = await render_graph()
-    print(f"Graphistry URL: {url}")
 
     graph_file_path = str(
         pathlib.Path(
