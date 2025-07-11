@@ -21,7 +21,7 @@ class PdfDocument(Document):
             except Exception:
                 raise PyPdfInternalError()
 
-            def get_text():
+            async def get_text():
                 try:
                     for page in file.pages:
                         page_text = page.extract_text()
