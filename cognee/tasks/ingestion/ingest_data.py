@@ -78,7 +78,7 @@ async def ingest_data(
 
             # Ingest data and add metadata
             async with open_data_file(file_path) as file:
-                classified_data = ingestion.classify(file, s3fs=fs)
+                classified_data = ingestion.classify(file)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)
