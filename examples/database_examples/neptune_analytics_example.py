@@ -1,9 +1,13 @@
+import base64
+import json
 import os
 import pathlib
 import asyncio
 import cognee
 from cognee.modules.search.types import SearchType
+from dotenv import load_dotenv
 
+load_dotenv()
 
 async def main():
     """

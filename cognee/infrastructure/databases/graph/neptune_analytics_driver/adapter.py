@@ -478,67 +478,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - Dict[str, Any]: A dictionary containing graph metrics and statistics.
         """
-        try:
-            from .neptune_analytics_metrics_utils import (
-                get_node_count,
-                get_edge_count,
-                get_edge_density,
-                get_num_connected_components,
-                get_size_of_connected_components,
-                count_self_loops,
-                get_shortest_path_lengths,
-                get_avg_clustering,
-                get_node_degree_distribution
-            )
-
-            # Get basic metrics
-            num_nodes = await get_node_count(self)
-            num_edges = await get_edge_count(self)
-
-            # Calculate mean degree
-            mean_degree = (2 * num_edges) / num_nodes if num_nodes > 0 else 0
-
-            # Get mandatory metrics
-            mandatory_metrics = {
-                "num_nodes": num_nodes,
-                "num_edges": num_edges,
-                "mean_degree": mean_degree,
-                "edge_density": await get_edge_density(self),
-                "num_connected_components": await get_num_connected_components(self),
-                "sizes_of_connected_components": await get_size_of_connected_components(self),
-            }
-
-            if include_optional:
-                # Get optional metrics
-                shortest_path_lengths = await get_shortest_path_lengths(self)
-                degree_distribution = await get_node_degree_distribution(self)
-
-                optional_metrics = {
-                    "num_selfloops": await count_self_loops(self),
-                    "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
-                    "avg_shortest_path_length": (
-                        sum(shortest_path_lengths) / len(shortest_path_lengths)
-                        if shortest_path_lengths else -1
-                    ),
-                    "avg_clustering": await get_avg_clustering(self),
-                    "degree_distribution": degree_distribution,
-                }
-            else:
-                optional_metrics = {
-                    "num_selfloops": -1,
-                    "diameter": -1,
-                    "avg_shortest_path_length": -1,
-                    "avg_clustering": -1,
-                }
-
-            metrics = {**mandatory_metrics, **optional_metrics}
-            logger.debug(f"Retrieved graph metrics: {metrics}")
-            return metrics
-
-        except Exception as e:
-            error_msg = format_neptune_error(e)
-            logger.error(f"Failed to get graph metrics: {error_msg}")
-            raise Exception(f"Failed to get graph metrics: {error_msg}")
+        # TODO: Implement using aws_langchain Neptune Analytics metrics retrieval
+        logger.warning("Neptune Analytics get_graph_metrics method not yet implemented")
+        return {}
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """

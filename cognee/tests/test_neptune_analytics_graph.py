@@ -150,12 +150,19 @@ async def main():
     all_nodes, all_edges = await na_adapter.get_graph_data()
     print(f"found {len(all_nodes)} nodes and found {len(all_edges)} edges")
 
-    print("------NEIGHBORS-------")
+    print("------NEIGHBORING NODES-------")
     center_node = nodes[2]
     neighbors = await na_adapter.get_neighbors(str(center_node.id))
     print(f"found {len(neighbors)} neighbors for node \"{center_node.name}\"")
     for neighbor in neighbors:
         print(neighbor)
+
+    print("------NEIGHBORING EDGES-------")
+    center_node = nodes[2]
+    neighbouring_edges = await na_adapter.get_edges(str(center_node.id))
+    print(f"found {len(neighbouring_edges)} edges neighbouring node \"{center_node.name}\"")
+    for edge in neighbouring_edges:
+        print(edge)
 
     print("------GET CONNECTIONS (SOURCE NODE)-------")
     document_chunk_node = nodes[0]
