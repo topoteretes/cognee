@@ -157,11 +157,20 @@ async def get_graph_from_model(
         edge_key = str(data_point.id) + str(field_value.id) + field_name
 
         if str(edge_key) not in added_edges:
+            # Determine relationship name: use relationship_type from edge metadata if available, else field_name
+            relationship_name = field_name
+            if (
+                edge_metadata
+                and hasattr(edge_metadata, "relationship_type")
+                and edge_metadata.relationship_type
+            ):
+                relationship_name = edge_metadata.relationship_type
+
             # Build edge properties with weights support
             edge_properties = _create_edge_properties(
-                data_point.id, field_value.id, field_name, edge_metadata
+                data_point.id, field_value.id, relationship_name, edge_metadata
             )
-            edges.append((data_point.id, field_value.id, field_name, edge_properties))
+            edges.append((data_point.id, field_value.id, relationship_name, edge_properties))
             added_edges[str(edge_key)] = True
 
         if str(field_value.id) in added_nodes:
