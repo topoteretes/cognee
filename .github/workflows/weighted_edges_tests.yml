@@ -33,12 +33,9 @@ jobs:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-4o-mini
       LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: fake-key-for-testing
-      LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: fake-key-for-testing
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+
+      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
       EMBEDDING_API_VERSION: "2024-02-01"
     steps:
       - name: Check out repository
@@ -76,12 +73,12 @@ jobs:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-4o-mini
       LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: fake-key-for-testing
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_API_VERSION: "2024-02-01"
       EMBEDDING_PROVIDER: openai
       EMBEDDING_MODEL: text-embedding-3-small
       EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: fake-key-for-testing
+      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
       EMBEDDING_API_VERSION: "2024-02-01"
     steps:
       - name: Check out repository
@@ -111,12 +108,12 @@ jobs:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-4o-mini
       LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: fake-key-for-testing
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_API_VERSION: "2024-02-01"
       EMBEDDING_PROVIDER: openai
       EMBEDDING_MODEL: text-embedding-3-small
       EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: fake-key-for-testing
+      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
       EMBEDDING_API_VERSION: "2024-02-01"
     steps:
       - name: Check out repository
