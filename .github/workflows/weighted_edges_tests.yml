@@ -1,0 +1,260 @@
+name: Weighted Edges Tests
+
+on:
+  push:
+    branches: [ main, weighted_edges ]
+    paths:
+      - 'cognee/modules/graph/utils/get_graph_from_model.py'
+      - 'cognee/infrastructure/engine/models/Edge.py'
+      - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
+      - 'examples/python/weighted_edges_example.py'
+      - '.github/workflows/weighted_edges_tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'cognee/modules/graph/utils/get_graph_from_model.py'
+      - 'cognee/infrastructure/engine/models/Edge.py'
+      - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
+      - 'examples/python/weighted_edges_example.py'
+      - '.github/workflows/weighted_edges_tests.yml'
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  test-weighted-edges-functionality:
+    name: Test Weighted Edges Core Functionality
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    env:
+      LLM_PROVIDER: openai
+      LLM_MODEL: gpt-4o-mini
+      LLM_ENDPOINT: https://api.openai.com/v1/
+      LLM_API_KEY: fake-key-for-testing
+      LLM_API_VERSION: "2024-02-01"
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
+      EMBEDDING_API_KEY: fake-key-for-testing
+      EMBEDDING_API_VERSION: "2024-02-01"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Weighted Edges Unit Tests
+        run: |
+          poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
+
+      - name: Run Standard Graph Tests (Regression)
+        run: |
+          poetry run pytest cognee/tests/unit/interfaces/graph/get_graph_from_model_unit_test.py -v --tb=short
+
+  test-with-different-databases:
+    name: Test Weighted Edges with Different Graph Databases
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        database: ['kuzu', 'neo4j']
+        include:
+          - database: kuzu
+            install_extra: ""
+            graph_db_provider: "kuzu"
+          - database: neo4j
+            install_extra: "-E neo4j"
+            graph_db_provider: "neo4j"
+    env:
+      LLM_PROVIDER: openai
+      LLM_MODEL: gpt-4o-mini
+      LLM_ENDPOINT: https://api.openai.com/v1/
+      LLM_API_KEY: fake-key-for-testing
+      LLM_API_VERSION: "2024-02-01"
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
+      EMBEDDING_API_KEY: fake-key-for-testing
+      EMBEDDING_API_VERSION: "2024-02-01"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11'
+
+      - name: Install Database Dependencies
+        run: |
+          poetry install ${{ matrix.install_extra }}
+
+      - name: Run Weighted Edges Tests
+        env:
+          GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_db_provider }}
+        run: |
+          poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
+
+  test-examples:
+    name: Test Weighted Edges Examples
+    runs-on: ubuntu-22.04
+    env:
+      LLM_PROVIDER: openai
+      LLM_MODEL: gpt-4o-mini
+      LLM_ENDPOINT: https://api.openai.com/v1/
+      LLM_API_KEY: fake-key-for-testing
+      LLM_API_VERSION: "2024-02-01"
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
+      EMBEDDING_API_KEY: fake-key-for-testing
+      EMBEDDING_API_VERSION: "2024-02-01"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11'
+
+      - name: Test Weighted Edges Example
+        run: |
+          poetry run python examples/python/weighted_edges_example.py
+
+      - name: Verify Visualization File Created
+        run: |
+          if [ -f "examples/python/weighted_graph_visualization.html" ]; then
+            echo "✅ Visualization file created successfully"
+            ls -la examples/python/weighted_graph_visualization.html
+          else
+            echo "❌ Visualization file not found"
+            exit 1
+          fi
+
+  performance-test:
+    name: Performance Test for Weighted Edges
+    runs-on: ubuntu-22.04
+    env:
+      LLM_PROVIDER: openai
+      LLM_MODEL: gpt-4o-mini
+      LLM_ENDPOINT: https://api.openai.com/v1/
+      LLM_API_KEY: fake-key-for-testing
+      LLM_API_VERSION: "2024-02-01"
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
+      EMBEDDING_API_KEY: fake-key-for-testing
+      EMBEDDING_API_VERSION: "2024-02-01"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11'
+
+      - name: Run Performance Tests
+        run: |
+          poetry run pytest cognee/tests/unit/interfaces/graph/get_graph_from_huge_model_test.py -v --tb=short
+
+      - name: Check Performance with Weighted Edges
+        run: |
+          python -c "
+          import time
+          import asyncio
+          from cognee.tests.unit.interfaces.graph.test_weighted_edges import *
+
+          async def perf_test():
+              start = time.time()
+              await test_complex_weighted_relationships()
+              end = time.time()
+              print(f'Complex weighted relationships test completed in {end - start:.2f} seconds')
+              
+              start = time.time()
+              await test_company_hierarchy_with_weights()
+              end = time.time()
+              print(f'Company hierarchy test completed in {end - start:.2f} seconds')
+
+          asyncio.run(perf_test())
+          "
+
+  code-quality:
+    name: Code Quality for Weighted Edges
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11'
+
+      - name: Run Linting on Weighted Edges Files
+        uses: astral-sh/ruff-action@v2
+        with:
+          args: "check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
+
+      - name: Run Formatting Check on Weighted Edges Files
+        uses: astral-sh/ruff-action@v2
+        with:
+          args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
+
+  documentation-check:
+    name: Documentation and Type Checking
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11'
+
+      - name: Install mypy for type checking
+        run: poetry add --group dev mypy
+
+      - name: Run Type Checking on Core Files
+        run: |
+          poetry run mypy cognee/modules/graph/utils/get_graph_from_model.py --ignore-missing-imports
+
+      - name: Check Docstring Coverage
+        run: |
+          python -c "
+          import ast
+          import inspect
+          from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model, _extract_field_info, _should_visit_property, _create_edge_properties
+
+          functions = [get_graph_from_model, _extract_field_info, _should_visit_property, _create_edge_properties]
+          missing_docs = []
+
+          for func in functions:
+              if not func.__doc__ or len(func.__doc__.strip()) < 10:
+                  missing_docs.append(func.__name__)
+
+          if missing_docs:
+              print(f'❌ Functions missing proper documentation: {missing_docs}')
+              exit(1)
+          else:
+              print('✅ All functions have proper documentation')
+          " 
