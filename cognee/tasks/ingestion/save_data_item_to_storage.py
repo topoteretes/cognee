@@ -2,7 +2,7 @@ from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SaveDataSettings(BaseSettings):

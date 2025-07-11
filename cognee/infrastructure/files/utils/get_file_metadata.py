@@ -2,7 +2,7 @@ import io
 from typing import BinaryIO, TypedDict
 
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import get_file_content_hash
+from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
 from .guess_file_type import guess_file_type
 
 logger = get_logger("FileMetadata")

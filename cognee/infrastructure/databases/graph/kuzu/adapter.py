@@ -14,7 +14,7 @@ from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.infrastructure.files.storage import S3FileStorage, get_file_storage
+from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
@@ -86,10 +86,14 @@ class KuzuAdapter(GraphDBInterface):
 
     async def push_to_s3(self) -> None:
         if os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
             s3_file_storage = S3FileStorage("")
             s3_file_storage.s3.put(self.temp_graph_directory + "/", self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
         s3_file_storage = S3FileStorage("")
         try:
             s3_file_storage.s3.get(self.db_path, self.temp_graph_directory, recursive=True)

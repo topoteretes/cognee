@@ -12,6 +12,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.ingestion import classify
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data, DatasetData, Dataset
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses

@@ -12,15 +12,17 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 )
 
 
-class TestGraphCompletionRetriever:
+class TestGraphCompletionWithContextExtensionRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_extension_context_simple(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_context"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_graph_completion_extension_context_simple",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_context"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_graph_completion_extension_context_simple",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -64,11 +66,13 @@ class TestGraphCompletionRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_extension_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_graph_completion_extension_context_complex",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_graph_completion_extension_context_complex",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -144,12 +148,12 @@ class TestGraphCompletionRetriever:
     async def test_get_graph_completion_extension_context_on_empty_graph(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent,
-            ".cognee_system/test_graph_completion_context_on_empty_graph",
+            ".cognee_system/test_get_graph_completion_extension_context_on_empty_graph",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
             pathlib.Path(__file__).parent,
-            ".data_storage/test_graph_completion_context_on_empty_graph",
+            ".data_storage/test_get_graph_completion_extension_context_on_empty_graph",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -177,11 +181,11 @@ class TestGraphCompletionRetriever:
 if __name__ == "__main__":
     from asyncio import run
 
-    test = TestGraphCompletionRetriever()
+    test = TestGraphCompletionWithContextExtensionRetriever()
 
     async def main():
-        await test.test_graph_completion_context_simple()
-        await test.test_graph_completion_context_complex()
-        await test.test_get_graph_completion_context_on_empty_graph()
+        await test.test_graph_completion_extension_context_simple()
+        await test.test_graph_completion_extension_context_complex()
+        await test.test_get_graph_completion_extension_context_on_empty_graph()
 
     run(main())

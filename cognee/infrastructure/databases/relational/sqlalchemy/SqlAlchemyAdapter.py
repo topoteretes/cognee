@@ -15,7 +15,7 @@ from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.files.storage import S3FileStorage, get_file_storage, get_storage_config
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 
 from ..ModelBase import Base
 
@@ -56,10 +56,14 @@ class SQLAlchemyAdapter:
 
     async def push_to_s3(self) -> None:
         if os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
             s3_file_storage = S3FileStorage("")
             s3_file_storage.s3.put(self.temp_db_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
         s3_file_storage = S3FileStorage("")
         try:
             s3_file_storage.s3.get(self.db_path, self.temp_db_file, recursive=True)
@@ -280,8 +284,6 @@ class SQLAlchemyAdapter:
             # Don't delete local file unless this is the only reference to the file in the database
             if len(raw_data_location_entities) == 1:
                 # delete local file only if it's created by cognee
-                from cognee.infrastructure.files.storage import get_file_storage
-
                 storage_config = get_storage_config()
 
                 if (
@@ -490,8 +492,6 @@ class SQLAlchemyAdapter:
         """
         try:
             if self.engine.dialect.name == "sqlite":
-                from cognee.infrastructure.files.storage import get_file_storage
-
                 await self.engine.dispose(close=True)
                 # Wait for the database connections to close and release the file (Windows)
                 await asyncio.sleep(2)

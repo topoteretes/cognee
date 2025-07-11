@@ -5,7 +5,7 @@ from cognee.infrastructure.files.storage import get_file_storage
 
 
 @asynccontextmanager
-async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
+async def open_data_file(file_path: str, encoding: str, mode: str = "rb", **kwargs):
     file_dir_path = path.dirname(file_path)
     file_name = path.basename(file_path)
 

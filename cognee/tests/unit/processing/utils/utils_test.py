@@ -9,11 +9,7 @@ from uuid import uuid4
 
 
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
-from cognee.shared.utils import (
-    get_anonymous_id,
-    prepare_edges,
-    prepare_nodes,
-)
+from cognee.shared.utils import get_anonymous_id
 
 
 @pytest.fixture
@@ -58,21 +54,3 @@ async def test_get_file_content_hash_stream():
     expected_hash = hashlib.md5(b"test_data").hexdigest()
     result = await get_file_content_hash(stream)
     assert result == expected_hash
-
-
-def test_prepare_edges():
-    graph = nx.MultiDiGraph()
-    graph.add_edge("A", "B", key="AB", weight=1)
-    edges_df = prepare_edges(graph, "source", "target", "key")
-
-    assert isinstance(edges_df, pd.DataFrame)
-    assert len(edges_df) == 1
-
-
-def test_prepare_nodes():
-    graph = nx.Graph()
-    graph.add_node(1, name="Node1")
-    nodes_df = prepare_nodes(graph)
-
-    assert isinstance(nodes_df, pd.DataFrame)
-    assert len(nodes_df) == 1

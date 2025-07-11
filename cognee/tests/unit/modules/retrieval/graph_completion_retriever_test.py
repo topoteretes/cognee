@@ -14,11 +14,11 @@ class TestGraphCompletionRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_context_simple(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_simple"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_simple"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -55,11 +55,11 @@ class TestGraphCompletionRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context"
+            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_complex"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context"
+            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_complex"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -128,12 +128,12 @@ class TestGraphCompletionRetriever:
     async def test_get_graph_completion_context_on_empty_graph(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent,
-            ".cognee_system/test_graph_completion_context_on_empty_graph",
+            ".cognee_system/test_get_graph_completion_context_on_empty_graph",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
             pathlib.Path(__file__).parent,
-            ".data_storage/test_graph_completion_context_on_empty_graph",
+            ".data_storage/test_get_graph_completion_context_on_empty_graph",
         )
         cognee.config.data_root_directory(data_directory_path)
 
