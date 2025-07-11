@@ -31,6 +31,7 @@ def get_add_router() -> APIRouter:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
         try:
+            # TODO: Add check if HTTP Requests are enabled before allowing requests and git clone
             if isinstance(data, str) and data.startswith("http"):
                 if "github" in data:
                     # Perform git clone if the URL is from GitHub

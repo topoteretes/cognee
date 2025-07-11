@@ -1,10 +1,25 @@
 import os
 import shutil
+from urllib.parse import urlparse
 from contextlib import contextmanager
 from typing import BinaryIO, Optional, Union
 
 from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
+
+
+def get_parsed_path(file_path: str) -> str:
+    parsed_url = urlparse(file_path)
+
+    # On Windows, urlparse handles drive letters correctly
+    # Convert the path component to a proper file path
+    if os.name == "nt":  # Windows
+        # Remove leading slash from Windows paths like /C:/Users/...
+        parsed_path = parsed_url.path.lstrip("/")
+    else:  # Unix-like systems
+        parsed_path = parsed_url.path
+
+    return parsed_path
 
 
 class LocalFileStorage(Storage):
@@ -35,7 +50,8 @@ class LocalFileStorage(Storage):
               binary stream.
             - overwrite (bool): If True, overwrite the existing file.
         """
-        full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
+        parsed_storage_path = get_parsed_path(self.storage_path)
+        full_file_path = os.path.join(parsed_storage_path, file_path)
         file_dir_path = os.path.dirname(full_file_path)
 
         self.ensure_directory_exists(file_dir_path)
@@ -76,7 +92,9 @@ class LocalFileStorage(Storage):
 
             The content of the retrieved file as bytes.
         """
-        full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        full_file_path = os.path.join(parsed_storage_path, file_path)
 
         with open(full_file_path, mode=mode, *args, **kwargs) as file:
             file = FileBufferedReader(file, name="file://" + full_file_path)
@@ -100,7 +118,9 @@ class LocalFileStorage(Storage):
 
             - bool: True if the file exists, otherwise False.
         """
-        return os.path.exists(os.path.join(self.storage_path.replace("file://", ""), file_path))
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        return os.path.exists(os.path.join(parsed_storage_path, file_path))
 
     def ensure_directory_exists(self, directory_path: str = None):
         """
@@ -114,7 +134,7 @@ class LocalFileStorage(Storage):
             - directory_path (str): The path of the directory to check or create.
         """
         if directory_path is None:
-            directory_path = self.storage_path.replace("file://", "")
+            directory_path = get_parsed_path(self.storage_path)
 
         if not os.path.exists(directory_path):
             os.makedirs(directory_path, exist_ok=True)
@@ -135,9 +155,11 @@ class LocalFileStorage(Storage):
 
             - str: The path to the copied file.
         """
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
         return shutil.copy2(
-            os.path.join(self.storage_path.replace("file://", ""), source_file_path),
-            os.path.join(self.storage_path.replace("file://", ""), destination_file_path),
+            os.path.join(parsed_storage_path, source_file_path),
+            os.path.join(parsed_storage_path, destination_file_path),
         )
 
     def remove(self, file_path: str):
@@ -149,7 +171,8 @@ class LocalFileStorage(Storage):
 
             - file_path (str): The path of the file to be removed.
         """
-        full_file_path = os.path.join(self.storage_path.replace("file://", ""), file_path)
+        parsed_storage_path = get_parsed_path(self.storage_path)
+        full_file_path = os.path.join(parsed_storage_path, file_path)
 
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
@@ -168,10 +191,12 @@ class LocalFileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
         if tree_path is None:
-            tree_path = self.storage_path.replace("file://", "")
+            tree_path = parsed_storage_path
         else:
-            tree_path = os.path.join(self.storage_path.replace("file://", ""), tree_path)
+            tree_path = os.path.join(parsed_storage_path, tree_path)
 
         try:
             return shutil.rmtree(tree_path)

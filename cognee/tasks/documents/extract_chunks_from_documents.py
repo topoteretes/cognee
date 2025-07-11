@@ -2,11 +2,13 @@ from uuid import UUID
 from sqlalchemy import select
 from typing import AsyncGenerator
 
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.Chunker import Chunker
+from cognee.modules.data.processing.document_types.exceptions.exceptions import PyPdfInternalError
 
 
 async def update_document_token_count(document_id: UUID, token_count: int) -> None:
@@ -38,12 +40,15 @@ async def extract_chunks_from_documents(
     """
     for document in documents:
         document_token_count = 0
-        async for document_chunk in document.read(
-            max_chunk_size=max_chunk_size, chunker_cls=chunker
-        ):
-            document_token_count += document_chunk.chunk_size
-            document_chunk.belongs_to_set = document.belongs_to_set
-            yield document_chunk
+        try:
+            async for document_chunk in document.read(
+                max_chunk_size=max_chunk_size, chunker_cls=chunker
+            ):
+                document_token_count += document_chunk.chunk_size
+                document_chunk.belongs_to_set = document.belongs_to_set
+                yield document_chunk
 
-        await update_document_token_count(document.id, document_token_count)
+            await update_document_token_count(document.id, document_token_count)
+        except PyPdfInternalError:
+            pass
         # todo rita

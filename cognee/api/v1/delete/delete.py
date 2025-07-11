@@ -15,6 +15,9 @@ from cognee.modules.ingestion import classify
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data, DatasetData, Dataset
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.context_global_variables import set_database_global_context_variables
 from .exceptions import DocumentNotFoundError, DatasetNotFoundError, DocumentSubgraphNotFoundError
 
 logger = get_logger()
@@ -28,7 +31,9 @@ def get_text_content_hash(text: str) -> str:
 async def delete(
     data: Union[BinaryIO, List[BinaryIO], str, List[str]],
     dataset_name: str = "main_dataset",
+    dataset_id: UUID = None,
     mode: str = "soft",
+    user: User = None,
 ):
     """Delete a document and all its related nodes from both relational and graph databases.
 
@@ -36,11 +41,23 @@ async def delete(
         data: The data to delete (file, URL, or text)
         dataset_name: Name of the dataset to delete from
         mode: "soft" (default) or "hard" - hard mode also deletes degree-one entity nodes
+        user: User doing the operation, if none default user will be used.
     """
+
+    if user is None:
+        user = await get_default_user()
+
+    # Verify user has permission to work with given dataset. If dataset_id is given use it, if not use dataset_name
+    dataset = await get_authorized_existing_datasets(
+        [dataset_id] if dataset_id else [dataset_name], "delete", user
+    )
+
+    # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
+    await set_database_global_context_variables(dataset[0].id, dataset[0].owner_id)
 
     # Handle different input types
     if isinstance(data, str):
-        if data.startswith("file://"):  # It's a file path
+        if data.startswith("file://") or data.startswith("/"):  # It's a file path
             full_file_path = data.replace("file://", "")
 
             file_dir = os.path.dirname(full_file_path)
@@ -51,7 +68,7 @@ async def delete(
             async with file_storage.open(file_path, mode="rb") as file:
                 classified_data = classify(file)
                 content_hash = classified_data.get_metadata()["content_hash"]
-                return await delete_single_document(content_hash, dataset_name, mode)
+                return await delete_single_document(content_hash, dataset[0].id, mode)
         elif data.startswith("http"):  # It's a URL
             import requests
 
@@ -60,26 +77,26 @@ async def delete(
             file_data = BytesIO(response.content)
             classified_data = classify(file_data)
             content_hash = classified_data.get_metadata()["content_hash"]
-            return await delete_single_document(content_hash, dataset_name, mode)
+            return await delete_single_document(content_hash, dataset[0].id, mode)
         else:  # It's a text string
             content_hash = get_text_content_hash(data)
             classified_data = classify(data)
-            return await delete_single_document(content_hash, dataset_name, mode)
+            return await delete_single_document(content_hash, dataset[0].id, mode)
     elif isinstance(data, list):
         # Handle list of inputs sequentially
         results = []
         for item in data:
-            result = await delete(item, dataset_name, mode)
+            result = await delete(item, dataset_name, dataset[0].id, mode, user=user)
             results.append(result)
         return {"status": "success", "message": "Multiple documents deleted", "results": results}
     else:  # It's already a BinaryIO
         data.seek(0)  # Ensure we're at the start of the file
         classified_data = classify(data)
         content_hash = classified_data.get_metadata()["content_hash"]
-        return await delete_single_document(content_hash, dataset_name, mode)
+        return await delete_single_document(content_hash, dataset[0].id, mode)
 
 
-async def delete_single_document(content_hash: str, dataset_name: str, mode: str = "soft"):
+async def delete_single_document(content_hash: str, dataset_id: UUID = None, mode: str = "soft"):
     """Delete a single document by its content hash."""
 
     # Delete from graph database
@@ -166,11 +183,11 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
 
         # Get the dataset
         dataset = (
-            await session.execute(select(Dataset).filter(Dataset.name == dataset_name))
+            await session.execute(select(Dataset).filter(Dataset.id == dataset_id))
         ).scalar_one_or_none()
 
         if dataset is None:
-            raise DatasetNotFoundError(f"Dataset not found: {dataset_name}")
+            raise DatasetNotFoundError(f"Dataset not found: {dataset_id}")
 
         # Delete from dataset_data table
         dataset_delete_stmt = sql_delete(DatasetData).where(
@@ -195,7 +212,7 @@ async def delete_single_document(content_hash: str, dataset_name: str, mode: str
         "message": "Document deleted from both graph and relational databases",
         "graph_deletions": deletion_result["deleted_counts"],
         "content_hash": content_hash,
-        "dataset": dataset_name,
+        "dataset": dataset_id,
         "deleted_node_ids": [
             str(node_id) for node_id in deleted_node_ids
         ],  # Convert back to strings for response

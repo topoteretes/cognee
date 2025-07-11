@@ -5,6 +5,7 @@ from .Document import Document
 
 class TextDocument(Document):
     type: str = "text"
+    mime_type: str = "text/plain"
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
         async def get_text():
