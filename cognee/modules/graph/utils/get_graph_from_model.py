@@ -196,8 +196,16 @@ async def get_graph_from_model(
         ):
             edge_metadata, field_value = field_value
 
-        # Get specific datapoint if it's from a list
-        target_datapoint = field_value[index] if index is not None else field_value
+        # Get specific datapoint - handle both single and list cases
+        if index is not None:
+            # List case: extract specific item by index
+            target_datapoint = field_value[index]
+        elif isinstance(field_value, list):
+            # Single datapoint case that was wrapped in a list
+            target_datapoint = field_value[0]
+        else:
+            # True single datapoint case
+            target_datapoint = field_value
 
         # Create edge if not already added
         edge_key = f"{data_point_id}{target_datapoint.id}{field_name}"
