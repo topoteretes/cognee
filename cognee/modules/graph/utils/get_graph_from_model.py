@@ -191,6 +191,19 @@ async def get_graph_from_model(
             edges.append((data_point.id, field_value.id, relationship_name, edge_properties))
             added_edges[str(edge_key)] = True
 
+        # Mark property as visited - CRITICAL for preventing infinite loops
+        # Must happen BEFORE checking if target node is already processed
+        relationship_key = field_name
+        if (
+            edge_metadata
+            and hasattr(edge_metadata, "relationship_type")
+            and edge_metadata.relationship_type
+        ):
+            relationship_key = edge_metadata.relationship_type
+
+        property_key = str(data_point.id) + relationship_key + str(field_value.id)
+        visited_properties[property_key] = True
+
         if str(field_value.id) in added_nodes:
             continue
 
@@ -207,19 +220,6 @@ async def get_graph_from_model(
 
         for edge in property_edges:
             edges.append(edge)
-
-        # Mark property as visited - CRITICAL for preventing infinite loops
-        # Use the same relationship_key logic as in discovery phase
-        relationship_key = field_name
-        if (
-            edge_metadata
-            and hasattr(edge_metadata, "relationship_type")
-            and edge_metadata.relationship_type
-        ):
-            relationship_key = edge_metadata.relationship_type
-
-        property_key = str(data_point.id) + relationship_key + str(field_value.id)
-        visited_properties[property_key] = True
 
     return nodes, edges
 
