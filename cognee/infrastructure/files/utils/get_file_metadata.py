@@ -45,7 +45,7 @@ async def get_file_metadata(file: BinaryIO) -> FileMetadata:
     """
     try:
         file.seek(0)
-        content_hash = get_file_content_hash(file)
+        content_hash = await get_file_content_hash(file)
         file.seek(0)
     except io.UnsupportedOperation as error:
         logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
