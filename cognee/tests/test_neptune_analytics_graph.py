@@ -157,14 +157,25 @@ async def main():
     for neighbor in neighbors:
         print(neighbor)
 
-    print("------GET CONNECTIONS-------")
+    print("------GET CONNECTIONS (SOURCE NODE)-------")
+    document_chunk_node = nodes[0]
+    connections = await na_adapter.get_connections(str(document_chunk_node.id))
+    print(f"found {len(connections)} connections for node \"{document_chunk_node.type}\"")
+    for connection in connections:
+        src, relationship, tgt = connection
+        src = src.get("name", src.get("type", "unknown"))
+        relationship = relationship["relationship_name"]
+        tgt = tgt.get("name", tgt.get("type", "unknown"))
+        print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
+
+    print("------GET CONNECTIONS (TARGET NODE)-------")
     connections = await na_adapter.get_connections(str(center_node.id))
     print(f"found {len(connections)} connections for node \"{center_node.name}\"")
     for connection in connections:
         src, relationship, tgt = connection
-        src = src["name"]
+        src = src.get("name", src.get("type", "unknown"))
         relationship = relationship["relationship_name"]
-        tgt = tgt["name"]
+        tgt = tgt.get("name", tgt.get("type", "unknown"))
         print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
 
     print("------SUBGRAPH-------")
@@ -175,8 +186,6 @@ async def main():
         print(subgraph_node)
     for subgraph_edge in subgraph_edges:
         print(subgraph_edge)
-
-
 
     print("------DELETE-------")
     # delete all nodes and edges:
