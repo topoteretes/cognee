@@ -2,6 +2,7 @@ import asyncio
 from typing import Union
 from uuid import NAMESPACE_OID, uuid5, UUID
 
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
@@ -52,6 +53,7 @@ async def cognee_pipeline(
     pipeline_name: str = "custom_pipeline",
     vector_db_config: dict = None,
     graph_db_config: dict = None,
+    incremental_loading: bool = True,
 ):
     # Note: These context variables allow different value assignment for databases in Cognee
     #       per async task, thread, process and etc.
@@ -106,6 +108,7 @@ async def cognee_pipeline(
             data=data,
             pipeline_name=pipeline_name,
             context={"dataset": dataset},
+            incremental_loading=incremental_loading,
         ):
             yield run_info
 
@@ -117,6 +120,7 @@ async def run_pipeline(
     data=None,
     pipeline_name: str = "custom_pipeline",
     context: dict = None,
+    incremental_loading=True,
 ):
     check_dataset_name(dataset.name)
 
@@ -184,7 +188,9 @@ async def run_pipeline(
         if not isinstance(task, Task):
             raise ValueError(f"Task {task} is not an instance of Task")
 
-    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context)
+    pipeline_run = run_tasks(
+        tasks, dataset_id, data, user, pipeline_name, context, incremental_loading
+    )
 
     async for pipeline_run_info in pipeline_run:
         yield pipeline_run_info
