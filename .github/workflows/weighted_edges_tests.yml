@@ -32,11 +32,8 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-4o-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
 
-      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
