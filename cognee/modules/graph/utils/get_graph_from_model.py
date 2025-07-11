@@ -109,7 +109,16 @@ async def get_graph_from_model(
         elif field_type in ["single_datapoint", "single_datapoint_with_edge"]:
             excluded_properties.add(field_name)
 
-            property_key = str(data_point.id) + field_name + str(actual_value.id)
+            # Use relationship_type if available, otherwise use field_name
+            relationship_key = field_name
+            if (
+                edge_metadata
+                and hasattr(edge_metadata, "relationship_type")
+                and edge_metadata.relationship_type
+            ):
+                relationship_key = edge_metadata.relationship_type
+
+            property_key = str(data_point.id) + relationship_key + str(actual_value.id)
             if property_key in visited_properties:
                 continue
 
@@ -117,8 +126,17 @@ async def get_graph_from_model(
         elif field_type in ["list_datapoint", "list_datapoint_with_edge"]:
             excluded_properties.add(field_name)
 
+            # Use relationship_type if available, otherwise use field_name
+            relationship_key = field_name
+            if (
+                edge_metadata
+                and hasattr(edge_metadata, "relationship_type")
+                and edge_metadata.relationship_type
+            ):
+                relationship_key = edge_metadata.relationship_type
+
             for index, item in enumerate(actual_value):
-                property_key = str(data_point.id) + field_name + str(item.id)
+                property_key = str(data_point.id) + relationship_key + str(item.id)
                 if property_key in visited_properties:
                     continue
 
@@ -191,7 +209,16 @@ async def get_graph_from_model(
             edges.append(edge)
 
         # Mark property as visited - CRITICAL for preventing infinite loops
-        property_key = str(data_point.id) + field_name + str(field_value.id)
+        # Use the same relationship_key logic as in discovery phase
+        relationship_key = field_name
+        if (
+            edge_metadata
+            and hasattr(edge_metadata, "relationship_type")
+            and edge_metadata.relationship_type
+        ):
+            relationship_key = edge_metadata.relationship_type
+
+        property_key = str(data_point.id) + relationship_key + str(field_value.id)
         visited_properties[property_key] = True
 
     return nodes, edges

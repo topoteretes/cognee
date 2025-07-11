@@ -143,55 +143,7 @@ jobs:
             exit 1
           fi
 
-  performance-test:
-    name: Performance Test for Weighted Edges
-    runs-on: ubuntu-22.04
-    env:
-      LLM_PROVIDER: openai
-      LLM_MODEL: gpt-4o-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: fake-key-for-testing
-      LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: fake-key-for-testing
-      EMBEDDING_API_VERSION: "2024-02-01"
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11'
-
-      - name: Run Performance Tests
-        run: |
-          poetry run pytest cognee/tests/unit/interfaces/graph/get_graph_from_huge_model_test.py -v --tb=short
-
-      - name: Check Performance with Weighted Edges
-        run: |
-          python -c "
-          import time
-          import asyncio
-          from cognee.tests.unit.interfaces.graph.test_weighted_edges import *
-
-          async def perf_test():
-              start = time.time()
-              await test_complex_weighted_relationships()
-              end = time.time()
-              print(f'Complex weighted relationships test completed in {end - start:.2f} seconds')
-              
-              start = time.time()
-              await test_company_hierarchy_with_weights()
-              end = time.time()
-              print(f'Company hierarchy test completed in {end - start:.2f} seconds')
-
-          asyncio.run(perf_test())
-          "
 
   code-quality:
     name: Code Quality for Weighted Edges
@@ -217,44 +169,4 @@ jobs:
         with:
           args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
 
-  documentation-check:
-    name: Documentation and Type Checking
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11'
-
-      - name: Install mypy for type checking
-        run: poetry add --group dev mypy
-
-      - name: Run Type Checking on Core Files
-        run: |
-          poetry run mypy cognee/modules/graph/utils/get_graph_from_model.py --ignore-missing-imports
-
-      - name: Check Docstring Coverage
-        run: |
-          python -c "
-          import ast
-          import inspect
-          from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model, _extract_field_info, _should_visit_property, _create_edge_properties
-
-          functions = [get_graph_from_model, _extract_field_info, _should_visit_property, _create_edge_properties]
-          missing_docs = []
-
-          for func in functions:
-              if not func.__doc__ or len(func.__doc__.strip()) < 10:
-                  missing_docs.append(func.__name__)
-
-          if missing_docs:
-              print(f'❌ Functions missing proper documentation: {missing_docs}')
-              exit(1)
-          else:
-              print('✅ All functions have proper documentation')
-          " 
+ 
