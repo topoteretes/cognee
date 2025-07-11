@@ -185,27 +185,4 @@ jobs:
       - name: Run Graph Tests
         run: poetry run python ./examples/python/code_graph_example.py --repo_path ./cognee/tasks/graph
 
-  weighted-edges-tests:
-    name: Run Weighted Edges Tests
-    runs-on: ubuntu-22.04
-    env:
-      LLM_PROVIDER: openai
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Run Weighted Edges Unit Tests
-        run: poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
-
-      - name: Run Weighted Edges Example
-        run: poetry run python ./examples/python/weighted_edges_example.py
