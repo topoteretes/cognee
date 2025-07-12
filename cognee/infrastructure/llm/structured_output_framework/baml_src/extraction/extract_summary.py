@@ -36,13 +36,17 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
     config = get_llm_config()
 
     # Use BAML's SummarizeContent function
-    summary_result = await b.SummarizeContent(content, baml_options={"client_registry": config.baml_registry})
+    summary_result = await b.SummarizeContent(
+        content, baml_options={"client_registry": config.baml_registry}
+    )
 
     # Convert BAML result to the expected response model
     if response_model is SummarizedCode:
         # If it's asking for SummarizedCode but we got SummarizedContent,
         # we need to use SummarizeCode instead
-        code_result = await b.SummarizeCode(content, baml_options={"client_registry": config.baml_registry})
+        code_result = await b.SummarizeCode(
+            content, baml_options={"client_registry": config.baml_registry}
+        )
         return code_result
     else:
         # For other models, return the summary result
@@ -70,7 +74,9 @@ async def extract_code_summary(content: str):
     else:
         try:
             config = get_llm_config()
-            result = await b.SummarizeCode(content, baml_options={"client_registry": config.baml_registry})
+            result = await b.SummarizeCode(
+                content, baml_options={"client_registry": config.baml_registry}
+            )
         except Exception as e:
             logger.error(
                 "Failed to extract code summary with BAML, falling back to mock summary", exc_info=e

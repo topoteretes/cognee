@@ -32,7 +32,7 @@ async def main():
     dataset_name = "cs_explanations"
 
     explanation_file_path = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
+        pathlib.Path(__file__).parent, "../../../../../test_data/Natural_language_processing.txt"
     )
     await cognee.add([explanation_file_path], dataset_name)
 

@@ -56,4 +56,4 @@ jobs:
           GRAPH_DATABASE_URL: "bolt://localhost:7687"
           GRAPH_DATABASE_PASSWORD: "memgraph"
           GRAPH_DATABASE_USERNAME: "memgraph"
-        run: poetry run python ./cognee/tests/test_memgraph.py
+        run: poetry run python ./cognee/tests/unit/infrastructure/databases/vector/test_memgraph.py
