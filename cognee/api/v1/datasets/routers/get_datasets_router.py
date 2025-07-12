@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, FileResponse
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.delete.exceptions import DataNotFoundError, DatasetNotFoundError
@@ -177,7 +178,8 @@ def get_datasets_router() -> APIRouter:
     async def get_dataset_data(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 
-        dataset = await get_dataset(user.id, dataset_id)
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
         if dataset is None:
             return JSONResponse(
@@ -185,7 +187,7 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
             )
 
-        dataset_data = await get_dataset_data(dataset_id=dataset.id)
+        dataset_data = await get_dataset_data(dataset_id=dataset[0].id)
 
         if dataset_data is None:
             return []
@@ -200,6 +202,9 @@ def get_datasets_router() -> APIRouter:
         from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
         try:
+            # Verify user has permission to read dataset
+            await get_authorized_existing_datasets(datasets, "read", user)
+
             datasets_statuses = await cognee_datasets.get_status(datasets)
 
             return datasets_statuses
@@ -211,16 +216,17 @@ def get_datasets_router() -> APIRouter:
         dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         from cognee.modules.data.methods import get_data
-        from cognee.modules.data.methods import get_dataset, get_dataset_data
+        from cognee.modules.data.methods import get_dataset_data
 
-        dataset = await get_dataset(user.id, dataset_id)
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
         if dataset is None:
             return JSONResponse(
                 status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )
 
-        dataset_data = await get_dataset_data(dataset.id)
+        dataset_data = await get_dataset_data(dataset[0].id)
 
         if dataset_data is None:
             raise DataNotFoundError(message=f"No data found in dataset ({dataset_id}).")

@@ -1,6 +1,5 @@
 import os
 from os import path
-from cognee.shared.logging_utils import get_logger
 from uuid import UUID
 from typing import Optional
 from typing import AsyncGenerator, List
@@ -10,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.data.models.Data import Data
 

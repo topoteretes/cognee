@@ -1,7 +1,9 @@
+import os
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
-from typing import List, Optional
+from typing import List
+from uuid import UUID
 import subprocess
 from cognee.shared.logging_utils import get_logger
 import requests
@@ -18,6 +20,7 @@ def get_delete_router() -> APIRouter:
     async def delete(
         data: List[UploadFile],
         dataset_name: str = Form("main_dataset"),
+        dataset_id: UUID = None,
         mode: str = Form("soft"),
         user: User = Depends(get_authenticated_user),
     ):
@@ -35,7 +38,9 @@ def get_delete_router() -> APIRouter:
             # Handle each file in the list
             results = []
             for file in data:
-                if file.filename.startswith("http"):
+                if file.filename.startswith("http") and (
+                    os.getenv("ALLOW_HTTP_REQUESTS", "true").lower() == "true"
+                ):
                     if "github" in file.filename:
                         # For GitHub repos, we need to get the content hash of each file
                         repo_name = file.filename.split("/")[-1].replace(".git", "")
@@ -54,12 +59,22 @@ def get_delete_router() -> APIRouter:
                         response.raise_for_status()
                         file_data = response.content
                         result = await cognee_delete(
-                            file_data, dataset_name=dataset_name, mode=mode
+                            file_data,
+                            dataset_name=dataset_name,
+                            dataset_id=dataset_id,
+                            mode=mode,
+                            user=user,
                         )
                         results.append(result)
                 else:
                     # Handle uploaded file by accessing its file attribute
-                    result = await cognee_delete(file.file, dataset_name=dataset_name, mode=mode)
+                    result = await cognee_delete(
+                        file.file,
+                        dataset_name=dataset_name,
+                        dataset_id=dataset_id,
+                        mode=mode,
+                        user=user,
+                    )
                     results.append(result)
 
             if len(results) == 1:

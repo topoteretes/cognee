@@ -239,7 +239,7 @@ def expand_with_nodes_and_edges(
                 )
                 existing_edges_map[edge_key] = True
 
-    graph_nodes = data_chunks + list(added_ontology_nodes_map.values())
+    graph_nodes = list(added_ontology_nodes_map.values())
     graph_edges = relationships + ontology_relationships
 
     return graph_nodes, graph_edges
