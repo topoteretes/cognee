@@ -249,13 +249,3 @@ class TestInsightsRetriever:
 
         context = await retriever.get_context("Christina Mayer")
         assert context == [], "Returned context should be empty on an empty graph"
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TestInsightsRetriever()
-
-    run(test.test_insights_context_simple())
-    run(test.test_insights_context_complex())
-    run(test.test_insights_context_on_empty_graph())

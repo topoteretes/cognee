@@ -183,16 +183,3 @@ class TestChunksRetriever:
 
         context = await retriever.get_context("Christina Mayer")
         assert len(context) == 0, "Found chunks when none should exist"
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TestChunksRetriever()
-
-    async def main():
-        await test.test_chunk_context_simple()
-        await test.test_chunk_context_complex()
-        await test.test_chunk_context_on_empty_graph()
-
-    run(main())

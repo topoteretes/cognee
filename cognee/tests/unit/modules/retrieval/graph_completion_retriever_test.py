@@ -149,16 +149,3 @@ class TestGraphCompletionRetriever:
 
         context = await retriever.get_context("Who works at Figma?")
         assert context == "", "Context should be empty on an empty graph"
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TestGraphCompletionRetriever()
-
-    async def main():
-        await test.test_graph_completion_context_simple()
-        await test.test_graph_completion_context_complex()
-        await test.test_get_graph_completion_context_on_empty_graph()
-
-    run(main())

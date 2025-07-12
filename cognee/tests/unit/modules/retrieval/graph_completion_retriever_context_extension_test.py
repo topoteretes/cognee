@@ -176,16 +176,3 @@ class TestGraphCompletionWithContextExtensionRetriever:
         assert all(isinstance(item, str) and item.strip() for item in answer), (
             "Answer must contain only non-empty strings"
         )
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TestGraphCompletionWithContextExtensionRetriever()
-
-    async def main():
-        await test.test_graph_completion_extension_context_simple()
-        await test.test_graph_completion_extension_context_complex()
-        await test.test_get_graph_completion_extension_context_on_empty_graph()
-
-    run(main())

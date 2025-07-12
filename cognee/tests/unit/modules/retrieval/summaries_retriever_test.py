@@ -157,12 +157,3 @@ class TextSummariesRetriever:
 
         context = await retriever.get_context("Christina Mayer")
         assert context == [], "Returned context should be empty on an empty graph"
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TextSummariesRetriever()
-
-    run(test.test_chunk_context())
-    run(test.test_chunk_context_on_empty_graph())

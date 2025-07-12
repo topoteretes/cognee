@@ -186,13 +186,3 @@ class TestRAGCompletionRetriever:
 
         context = await retriever.get_context("Christina Mayer")
         assert context == "", "Returned context should be empty on an empty graph"
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TestRAGCompletionRetriever()
-
-    run(test.test_rag_completion_context_simple())
-    run(test.test_rag_completion_context_complex())
-    run(test.test_get_rag_completion_context_on_empty_graph())
