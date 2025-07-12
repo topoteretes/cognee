@@ -63,6 +63,9 @@ class OpenAIAdapter(LLMInterface):
         transcription_model: str,
         max_tokens: int,
         streaming: bool = False,
+        fallback_api_key: str = "",
+        fallback_endpoint: str = "",
+        fallback_model: str = "",
     ):
         self.aclient = instructor.from_litellm(litellm.acompletion)
         self.client = instructor.from_litellm(litellm.completion)
@@ -73,6 +76,9 @@ class OpenAIAdapter(LLMInterface):
         self.api_version = api_version
         self.max_tokens = max_tokens
         self.streaming = streaming
+        self.fallback_api_key = fallback_api_key
+        self.fallback_endpoint = fallback_endpoint
+        self.fallback_model = fallback_model
 
     @observe(as_type="generation")
     @sleep_and_retry_async()
