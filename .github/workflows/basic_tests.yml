@@ -153,6 +153,39 @@ jobs:
       - name: Run Simple Examples
         run: poetry run python ./examples/python/simple_example.py
 
+  simple-examples-baml:
+    name: Run Simple Examples BAML
+    runs-on: ubuntu-22.04
+    env:
+      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
+      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
+
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      STRUCTURED_OUTPUT_FRAMEWORK: "BAML"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Run Simple Examples
+        run: poetry run python ./examples/python/simple_example.py
+
   graph-tests:
     name: Run Basic Graph Tests
     runs-on: ubuntu-22.04
