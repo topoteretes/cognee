@@ -123,8 +123,6 @@ def create_graph_engine(
             password=graph_database_password,
         )
 
-
-
     from .networkx.adapter import NetworkXAdapter
 
     graph_client = NetworkXAdapter(filename=graph_file_path)
