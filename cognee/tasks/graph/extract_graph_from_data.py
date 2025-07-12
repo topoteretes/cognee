@@ -1,16 +1,31 @@
 import asyncio
 from typing import Type, List
+
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
+from cognee.base_config import get_base_config
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.tasks.storage import add_data_points
+
+# Framework selection
+base = get_base_config()
+if base.structured_output_framework == "BAML":
+    print(f"Using BAML framework: {base.structured_output_framework}")
+    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import (
+        extract_content_graph,
+    )
+else:
+    print(f"Using llitellm_instructor framework: {base.structured_output_framework}")
+    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+        extract_content_graph,
+    )
 
 
 async def integrate_chunk_graphs(
@@ -26,6 +41,7 @@ async def integrate_chunk_graphs(
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
 
+        await add_data_points(chunk_graphs)
         return data_chunks
 
     existing_edges_map = await retrieve_existing_edges(
@@ -38,7 +54,7 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await graph_engine.add_nodes(graph_nodes)
+        await add_data_points(graph_nodes)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
