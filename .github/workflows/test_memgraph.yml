@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: poetry install -E neo4j
 
+      - name: Install community memgraph adapter
+        run: pip install -e ./cognee-community/packages/graph/memgraph/
+
       - name: Run default Memgraph
         env:
           ENV: 'dev'
@@ -56,4 +59,4 @@ jobs:
           GRAPH_DATABASE_URL: "bolt://localhost:7687"
           GRAPH_DATABASE_PASSWORD: "memgraph"
           GRAPH_DATABASE_USERNAME: "memgraph"
-        run: poetry run python ./cognee/tests/unit/infrastructure/databases/vector/test_memgraph.py
+        run: poetry run python ./cognee-community/packages/graph/memgraph/cognee_community_graph_adapter_memgraph/tests/test_memgraph.py
