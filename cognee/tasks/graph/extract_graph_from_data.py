@@ -47,7 +47,6 @@ async def integrate_chunk_graphs(
     existing_edges_map = await retrieve_existing_edges(
         data_chunks,
         chunk_graphs,
-        graph_engine,
     )
 
     graph_nodes, graph_edges = expand_with_nodes_and_edges(
