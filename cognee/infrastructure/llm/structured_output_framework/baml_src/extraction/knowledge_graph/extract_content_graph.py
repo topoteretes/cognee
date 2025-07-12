@@ -20,7 +20,7 @@ async def extract_content_graph(content: str, response_model: Type[BaseModel]):
     # tb.Node.add_property("country", country)
 
     graph = await b.ExtractContentGraph(
-        content, mode="simple", baml_options={"tb": config.baml_registry}
+        content, mode="simple", baml_options={"client_registry": config.baml_registry}
     )
 
     return graph
