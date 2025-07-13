@@ -1,6 +1,5 @@
 import os
 import pytest
-import networkx as nx
 import pandas as pd
 from unittest.mock import patch, mock_open
 from io import BytesIO
@@ -58,18 +57,27 @@ def test_get_file_content_hash_stream():
 
 
 def test_prepare_edges():
-    graph = nx.MultiDiGraph()
-    graph.add_edge("A", "B", key="AB", weight=1)
+    # Test with tuple format (nodes, edges)
+    nodes = [("A", {"name": "Node A"}), ("B", {"name": "Node B"})]
+    edges = [("A", "B", "AB", {"weight": 1})]
+    graph = (nodes, edges)
     edges_df = prepare_edges(graph, "source", "target", "key")
 
     assert isinstance(edges_df, pd.DataFrame)
     assert len(edges_df) == 1
+    assert edges_df.iloc[0]["source"] == "A"
+    assert edges_df.iloc[0]["target"] == "B"
+    assert edges_df.iloc[0]["key"] == "AB"
 
 
 def test_prepare_nodes():
-    graph = nx.Graph()
-    graph.add_node(1, name="Node1")
+    # Test with tuple format (nodes, edges)
+    nodes = [(1, {"name": "Node1"}), (2, {"name": "Node2"})]
+    edges = []
+    graph = (nodes, edges)
     nodes_df = prepare_nodes(graph)
 
     assert isinstance(nodes_df, pd.DataFrame)
-    assert len(nodes_df) == 1
+    assert len(nodes_df) == 2
+    assert nodes_df.iloc[0]["name"] == "Node1"
+    assert nodes_df.iloc[1]["name"] == "Node2"

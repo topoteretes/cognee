@@ -60,7 +60,7 @@ async def relational_db_migration():
         relationship_label = "ReportsTo"
 
     # 3. Directly verify the 'reports to' hierarchy
-    graph_db_provider = os.getenv("GRAPH_DATABASE_PROVIDER", "networkx").lower()
+    graph_db_provider = os.getenv("GRAPH_DATABASE_PROVIDER", "kuzu").lower()
 
     distinct_node_names = set()
     found_edges = set()

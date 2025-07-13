@@ -1,6 +1,5 @@
 import os
 import json
-import networkx
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage import LocalStorage
@@ -10,8 +9,6 @@ logger = get_logger()
 
 async def cognee_network_visualization(graph_data, destination_file_path: str = None):
     nodes_data, edges_data = graph_data
-
-    G = networkx.DiGraph()
 
     nodes_list = []
     color_map = {
@@ -44,15 +41,11 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
             pass
 
         nodes_list.append(node_info)
-        G.add_node(node_id, **node_info)
 
-    edge_labels = {}
     links_list = []
     for source, target, relation, edge_info in edges_data:
         source = str(source)
         target = str(target)
-        G.add_edge(source, target)
-        edge_labels[(source, target)] = relation
         links_list.append({"source": source, "target": target, "relation": relation})
 
     html_template = """

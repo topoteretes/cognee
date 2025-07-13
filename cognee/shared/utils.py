@@ -7,7 +7,6 @@ import requests
 import hashlib
 from datetime import datetime, timezone
 import graphistry
-import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
 import http.server
@@ -146,31 +145,68 @@ async def register_graphistry():
 
 
 def prepare_edges(graph, source, target, edge_key):
-    edge_list = [
-        {
-            source: str(edge[0]),
-            target: str(edge[1]),
-            edge_key: str(edge[2]),
-        }
-        for edge in graph.edges(keys=True, data=True)
-    ]
+    """
+    Prepare edges data for visualization.
+
+    :param graph: Either a networkx graph or a tuple of (nodes, edges)
+    :param source: Column name for source node
+    :param target: Column name for target node
+    :param edge_key: Column name for edge key/relationship
+    :return: DataFrame with edge data
+    """
+    edge_list = []
+
+    # Handle networkx graph format (for backward compatibility)
+    if hasattr(graph, "edges"):
+        edge_list = [
+            {
+                source: str(edge[0]),
+                target: str(edge[1]),
+                edge_key: str(edge[2]),
+            }
+            for edge in graph.edges(keys=True, data=True)
+        ]
+    # Handle tuple format (nodes, edges)
+    elif isinstance(graph, tuple) and len(graph) == 2:
+        nodes, edges = graph
+        edge_list = [
+            {
+                source: str(edge[0]),
+                target: str(edge[1]),
+                edge_key: str(edge[2]) if len(edge) > 2 else "relationship",
+            }
+            for edge in edges
+        ]
+    # Handle empty or invalid graph
+    else:
+        edge_list = []
 
     return pd.DataFrame(edge_list)
 
 
 def prepare_nodes(graph, include_size=False):
+    """
+    Prepare nodes data for visualization.
+
+    :param graph: Either a networkx graph or a tuple of (nodes, edges)
+    :param include_size: Whether to include size information
+    :return: DataFrame with node data
+    """
     nodes_data = []
-    for node in graph.nodes:
-        node_info = graph.nodes[node]
 
-        if not node_info:
-            continue
+    # Handle networkx graph format (for backward compatibility)
+    if hasattr(graph, "nodes"):
+        for node in graph.nodes:
+            node_info = graph.nodes[node]
 
-        node_data = {
-            **node_info,
-            "id": str(node),
-            "name": node_info["name"] if "name" in node_info else str(node),
-        }
+            if not node_info:
+                continue
+
+            node_data = {
+                **node_info,
+                "id": str(node),
+                "name": node_info["name"] if "name" in node_info else str(node),
+            }
 
         if include_size:
             default_size = 10  # Default node size
@@ -183,6 +219,32 @@ def prepare_nodes(graph, include_size=False):
 
         nodes_data.append(node_data)
 
+    # Handle tuple format (nodes, edges)
+    elif isinstance(graph, tuple) and len(graph) == 2:
+        nodes, edges = graph
+        for node_id, node_info in nodes:
+            if not node_info:
+                continue
+
+            node_data = {
+                **node_info,
+                "id": str(node_id),
+                "name": node_info.get("name", str(node_id)),
+            }
+
+            if include_size:
+                default_size = 10  # Default node size
+                larger_size = 20  # Size for nodes with specific keywords in their ID
+                keywords = ["DOCUMENT", "User"]
+                node_size = (
+                    larger_size
+                    if any(keyword in str(node_id) for keyword in keywords)
+                    else default_size
+                )
+                node_data["size"] = node_size
+
+            nodes_data.append(node_data)
+
     return pd.DataFrame(nodes_data)
 
 
@@ -191,24 +253,18 @@ async def render_graph(
 ):
     await register_graphistry()
 
-    if not isinstance(graph, nx.MultiDiGraph):
-        graph_engine = await get_graph_engine()
-        networkx_graph = nx.MultiDiGraph()
+    # Get graph data from the graph engine
+    graph_engine = await get_graph_engine()
+    (nodes, edges) = await graph_engine.get_graph_data()
 
-        (nodes, edges) = await graph_engine.get_graph_data()
-
-        networkx_graph.add_nodes_from(nodes)
-        networkx_graph.add_edges_from(edges)
-
-        graph = networkx_graph
-
-    edges = prepare_edges(graph, "source_node", "target_node", "relationship_name")
-    plotter = graphistry.edges(edges, "source_node", "target_node")
+    # Convert to dataframes for graphistry
+    edges_df = prepare_edges(graph, "source_node", "target_node", "relationship_name")
+    plotter = graphistry.edges(edges_df, "source_node", "target_node")
     plotter = plotter.bind(edge_label="relationship_name")
 
     if include_nodes:
-        nodes = prepare_nodes(graph, include_size=include_size)
-        plotter = plotter.nodes(nodes, "id")
+        nodes_df = prepare_nodes(graph, include_size=include_size)
+        plotter = plotter.nodes(nodes_df, "id")
 
         if include_size:
             plotter = plotter.bind(point_size="size")
@@ -241,41 +297,19 @@ async def convert_to_serializable_graph(G):
 
     (nodes, edges) = G
 
-    networkx_graph = nx.MultiDiGraph()
-    networkx_graph.add_nodes_from(nodes)
-    networkx_graph.add_edges_from(edges)
-
-    # Create a new graph to store the serializable version
-    new_G = nx.MultiDiGraph()
-
-    # Serialize nodes
-    for node, data in networkx_graph.nodes(data=True):
+    # Convert nodes to serializable format
+    serializable_nodes = []
+    for node_id, data in nodes:
         serializable_data = {k: str(v) for k, v in data.items()}
-        new_G.add_node(str(node), **serializable_data)
+        serializable_nodes.append((str(node_id), serializable_data))
 
-    # Serialize edges
-    for u, v, data in networkx_graph.edges(data=True):
+    # Convert edges to serializable format
+    serializable_edges = []
+    for u, v, data in edges:
         serializable_data = {k: str(v) for k, v in data.items()}
-        new_G.add_edge(str(u), str(v), **serializable_data)
+        serializable_edges.append((str(u), str(v), serializable_data))
 
-    return new_G
-
-
-def generate_layout_positions(G, layout_func, layout_scale):
-    """
-    Generate layout positions for the graph using the specified layout function.
-    """
-    positions = layout_func(G)
-    return {str(node): (x * layout_scale, y * layout_scale) for node, (x, y) in positions.items()}
-
-
-def assign_node_colors(G, node_attribute, palette):
-    """
-    Assign colors to nodes based on a specified attribute and a given palette.
-    """
-    unique_attrs = set(G.nodes[node].get(node_attribute, "Unknown") for node in G.nodes)
-    color_map = {attr: palette[i % len(palette)] for i, attr in enumerate(unique_attrs)}
-    return [color_map[G.nodes[node].get(node_attribute, "Unknown")] for node in G.nodes], color_map
+    return (serializable_nodes, serializable_edges)
 
 
 def embed_logo(p, layout_scale, logo_alpha, position):
@@ -309,14 +343,16 @@ def embed_logo(p, layout_scale, logo_alpha, position):
 
 def graph_to_tuple(graph):
     """
-    Converts a networkx graph to a tuple of (nodes, edges).
+    Converts a graph to a tuple of (nodes, edges).
 
-    :param graph: A networkx graph.
+    :param graph: A graph represented as a tuple of (nodes, edges).
     :return: A tuple (nodes, edges).
     """
-    nodes = list(graph.nodes(data=True))  # Get nodes with attributes
-    edges = list(graph.edges(data=True))  # Get edges with attributes
-    return (nodes, edges)
+    if isinstance(graph, tuple) and len(graph) == 2:
+        return graph
+
+    # If it's some other format, return empty tuple
+    return ([], [])
 
 
 def start_visualization_server(

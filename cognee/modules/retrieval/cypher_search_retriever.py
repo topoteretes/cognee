@@ -1,6 +1,5 @@
 from typing import Any, Optional
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported, CypherSearchError
@@ -31,8 +30,7 @@ class CypherSearchRetriever(BaseRetriever):
         """
         Retrieves relevant context using a cypher query.
 
-        If the graph engine is an instance of NetworkXAdapter, raises SearchTypeNotSupported. If
-        any error occurs during execution, logs the error and raises CypherSearchError.
+        If any error occurs during execution, logs the error and raises CypherSearchError.
 
         Parameters:
         -----------
@@ -46,11 +44,6 @@ class CypherSearchRetriever(BaseRetriever):
         """
         try:
             graph_engine = await get_graph_engine()
-
-            if isinstance(graph_engine, NetworkXAdapter):
-                raise SearchTypeNotSupported(
-                    "CYPHER search type not supported for NetworkXAdapter."
-                )
 
             result = await graph_engine.query(query)
         except Exception as e:

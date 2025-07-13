@@ -1,7 +1,6 @@
 from typing import Any, Optional
 import logging
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -108,9 +107,7 @@ class NaturalLanguageRetriever(BaseRetriever):
         """
         Retrieves relevant context using a natural language query converted to Cypher.
 
-        This method raises a SearchTypeNotSupported exception if the graph engine does not
-        support natural language search. It also logs errors if the execution of the retrieval
-        fails.
+        This method logs errors if the execution of the retrieval fails.
 
         Parameters:
         -----------
@@ -125,9 +122,6 @@ class NaturalLanguageRetriever(BaseRetriever):
         """
         try:
             graph_engine = await get_graph_engine()
-
-            if isinstance(graph_engine, (NetworkXAdapter)):
-                raise SearchTypeNotSupported("Natural language search type not supported.")
 
             return await self._execute_cypher_query(query, graph_engine)
         except Exception as e:

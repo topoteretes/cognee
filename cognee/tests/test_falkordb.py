@@ -99,7 +99,7 @@ async def main():
     from cognee.infrastructure.databases.graph import get_graph_config
 
     graph_config = get_graph_config()
-    assert not os.path.exists(graph_config.graph_file_path), "Networkx graph database is not empty"
+    assert not os.path.exists(graph_config.graph_file_path), "Graph database is not empty"
 
 
 if __name__ == "__main__":
