@@ -46,7 +46,9 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            os.makedirs(self.db_path, exist_ok=True)
+            # For Kuzu v0.11.0+, create parent directory but use db_path as file
+            parent_dir = os.path.dirname(self.db_path)
+            os.makedirs(parent_dir, exist_ok=True)
 
             self.db = Database(self.db_path)
             self.db.init_database()
@@ -1417,9 +1419,9 @@ class KuzuAdapter(GraphDBInterface):
 
     async def delete_graph(self) -> None:
         """
-        Delete all data from the graph directory.
+        Delete all data from the graph database.
 
-        This method deletes all nodes and relationships from the graph directory
+        This method deletes all nodes and relationships from the graph database.
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
@@ -1432,9 +1434,16 @@ class KuzuAdapter(GraphDBInterface):
             if self.db:
                 self.db.close()
                 self.db = None
+
+            # For Kuzu v0.11.0+, delete the database file instead of directory
             if os.path.exists(self.db_path):
-                shutil.rmtree(self.db_path)
-                logger.info(f"Deleted Kuzu database files at {self.db_path}")
+                if os.path.isfile(self.db_path):
+                    os.remove(self.db_path)
+                    logger.info(f"Deleted Kuzu database file at {self.db_path}")
+                else:
+                    # Fallback for older versions or directory-based databases
+                    shutil.rmtree(self.db_path)
+                    logger.info(f"Deleted Kuzu database directory at {self.db_path}")
 
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
@@ -1454,9 +1463,17 @@ class KuzuAdapter(GraphDBInterface):
             if self.db:
                 self.db.close()
                 self.db = None
+
+            # For Kuzu v0.11.0+, delete the database file instead of directory
             if os.path.exists(self.db_path):
-                shutil.rmtree(self.db_path)
-                logger.info(f"Deleted Kuzu database files at {self.db_path}")
+                if os.path.isfile(self.db_path):
+                    os.remove(self.db_path)
+                    logger.info(f"Deleted Kuzu database file at {self.db_path}")
+                else:
+                    # Fallback for older versions or directory-based databases
+                    shutil.rmtree(self.db_path)
+                    logger.info(f"Deleted Kuzu database directory at {self.db_path}")
+
             # Reinitialize the database
             self._initialize_connection()
             # Verify the database is empty

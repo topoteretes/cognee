@@ -96,9 +96,16 @@ async def main():
     from cognee.infrastructure.databases.graph import get_graph_config
 
     graph_config = get_graph_config()
-    assert not os.path.exists(graph_config.graph_file_path) or not os.listdir(
-        graph_config.graph_file_path
-    ), "Kuzu graph directory is not empty"
+    # For Kuzu v0.11.0+, check if database file doesn't exist (single-file format with .kuzu extension)
+    # For older versions or other providers, check if directory is empty
+    if graph_config.graph_database_provider.lower() == "kuzu":
+        assert not os.path.exists(graph_config.graph_file_path), (
+            "Kuzu graph database file still exists"
+        )
+    else:
+        assert not os.path.exists(graph_config.graph_file_path) or not os.listdir(
+            graph_config.graph_file_path
+        ), "Graph database directory is not empty"
 
 
 if __name__ == "__main__":

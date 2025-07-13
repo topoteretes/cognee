@@ -56,7 +56,11 @@ class GraphConfig(BaseSettings):
         # Set file path based on graph database provider if no file path is provided
         if not values.graph_file_path:
             base = os.path.join(get_absolute_path(".cognee_system"), "databases")
-            values.graph_file_path = os.path.join(base, values.graph_filename)
+            # For Kuzu v0.11.0+, use single-file database with .kuzu extension
+            if provider == "kuzu":
+                values.graph_file_path = os.path.join(base, f"{values.graph_filename}.kuzu")
+            else:
+                values.graph_file_path = os.path.join(base, values.graph_filename)
         return values
 
     def to_dict(self) -> dict:
