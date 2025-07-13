@@ -116,7 +116,7 @@ async def main():
             dataset_id=test_dataset.id,
             user=default_user,  # Wrong user - should fail
         )
-    except (PermissionDeniedError, DatasetNotFoundError) as e:
+    except (PermissionDeniedError, DatasetNotFoundError):
         delete_permission_error = True
         print("✅ Delete correctly denied for user without permission")
     except Exception as e:
