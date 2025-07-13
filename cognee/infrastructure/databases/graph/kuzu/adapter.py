@@ -48,7 +48,9 @@ class KuzuAdapter(GraphDBInterface):
         try:
             # For Kuzu v0.11.0+, create parent directory but use db_path as file
             parent_dir = os.path.dirname(self.db_path)
-            os.makedirs(parent_dir, exist_ok=True)
+            # Only create directory if parent_dir is not empty (i.e., db_path has a directory component)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
 
             self.db = Database(self.db_path)
             self.db.init_database()
