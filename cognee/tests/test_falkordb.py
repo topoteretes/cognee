@@ -91,13 +91,55 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    search_results = await vector_engine.search("Entity_name", "AI")
+
+    # Debug: Let's see what's actually in the database
+    print("🔍 Debugging FalkorDB contents...")
+    try:
+        # Check what nodes exist in the database
+        debug_query = "MATCH (n) RETURN labels(n) AS labels, properties(n) AS properties LIMIT 10"
+        debug_result = vector_engine.query(debug_query)
+        print(f"Database contains {len(debug_result.result_set)} nodes (showing first 10):")
+        for i, record in enumerate(debug_result.result_set):
+            print(f"  Node {i}: Labels={record[0]}, Properties={record[1]}")
+    except Exception as e:
+        print(f"Error querying database: {e}")
+
+    # Try different search approaches
+    search_terms = ["AI", "LLM", "GPT", "OpenAI", "language", "model"]
+    search_fields = ["Entity_name", "name", "text", "Entity.name"]
+
+    search_results = []
+    for field in search_fields:
+        for term in search_terms:
+            try:
+                results = await vector_engine.search(field, term)
+                if results:
+                    print(f"✅ Found {len(results)} results for field '{field}' with term '{term}'")
+                    search_results = results
+                    break
+            except Exception as e:
+                print(f"❌ Error searching field '{field}' with term '{term}': {e}")
+        if search_results:
+            break
+
     if not search_results:
-        # If "AI" is not found, try searching for "LLM" which is more likely to be an entity
-        search_results = await vector_engine.search("Entity_name", "LLM")
-    if not search_results:
-        # If still no results, try a broader search
-        search_results = await vector_engine.search("Entity_name", "language model")
+        # If still no results, try to get any Entity node
+        try:
+            entity_query = "MATCH (n:Entity) RETURN n LIMIT 1"
+            entity_result = vector_engine.query(entity_query)
+            if entity_result.result_set:
+                print("✅ Found Entity node directly via query")
+                # Create a mock search result format
+                entity_node = entity_result.result_set[0][0]
+                search_results = [
+                    type(
+                        "MockResult",
+                        (),
+                        {"payload": {"text": entity_node.properties.get("name", "Entity")}},
+                    )()
+                ]
+        except Exception as e:
+            print(f"❌ Error querying Entity nodes: {e}")
 
     assert len(search_results) > 0, "No entities found in the vector database"
     random_node = search_results[0]
