@@ -50,6 +50,11 @@ class SummarizedCode {
     workflow_description string?
 }
 
+class DynamicKnowledgeGraph {
+    @@dynamic
+}
+
+
 // Simple template for basic extraction (fast, good quality)
 template_string ExtractContentGraphPrompt() #"
     You are an advanced algorithm that extracts structured data into a knowledge graph.
@@ -219,31 +224,15 @@ template_string StrictExtractContentGraphPrompt() #"
 "#
 
 // OpenAI client with environment model selection
-client<llm> OpenAIClientWithEnvModel {
+client<llm> OpenAI {
     provider openai
     options {
-        model env.LLM_MODEL
-        api_key env.OPENAI_API_KEY
+        model client_registry.model
+        api_key client_registry.api_key
     }
 }
 
-// Anthropic client with environment model selection
-client<llm> AnthropicClientWithEnvModel {
-    provider anthropic
-    options {
-        model env.LLM_MODEL
-        api_key env.ANTHROPIC_API_KEY
-    }
-}
 
-// Default client (maintains backward compatibility)
-client<llm> DefaultClient {
-    provider openai
-    options {
-        model "gpt-4o-mini"
-        api_key env.OPENAI_API_KEY
-    }
-}
 
 // Function that returns raw structured output (for custom objects - to be handled in Python)
 function ExtractContentGraphGeneric(
@@ -251,7 +240,7 @@ function ExtractContentGraphGeneric(
     mode: "simple" | "base" | "guided" | "strict" | "custom"?,
     custom_prompt_content: string?
 ) -> KnowledgeGraph {
-    client OpenAIClientWithEnvModel
+    client OpenAI
 
     prompt #"
         {% if mode == "base" %}
@@ -281,12 +270,12 @@ function ExtractContentGraphGeneric(
 }
 
 // Backward-compatible function specifically for KnowledgeGraph
-function ExtractContentGraph(
+function ExtractDynamicContentGraph(
     content: string,
     mode: "simple" | "base" | "guided" | "strict" | "custom"?,
     custom_prompt_content: string?
-) -> KnowledgeGraph {
-    client OpenAIClientWithEnvModel
+) -> DynamicKnowledgeGraph {
+    client OpenAI
 
     prompt #"
         {% if mode == "base" %}
@@ -315,72 +304,10 @@ function ExtractContentGraph(
     "#
 }
 
-// Alternative function that uses environment variable for prompt selection
-function ExtractContentGraphWithEnvPrompt(
-    content: string,
-    prompt_override: string?
-) -> KnowledgeGraph {
-    client OpenAIClientWithEnvModel
-
-    prompt #"
-        {% if prompt_override %}
-            {{ prompt_override }}
-        {% else %}
-            {{ ExtractContentGraphPrompt() }}
-        {% endif %}
-
-        {{ ctx.output_format(prefix="Answer in this schema:\n") }}
-
-        Before answering, briefly describe what you'll extract from the text, then provide the structured output.
-
-        Example format:
-        I'll extract the main entities and their relationships from this text...
-
-        { ... }
-
-        {{ _.role('user') }}
-        {{ content }}
-    "#
-}
-
-// Function that uses Anthropic client
-function ExtractContentGraphWithAnthropic(
-    content: string,
-    mode: "simple" | "base" | "guided" | "strict" | "custom"?,
-    custom_prompt_content: string?
-) -> KnowledgeGraph {
-    client AnthropicClientWithEnvModel
-
-    prompt #"
-        {% if mode == "base" %}
-            {{ DetailedExtractContentGraphPrompt() }}
-        {% elif mode == "guided" %}
-            {{ GuidedExtractContentGraphPrompt() }}
-        {% elif mode == "strict" %}
-            {{ StrictExtractContentGraphPrompt() }}
-        {% elif mode == "custom" and custom_prompt_content %}
-            {{ custom_prompt_content }}
-        {% else %}
-            {{ ExtractContentGraphPrompt() }}
-        {% endif %}
-
-        {{ ctx.output_format(prefix="Answer in this schema:\n") }}
-
-        Before answering, briefly describe what you'll extract from the text, then provide the structured output.
-
-        Example format:
-        I'll extract the main entities and their relationships from this text...
-
-        { ... }
-
-        {{ _.role('user') }}
-        {{ content }}
-    "#
-}
 
 // Summarization functions
 function SummarizeContent(content: string) -> SummarizedContent {
-    client OpenAIClientWithEnvModel
+    client OpenAI
 
     prompt #"
         {{ SummarizeContentPrompt() }}
@@ -393,7 +320,7 @@ function SummarizeContent(content: string) -> SummarizedContent {
 }
 
 function SummarizeCode(content: string) -> SummarizedCode {
-    client OpenAIClientWithEnvModel
+    client OpenAI
 
     prompt #"
         {{ SummarizeCodePrompt() }}
@@ -405,71 +332,12 @@ function SummarizeCode(content: string) -> SummarizedCode {
     "#
 }
 
-test ExtractPersonExample {
-    functions [ExtractContentGraph]
-    args {
-        content #"
-            My name is Vasiliy. I was born in 1992. I am a software engineer. I work at Google and am based in Berlin.
-        "#
-        mode "simple"
-    }
-}
-
-test ExtractGuidedExample {
-    functions [ExtractContentGraph]
-    args {
-        content #"
-            Apple Inc. was founded by Steve Jobs in 1976. The company is headquartered in Cupertino, California.
-            Tim Cook is the current CEO of Apple Inc.
-        "#
-        mode "guided"
-    }
-}
-
 test ExtractStrictExample {
-    functions [ExtractContentGraph]
+    functions [ExtractContentGraphGeneric]
     args {
         content #"
             The Python programming language was created by Guido van Rossum in 1991.
         "#
         mode "strict"
-    }
-}
-
-test ExtractGenericExample {
-    functions [ExtractContentGraphGeneric]
-    args {
-        content #"
-            React is a JavaScript library for building user interfaces, developed by Facebook.
-        "#
-        mode "simple"
-    }
-}
-
-test SummarizeContentExample {
-    functions [SummarizeContent]
-    args {
-        content #"
-            Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.
-            It deals with the interaction between computers and human language, in particular how to program computers to process and analyze large amounts of natural language data.
-        "#
-    }
-}
-
-test SummarizeCodeExample {
-    functions [SummarizeCode]
-    args {
-        content #"
-            def fibonacci(n):
-                if n <= 1:
-                    return n
-                return fibonacci(n-1) + fibonacci(n-2)
-            
-            def main():
-                print(fibonacci(10))
-            
-            if __name__ == "__main__":
-                main()
-        "#
     }
 }

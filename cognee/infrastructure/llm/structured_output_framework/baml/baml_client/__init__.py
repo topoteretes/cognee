@@ -13,9 +13,9 @@
 __version__ = "0.201.0"
 
 try:
-    from baml_py.safe_import import EnsureBamlPyImport
+  from baml_py.safe_import import EnsureBamlPyImport
 except ImportError:
-    raise ImportError(f"""Update to baml-py required.
+  raise ImportError(f"""Update to baml-py required.
 Version of baml_client generator (see generators.baml): {__version__}
 
 Please upgrade baml-py to version "{__version__}".
@@ -31,15 +31,16 @@ https://boundaryml.com/discord
 
 
 with EnsureBamlPyImport(__version__) as e:
-    e.raise_if_incompatible_version(__version__)
+  e.raise_if_incompatible_version(__version__)
 
-    from . import types
-    from . import tracing
-    from . import stream_types
-    from . import config
-    from .config import reset_baml_env_vars
-
-    from .sync_client import b
+  from . import types
+  from . import tracing
+  from . import stream_types
+  from . import config
+  from .config import reset_baml_env_vars
+  
+  from .sync_client import b
+  
 
 
 # FOR LEGACY COMPATIBILITY, expose "partial_types" as an alias for "stream_types"
@@ -47,11 +48,11 @@ with EnsureBamlPyImport(__version__) as e:
 partial_types = stream_types
 
 __all__ = [
-    "b",
-    "stream_types",
-    "partial_types",
-    "tracing",
-    "types",
-    "reset_baml_env_vars",
-    "config",
+  "b",
+  "stream_types",
+  "partial_types",
+  "tracing",
+  "types",
+  "reset_baml_env_vars",
+  "config",
 ]

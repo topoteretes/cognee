@@ -19,7 +19,6 @@ from .parser import LlmResponseParser, LlmStreamParser
 from .runtime import DoNotUseDirectlyCallManager, BamlCallOptions
 from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__
 
-
 class BamlSyncClient:
     __options: DoNotUseDirectlyCallManager
     __stream_client: "BamlStreamClient"
@@ -49,13 +48,10 @@ class BamlSyncClient:
         self.__llm_response_parser = LlmResponseParser(self.__options)
         self.__llm_stream_parser = LlmStreamParser(self.__options)
 
-    def with_options(
-        self,
+    def with_options(self,
         tb: typing.Optional[type_builder.TypeBuilder] = None,
         client_registry: typing.Optional[baml_py.baml_py.ClientRegistry] = None,
-        collector: typing.Optional[
-            typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
-        ] = None,
+        collector: typing.Optional[typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]] = None,
         env: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None,
     ) -> "BamlSyncClient":
         options: BamlCallOptions = {}
@@ -71,151 +67,60 @@ class BamlSyncClient:
 
     @property
     def stream(self):
-        return self.__stream_client
+      return self.__stream_client
 
     @property
     def request(self):
-        return self.__http_request
+      return self.__http_request
 
     @property
     def stream_request(self):
-        return self.__http_stream_request
+      return self.__http_stream_request
 
     @property
     def parse(self):
-        return self.__llm_response_parser
+      return self.__llm_response_parser
 
     @property
     def parse_stream(self):
-        return self.__llm_stream_parser
-
-    def ExtractContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+      return self.__llm_stream_parser
+    
+    def ExtractCategories(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.DefaultContentPrediction:
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractCategories", args={
+            "content": content,
+        })
+        return typing.cast(types.DefaultContentPrediction, result.cast_to(types, types, stream_types, False, __runtime__))
+    def ExtractContentGraphGeneric(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).call_function_sync(
-            function_name="ExtractContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractContentGraphGeneric", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        })
+        return typing.cast(types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__))
+    def ExtractDynamicContentGraph(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).call_function_sync(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    def ExtractContentGraphWithAnthropic(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).call_function_sync(
-            function_name="ExtractContentGraphWithAnthropic",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    def ExtractContentGraphWithEnvPrompt(
-        self,
-        content: str,
-        prompt_override: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).call_function_sync(
-            function_name="ExtractContentGraphWithEnvPrompt",
-            args={
-                "content": content,
-                "prompt_override": prompt_override,
-            },
-        )
-        return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    def SummarizeCode(
-        self,
-        content: str,
+    ) -> types.DynamicKnowledgeGraph:
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractDynamicContentGraph", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        })
+        return typing.cast(types.DynamicKnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__))
+    def SummarizeCode(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> types.SummarizedCode:
-        result = self.__options.merge_options(baml_options).call_function_sync(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    def SummarizeContent(
-        self,
-        content: str,
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="SummarizeCode", args={
+            "content": content,
+        })
+        return typing.cast(types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__))
+    def SummarizeContent(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> types.SummarizedContent:
-        result = self.__options.merge_options(baml_options).call_function_sync(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.SummarizedContent, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="SummarizeContent", args={
+            "content": content,
+        })
+        return typing.cast(types.SummarizedContent, result.cast_to(types, types, stream_types, False, __runtime__))
+    
 
 
 class BamlStreamClient:
@@ -224,182 +129,67 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractCategories(self, content: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.DefaultContentPrediction, types.DefaultContentPrediction]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractCategories", args={
+            "content": content,
+        })
+        return baml_py.BamlSyncStream[stream_types.DefaultContentPrediction, types.DefaultContentPrediction](
+          result,
+          lambda x: typing.cast(stream_types.DefaultContentPrediction, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.DefaultContentPrediction, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def ExtractContentGraphGeneric(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph]:
-        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
-            function_name="ExtractContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractContentGraphGeneric", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        })
         return baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph](
-            result,
-            lambda x: typing.cast(
-                stream_types.KnowledgeGraph,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
+          result,
+          lambda x: typing.cast(stream_types.KnowledgeGraph, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
         )
-
-    def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractDynamicContentGraph(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph]:
-        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
+    ) -> baml_py.BamlSyncStream[stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractDynamicContentGraph", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        })
+        return baml_py.BamlSyncStream[stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph](
+          result,
+          lambda x: typing.cast(stream_types.DynamicKnowledgeGraph, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.DynamicKnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
         )
-        return baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph](
-            result,
-            lambda x: typing.cast(
-                stream_types.KnowledgeGraph,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
-        )
-
-    def ExtractContentGraphWithAnthropic(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph]:
-        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
-            function_name="ExtractContentGraphWithAnthropic",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph](
-            result,
-            lambda x: typing.cast(
-                stream_types.KnowledgeGraph,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
-        )
-
-    def ExtractContentGraphWithEnvPrompt(
-        self,
-        content: str,
-        prompt_override: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph]:
-        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
-            function_name="ExtractContentGraphWithEnvPrompt",
-            args={
-                "content": content,
-                "prompt_override": prompt_override,
-            },
-        )
-        return baml_py.BamlSyncStream[stream_types.KnowledgeGraph, types.KnowledgeGraph](
-            result,
-            lambda x: typing.cast(
-                stream_types.KnowledgeGraph,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
-        )
-
-    def SummarizeCode(
-        self,
-        content: str,
+    def SummarizeCode(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.SummarizedCode, types.SummarizedCode]:
-        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-        )
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="SummarizeCode", args={
+            "content": content,
+        })
         return baml_py.BamlSyncStream[stream_types.SummarizedCode, types.SummarizedCode](
-            result,
-            lambda x: typing.cast(
-                stream_types.SummarizedCode,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.SummarizedCode, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
+          result,
+          lambda x: typing.cast(stream_types.SummarizedCode, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.SummarizedCode, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
         )
-
-    def SummarizeContent(
-        self,
-        content: str,
+    def SummarizeContent(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.SummarizedContent, types.SummarizedContent]:
-        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-        )
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="SummarizeContent", args={
+            "content": content,
+        })
         return baml_py.BamlSyncStream[stream_types.SummarizedContent, types.SummarizedContent](
-            result,
-            lambda x: typing.cast(
-                stream_types.SummarizedContent,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.SummarizedContent, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
+          result,
+          lambda x: typing.cast(stream_types.SummarizedContent, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.SummarizedContent, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
         )
-
+    
 
 class BamlHttpRequestClient:
     __options: DoNotUseDirectlyCallManager
@@ -407,128 +197,42 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractCategories(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="request",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractCategories", args={
+            "content": content,
+        }, mode="request")
         return result
-
-    def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractContentGraphGeneric(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="request",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractContentGraphGeneric", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        }, mode="request")
         return result
-
-    def ExtractContentGraphWithAnthropic(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractDynamicContentGraph(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraphWithAnthropic",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="request",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractDynamicContentGraph", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        }, mode="request")
         return result
-
-    def ExtractContentGraphWithEnvPrompt(
-        self,
-        content: str,
-        prompt_override: typing.Optional[str] = None,
+    def SummarizeCode(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraphWithEnvPrompt",
-            args={
-                "content": content,
-                "prompt_override": prompt_override,
-            },
-            mode="request",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeCode", args={
+            "content": content,
+        }, mode="request")
         return result
-
-    def SummarizeCode(
-        self,
-        content: str,
+    def SummarizeContent(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-            mode="request",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeContent", args={
+            "content": content,
+        }, mode="request")
         return result
-
-    def SummarizeContent(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-            mode="request",
-        )
-        return result
-
+    
 
 class BamlHttpStreamRequestClient:
     __options: DoNotUseDirectlyCallManager
@@ -536,127 +240,41 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractCategories(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="stream",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractCategories", args={
+            "content": content,
+        }, mode="stream")
         return result
-
-    def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractContentGraphGeneric(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="stream",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractContentGraphGeneric", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        }, mode="stream")
         return result
-
-    def ExtractContentGraphWithAnthropic(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
+    def ExtractDynamicContentGraph(self, content: str,mode: typing.Optional[typing.Union[typing_extensions.Literal['simple'], typing_extensions.Literal['base'], typing_extensions.Literal['guided'], typing_extensions.Literal['strict'], typing_extensions.Literal['custom']]] = None,custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraphWithAnthropic",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="stream",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractDynamicContentGraph", args={
+            "content": content,"mode": mode,"custom_prompt_content": custom_prompt_content,
+        }, mode="stream")
         return result
-
-    def ExtractContentGraphWithEnvPrompt(
-        self,
-        content: str,
-        prompt_override: typing.Optional[str] = None,
+    def SummarizeCode(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="ExtractContentGraphWithEnvPrompt",
-            args={
-                "content": content,
-                "prompt_override": prompt_override,
-            },
-            mode="stream",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeCode", args={
+            "content": content,
+        }, mode="stream")
         return result
-
-    def SummarizeCode(
-        self,
-        content: str,
+    def SummarizeContent(self, content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-            mode="stream",
-        )
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="SummarizeContent", args={
+            "content": content,
+        }, mode="stream")
         return result
-
-    def SummarizeContent(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = self.__options.merge_options(baml_options).create_http_request_sync(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-            mode="stream",
-        )
-        return result
-
+    
 
 b = BamlSyncClient(DoNotUseDirectlyCallManager({}))

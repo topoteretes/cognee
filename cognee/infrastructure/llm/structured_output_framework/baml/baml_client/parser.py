@@ -16,77 +16,43 @@ import typing_extensions
 from . import stream_types, types
 from .runtime import DoNotUseDirectlyCallManager, BamlCallOptions
 
-
 class LlmResponseParser:
     __options: DoNotUseDirectlyCallManager
 
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractContentGraph(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraph", llm_response=llm_response, mode="request"
-        )
-        return typing.cast(types.KnowledgeGraph, result)
+    def ExtractCategories(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.DefaultContentPrediction:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractCategories", llm_response=llm_response, mode="request")
+        return typing.cast(types.DefaultContentPrediction, result)
 
     def ExtractContentGraphGeneric(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
+        self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphGeneric", llm_response=llm_response, mode="request"
-        )
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractContentGraphGeneric", llm_response=llm_response, mode="request")
         return typing.cast(types.KnowledgeGraph, result)
 
-    def ExtractContentGraphWithAnthropic(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphWithAnthropic",
-            llm_response=llm_response,
-            mode="request",
-        )
-        return typing.cast(types.KnowledgeGraph, result)
-
-    def ExtractContentGraphWithEnvPrompt(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphWithEnvPrompt",
-            llm_response=llm_response,
-            mode="request",
-        )
-        return typing.cast(types.KnowledgeGraph, result)
+    def ExtractDynamicContentGraph(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.DynamicKnowledgeGraph:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractDynamicContentGraph", llm_response=llm_response, mode="request")
+        return typing.cast(types.DynamicKnowledgeGraph, result)
 
     def SummarizeCode(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
+        self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.SummarizedCode:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="SummarizeCode", llm_response=llm_response, mode="request"
-        )
+        result = self.__options.merge_options(baml_options).parse_response(function_name="SummarizeCode", llm_response=llm_response, mode="request")
         return typing.cast(types.SummarizedCode, result)
 
     def SummarizeContent(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
+        self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.SummarizedContent:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="SummarizeContent", llm_response=llm_response, mode="request"
-        )
+        result = self.__options.merge_options(baml_options).parse_response(function_name="SummarizeContent", llm_response=llm_response, mode="request")
         return typing.cast(types.SummarizedContent, result)
 
+    
 
 class LlmStreamParser:
     __options: DoNotUseDirectlyCallManager
@@ -94,66 +60,34 @@ class LlmStreamParser:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractContentGraph(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
-    ) -> stream_types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraph", llm_response=llm_response, mode="stream"
-        )
-        return typing.cast(stream_types.KnowledgeGraph, result)
+    def ExtractCategories(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.DefaultContentPrediction:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractCategories", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.DefaultContentPrediction, result)
 
     def ExtractContentGraphGeneric(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
+        self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> stream_types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphGeneric", llm_response=llm_response, mode="stream"
-        )
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractContentGraphGeneric", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.KnowledgeGraph, result)
 
-    def ExtractContentGraphWithAnthropic(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
-    ) -> stream_types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphWithAnthropic",
-            llm_response=llm_response,
-            mode="stream",
-        )
-        return typing.cast(stream_types.KnowledgeGraph, result)
-
-    def ExtractContentGraphWithEnvPrompt(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
-    ) -> stream_types.KnowledgeGraph:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphWithEnvPrompt",
-            llm_response=llm_response,
-            mode="stream",
-        )
-        return typing.cast(stream_types.KnowledgeGraph, result)
+    def ExtractDynamicContentGraph(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.DynamicKnowledgeGraph:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractDynamicContentGraph", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.DynamicKnowledgeGraph, result)
 
     def SummarizeCode(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
+        self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> stream_types.SummarizedCode:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="SummarizeCode", llm_response=llm_response, mode="stream"
-        )
+        result = self.__options.merge_options(baml_options).parse_response(function_name="SummarizeCode", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.SummarizedCode, result)
 
     def SummarizeContent(
-        self,
-        llm_response: str,
-        baml_options: BamlCallOptions = {},
+        self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> stream_types.SummarizedContent:
-        result = self.__options.merge_options(baml_options).parse_response(
-            function_name="SummarizeContent", llm_response=llm_response, mode="stream"
-        )
+        result = self.__options.merge_options(baml_options).parse_response(function_name="SummarizeContent", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.SummarizedContent, result)
+
+    

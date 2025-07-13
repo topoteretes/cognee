@@ -1,11 +1,13 @@
 import os
 from typing import Type
 from pydantic import BaseModel
+from cognee.infrastructure.llm.structured_output_framework.baml_src.config import get_llm_config
+config = get_llm_config()
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import b
 from cognee.infrastructure.llm.structured_output_framework.baml_src.config import get_llm_config
 from cognee.shared.data_models import SummarizedCode
 from cognee.shared.logging_utils import get_logger
-
+from baml_py import ClientRegistry
 logger = get_logger("extract_summary_baml")
 
 
@@ -35,9 +37,21 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
     """
     config = get_llm_config()
 
+    baml_registry = ClientRegistry()
+
+    baml_registry.add_llm_client(
+        name="def",
+        provider="openai",
+        options={
+            "model": config.llm_model,
+            "temperature": config.llm_temperature,
+            "api_key": config.llm_api_key
+        })
+    baml_registry.set_primary('def')
+
     # Use BAML's SummarizeContent function
     summary_result = await b.SummarizeContent(
-        content, baml_options={"client_registry": config.baml_registry}
+        content, baml_options={"client_registry": baml_registry}
     )
 
     # Convert BAML result to the expected response model
@@ -74,8 +88,20 @@ async def extract_code_summary(content: str):
     else:
         try:
             config = get_llm_config()
+
+            baml_registry = ClientRegistry()
+
+            baml_registry.add_llm_client(
+                name="def",
+                provider="openai",
+                options={
+                    "model": config.llm_model,
+                    "temperature": config.llm_temperature,
+                    "api_key": config.llm_api_key
+                })
+            baml_registry.set_primary('def')
             result = await b.SummarizeCode(
-                content, baml_options={"client_registry": config.baml_registry}
+                content, baml_options={"client_registry": baml_registry}
             )
         except Exception as e:
             logger.error(

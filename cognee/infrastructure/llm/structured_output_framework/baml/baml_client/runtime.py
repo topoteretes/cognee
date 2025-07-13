@@ -17,10 +17,7 @@ import typing_extensions
 import baml_py
 
 from . import types, stream_types, type_builder
-from .globals import (
-    DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__,
-    DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_CTX as __ctx__manager__,
-)
+from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__, DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_CTX as __ctx__manager__
 
 
 class BamlCallOptions(typing.TypedDict, total=False):
@@ -51,6 +48,9 @@ class _ResolvedBamlOptions:
         self.env_vars = env_vars
 
 
+
+
+
 class DoNotUseDirectlyCallManager:
     def __init__(self, baml_options: BamlCallOptions):
         self.__baml_options = baml_options
@@ -74,9 +74,7 @@ class DoNotUseDirectlyCallManager:
         collectors_as_list = (
             collector
             if isinstance(collector, list)
-            else [collector]
-            if collector is not None
-            else []
+            else [collector] if collector is not None else []
         )
         env_vars = os.environ.copy()
         for k, v in self.__baml_options.get("env", {}).items():
@@ -166,9 +164,7 @@ class DoNotUseDirectlyCallManager:
         *,
         function_name: str,
         args: typing.Dict[str, typing.Any],
-    ) -> typing.Tuple[
-        baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.SyncFunctionResultStream
-    ]:
+    ) -> typing.Tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.SyncFunctionResultStream]:
         resolved_options = self.__resolve()
         ctx = __ctx__manager__.get()
         result = __runtime__.stream_function_sync(
@@ -176,7 +172,7 @@ class DoNotUseDirectlyCallManager:
             args,
             # this is always None, we set this later!
             # on_event
-            None,
+            None,   
             # ctx
             ctx,
             # tb
@@ -236,13 +232,7 @@ class DoNotUseDirectlyCallManager:
             mode == "stream",
         )
 
-    def parse_response(
-        self,
-        *,
-        function_name: str,
-        llm_response: str,
-        mode: typing_extensions.Literal["stream", "request"],
-    ) -> typing.Any:
+    def parse_response(self, *, function_name: str, llm_response: str, mode: typing_extensions.Literal["stream", "request"]) -> typing.Any:
         resolved_options = self.__resolve()
         return __runtime__.parse_llm_response(
             function_name,
