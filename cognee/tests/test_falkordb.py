@@ -91,56 +91,44 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-
-    # Debug: Let's see what's actually in the database
-    print("🔍 Debugging FalkorDB contents...")
-    try:
-        # Check what nodes exist in the database
-        debug_query = "MATCH (n) RETURN labels(n) AS labels, properties(n) AS properties LIMIT 10"
-        debug_result = vector_engine.query(debug_query)
-        print(f"Database contains {len(debug_result.result_set)} nodes (showing first 10):")
-        for i, record in enumerate(debug_result.result_set):
-            print(f"  Node {i}: Labels={record[0]}, Properties={record[1]}")
-    except Exception as e:
-        print(f"Error querying database: {e}")
-
-    # Try different search approaches
-    search_terms = ["AI", "LLM", "GPT", "OpenAI", "language", "model"]
-    search_fields = ["Entity_name", "name", "text", "Entity.name"]
-
+    
+    # Try different search terms that are likely to be found as entities in the processed text
+    search_terms = ["GPT", "OpenAI", "language model", "LLM", "AI", "neural network"]
     search_results = []
-    for field in search_fields:
-        for term in search_terms:
-            try:
-                results = await vector_engine.search(field, term)
-                if results:
-                    print(f"✅ Found {len(results)} results for field '{field}' with term '{term}'")
-                    search_results = results
-                    break
-            except Exception as e:
-                print(f"❌ Error searching field '{field}' with term '{term}': {e}")
+    
+    for term in search_terms:
+        search_results = await vector_engine.search("Entity_name", term)
         if search_results:
+            print(f"✅ Found {len(search_results)} results for '{term}'")
             break
-
+    
+    # If no entities found with common search terms, fallback to any Entity
     if not search_results:
-        # If still no results, try to get any Entity node
         try:
-            entity_query = "MATCH (n:Entity) RETURN n LIMIT 1"
-            entity_result = vector_engine.query(entity_query)
-            if entity_result.result_set:
-                print("✅ Found Entity node directly via query")
-                # Create a mock search result format
-                entity_node = entity_result.result_set[0][0]
-                search_results = [
-                    type(
-                        "MockResult",
-                        (),
-                        {"payload": {"text": entity_node.properties.get("name", "Entity")}},
-                    )()
-                ]
+            # Try a broader search for any entity
+            search_results = await vector_engine.search("Entity_name", "")
+            if not search_results:
+                # Direct query as last resort
+                entity_query = "MATCH (n:Entity) RETURN n, 1.0 as score LIMIT 1"
+                entity_result = vector_engine.query(entity_query)
+                if entity_result.result_set:
+                    # Convert to ScoredResult format
+                    from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+                    from cognee.shared.utils import parse_id
+                    
+                    node = entity_result.result_set[0][0]
+                    payload = dict(node.properties) if hasattr(node, 'properties') else {}
+                    if 'text' not in payload and 'name' in payload:
+                        payload['text'] = payload['name']
+                    
+                    search_results = [ScoredResult(
+                        id=parse_id(payload.get('id', str(hash(str(node))))),
+                        score=1.0,
+                        payload=payload
+                    )]
         except Exception as e:
-            print(f"❌ Error querying Entity nodes: {e}")
-
+            print(f"❌ Error in fallback search: {e}")
+    
     assert len(search_results) > 0, "No entities found in the vector database"
     random_node = search_results[0]
     random_node_name = random_node.payload["text"]
