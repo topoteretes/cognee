@@ -1,3 +1,4 @@
+import os
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
@@ -37,8 +38,9 @@ def get_delete_router() -> APIRouter:
             # Handle each file in the list
             results = []
             for file in data:
-                # TODO: Add check if HTTP Requests are enabled before allowing requests and git clone
-                if file.filename.startswith("http"):
+                if file.filename.startswith("http") and (
+                    os.getenv("ALLOW_HTTP_REQUESTS", "true").lower() == "true"
+                ):
                     if "github" in file.filename:
                         # For GitHub repos, we need to get the content hash of each file
                         repo_name = file.filename.split("/")[-1].replace(".git", "")
