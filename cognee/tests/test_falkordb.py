@@ -91,17 +91,17 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    
+
     # Try different search terms that are likely to be found as entities in the processed text
     search_terms = ["GPT", "OpenAI", "language model", "LLM", "AI", "neural network"]
     search_results = []
-    
+
     for term in search_terms:
         search_results = await vector_engine.search("Entity_name", term)
         if search_results:
             print(f"✅ Found {len(search_results)} results for '{term}'")
             break
-    
+
     # If no entities found with common search terms, fallback to any Entity
     if not search_results:
         try:
@@ -113,22 +113,26 @@ async def main():
                 entity_result = vector_engine.query(entity_query)
                 if entity_result.result_set:
                     # Convert to ScoredResult format
-                    from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+                    from cognee.infrastructure.databases.vector.models.ScoredResult import (
+                        ScoredResult,
+                    )
                     from cognee.shared.utils import parse_id
-                    
+
                     node = entity_result.result_set[0][0]
-                    payload = dict(node.properties) if hasattr(node, 'properties') else {}
-                    if 'text' not in payload and 'name' in payload:
-                        payload['text'] = payload['name']
-                    
-                    search_results = [ScoredResult(
-                        id=parse_id(payload.get('id', str(hash(str(node))))),
-                        score=1.0,
-                        payload=payload
-                    )]
+                    payload = dict(node.properties) if hasattr(node, "properties") else {}
+                    if "text" not in payload and "name" in payload:
+                        payload["text"] = payload["name"]
+
+                    search_results = [
+                        ScoredResult(
+                            id=parse_id(payload.get("id", str(hash(str(node))))),
+                            score=1.0,
+                            payload=payload,
+                        )
+                    ]
         except Exception as e:
             print(f"❌ Error in fallback search: {e}")
-    
+
     assert len(search_results) > 0, "No entities found in the vector database"
     random_node = search_results[0]
     random_node_name = random_node.payload["text"]
