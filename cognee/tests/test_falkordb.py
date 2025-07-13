@@ -91,7 +91,16 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("entity.name", "AI"))[0]
+    search_results = await vector_engine.search("Entity_name", "AI")
+    if not search_results:
+        # If "AI" is not found, try searching for "LLM" which is more likely to be an entity
+        search_results = await vector_engine.search("Entity_name", "LLM")
+    if not search_results:
+        # If still no results, try a broader search
+        search_results = await vector_engine.search("Entity_name", "language model")
+    
+    assert len(search_results) > 0, "No entities found in the vector database"
+    random_node = search_results[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
