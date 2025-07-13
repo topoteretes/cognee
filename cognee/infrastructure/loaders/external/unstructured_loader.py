@@ -104,7 +104,6 @@ class UnstructuredLoader(LoaderInterface):
 
             # Determine content type from file extension
             file_ext = os.path.splitext(file_path)[1].lower()
-            content_type_hint = None
 
             # Get file size and basic info
             file_size = os.path.getsize(file_path)

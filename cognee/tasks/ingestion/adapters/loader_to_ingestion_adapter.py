@@ -235,6 +235,5 @@ class LoaderToIngestionAdapter:
         Returns:
             IngestionData compatible object
         """
-        from cognee.modules.ingestion.data_types import TextData
 
         return TextData(content)
