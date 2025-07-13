@@ -98,7 +98,7 @@ async def main():
     if not search_results:
         # If still no results, try a broader search
         search_results = await vector_engine.search("Entity_name", "language model")
-    
+
     assert len(search_results) > 0, "No entities found in the vector database"
     random_node = search_results[0]
     random_node_name = random_node.payload["text"]
