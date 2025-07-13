@@ -15,13 +15,18 @@ async def add(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     dataset_id: UUID = None,
+    preferred_loaders: Optional[List[str]] = None,
+    loader_config: Optional[dict] = None,
 ):
     """
-    Add data to Cognee for knowledge graph processing.
+    Add data to Cognee for knowledge graph processing using a plugin-based loader system.
 
     This is the first step in the Cognee workflow - it ingests raw data and prepares it
     for processing. The function accepts various data formats including text, files, and
     binary streams, then stores them in a specified dataset for further processing.
+
+    This version supports both the original ingestion system (for backward compatibility)
+    and the new plugin-based loader system (when loader parameters are provided).
 
     Prerequisites:
         - **LLM_API_KEY**: Must be set in environment variables for content processing
@@ -38,16 +43,38 @@ async def add(
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
-        - Text files (.txt, .md, .csv)
-        - PDFs (.pdf)
+        - Text files (.txt, .md, .csv) - processed by text_loader
+        - PDFs (.pdf) - processed by pypdf_loader (if available)
         - Images (.png, .jpg, .jpeg) - extracted via OCR/vision models
         - Audio files (.mp3, .wav) - transcribed to text
         - Code files (.py, .js, .ts, etc.) - parsed for structure and content
-        - Office documents (.docx, .pptx)
+        - Office documents (.docx, .pptx) - processed by unstructured_loader (if available)
+        - Data files (.json, .jsonl, .parquet) - processed by dlt_loader (if available)
 
-            Workflow:
+    Plugin System:
+        The function automatically uses the best available loader for each file type.
+        You can customize this behavior using the loader parameters:
+
+        ```python
+        # Use specific loaders in priority order
+        await cognee.add(
+            "/path/to/document.pdf",
+            preferred_loaders=["pypdf_loader", "text_loader"]
+        )
+
+        # Configure loader-specific options
+        await cognee.add(
+            "/path/to/document.pdf",
+            loader_config={
+                "pypdf_loader": {"strict": False},
+                "unstructured_loader": {"strategy": "hi_res"}
+            }
+        )
+        ```
+
+    Workflow:
         1. **Data Resolution**: Resolves file paths and validates accessibility
-        2. **Content Extraction**: Extracts text content from various file formats
+        2. **Content Extraction**: Uses plugin system or falls back to existing classification
         3. **Dataset Storage**: Stores processed content in the specified dataset
         4. **Metadata Tracking**: Records file metadata, timestamps, and user permissions
         5. **Permission Assignment**: Grants user read/write/delete/share permissions on dataset
@@ -70,6 +97,10 @@ async def add(
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        preferred_loaders: Optional list of loader names to try first (e.g., ["pypdf_loader", "text_loader"]).
+                         If not provided, uses default loader priority.
+        loader_config: Optional configuration for specific loaders. Dictionary mapping loader names
+                      to their configuration options (e.g., {"pypdf_loader": {"strict": False}}).
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -138,10 +169,32 @@ async def add(
         UnsupportedFileTypeError: If file format cannot be processed
         InvalidValueError: If LLM_API_KEY is not set or invalid
     """
-    tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
-        Task(ingest_data, dataset_name, user, node_set, dataset_id),
-    ]
+
+    # Determine which ingestion system to use
+    use_plugin_system = preferred_loaders is not None or loader_config is not None
+
+    if use_plugin_system:
+        # Use new plugin-based ingestion system
+        from cognee.tasks.ingestion.plugin_ingest_data import plugin_ingest_data
+
+        tasks = [
+            Task(resolve_data_directories, include_subdirectories=True),
+            Task(
+                plugin_ingest_data,
+                dataset_name,
+                user,
+                node_set,
+                dataset_id,
+                preferred_loaders,
+                loader_config,
+            ),
+        ]
+    else:
+        # Use existing ingestion system for backward compatibility
+        tasks = [
+            Task(resolve_data_directories, include_subdirectories=True),
+            Task(ingest_data, dataset_name, user, node_set, dataset_id),
+        ]
 
     pipeline_run_info = None
 
