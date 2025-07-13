@@ -10,7 +10,7 @@ dependencies = [
     #"cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/<username>/Desktop/cognee",
     "cognee[postgres,codegraph,gemini,huggingface,docs,neo4j]>=0.2.0,<1.0.0",
     "fastmcp>=1.0,<2.0.0",
-    "mcp>=1.10.0,<2.0.0",
+    "mcp>=1.11.0,<2.0.0",
     "uv>=0.6.3,<1.0.0",
 ]
 
