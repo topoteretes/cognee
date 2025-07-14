@@ -24,7 +24,13 @@ class config:
 
         graph_config = get_graph_config()
         graph_file_name = graph_config.graph_filename
-        graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
+        # For Kuzu v0.11.0+, use single-file database with .kuzu extension
+        if graph_config.graph_database_provider.lower() == "kuzu":
+            graph_config.graph_file_path = os.path.join(
+                databases_directory_path, f"{graph_file_name}.kuzu"
+            )
+        else:
+            graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
 
         vector_config = get_vectordb_config()
         if vector_config.vector_db_provider == "lancedb":

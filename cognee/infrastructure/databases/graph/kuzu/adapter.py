@@ -1410,9 +1410,9 @@ class KuzuAdapter(GraphDBInterface):
 
     async def delete_graph(self) -> None:
         """
-        Delete all data from the graph directory.
+        Delete all data from the graph database.
 
-        This method deletes all nodes and relationships from the graph directory
+        This method deletes all nodes and relationships from the graph database.
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
