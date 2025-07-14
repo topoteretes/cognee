@@ -9,12 +9,9 @@ from .storage import Storage
 
 
 def get_parsed_path(file_path: str) -> str:
-    print(f"DEBUG: get_parsed_path called with file_path='{file_path}'")
-
     # Check if this is actually a URL (has a scheme like file://, http://, etc.)
     if "://" in file_path:
         parsed_url = urlparse(file_path)
-        print(f"DEBUG: Found URL scheme: {parsed_url.scheme}")
 
         # Handle file:// URLs specially
         if parsed_url.scheme == "file":
@@ -44,14 +41,10 @@ def get_parsed_path(file_path: str) -> str:
                 parsed_path = parsed_path[1:]
 
         # Normalize path separators to ensure consistency
-        result = os.path.normpath(parsed_path)
-        print(f"DEBUG: URL path result: '{result}'")
-        return result
+        return os.path.normpath(parsed_path)
     else:
         # This is a regular file path, not a URL - normalize separators
-        result = os.path.normpath(file_path)
-        print(f"DEBUG: Regular path result: '{result}'")
-        return result
+        return os.path.normpath(file_path)
 
 
 class LocalFileStorage(Storage):
@@ -63,7 +56,6 @@ class LocalFileStorage(Storage):
     storage_path: Optional[str] = None
 
     def __init__(self, storage_path: str):
-        print(f"DEBUG: LocalFileStorage.__init__ called with storage_path='{storage_path}'")
         self.storage_path = storage_path
 
     def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False) -> str:
