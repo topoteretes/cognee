@@ -1,4 +1,5 @@
 import io
+import os.path
 from typing import BinaryIO, TypedDict
 
 from cognee.shared.logging_utils import get_logger
@@ -22,6 +23,7 @@ class FileMetadata(TypedDict):
     mime_type: str
     extension: str
     content_hash: str
+    file_size: int
 
 
 def get_file_metadata(file: BinaryIO) -> FileMetadata:
@@ -54,6 +56,7 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
 
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
     file_name = str(file_path).split("/")[-1].split(".")[0] if file_path else None
+    file_size = os.path.getsize(file_path)
 
     return FileMetadata(
         name=file_name,
@@ -61,4 +64,5 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
         mime_type=file_type.mime,
         extension=file_type.extension,
         content_hash=content_hash,
+        file_size=file_size,
     )
