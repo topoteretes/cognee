@@ -9,17 +9,22 @@ from .storage import Storage
 
 
 def get_parsed_path(file_path: str) -> str:
-    parsed_url = urlparse(file_path)
+    # Check if this is actually a URL (has a scheme like file://, http://, etc.)
+    if "://" in file_path:
+        parsed_url = urlparse(file_path)
 
-    # On Windows, urlparse handles drive letters correctly
-    # Convert the path component to a proper file path
-    if os.name == "nt":  # Windows
-        # Remove leading slash from Windows paths like /C:/Users/...
-        parsed_path = parsed_url.path.lstrip("/")
-    else:  # Unix-like systems
-        parsed_path = parsed_url.path
+        # On Windows, urlparse handles drive letters correctly
+        # Convert the path component to a proper file path
+        if os.name == "nt":  # Windows
+            # Remove leading slash from Windows paths like /C:/Users/...
+            parsed_path = parsed_url.path.lstrip("/")
+        else:  # Unix-like systems
+            parsed_path = parsed_url.path
 
-    return parsed_path
+        return parsed_path
+    else:
+        # This is a regular file path, not a URL - return as is
+        return file_path
 
 
 class LocalFileStorage(Storage):
