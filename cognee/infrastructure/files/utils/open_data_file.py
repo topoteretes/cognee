@@ -9,7 +9,7 @@ from cognee.infrastructure.files.storage import get_file_storage
 async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
     # Normalize path separators to handle mixed separators on Windows
     normalized_path = os.path.normpath(file_path)
-    
+
     file_dir_path = path.dirname(normalized_path)
     file_name = path.basename(normalized_path)
 

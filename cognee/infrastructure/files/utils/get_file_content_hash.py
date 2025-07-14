@@ -14,7 +14,7 @@ async def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
         if isinstance(file_obj, str):
             # Normalize path separators to handle mixed separators on Windows
             normalized_path = os.path.normpath(file_obj)
-            
+
             file_dir_path = path.dirname(normalized_path)
             file_path = path.basename(normalized_path)
 

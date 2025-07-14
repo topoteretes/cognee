@@ -32,7 +32,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if data_item.startswith("s3://") or data_item.startswith("file://"):
             file_path = data_item
         # data is a file path
-        elif data_item.startswith("/") or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":"):
+        elif data_item.startswith("/") or (
+            os.name == "nt" and len(data_item) > 1 and data_item[1] == ":"
+        ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
                 # Use pathlib to properly construct file URLs
