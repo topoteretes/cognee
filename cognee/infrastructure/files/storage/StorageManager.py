@@ -4,6 +4,12 @@ from contextlib import asynccontextmanager
 
 from .storage import Storage
 
+# Import here to avoid circular imports and repeated imports in the open method
+try:
+    from .S3FileStorage import S3FileStorage
+except ImportError:
+    S3FileStorage = None
+
 
 class StorageManager:
     """
@@ -76,10 +82,14 @@ class StorageManager:
 
             Returns the retrieved data, as defined by the storage implementation.
         """
-        if "s3://" in self.storage.storage_path:
+        # Check the actual storage type to determine if open() is async or sync
+
+        if isinstance(self.storage, S3FileStorage):
+            # S3FileStorage.open() is async
             async with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
         else:
+            # LocalFileStorage.open() is sync
             with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
 

@@ -8,7 +8,8 @@ from .StorageManager import StorageManager
 def get_file_storage(storage_path: str) -> StorageManager:
     base_config = get_base_config()
 
-    if (
+    # Use S3FileStorage if the storage_path is an S3 URL or if configured for S3
+    if storage_path.startswith("s3://") or (
         os.getenv("STORAGE_BACKEND") == "s3"
         and "s3://" in base_config.system_root_directory
         and "s3://" in base_config.data_root_directory
