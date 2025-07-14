@@ -5,8 +5,8 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
 from pydantic import Field
+from cognee.base_config import get_base_config
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.root_dir import get_absolute_path
 
 
 class GraphConfig(BaseSettings):
@@ -55,8 +55,14 @@ class GraphConfig(BaseSettings):
             values.graph_filename = f"cognee_graph_{provider}"
         # Set file path based on graph database provider if no file path is provided
         if not values.graph_file_path:
-            base = os.path.join(get_absolute_path(".cognee_system"), "databases")
-            values.graph_file_path = os.path.join(base, values.graph_filename)
+            base_config = get_base_config()
+
+            base = os.path.join(base_config.system_root_directory, "databases")
+            # For Kuzu v0.11.0+, use single-file database with .kuzu extension
+            if provider == "kuzu":
+                values.graph_file_path = os.path.join(base, f"{values.graph_filename}.kuzu")
+            else:
+                values.graph_file_path = os.path.join(base, values.graph_filename)
         return values
 
     def to_dict(self) -> dict:

@@ -4,7 +4,7 @@ from typing import List
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
 from cognee.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
 from cognee.eval_framework.analysis.dashboard_generator import create_dashboard
-from cognee.infrastructure.files.storage import LocalStorage
+from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
     get_relational_engine,
     get_relational_config,
@@ -21,7 +21,7 @@ async def create_and_insert_metrics_table(questions_payload):
     relational_engine = get_relational_engine()
 
     if relational_engine.engine.dialect.name == "sqlite":
-        LocalStorage.ensure_directory_exists(relational_config.db_path)
+        await get_file_storage(relational_config.db_path).ensure_directory_exists()
 
     async with relational_engine.engine.begin() as connection:
         if len(MetricsBase.metadata.tables.keys()) > 0:
