@@ -183,6 +183,9 @@ class LocalFileStorage(Storage):
         """
         if directory_path is None:
             directory_path = get_parsed_path(self.storage_path)
+        elif not directory_path or directory_path.strip() == "":
+            # Handle empty string case - use current directory or storage path
+            directory_path = get_parsed_path(self.storage_path) or "."
 
         if not os.path.exists(directory_path):
             os.makedirs(directory_path, exist_ok=True)

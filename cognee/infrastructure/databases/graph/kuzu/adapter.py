@@ -61,6 +61,13 @@ class KuzuAdapter(GraphDBInterface):
                 # Ensure the parent directory exists before creating the database
                 db_dir = os.path.dirname(self.db_path)
 
+                # If db_path is just a filename, db_dir will be empty string
+                # In this case, use the directory containing the db_path or current directory
+                if not db_dir:
+                    # If no directory in path, use the absolute path's directory
+                    abs_path = os.path.abspath(self.db_path)
+                    db_dir = os.path.dirname(abs_path)
+
                 file_storage = get_file_storage(db_dir)
 
                 run_sync(file_storage.ensure_directory_exists())
