@@ -54,6 +54,19 @@ class KuzuAdapter(GraphDBInterface):
 
                 self.db = Database(self.temp_graph_directory)
             else:
+                # Ensure the parent directory exists before creating the database
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    file_storage = get_file_storage(db_dir)
+                    if hasattr(file_storage, "ensure_directory_exists"):
+                        if asyncio.iscoroutinefunction(file_storage.ensure_directory_exists):
+                            run_sync(file_storage.ensure_directory_exists())
+                        else:
+                            file_storage.ensure_directory_exists()
+                    else:
+                        # Fallback to os.makedirs if file_storage doesn't have ensure_directory_exists
+                        os.makedirs(db_dir, exist_ok=True)
+
                 self.db = Database(self.db_path)
 
             self.db.init_database()
