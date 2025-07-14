@@ -41,7 +41,71 @@ def get_cognify_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
-        """This endpoint is responsible for the cognitive processing of the content."""
+        """
+        Transform datasets into structured knowledge graphs through cognitive processing.
+
+        This endpoint is the core of Cognee's intelligence layer, responsible for converting
+        raw text, documents, and data added through the add endpoint into semantic knowledge graphs.
+        It performs deep analysis to extract entities, relationships, and insights from ingested content.
+
+        The processing pipeline includes:
+        1. Document classification and permission validation
+        2. Text chunking and semantic segmentation
+        3. Entity extraction using LLM-powered analysis
+        4. Relationship detection and graph construction
+        5. Vector embeddings generation for semantic search
+        6. Content summarization and indexing
+
+        Args:
+            payload (CognifyPayloadDTO): Request payload containing processing parameters:
+                - datasets (Optional[List[str]]): List of dataset names to process.
+                  Dataset names are resolved to datasets owned by the authenticated user.
+                - dataset_ids (Optional[List[UUID]]): List of dataset UUIDs to process.
+                  UUIDs allow processing of datasets not owned by the user (if permitted).
+                - graph_model (Optional[BaseModel]): Custom Pydantic model defining the
+                  knowledge graph schema. Defaults to KnowledgeGraph for general-purpose
+                  processing. Custom models enable domain-specific entity extraction.
+                - run_in_background (Optional[bool]): Whether to execute processing
+                  asynchronously. Defaults to False (blocking).
+
+            user (User): Authenticated user context injected via dependency injection.
+                Used for permission validation and data access control.
+
+        Returns:
+            dict: Processing results containing:
+                - For blocking execution: Complete pipeline run information with
+                  entity counts, processing duration, and success/failure status
+                - For background execution: Pipeline run metadata including
+                  pipeline_run_id for status monitoring via WebSocket subscription
+
+        Raises:
+            HTTPException 400: Bad Request
+                - When neither datasets nor dataset_ids are provided
+                - When specified datasets don't exist or are inaccessible
+
+            HTTPException 409: Conflict
+                - When processing fails due to system errors
+                - When LLM API keys are missing or invalid
+                - When database connections fail
+                - When content cannot be processed (corrupted files, unsupported formats)
+
+        Example Usage:
+            ```python
+            # Process specific datasets synchronously
+            POST /api/v1/cognify
+            {
+                "datasets": ["research_papers", "documentation"],
+                "run_in_background": false
+            }
+            ```
+        Notes:
+            To cognify data in a datasets not owned by the user and for which the current user has write permission for
+            the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
+
+        Next Steps:
+            After successful processing, use the search endpoints to query the
+            generated knowledge graph for insights, relationships, and semantic search.
+        """
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(
                 status_code=400, content={"error": "No datasets or dataset_ids provided"}
