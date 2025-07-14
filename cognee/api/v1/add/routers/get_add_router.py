@@ -54,6 +54,8 @@ def get_add_router() -> APIRouter:
             PermissionDeniedError: If the user doesn't have permission to add to the dataset
 
         Note:
+            - To add data to a datasets not owned by the user and for which the user has write permission for
+              the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
             - GitHub repositories are cloned and all files are processed
             - HTTP URLs are fetched and their content is processed
             - Regular files are uploaded and processed directly
