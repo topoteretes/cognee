@@ -1,4 +1,5 @@
 import hashlib
+import os
 from os import path
 from typing import BinaryIO, Union
 
@@ -11,8 +12,11 @@ async def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
 
     try:
         if isinstance(file_obj, str):
-            file_dir_path = path.dirname(file_obj)
-            file_path = path.basename(file_obj)
+            # Normalize path separators to handle mixed separators on Windows
+            normalized_path = os.path.normpath(file_obj)
+            
+            file_dir_path = path.dirname(normalized_path)
+            file_path = path.basename(normalized_path)
 
             file_storage = get_file_storage(file_dir_path)
 

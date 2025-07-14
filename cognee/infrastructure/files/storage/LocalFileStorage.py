@@ -40,10 +40,11 @@ def get_parsed_path(file_path: str) -> str:
             ):
                 parsed_path = parsed_path[1:]
 
-        return parsed_path
+        # Normalize path separators to ensure consistency
+        return os.path.normpath(parsed_path)
     else:
-        # This is a regular file path, not a URL - return as is
-        return file_path
+        # This is a regular file path, not a URL - normalize separators
+        return os.path.normpath(file_path)
 
 
 class LocalFileStorage(Storage):

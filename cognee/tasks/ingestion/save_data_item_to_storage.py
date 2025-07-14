@@ -1,5 +1,6 @@
 import os
 from typing import Union, BinaryIO, Any
+from pathlib import Path
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
@@ -31,9 +32,11 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if data_item.startswith("s3://") or data_item.startswith("file://"):
             file_path = data_item
         # data is a file path
-        elif data_item.startswith("/"):
+        elif data_item.startswith("/") or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":"):
+            # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
-                file_path = "file://" + data_item
+                # Use pathlib to properly construct file URLs
+                file_path = Path(data_item).as_uri()
             else:
                 raise IngestionError(message="Local files are not accepted.")
         # data is text
