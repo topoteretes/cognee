@@ -22,19 +22,22 @@ def get_visualize_router() -> APIRouter:
         This endpoint creates an interactive HTML visualization of the knowledge graph
         for a specific dataset. The visualization displays nodes and edges representing
         entities and their relationships, allowing users to explore the graph structure
-        visually. The user must have read permissions on the dataset.
+        visually.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset to visualize
-            user: The authenticated user requesting the visualization
+        ## Query Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset to visualize
 
-        Returns:
-            HTMLResponse: An HTML page containing the interactive graph visualization
+        ## Response
+        Returns an HTML page containing the interactive graph visualization.
 
-        Raises:
-            HTTPException: If there's an error generating the visualization
-            PermissionDeniedError: If the user doesn't have permission to read the dataset
-            DatasetNotFoundError: If the dataset doesn't exist
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist
+        - **403 Forbidden**: User doesn't have permission to read the dataset
+        - **500 Internal Server Error**: Error generating visualization
+
+        ## Notes
+        - User must have read permissions on the dataset
+        - Visualization is interactive and allows graph exploration
         """
         from cognee.api.v1.visualize import visualize_graph
 

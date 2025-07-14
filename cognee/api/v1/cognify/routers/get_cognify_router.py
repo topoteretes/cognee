@@ -48,7 +48,7 @@ def get_cognify_router() -> APIRouter:
         raw text, documents, and data added through the add endpoint into semantic knowledge graphs.
         It performs deep analysis to extract entities, relationships, and insights from ingested content.
 
-        The processing pipeline includes:
+        ## Processing Pipeline
         1. Document classification and permission validation
         2. Text chunking and semantic segmentation
         3. Entity extraction using LLM-powered analysis
@@ -56,55 +56,34 @@ def get_cognify_router() -> APIRouter:
         5. Vector embeddings generation for semantic search
         6. Content summarization and indexing
 
-        Args:
-            payload (CognifyPayloadDTO): Request payload containing processing parameters:
-                - datasets (Optional[List[str]]): List of dataset names to process.
-                  Dataset names are resolved to datasets owned by the authenticated user.
-                - dataset_ids (Optional[List[UUID]]): List of dataset UUIDs to process.
-                  UUIDs allow processing of datasets not owned by the user (if permitted).
-                - graph_model (Optional[BaseModel]): Custom Pydantic model defining the
-                  knowledge graph schema. Defaults to KnowledgeGraph for general-purpose
-                  processing. Custom models enable domain-specific entity extraction.
-                - run_in_background (Optional[bool]): Whether to execute processing
-                  asynchronously. Defaults to False (blocking).
+        ## Request Parameters
+        - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
+        - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
+        - **graph_model** (Optional[BaseModel]): Custom Pydantic model defining the knowledge graph schema. Defaults to KnowledgeGraph for general-purpose processing.
+        - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
 
-            user (User): Authenticated user context injected via dependency injection.
-                Used for permission validation and data access control.
+        ## Response
+        - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
+        - **Background execution**: Pipeline run metadata including pipeline_run_id for status monitoring via WebSocket subscription
 
-        Returns:
-            dict: Processing results containing:
-                - For blocking execution: Complete pipeline run information with
-                  entity counts, processing duration, and success/failure status
-                - For background execution: Pipeline run metadata including
-                  pipeline_run_id for status monitoring via WebSocket subscription
+        ## Error Codes
+        - **400 Bad Request**: When neither datasets nor dataset_ids are provided, or when specified datasets don't exist
+        - **409 Conflict**: When processing fails due to system errors, missing LLM API keys, database connection failures, or corrupted content
 
-        Raises:
-            HTTPException 400: Bad Request
-                - When neither datasets nor dataset_ids are provided
-                - When specified datasets don't exist or are inaccessible
+        ## Example Request
+        ```json
+        {
+            "datasets": ["research_papers", "documentation"],
+            "run_in_background": false
+        }
+        ```
 
-            HTTPException 409: Conflict
-                - When processing fails due to system errors
-                - When LLM API keys are missing or invalid
-                - When database connections fail
-                - When content cannot be processed (corrupted files, unsupported formats)
+        ## Notes
+        To cognify data in datasets not owned by the user and for which the current user has write permission,
+        the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True).
 
-        Example Usage:
-            ```python
-            # Process specific datasets synchronously
-            POST /api/v1/cognify
-            {
-                "datasets": ["research_papers", "documentation"],
-                "run_in_background": false
-            }
-            ```
-        Notes:
-            To cognify data in a datasets not owned by the user and for which the current user has write permission for
-            the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
-
-        Next Steps:
-            After successful processing, use the search endpoints to query the
-            generated knowledge graph for insights, relationships, and semantic search.
+        ## Next Steps
+        After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
         """
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(

@@ -76,7 +76,29 @@ def get_responses_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ) -> ResponseBody:
         """
-        OpenAI-compatible responses endpoint with function calling support
+        OpenAI-compatible responses endpoint with function calling support.
+
+        This endpoint provides OpenAI-compatible API responses with integrated
+        function calling capabilities for Cognee operations.
+
+        ## Request Parameters
+        - **input** (str): The input text to process
+        - **model** (str): The model to use for processing
+        - **tools** (Optional[List[Dict]]): Available tools for function calling
+        - **tool_choice** (Any): Tool selection strategy (default: "auto")
+        - **temperature** (float): Response randomness (default: 1.0)
+
+        ## Response
+        Returns an OpenAI-compatible response body with function call results.
+
+        ## Error Codes
+        - **400 Bad Request**: Invalid request parameters
+        - **500 Internal Server Error**: Error processing request
+
+        ## Notes
+        - Compatible with OpenAI API format
+        - Supports function calling with Cognee tools
+        - Uses default tools if none provided
         """
         # Use default tools if none provided
         tools = request.tools or DEFAULT_TOOLS
