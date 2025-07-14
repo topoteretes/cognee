@@ -52,9 +52,24 @@ class KuzuAdapter(GraphDBInterface):
 
                 run_sync(self.pull_from_s3())
 
-                self.db = Database(self.temp_graph_file)
+                self.db = Database(
+                    self.temp_graph_file,
+                    buffer_pool_size=256 * 1024 * 1024,  # 256MB buffer pool
+                    max_db_size=1024 * 1024 * 1024,
+                )
             else:
-                self.db = Database(self.db_path)
+                # Ensure the parent directory exists before creating the database
+                db_dir = os.path.dirname(self.db_path)
+
+                file_storage = get_file_storage(db_dir)
+
+                run_sync(file_storage.ensure_directory_exists())
+
+                self.db = Database(
+                    self.db_path,
+                    buffer_pool_size=256 * 1024 * 1024,  # 256MB buffer pool
+                    max_db_size=1024 * 1024 * 1024,
+                )
 
             self.db.init_database()
             self.connection = Connection(self.db)
