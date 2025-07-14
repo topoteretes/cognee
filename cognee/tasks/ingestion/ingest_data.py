@@ -125,8 +125,10 @@ async def ingest_data(
                     data_point.mime_type = file_metadata["mime_type"]
                     data_point.owner_id = user.id
                     data_point.content_hash = file_metadata["content_hash"]
+                    data_point.file_size = file_metadata["file_size"]
                     data_point.external_metadata = ext_metadata
                     data_point.node_set = json.dumps(node_set) if node_set else None
+                    data_point.tenant_id = user.tenant_id if user.tenant_id else None
 
                     # Check if data is already in dataset
                     if str(data_point.id) in dataset_data_map:
@@ -148,6 +150,8 @@ async def ingest_data(
                         content_hash=file_metadata["content_hash"],
                         external_metadata=ext_metadata,
                         node_set=json.dumps(node_set) if node_set else None,
+                        data_size=file_metadata["file_size"],
+                        tenant_id=user.tenant_id if user.tenant_id else None,
                         token_count=-1,
                     )
 
