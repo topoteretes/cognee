@@ -62,16 +62,15 @@ def get_permissions_router() -> APIRouter:
         to group permissions and can be assigned to users to manage access control
         more efficiently. The authenticated user becomes the owner of the created role.
 
-        Args:
-            role_name (str): The name of the role to create
-            user: The authenticated user creating the role
+        ## Request Parameters
+        - **role_name** (str): The name of the role to create
 
-        Returns:
-            JSONResponse: Success message indicating the role was created
+        ## Response
+        Returns a success message indicating the role was created.
 
-        Raises:
-            HTTPException: If there's an error creating the role
-            ValidationError: If the role name is invalid or already exists
+        ## Error Codes
+        - **400 Bad Request**: Invalid role name or role already exists
+        - **500 Internal Server Error**: Error creating the role
         """
         from cognee.modules.users.roles.methods import create_role as create_role_method
 
@@ -90,18 +89,20 @@ def get_permissions_router() -> APIRouter:
         permissions associated with that role. The authenticated user must be
         the owner of the role or have appropriate administrative permissions.
 
-        Args:
-            user_id (UUID): The UUID of the user to add to the role
-            role_id (UUID): The UUID of the role to assign the user to
-            user: The authenticated user performing the role assignment
+        ## Path Parameters
+        - **user_id** (UUID): The UUID of the user to add to the role
 
-        Returns:
-            JSONResponse: Success message indicating the user was added to the role
+        ## Request Parameters
+        - **role_id** (UUID): The UUID of the role to assign the user to
 
-        Raises:
-            HTTPException: If there's an error adding the user to the role
-            PermissionDeniedError: If the user doesn't have permission to assign roles
-            ValidationError: If the user or role doesn't exist
+        ## Response
+        Returns a success message indicating the user was added to the role.
+
+        ## Error Codes
+        - **400 Bad Request**: Invalid user or role ID
+        - **403 Forbidden**: User doesn't have permission to assign roles
+        - **404 Not Found**: User or role doesn't exist
+        - **500 Internal Server Error**: Error adding user to role
         """
         from cognee.modules.users.roles.methods import add_user_to_role as add_user_to_role_method
 
@@ -120,18 +121,20 @@ def get_permissions_router() -> APIRouter:
         resources and data associated with that tenant. The authenticated user must
         be the owner of the tenant or have appropriate administrative permissions.
 
-        Args:
-            user_id (UUID): The UUID of the user to add to the tenant
-            tenant_id (UUID): The UUID of the tenant to assign the user to
-            user: The authenticated user performing the tenant assignment
+        ## Path Parameters
+        - **user_id** (UUID): The UUID of the user to add to the tenant
 
-        Returns:
-            JSONResponse: Success message indicating the user was added to the tenant
+        ## Request Parameters
+        - **tenant_id** (UUID): The UUID of the tenant to assign the user to
 
-        Raises:
-            HTTPException: If there's an error adding the user to the tenant
-            PermissionDeniedError: If the user doesn't have permission to assign tenants
-            ValidationError: If the user or tenant doesn't exist
+        ## Response
+        Returns a success message indicating the user was added to the tenant.
+
+        ## Error Codes
+        - **400 Bad Request**: Invalid user or tenant ID
+        - **403 Forbidden**: User doesn't have permission to assign tenants
+        - **404 Not Found**: User or tenant doesn't exist
+        - **500 Internal Server Error**: Error adding user to tenant
         """
         from cognee.modules.users.tenants.methods import add_user_to_tenant
 
@@ -148,16 +151,15 @@ def get_permissions_router() -> APIRouter:
         to organize users and resources in multi-tenant environments, providing
         isolation and access control between different groups or organizations.
 
-        Args:
-            tenant_name (str): The name of the tenant to create
-            user: The authenticated user creating the tenant
+        ## Request Parameters
+        - **tenant_name** (str): The name of the tenant to create
 
-        Returns:
-            JSONResponse: Success message indicating the tenant was created
+        ## Response
+        Returns a success message indicating the tenant was created.
 
-        Raises:
-            HTTPException: If there's an error creating the tenant
-            ValidationError: If the tenant name is invalid or already exists
+        ## Error Codes
+        - **400 Bad Request**: Invalid tenant name or tenant already exists
+        - **500 Internal Server Error**: Error creating the tenant
         """
         from cognee.modules.users.tenants.methods import create_tenant as create_tenant_method
 
