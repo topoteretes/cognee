@@ -1,9 +1,11 @@
 import json
 import inspect
+from os import path
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.users.models import User
@@ -18,9 +20,6 @@ from cognee.modules.data.methods import (
 from .save_data_item_to_storage import save_data_item_to_storage
 
 
-from cognee.api.v1.add.config import get_s3_config
-
-
 async def ingest_data(
     data: Any,
     dataset_name: str,
@@ -30,23 +29,6 @@ async def ingest_data(
 ):
     if not user:
         user = await get_default_user()
-
-    s3_config = get_s3_config()
-
-    fs = None
-    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
-        import s3fs
-
-        fs = s3fs.S3FileSystem(
-            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
-        )
-
-    def open_data_file(file_path: str):
-        if file_path.startswith("s3://"):
-            return fs.open(file_path, mode="rb")
-        else:
-            local_path = file_path.replace("file://", "")
-            return open(local_path, mode="rb")
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
@@ -92,11 +74,11 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
-            file_path = await save_data_item_to_storage(data_item, dataset_name)
+            file_path = await save_data_item_to_storage(data_item)
 
             # Ingest data and add metadata
-            with open_data_file(file_path) as file:
-                classified_data = ingestion.classify(file, s3fs=fs)
+            async with open_data_file(file_path) as file:
+                classified_data = ingestion.classify(file)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)

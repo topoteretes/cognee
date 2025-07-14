@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import os
 from uuid import UUID
 from typing import List, Optional
 
@@ -7,6 +8,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.files.storage import get_file_storage
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -73,6 +75,34 @@ class MilvusAdapter(VectorDBInterface):
             A MilvusClient instance.
         """
         from pymilvus import MilvusClient
+
+        # Ensure the parent directory exists for local file-based Milvus databases
+        if self.url and not self.url.startswith(("http://", "https://", "grpc://")):
+            # This is likely a local file path, ensure the directory exists
+            db_dir = os.path.dirname(self.url)
+            if db_dir and not os.path.exists(db_dir):
+                try:
+                    file_storage = get_file_storage(db_dir)
+                    if hasattr(file_storage, "ensure_directory_exists"):
+                        if asyncio.iscoroutinefunction(file_storage.ensure_directory_exists):
+                            # Run async function synchronously in this sync method
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # If we're already in an async context, we can't use run_sync easily
+                                # Create the directory directly as a fallback
+                                os.makedirs(db_dir, exist_ok=True)
+                            else:
+                                loop.run_until_complete(file_storage.ensure_directory_exists())
+                        else:
+                            file_storage.ensure_directory_exists()
+                    else:
+                        # Fallback to os.makedirs if file_storage doesn't have ensure_directory_exists
+                        os.makedirs(db_dir, exist_ok=True)
+                except Exception as e:
+                    logger.warning(
+                        f"Could not create directory {db_dir} using file_storage, falling back to os.makedirs: {e}"
+                    )
+                    os.makedirs(db_dir, exist_ok=True)
 
         if self.api_key:
             client = MilvusClient(uri=self.url, token=self.api_key)
@@ -343,8 +373,6 @@ class MilvusAdapter(VectorDBInterface):
         """
         from pymilvus import MilvusException, exceptions
 
-        if limit <= 0:
-            return []
         client = self.get_milvus_client()
         if query_text is None and query_vector is None:
             raise ValueError("One of query_text or query_vector must be provided!")

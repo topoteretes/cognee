@@ -1,17 +1,15 @@
-from typing import Type
-from pydantic import BaseModel
+import base64
 import instructor
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
-    LLMInterface,
-)
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
+from typing import Type
+from openai import OpenAI
+from pydantic import BaseModel
+
+from cognee.infrastructure.llm.llm_interface import LLMInterface
+from cognee.infrastructure.llm.rate_limiter import (
     rate_limit_async,
-    rate_limit_sync,
     sleep_and_retry_async,
 )
-from openai import OpenAI
-import base64
-import os
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 
 class OllamaAPIAdapter(LLMInterface):
@@ -88,8 +86,8 @@ class OllamaAPIAdapter(LLMInterface):
 
         return response
 
-    @rate_limit_sync
-    def create_transcript(self, input_file: str) -> str:
+    @rate_limit_async
+    async def create_transcript(self, input_file: str) -> str:
         """
         Generate an audio transcript from a user query.
 
@@ -108,10 +106,7 @@ class OllamaAPIAdapter(LLMInterface):
             - str: The transcription of the audio as a string.
         """
 
-        if not os.path.isfile(input_file):
-            raise FileNotFoundError(f"The file {input_file} does not exist.")
-
-        with open(input_file, "rb") as audio_file:
+        async with open_data_file(input_file, mode="rb") as audio_file:
             transcription = self.aclient.audio.transcriptions.create(
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
@@ -124,8 +119,8 @@ class OllamaAPIAdapter(LLMInterface):
 
         return transcription.text
 
-    @rate_limit_sync
-    def transcribe_image(self, input_file: str) -> str:
+    @rate_limit_async
+    async def transcribe_image(self, input_file: str) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -145,10 +140,7 @@ class OllamaAPIAdapter(LLMInterface):
             - str: The transcription of the image's content as a string.
         """
 
-        if not os.path.isfile(input_file):
-            raise FileNotFoundError(f"The file {input_file} does not exist.")
-
-        with open(input_file, "rb") as image_file:
+        async with open_data_file(input_file, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = self.aclient.chat.completions.create(
