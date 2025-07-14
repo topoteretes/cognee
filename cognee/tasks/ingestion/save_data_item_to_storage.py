@@ -1,6 +1,5 @@
 import os
 from typing import Union, BinaryIO, Any
-from pathlib import Path
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
@@ -37,8 +36,11 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
-                # Use pathlib to properly construct file URLs
-                file_path = Path(data_item).as_uri()
+                # Normalize path separators before creating file URL
+                normalized_path = os.path.normpath(data_item)
+                # Use forward slashes in file URLs for consistency
+                url_path = normalized_path.replace(os.sep, "/")
+                file_path = "file://" + url_path
             else:
                 raise IngestionError(message="Local files are not accepted.")
         # data is text
