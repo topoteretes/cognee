@@ -55,7 +55,7 @@ class SQLAlchemyAdapter:
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_db_file"):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")

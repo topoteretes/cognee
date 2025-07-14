@@ -47,12 +47,12 @@ class KuzuAdapter(GraphDBInterface):
         """Initialize the Kuzu database connection and schema."""
         try:
             if "s3://" in self.db_path:
-                with tempfile.TemporaryDirectory() as temp_directory_path:
-                    self.temp_graph_directory = temp_directory_path
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
+                    self.temp_graph_file = temp_file.name
 
                 run_sync(self.pull_from_s3())
 
-                self.db = Database(self.temp_graph_directory)
+                self.db = Database(self.temp_graph_file)
             else:
                 self.db = Database(self.db_path)
 
@@ -85,18 +85,18 @@ class KuzuAdapter(GraphDBInterface):
             raise e
 
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3":
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
-            s3_file_storage.s3.put(self.temp_graph_directory + "/", self.db_path, recursive=True)
+            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
         s3_file_storage = S3FileStorage("")
         try:
-            s3_file_storage.s3.get(self.db_path, self.temp_graph_directory, recursive=True)
+            s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
         except FileNotFoundError:
             pass
 
