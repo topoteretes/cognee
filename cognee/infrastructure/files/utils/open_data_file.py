@@ -8,12 +8,9 @@ from cognee.infrastructure.files.storage import get_file_storage
 
 @asynccontextmanager
 async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
-    # Normalize path separators to handle mixed separators on Windows
-    normalized_path = os.path.normpath(file_path)
-
-    # Check if this is a file URI and extract the actual file system path
-    if normalized_path.startswith("file://"):
-        parsed_url = urlparse(normalized_path)
+    # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
+    if file_path.startswith("file://"):
+        parsed_url = urlparse(file_path)
 
         # Convert URI path to file system path
         if os.name == "nt":  # Windows
@@ -30,7 +27,8 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
         file_dir_path = path.dirname(fs_path)
         file_name = path.basename(fs_path)
     else:
-        # Regular file path - split normally
+        # Regular file path - normalize and split
+        normalized_path = os.path.normpath(file_path)
         file_dir_path = path.dirname(normalized_path)
         file_name = path.basename(normalized_path)
 
