@@ -1,10 +1,7 @@
 import os
 import pathlib
 import cognee
-from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
 
 logger = get_logger()
 
@@ -12,13 +9,13 @@ logger = get_logger()
 async def main():
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_library")
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_parallel_databases")
         ).resolve()
     )
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_library")
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_parallel_databases")
         ).resolve()
     )
     cognee.config.system_root_directory(cognee_directory_path)
@@ -30,23 +27,23 @@ async def main():
     await cognee.add(["TEST2"], "test2")
 
     task_1_config = {
-        "vector_db_url": "cognee1.test",
+        "vector_db_url": os.path.join(cognee_directory_path, "cognee1.test"),
         "vector_db_key": "",
         "vector_db_provider": "lancedb",
     }
     task_2_config = {
-        "vector_db_url": "cognee2.test",
+        "vector_db_url": os.path.join(cognee_directory_path, "cognee2.test"),
         "vector_db_key": "",
         "vector_db_provider": "lancedb",
     }
 
     task_1_graph_config = {
         "graph_database_provider": "kuzu",
-        "graph_file_path": "kuzu1.db",
+        "graph_file_path": os.path.join(cognee_directory_path, "kuzu1.db"),
     }
     task_2_graph_config = {
         "graph_database_provider": "kuzu",
-        "graph_file_path": "kuzu2.db",
+        "graph_file_path": os.path.join(cognee_directory_path, "kuzu2.db"),
     }
 
     # schedule both cognify calls concurrently
