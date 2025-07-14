@@ -77,19 +77,10 @@ class StorageManager:
             Returns the retrieved data, as defined by the storage implementation.
         """
         if "s3://" in self.storage.storage_path:
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-            storage = S3FileStorage(self.storage.storage_path)
-
-            async with storage.open(file_path, *args, **kwargs) as file:
+            async with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
-
         else:
-            from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
-
-            storage = LocalFileStorage(self.storage.storage_path)
-
-            with storage.open(file_path, *args, **kwargs) as file:
+            with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
 
     async def ensure_directory_exists(self, directory_path: str = None):

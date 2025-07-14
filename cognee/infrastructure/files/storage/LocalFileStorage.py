@@ -13,13 +13,32 @@ def get_parsed_path(file_path: str) -> str:
     if "://" in file_path:
         parsed_url = urlparse(file_path)
 
-        # On Windows, urlparse handles drive letters correctly
-        # Convert the path component to a proper file path
-        if os.name == "nt":  # Windows
-            # Remove leading slash from Windows paths like /C:/Users/...
-            parsed_path = parsed_url.path.lstrip("/")
-        else:  # Unix-like systems
+        # Handle file:// URLs specially
+        if parsed_url.scheme == "file":
+            # On Windows, urlparse handles drive letters correctly
+            # Convert the path component to a proper file path
+            if os.name == "nt":  # Windows
+                # Remove leading slash from Windows paths like /C:/Users/...
+                # but handle UNC paths like //server/share correctly
+                parsed_path = parsed_url.path
+                if parsed_path.startswith("/") and len(parsed_path) > 1 and parsed_path[2] == ":":
+                    # This is a Windows drive path like /C:/Users/...
+                    parsed_path = parsed_path[1:]
+                elif parsed_path.startswith("///"):
+                    # This is a UNC path like ///server/share, convert to //server/share
+                    parsed_path = parsed_path[1:]
+            else:  # Unix-like systems
+                parsed_path = parsed_url.path
+        else:
+            # For non-file URLs, use the path as-is
             parsed_path = parsed_url.path
+            if (
+                os.name == "nt"
+                and parsed_path.startswith("/")
+                and len(parsed_path) > 1
+                and parsed_path[2] == ":"
+            ):
+                parsed_path = parsed_path[1:]
 
         return parsed_path
     else:
@@ -100,6 +119,30 @@ class LocalFileStorage(Storage):
         parsed_storage_path = get_parsed_path(self.storage_path)
 
         full_file_path = os.path.join(parsed_storage_path, file_path)
+
+        # Add debug information for Windows path issues
+        if not os.path.exists(full_file_path):
+            # Try to provide helpful debug information
+            if os.path.exists(parsed_storage_path):
+                available_files = []
+                try:
+                    available_files = os.listdir(parsed_storage_path)
+                except (OSError, PermissionError):
+                    available_files = ["<unable to list directory>"]
+
+                raise FileNotFoundError(
+                    f"File not found: '{full_file_path}'\n"
+                    f"Storage path: '{parsed_storage_path}'\n"
+                    f"Requested file: '{file_path}'\n"
+                    f"Storage path exists: {os.path.exists(parsed_storage_path)}\n"
+                    f"Available files in storage: {available_files[:10]}..."  # Limit to first 10 files
+                )
+            else:
+                raise FileNotFoundError(
+                    f"Storage directory does not exist: '{parsed_storage_path}'\n"
+                    f"Original storage path: '{self.storage_path}'\n"
+                    f"Requested file: '{file_path}'"
+                )
 
         with open(full_file_path, mode=mode, *args, **kwargs) as file:
             file = FileBufferedReader(file, name="file://" + full_file_path)
