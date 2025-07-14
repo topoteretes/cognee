@@ -1,0 +1,26 @@
+# .gitguardian.yml
+version: v1
+
+secret-scan:
+  # Ignore specific files
+  excluded-paths:
+    - '.env.template'
+    - '.github/workflows/*.yml'
+    - 'examples/**'
+    - 'tests/**'
+
+  # Ignore specific patterns
+  excluded-detectors:
+    - 'Generic Password'
+    - 'Generic High Entropy Secret'
+
+  # Ignore by commit (if needed)
+  excluded-commits:
+    - '782bbb4'
+
+  # Custom rules for template files
+  paths-ignore:
+    - path: '.env.template'
+      comment: 'Template file with placeholder values'
+    - path: '.github/workflows/search_db_tests.yml'
+      comment: 'Test workflow with test credentials'
