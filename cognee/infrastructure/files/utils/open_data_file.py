@@ -26,6 +26,18 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
 
         file_dir_path = path.dirname(fs_path)
         file_name = path.basename(fs_path)
+    elif file_path.startswith("s3://"):
+        # Handle S3 URLs without normalization (which corrupts them)
+        parsed_url = urlparse(file_path)
+
+        # For S3, reconstruct the directory path and filename
+        s3_path = parsed_url.path.lstrip("/")  # Remove leading slash
+        if "/" in s3_path:
+            dir_parts, file_name = s3_path.rsplit("/", 1)
+            file_dir_path = f"s3://{parsed_url.netloc}/{dir_parts}"
+        else:
+            file_dir_path = f"s3://{parsed_url.netloc}"
+            file_name = s3_path
     else:
         # Regular file path - normalize and split
         normalized_path = os.path.normpath(file_path)
