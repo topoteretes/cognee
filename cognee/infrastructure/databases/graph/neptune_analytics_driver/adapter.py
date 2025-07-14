@@ -583,10 +583,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             result = await self.query(query, params)
 
             # Format edges as EdgeData tuples: (source_id, target_id, relationship_name, properties)
-            edges = [
-                (record["source_id"], record["target_id"], record["relationship_name"], record["properties"])
-                for record in result
-            ]
+            edges = [self._convert_relationship_to_edge(record) for record in result]
 
             logger.debug(f"Retrieved {len(edges)} edges for node: {node_id}")
             return edges
@@ -749,11 +746,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
             connections = []
             for record in result:
-                relationship_details = {
-                    "relationship_name": record["relationship_name"],
-                    **record["relationship_props"]
-                }
-
                 # Return as (source_node, relationship, target_node)
                 connections.append(
                     (
@@ -761,7 +753,10 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
                             "id": record["source_id"],
                             **record["source_props"]
                         },
-                        relationship_details,
+                        {
+                            "relationship_name": record["relationship_name"],
+                            **record["relationship_props"]
+                        },
                         {
                             "id": record["target_id"],
                             **record["target_props"]
@@ -776,3 +771,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get connections for node {node_id}: {error_msg}")
             raise Exception(f"Failed to get connections: {error_msg}")
+
+    @staticmethod
+    def _convert_relationship_to_edge(relationship: dict) -> EdgeData:
+        return relationship["source_id"], relationship["target_id"], relationship["relationship_name"], relationship["properties"]
