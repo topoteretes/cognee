@@ -56,7 +56,12 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
 
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
     file_name = str(file_path).split("/")[-1].split(".")[0] if file_path else None
-    file_size = os.path.getsize(file_path)
+
+    # Get file size
+    pos = file.tell()  # remember current pointer
+    file.seek(0, os.SEEK_END)  # jump to end
+    file_size = file.tell()  # byte count
+    file.seek(pos)
 
     return FileMetadata(
         name=file_name,
