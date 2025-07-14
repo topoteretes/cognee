@@ -4,7 +4,7 @@ from typing import List
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
-from cognee.infrastructure.llm.embedding_rate_limiter import (
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.embedding_rate_limiter import (
     embedding_rate_limit_async,
     embedding_sleep_and_retry_async,
 )
