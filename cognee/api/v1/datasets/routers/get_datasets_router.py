@@ -81,19 +81,16 @@ def get_datasets_router() -> APIRouter:
         read permissions for. The datasets are returned with their metadata
         including ID, name, creation time, and owner information.
 
-        Args:
-            user: The authenticated user requesting the datasets
+        ## Response
+        Returns a list of dataset objects containing:
+        - **id**: Unique dataset identifier
+        - **name**: Dataset name
+        - **created_at**: When the dataset was created
+        - **updated_at**: When the dataset was last updated
+        - **owner_id**: ID of the dataset owner
 
-        Returns:
-            List[DatasetDTO]: A list of dataset objects containing:
-                - id: Unique dataset identifier
-                - name: Dataset name
-                - created_at: When the dataset was created
-                - updated_at: When the dataset was last updated
-                - owner_id: ID of the dataset owner
-
-        Raises:
-            HTTPException: If there's an error retrieving the datasets
+        ## Error Codes
+        - **418 I'm a teapot**: Error retrieving datasets
         """
         try:
             datasets = await get_all_user_permission_datasets(user, "read")
@@ -118,21 +115,20 @@ def get_datasets_router() -> APIRouter:
         dataset instead of creating a duplicate. The user is automatically granted
         all permissions (read, write, share, delete) on the created dataset.
 
-        Args:
-            dataset_data (DatasetCreationPayload): Dataset creation parameters containing:
-                - name: The name for the new dataset
-            user: The authenticated user creating the dataset
+        ## Request Parameters
+        - **dataset_data** (DatasetCreationPayload): Dataset creation parameters containing:
+          - **name**: The name for the new dataset
 
-        Returns:
-            DatasetDTO: The created or existing dataset object containing:
-                - id: Unique dataset identifier
-                - name: Dataset name
-                - created_at: When the dataset was created
-                - updated_at: When the dataset was last updated
-                - owner_id: ID of the dataset owner
+        ## Response
+        Returns the created or existing dataset object containing:
+        - **id**: Unique dataset identifier
+        - **name**: Dataset name
+        - **created_at**: When the dataset was created
+        - **updated_at**: When the dataset was last updated
+        - **owner_id**: ID of the dataset owner
 
-        Raises:
-            HTTPException: If there's an error creating the dataset
+        ## Error Codes
+        - **418 I'm a teapot**: Error creating dataset
         """
         try:
             datasets = await get_datasets_by_name([dataset_data.name], user.id)
@@ -169,16 +165,15 @@ def get_datasets_router() -> APIRouter:
         This endpoint permanently deletes a dataset and all its associated data.
         The user must have delete permissions on the dataset to perform this operation.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset to delete
-            user: The authenticated user requesting the deletion
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset to delete
 
-        Returns:
-            None: No content returned on successful deletion
+        ## Response
+        No content returned on successful deletion.
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist or user doesn't have access
-            HTTPException: If there's an error during deletion
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error during deletion
         """
         from cognee.modules.data.methods import get_dataset, delete_dataset
 
@@ -204,18 +199,16 @@ def get_datasets_router() -> APIRouter:
         the dataset itself intact. The user must have delete permissions on the
         dataset to perform this operation.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset containing the data
-            data_id (UUID): The unique identifier of the data item to delete
-            user: The authenticated user requesting the deletion
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset containing the data
+        - **data_id** (UUID): The unique identifier of the data item to delete
 
-        Returns:
-            None: No content returned on successful deletion
+        ## Response
+        No content returned on successful deletion.
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist or user doesn't have access
-            DataNotFoundError: If the data item doesn't exist in the dataset
-            HTTPException: If there's an error during deletion
+        ## Error Codes
+        - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
+        - **500 Internal Server Error**: Error during deletion
         """
         from cognee.modules.data.methods import get_data, delete_data
         from cognee.modules.data.methods import get_dataset
@@ -242,18 +235,17 @@ def get_datasets_router() -> APIRouter:
         including nodes and edges that represent the relationships between entities
         in the dataset. The graph data is formatted for visualization purposes.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset
-            user: The authenticated user requesting the graph data
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
 
-        Returns:
-            GraphDTO: The graph data containing:
-                - nodes: List of graph nodes with id, label, and properties
-                - edges: List of graph edges with source, target, and label
+        ## Response
+        Returns the graph data containing:
+        - **nodes**: List of graph nodes with id, label, and properties
+        - **edges**: List of graph edges with source, target, and label
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist or user doesn't have access
-            HTTPException: If there's an error retrieving the graph data
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error retrieving graph data
         """
         from cognee.modules.data.methods import get_dataset
 
@@ -279,23 +271,22 @@ def get_datasets_router() -> APIRouter:
         to a specific dataset. Each data item includes metadata such as name, type,
         creation time, and storage location.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset
-            user: The authenticated user requesting the data
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
 
-        Returns:
-            List[DataDTO]: A list of data objects containing:
-                - id: Unique data item identifier
-                - name: Data item name
-                - created_at: When the data was added
-                - updated_at: When the data was last updated
-                - extension: File extension
-                - mime_type: MIME type of the data
-                - raw_data_location: Storage location of the raw data
+        ## Response
+        Returns a list of data objects containing:
+        - **id**: Unique data item identifier
+        - **name**: Data item name
+        - **created_at**: When the data was added
+        - **updated_at**: When the data was last updated
+        - **extension**: File extension
+        - **mime_type**: MIME type of the data
+        - **raw_data_location**: Storage location of the raw data
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist or user doesn't have access
-            HTTPException: If there's an error retrieving the data
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error retrieving data
         """
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 
@@ -327,16 +318,18 @@ def get_datasets_router() -> APIRouter:
         indicating whether they are being processed, have completed processing, or
         encountered errors during pipeline execution.
 
-        Args:
-            datasets: List of dataset UUIDs to check status for (query parameter "dataset")
-            user: The authenticated user requesting the status
+        ## Query Parameters
+        - **dataset** (List[UUID]): List of dataset UUIDs to check status for
 
-        Returns:
-            Dict[str, PipelineRunStatus]: A dictionary mapping dataset IDs to their
-            processing status (e.g., "pending", "running", "completed", "failed")
+        ## Response
+        Returns a dictionary mapping dataset IDs to their processing status:
+        - **pending**: Dataset is queued for processing
+        - **running**: Dataset is currently being processed
+        - **completed**: Dataset processing completed successfully
+        - **failed**: Dataset processing encountered an error
 
-        Raises:
-            HTTPException: If there's an error retrieving the status information
+        ## Error Codes
+        - **500 Internal Server Error**: Error retrieving status information
         """
         from cognee.modules.data.methods import get_dataset_status
 
@@ -355,18 +348,16 @@ def get_datasets_router() -> APIRouter:
         for a specific data item within a dataset. The file is returned as a direct
         download with appropriate headers.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset containing the data
-            data_id (UUID): The unique identifier of the data item to download
-            user: The authenticated user requesting the download
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset containing the data
+        - **data_id** (UUID): The unique identifier of the data item to download
 
-        Returns:
-            FileResponse: The raw data file as a downloadable response
+        ## Response
+        Returns the raw data file as a downloadable response.
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist or user doesn't have access
-            DataNotFoundError: If the data item doesn't exist in the dataset
-            HTTPException: If there's an error accessing the raw data file
+        ## Error Codes
+        - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
+        - **500 Internal Server Error**: Error accessing the raw data file
         """
         from cognee.modules.data.methods import get_data
         from cognee.modules.data.methods import get_dataset_data

@@ -24,13 +24,29 @@ def get_delete_router() -> APIRouter:
         mode: str = Form("soft"),
         user: User = Depends(get_authenticated_user),
     ):
-        """This endpoint is responsible for deleting data from the graph.
+        """
+        Delete data from the knowledge graph.
 
-        Args:
-            data: The data to delete (files, URLs, or text)
-            dataset_name: Name of the dataset to delete from (default: "main_dataset")
-            mode: "soft" (default) or "hard" - hard mode also deletes degree-one entity nodes
-            user: Authenticated user
+        This endpoint removes specified data from the knowledge graph. It supports
+        both soft deletion (preserving related entities) and hard deletion (removing
+        degree-one entity nodes as well).
+
+        ## Request Parameters
+        - **data** (List[UploadFile]): The data to delete (files, URLs, or text)
+        - **dataset_name** (str): Name of the dataset to delete from (default: "main_dataset")
+        - **dataset_id** (UUID): UUID of the dataset to delete from
+        - **mode** (str): Deletion mode - "soft" (default) or "hard"
+
+        ## Response
+        No content returned on successful deletion.
+
+        ## Error Codes
+        - **409 Conflict**: Error during deletion process
+        - **403 Forbidden**: User doesn't have permission to delete from dataset
+
+        ## Notes
+        - **Soft mode**: Preserves related entities and relationships
+        - **Hard mode**: Also deletes degree-one entity nodes
         """
         from cognee.api.v1.delete import delete as cognee_delete
 
