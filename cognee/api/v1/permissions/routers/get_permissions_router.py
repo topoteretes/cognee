@@ -25,18 +25,20 @@ def get_permissions_router() -> APIRouter:
         to a principal (which can be a user or role). The authenticated user must
         have appropriate permissions to grant access to the specified datasets.
 
-        Args:
-            permission_name (str): The name of the permission to grant (e.g., "read", "write", "delete")
-            dataset_ids (List[UUID]): List of dataset UUIDs to grant permission on
-            principal_id (UUID): The UUID of the principal (user or role) to grant permission to
-            user: The authenticated user granting the permission
+        ## Path Parameters
+        - **principal_id** (UUID): The UUID of the principal (user or role) to grant permission to
 
-        Returns:
-            JSONResponse: Success message indicating permission was assigned
+        ## Request Parameters
+        - **permission_name** (str): The name of the permission to grant (e.g., "read", "write", "delete")
+        - **dataset_ids** (List[UUID]): List of dataset UUIDs to grant permission on
 
-        Raises:
-            HTTPException: If there's an error granting the permission
-            PermissionDeniedError: If the user doesn't have permission to grant access
+        ## Response
+        Returns a success message indicating permission was assigned.
+
+        ## Error Codes
+        - **400 Bad Request**: Invalid request parameters
+        - **403 Forbidden**: User doesn't have permission to grant access
+        - **500 Internal Server Error**: Error granting permission
         """
         from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 

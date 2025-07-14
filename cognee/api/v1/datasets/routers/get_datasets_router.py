@@ -81,19 +81,16 @@ def get_datasets_router() -> APIRouter:
         read permissions for. The datasets are returned with their metadata
         including ID, name, creation time, and owner information.
 
-        Args:
-            user: The authenticated user requesting the datasets
+        ## Response
+        Returns a list of dataset objects containing:
+        - **id**: Unique dataset identifier
+        - **name**: Dataset name
+        - **created_at**: When the dataset was created
+        - **updated_at**: When the dataset was last updated
+        - **owner_id**: ID of the dataset owner
 
-        Returns:
-            List[DatasetDTO]: A list of dataset objects containing:
-                - id: Unique dataset identifier
-                - name: Dataset name
-                - created_at: When the dataset was created
-                - updated_at: When the dataset was last updated
-                - owner_id: ID of the dataset owner
-
-        Raises:
-            HTTPException: If there's an error retrieving the datasets
+        ## Error Codes
+        - **418 I'm a teapot**: Error retrieving datasets
         """
         try:
             datasets = await get_all_user_permission_datasets(user, "read")
@@ -279,23 +276,22 @@ def get_datasets_router() -> APIRouter:
         to a specific dataset. Each data item includes metadata such as name, type,
         creation time, and storage location.
 
-        Args:
-            dataset_id (UUID): The unique identifier of the dataset
-            user: The authenticated user requesting the data
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
 
-        Returns:
-            List[DataDTO]: A list of data objects containing:
-                - id: Unique data item identifier
-                - name: Data item name
-                - created_at: When the data was added
-                - updated_at: When the data was last updated
-                - extension: File extension
-                - mime_type: MIME type of the data
-                - raw_data_location: Storage location of the raw data
+        ## Response
+        Returns a list of data objects containing:
+        - **id**: Unique data item identifier
+        - **name**: Data item name
+        - **created_at**: When the data was added
+        - **updated_at**: When the data was last updated
+        - **extension**: File extension
+        - **mime_type**: MIME type of the data
+        - **raw_data_location**: Storage location of the raw data
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist or user doesn't have access
-            HTTPException: If there's an error retrieving the data
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error retrieving data
         """
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 

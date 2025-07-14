@@ -30,36 +30,34 @@ def get_add_router() -> APIRouter:
 
         This endpoint accepts various types of data (files, URLs, GitHub repositories)
         and adds them to a specified dataset for processing. The data is ingested,
-        analyzed, and integrated into the knowledge graph. Either datasetName or
-        datasetId must be provided to specify the target dataset.
+        analyzed, and integrated into the knowledge graph.
 
-        Args:
-            data (List[UploadFile]): List of files to upload. Can also include:
-                - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)
-                - GitHub repository URLs (will be cloned and processed)
-                - Regular file uploads
-            datasetName (Optional[str]): Name of the dataset to add data to
-            datasetId (Optional[UUID]): UUID of the dataset to add data to
-            user: The authenticated user adding the data
+        ## Request Parameters
+        - **data** (List[UploadFile]): List of files to upload. Can also include:
+          - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)
+          - GitHub repository URLs (will be cloned and processed)
+          - Regular file uploads
+        - **datasetName** (Optional[str]): Name of the dataset to add data to
+        - **datasetId** (Optional[UUID]): UUID of the dataset to add data to
 
-        Returns:
-            dict: Information about the add operation containing:
-                - Status of the operation
-                - Details about the processed data
-                - Any relevant metadata from the ingestion process
+        Either datasetName or datasetId must be provided.
 
-        Raises:
-            ValueError: If neither datasetId nor datasetName is provided
-            HTTPException: If there's an error during the add operation
-            PermissionDeniedError: If the user doesn't have permission to add to the dataset
+        ## Response
+        Returns information about the add operation containing:
+        - Status of the operation
+        - Details about the processed data
+        - Any relevant metadata from the ingestion process
 
-        Note:
-            - To add data to a datasets not owned by the user and for which the user has write permission for
-              the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
-            - GitHub repositories are cloned and all files are processed
-            - HTTP URLs are fetched and their content is processed
-            - Regular files are uploaded and processed directly
-            - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
+        ## Error Codes
+        - **400 Bad Request**: Neither datasetId nor datasetName provided
+        - **409 Conflict**: Error during add operation
+        - **403 Forbidden**: User doesn't have permission to add to dataset
+
+        ## Notes
+        - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
+        - GitHub repositories are cloned and all files are processed
+        - HTTP URLs are fetched and their content is processed
+        - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
         """
         from cognee.api.v1.add import add as cognee_add
 
