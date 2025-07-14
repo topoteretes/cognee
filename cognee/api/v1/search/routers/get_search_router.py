@@ -32,6 +32,22 @@ def get_search_router() -> APIRouter:
 
     @router.get("", response_model=list[SearchHistoryItem])
     async def get_search_history(user: User = Depends(get_authenticated_user)):
+        """
+        Get search history for the authenticated user.
+
+        This endpoint retrieves the search history for the authenticated user,
+        returning a list of previously executed searches with their timestamps.
+
+        Returns:
+            List[SearchHistoryItem]: A list of search history items containing:
+                - id: Unique identifier for the search
+                - text: The search query text
+                - user: User who performed the search
+                - created_at: When the search was performed
+
+        Raises:
+            HTTPException: If there's an error retrieving the search history
+        """
         try:
             history = await get_history(user.id, limit=0)
 
@@ -41,7 +57,34 @@ def get_search_router() -> APIRouter:
 
     @router.post("", response_model=list)
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
-        """This endpoint is responsible for searching for nodes in the graph."""
+        """
+        Search for nodes in the graph database.
+
+        This endpoint performs semantic search across the knowledge graph to find
+        relevant nodes based on the provided query. It supports different search
+        types and can be scoped to specific datasets.
+
+        Args:
+            payload (SearchPayloadDTO): Search parameters containing:
+                - search_type: Type of search to perform (SearchType)
+                - datasets: Optional list of dataset names to search within
+                - dataset_ids: Optional list of dataset UUIDs to search within
+                - query: The search query string
+                - top_k: Maximum number of results to return (default: 10)
+            user: The authenticated user performing the search
+
+        Returns:
+            List: A list of search results containing relevant nodes from the graph
+
+        Raises:
+            HTTPException: If there's an error during the search operation
+            PermissionDeniedError: If user doesn't have permission to search datasets
+
+        Note:
+            - Datasets sent by name will only map to datasets owned by the request sender
+            - To search datasets not owned by the request sender, dataset UUID is needed
+            - If permission is denied, returns empty list instead of error
+        """
         from cognee.api.v1.search import search as cognee_search
 
         try:
