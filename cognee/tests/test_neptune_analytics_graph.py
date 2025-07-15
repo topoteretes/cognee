@@ -23,7 +23,6 @@ def setup():
     #     complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load
     #     the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's
     #     stored in Amazon S3.
-    #
 
     document = TextDocument(
         name='text.txt',
@@ -147,13 +146,61 @@ async def main():
     else:
         print(f"no edges found (expected: {len(edges)})")
 
+    print("------GET GRAPH-------")
+    all_nodes, all_edges = await na_adapter.get_graph_data()
+    print(f"found {len(all_nodes)} nodes and found {len(all_edges)} edges")
+
+    print("------NEIGHBORING NODES-------")
+    center_node = nodes[2]
+    neighbors = await na_adapter.get_neighbors(str(center_node.id))
+    print(f"found {len(neighbors)} neighbors for node \"{center_node.name}\"")
+    for neighbor in neighbors:
+        print(neighbor)
+
+    print("------NEIGHBORING EDGES-------")
+    center_node = nodes[2]
+    neighbouring_edges = await na_adapter.get_edges(str(center_node.id))
+    print(f"found {len(neighbouring_edges)} edges neighbouring node \"{center_node.name}\"")
+    for edge in neighbouring_edges:
+        print(edge)
+
+    print("------GET CONNECTIONS (SOURCE NODE)-------")
+    document_chunk_node = nodes[0]
+    connections = await na_adapter.get_connections(str(document_chunk_node.id))
+    print(f"found {len(connections)} connections for node \"{document_chunk_node.type}\"")
+    for connection in connections:
+        src, relationship, tgt = connection
+        src = src.get("name", src.get("type", "unknown"))
+        relationship = relationship["relationship_name"]
+        tgt = tgt.get("name", tgt.get("type", "unknown"))
+        print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
+
+    print("------GET CONNECTIONS (TARGET NODE)-------")
+    connections = await na_adapter.get_connections(str(center_node.id))
+    print(f"found {len(connections)} connections for node \"{center_node.name}\"")
+    for connection in connections:
+        src, relationship, tgt = connection
+        src = src.get("name", src.get("type", "unknown"))
+        relationship = relationship["relationship_name"]
+        tgt = tgt.get("name", tgt.get("type", "unknown"))
+        print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
+
+    print("------SUBGRAPH-------")
+    node_names = ["neptune analytics", "amazon neptune database"]
+    subgraph_nodes, subgraph_edges = await na_adapter.get_nodeset_subgraph(Entity, node_names)
+    print(f"found {len(subgraph_nodes)} nodes and  {len(subgraph_edges)} edges in the subgraph around {node_names}")
+    for subgraph_node in subgraph_nodes:
+        print(subgraph_node)
+    for subgraph_edge in subgraph_edges:
+        print(subgraph_edge)
+
     print("------DELETE-------")
     # delete all nodes and edges:
-    # await na_adapter.delete_graph()
+    await na_adapter.delete_graph()
 
     # delete all nodes by node id
-    node_ids = [str(node.id) for node in nodes]
-    await na_adapter.delete_nodes(node_ids)
+    # node_ids = [str(node.id) for node in nodes]
+    # await na_adapter.delete_nodes(node_ids)
 
     has_edges = await na_adapter.has_edges(edges)
     if len(has_edges) == 0:
