@@ -308,15 +308,15 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         try:
             # Build bulk node deletion query using UNWIND
-            query = """
+            query = f"""
             UNWIND $node_ids AS node_id
-            MATCH (n)
+            MATCH (n:{self._GRAPH_NODE_LABEL})
             WHERE id(n) = node_id
             DETACH DELETE n
             """
 
             params = {"node_ids": node_ids}
-            result = await self.query(query, params)
+            await self.query(query, params)
             logger.debug(f"Successfully deleted {len(node_ids)} nodes in bulk operation")
 
         except Exception as e:
@@ -356,9 +356,8 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             
             if result and len(result) == 1:
                 # Extract node properties from the result
-                node_data = result.pop().get('n', {})
                 logger.debug(f"Successfully retrieved node: {node_id}")
-                return node_data
+                return result[0]["n"]
             else:
                 if not result:
                     logger.debug(f"Node not found: {node_id}")
@@ -389,9 +388,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         try:
             # Build bulk node-retrieval OpenCypher query using UNWIND
-            query = """
+            query = f"""
             UNWIND $node_ids AS node_id
-            MATCH (n)
+            MATCH (n:{self._GRAPH_NODE_LABEL})
             WHERE id(n) = node_id
             RETURN n
             """
@@ -400,12 +399,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             result = await self.query(query, params)
 
             # Extract node data from results
-            nodes = []
-            if result:
-                for record in result:
-                    node_data = record.get('n', {})
-                    if node_data:
-                        nodes.append(node_data)
+            nodes = [record["n"] for record in result]
 
             logger.debug(f"Successfully retrieved {len(nodes)} nodes out of {len(node_ids)} requested")
             return nodes
@@ -649,7 +643,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         try:
             # Build openCypher query to check if the edge exists
             query = f"""
-            MATCH (source)-[r:{relationship_name}]->(target)
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r:{relationship_name}]->(target:{self._GRAPH_NODE_LABEL})
             WHERE id(source) = $source_id AND id(target) = $target_id
             RETURN COUNT(r) > 0 AS edge_exists
             """
@@ -686,9 +680,9 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[EdgeData]: A list of EdgeData objects that exist in the graph.
         """
-        query = """
+        query = f"""
         UNWIND $edges AS edge
-        MATCH (a)-[r]->(b)
+        MATCH (a:{self._GRAPH_NODE_LABEL})-[r]->(b:{self._GRAPH_NODE_LABEL})
         WHERE id(a) = edge.from_node AND id(b) = edge.to_node AND type(r) = edge.relationship_name
         RETURN edge.from_node AS from_node, edge.to_node AS to_node, edge.relationship_name AS relationship_name, count(r) > 0 AS edge_exists
         """
@@ -822,7 +816,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             WITH primary + nbrs AS nodelist, rels
             UNWIND nodelist AS node
             WITH collect(DISTINCT node) AS nodes, rels
-            MATCH (a)-[r]-(b)
+            MATCH (a:{self._GRAPH_NODE_LABEL})-[r]-(b:{self._GRAPH_NODE_LABEL})
             WHERE a IN nodes AND b IN nodes
             WITH nodes, collect(DISTINCT r) AS all_rels
             RETURN
