@@ -24,7 +24,7 @@ from .neptune_analytics_utils import (
     format_neptune_error,
 )
 
-logger = get_logger("NeptuneAnalyticsAdapter", level=ERROR)
+logger = get_logger("NeptuneAnalyticsAdapter")
 
 try:
     from langchain_aws import NeptuneAnalyticsGraph
@@ -167,7 +167,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             # The langchain_aws NeptuneAnalyticsGraph supports openCypher queries
             if params is None:
                 params = {}
-            logger.debug(f"executing na query:\nquery={query}\n")
+            logger.info(f"executing na query:\nquery={query}\n")
             result = self._client.query(query, params)
             
             # Convert the result to list format expected by the interface
@@ -235,31 +235,24 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         try:
             # Build bulk node creation query using UNWIND
-            query = """
+            query = f"""
             UNWIND $nodes AS node
-            MERGE (n {`~id`: node.node_id})
+            MERGE (n:{self._GRAPH_NODE_LABEL} {{`~id`: node.node_id}})
             ON CREATE SET n = node.properties, n.updated_at = timestamp()
             ON MATCH SET n = node.properties, n.updated_at = timestamp()
-            WITH n, node.label AS label
-            CALL {
-                WITH n, label
-                CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
-                RETURN labeledNode
-            }
             RETURN count(n) AS nodes_processed
             """
 
-            # Prepare nodes data for bulk operation
-            nodes_data = [
-                {
-                    "node_id": str(node.id),
-                    "label": type(node).__name__,
-                    "properties": self.serialize_properties(node.model_dump()),
-                }
-                for node in nodes
-            ]
-
-            params = {"nodes": nodes_data}
+            # Prepare node data for bulk operation
+            params = {
+                "nodes": [
+                    {
+                        "node_id": str(node.id),
+                        "properties": self.serialize_properties(node.model_dump()),
+                    }
+                    for node in nodes
+                ]
+            }
             result = await self.query(query, params)
 
             processed_count = result[0].get('nodes_processed', 0) if result else 0
@@ -407,7 +400,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             return []
 
         try:
-            # Build bulk node retrieval query using UNWIND
+            # Build bulk node-retrieval OpenCypher query using UNWIND
             query = """
             UNWIND $node_ids AS node_id
             MATCH (n)
@@ -503,69 +496,64 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - edges (List[EdgeData]): A list of EdgeData objects representing edges to be added.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-
         if not edges:
             logger.debug("No edges to add")
             return
 
-        try:
-            # Build bulk edge creation query using UNWIND
-            query = """
-            UNWIND $edges AS edge
-            MATCH (source)
-            WHERE id(source) = edge.from_node
-            MATCH (target)
-            WHERE id(target) = edge.to_node
-            CALL {
-                WITH source, target, edge
-                CALL apoc.merge.relationship(
-                    source,
-                    edge.relationship_name,
-                    {
-                        source_node_id: edge.from_node,
-                        target_node_id: edge.to_node
-                    },
-                    edge.properties,
-                    target
-                ) YIELD rel
-                RETURN rel
-            }
-            RETURN count(*) AS edges_processed
-            """
+        edges_by_relationship: dict[str, list] = {}
+        for edge in edges:
+            relationship_name = edge[2]
+            if edges_by_relationship.get(relationship_name, None):
+                edges_by_relationship[relationship_name].append(edge)
+            else:
+                edges_by_relationship[relationship_name] = [edge]
 
-            # Prepare edges data for bulk operation
-            edges_data = [
-                {
-                    "from_node": str(edge[0]),
-                    "to_node": str(edge[1]),
-                    "relationship_name": edge[2],
-                    "properties": self.serialize_properties(edge[3] if len(edge) > 3 and edge[3] else {}),
+        results = {}
+        for relationship_name, edges_by_relationship in edges_by_relationship.items():
+            try:
+                # Create the bulk-edge OpenCypher query using UNWIND
+                query = f"""
+                    UNWIND $edges AS edge
+                    MATCH (source:{self._GRAPH_NODE_LABEL})
+                    WHERE id(source) = edge.from_node
+                    MATCH (target:{self._GRAPH_NODE_LABEL})
+                    WHERE id(target) = edge.to_node
+                    MERGE (source)-[r:{relationship_name}]->(target) 
+                    ON CREATE SET r = edge.properties, r.updated_at = timestamp() 
+                    ON MATCH SET r = edge.properties, r.updated_at = timestamp() 
+                    RETURN count(*) AS edges_processed
+                    """
+
+                # Prepare edges data for bulk operation
+                params = {"edges":
+                    [
+                        {
+                            "from_node": str(edge[0]),
+                            "to_node": str(edge[1]),
+                            "relationship_name": relationship_name,
+                            "properties": self.serialize_properties(edge[3] if len(edge) > 3 and edge[3] else {}),
+                        }
+                        for edge in edges_by_relationship
+                    ]
                 }
-                for edge in edges
-            ]
+                results[relationship_name] = await self.query(query, params)
+            except Exception as e:
+                logger.error(f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}")
+                logger.info("Falling back to individual edge creation")
+                for edge in edges_by_relationship:
+                    try:
+                        source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
+                        properties = edge[3] if len(edge) > 3 else {}
+                        await self.add_edge(source_id, target_id, relationship_name, properties)
+                    except Exception as edge_error:
+                        logger.error(f"Failed to add individual edge {edge[0]} -> {edge[1]}: {format_neptune_error(edge_error)}")
+                        continue
 
-            params = {"edges": edges_data}
-            result = await self.query(query, params)
+        processed_count = 0
+        for result in results.values():
+            processed_count += result[0].get('edges_processed', 0) if result else 0
+        logger.debug(f"Successfully processed {processed_count} edges in bulk operation")
 
-            processed_count = result[0].get('edges_processed', 0) if result else 0
-            logger.debug(f"Successfully processed {processed_count} edges in bulk operation")
-
-        except Exception as e:
-            error_msg = format_neptune_error(e)
-            logger.error(f"Failed to add edges in bulk: {error_msg}")
-            # Fallback to individual edge creation
-            logger.info("Falling back to individual edge creation")
-            for edge in edges:
-                try:
-                    source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
-                    properties = edge[3] if len(edge) > 3 else {}
-                    await self.add_edge(source_id, target_id, relationship_name, properties)
-                except Exception as edge_error:
-                    logger.error(f"Failed to add individual edge {edge[0]} -> {edge[1]}: {format_neptune_error(edge_error)}")
-                    continue
 
     async def delete_graph(self) -> None:
         """
@@ -710,24 +698,33 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[EdgeData]: A list of EdgeData objects that exist in the graph.
         """
+        query = """
+        UNWIND $edges AS edge
+        MATCH (a)-[r]->(b)
+        WHERE id(a) = edge.from_node AND id(b) = edge.to_node AND type(r) = edge.relationship_name
+        RETURN edge.from_node AS from_node, edge.to_node AS to_node, edge.relationship_name AS relationship_name, count(r) > 0 AS edge_exists
+        """
 
-        existing_edges = []
-        
         try:
-            # Check each edge individually
-            for edge in edges:
-                (source_id, target_id, relationship_name, *props) = edge
-                edge_exists = await self.has_edge(source_id, target_id, relationship_name)
-                if edge_exists:
-                    existing_edges.append(edge)
+            params = {
+                "edges": [
+                    {
+                        "from_node": str(edge[0]),
+                        "to_node": str(edge[1]),
+                        "relationship_name": edge[2],
+                    }
+                    for edge in edges
+                ],
+            }
+
+            results = await self.query(query, params)
+            logger.debug(f"Found {len(results)} existing edges out of {len(edges)} checked")
+            return [result["edge_exists"] for result in results]
             
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edges existence: {error_msg}")
             return []
-
-        logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
-        return existing_edges
 
     async def get_edges(self, node_id: str) -> List[EdgeData]:
         """
