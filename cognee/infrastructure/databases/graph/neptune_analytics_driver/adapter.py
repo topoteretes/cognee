@@ -225,10 +225,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - nodes (List[DataPoint]): A list of DataPoint objects to be added to the graph.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-
         if not nodes:
             logger.debug("No nodes to add")
             return
@@ -306,10 +302,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         -----------
             - node_ids (List[str]): A list of unique identifiers for the nodes to delete.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return
-
         if not node_ids:
             logger.debug("No nodes to delete")
             return
@@ -391,10 +383,6 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
         --------
             - List[NodeData]: A list of node data for the found nodes.
         """
-        if not self._client:
-            logger.error("Neptune Analytics client not initialized")
-            return []
-
         if not node_ids:
             logger.debug("No node IDs provided")
             return []
