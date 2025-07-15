@@ -51,6 +51,14 @@ async def main():
 
     # Save data-points
     await engine.create_data_points(TEST_COLLECTION_NAME, [datapoint, datapoint_2])
+    # Search single text
+    result_search = await engine.search(
+        collection_name=TEST_COLLECTION_NAME,
+        query_text=TEST_TEXT,
+        query_vector=None,
+        limit=10,
+        with_vector=True)
+    assert (len(result_search) == 2)
 
     # # Retrieve data-points
     result = await engine.retrieve(TEST_COLLECTION_NAME, [TEST_UUID, TEST_UUID_2])
@@ -62,6 +70,15 @@ async def main():
         str(r.id) == TEST_UUID_2 and r.payload['text'] == TEST_TEXT_2
         for r in result
     )
+    # Search multiple
+    result_search_batch = await engine.batch_search(
+        collection_name=TEST_COLLECTION_NAME,
+        query_texts=[TEST_TEXT, TEST_TEXT_2],
+        limit=10,
+        with_vectors=False
+    )
+    assert (len(result_search_batch) == 2 and
+            all(len(batch) == 2 for batch in result_search_batch))
 
     # Delete datapoint from vector store
     await engine.delete_data_points(TEST_COLLECTION_NAME, [TEST_UUID, TEST_UUID_2])

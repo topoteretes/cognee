@@ -1,13 +1,17 @@
+import asyncio
 from typing import List, Optional
 from langchain_aws import NeptuneAnalyticsGraph, NeptuneGraph
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import get_own_properties
+from cognee.shared.logging_utils import get_logger
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.PayloadSchema import PayloadSchema
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
+
+logger = get_logger("NeptuneAnalyticsDBAdapter")
 
 class IndexSchema(DataPoint):
     """
@@ -137,6 +141,7 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
             self._client.query(query_string, params)
         pass
 
+
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """
         Retrieve data points from a collection using their IDs.
@@ -152,11 +157,11 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
         query_string = (f"MATCH( n :{self.VECTOR_NODE_IDENTIFIER}) "
                         f"WHERE id(n) in $node_ids AND "
                         f"n.{self.COLLECTION_PREFIX} = $collection_name "
-                        f"RETURN id(n) as id , n as payload ")
+                        f"RETURN n as payload ")
         result = self._client.query(query_string, params)
 
         result_set = [ScoredResult(
-            id=item.get('id'),
+            id=item.get('payload').get('~id'),
             payload=item.get('payload').get('~properties'),
             score=0
         ) for item in result]
@@ -194,7 +199,60 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
             A list of scored results that match the query.
 
         """
-        pass
+        if with_vector:
+            logger.warning(
+                "with_vector=True will include embedding vectors in the result. "
+                "This may trigger a resource-intensive query and increase response time. "
+                "Use this option only when vector data is required."
+            )
+
+        if query_vector and query_text:
+            raise InvalidValueError(
+                message="The search function accepts either text or embedding as input, but not both."
+            )
+        elif query_text is None and query_vector is None:
+            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+        elif query_vector:
+            embedding = query_vector
+        else:
+            data_vectors = (await self.embedding_engine.embed_text([query_text]))
+            embedding = data_vectors[0]
+
+        # Compose the parameters map
+        params = dict(embedding=embedding, param_topk=limit)
+        # Compose the query
+        query_string = f"""
+        CALL neptune.algo.vectors.topKByEmbeddingWithFiltering({{
+                topK: {limit},
+                embedding: {embedding}, 
+                nodeFilter: {{ equals: {{property: '{self.COLLECTION_PREFIX}', value: '{collection_name}'}} }}
+              }}
+            )
+        YIELD node, score
+        """
+
+        if with_vector:
+            query_string += """
+        WITH node, score, id(node) as node_id 
+        MATCH (n)
+        WHERE id(n) = id(node)
+        CALL neptune.algo.vectors.get(n)
+        YIELD embedding
+        RETURN node as payload, score, embedding
+        """
+
+        else:
+            query_string += """
+        RETURN node as payload, score
+        """
+
+        query_response = self._client.query(query_string, params)
+        return [ScoredResult(
+            id=item.get('payload').get('~id'),
+            payload=item.get('payload').get('~properties'),
+            score=item.get('score'),
+            vector=item.get('embedding') if with_vector else None
+        ) for item in query_response]
 
     async def batch_search(
         self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
@@ -217,7 +275,13 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
 
             A list of search result sets, one for each query input.
         """
-        pass
+
+        # Convert text to embedding array in batch
+        data_vectors = (await self.embedding_engine.embed_text(query_texts))
+        return await asyncio.gather(*[
+            self.search(collection_name, None, vector, limit, with_vectors)
+            for vector in data_vectors
+        ])
 
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
@@ -247,3 +311,4 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
         self._client.query(f"MATCH (n :{self.VECTOR_NODE_IDENTIFIER}) "
                            f"DETACH DELETE n")
         pass
+
