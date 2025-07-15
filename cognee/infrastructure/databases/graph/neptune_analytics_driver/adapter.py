@@ -328,6 +328,51 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
 
         return [await self.get_node(node_id) for node_id in node_ids]
 
+
+    async def extract_node(self, node_id: str):
+        """
+        Retrieve a single node based on its ID.
+
+        Parameters:
+        -----------
+
+            - node_id (str): The ID of the node to retrieve.
+
+        Returns:
+        --------
+
+            - Optional[Dict[str, Any]]: The requested node as a dictionary, or None if it does
+              not exist.
+        """
+        results = await self.extract_nodes([node_id])
+
+        return results[0] if len(results) > 0 else None
+
+    async def extract_nodes(self, node_ids: List[str]):
+        """
+        Retrieve multiple nodes from the database by their IDs.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): A list of IDs for the nodes to retrieve.
+
+        Returns:
+        --------
+
+            A list of nodes represented as dictionaries.
+        """
+        query = """
+        UNWIND $node_ids AS id
+        MATCH (node) WHERE id(node) = id
+        RETURN node"""
+
+        params = {"node_ids": node_ids}
+
+        results = await self.query(query, params)
+
+        return [result["node"] for result in results]
+
     async def add_edge(
         self,
         source_id: str,
@@ -713,9 +758,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             logger.error(f"Failed to get nodeset subgraph for type {node_type}: {error_msg}")
             raise Exception(f"Failed to get nodeset subgraph: {error_msg}")
 
-    async def get_connections(
-        self, node_id: str
-    ) -> List[Tuple[NodeData, Dict[str, Any], NodeData]]:
+    async def get_connections(self, node_id: UUID) -> list:
         """
         Get all nodes connected to a specified node and their relationship details.
 
@@ -741,7 +784,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
                 properties(r) AS relationship_props
             """
 
-            params = {"node_id": node_id}
+            params = {"node_id": str(node_id)}
             result = await self.query(query, params)
 
             connections = []
