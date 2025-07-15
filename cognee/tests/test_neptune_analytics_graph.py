@@ -5,8 +5,6 @@ from cognee.infrastructure.databases.graph.neptune_analytics_driver import Neptu
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
-from cognee.infrastructure.engine import DataPoint
-from infrastructure.databases.graph.graph_db_interface import EdgeData
 
 # Set up Amazon credentials in .env file and get the values from environment variables
 load_dotenv()
@@ -42,19 +40,16 @@ def setup():
     neptune_analytics_entity = Entity(
         name='neptune analytics',
         description='A memory-optimized graph database engine for analytics that processes large amounts of graph data quickly.',
-        is_type=graph_database
     )
     neptune_database_entity = Entity(
         name='amazon neptune database',
         description='A popular managed graph database that complements Neptune Analytics.',
-        is_type=graph_database
     )
 
     storage = EntityType(name='storage', description='storage')
     storage_entity = Entity(
         name='amazon s3',
         description='A storage service provided by Amazon Web Services that allows storing graph data.',
-        is_type=storage
     )
     
     nodes_data = [
