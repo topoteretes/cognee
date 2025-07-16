@@ -251,6 +251,9 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             data_vectors = (await self.embedding_engine.embed_text([query_text]))
             embedding = data_vectors[0]
 
+        # normalize the embeddings [from (-1,1) => (0,2) => (0,1)]
+        embedding = [(e + 1)/2 for e in embedding]
+
         # Compose the parameters map
         params = dict(embedding=embedding, param_topk=limit)
         # Compose the query
