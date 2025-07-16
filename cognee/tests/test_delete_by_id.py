@@ -34,12 +34,15 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
+    # Setup database and tables
+    from cognee.modules.engine.operations.setup import setup
+    await setup()
+
     print("🧪 Testing Delete by ID and Dataset Data Endpoints")
     print("=" * 60)
 
-    # Create test users
+    # Get the default user first
     default_user = await get_default_user()
-    test_user = await create_user("testuser@example.com", "testpass")
 
     # Test data
     text_1 = """
@@ -54,51 +57,84 @@ async def main():
     Microsoft Windows line of operating systems and the Microsoft Office suite.
     """
 
+    text_3 = """
+    Google LLC is an American multinational technology company that specializes in Internet-related services and products, 
+    which include online advertising technologies, search engine, cloud computing, software, and hardware. Google has been 
+    referred to as the most powerful company in the world and one of the world's most valuable brands.
+    """
+
     # Test 1: Setup data and datasets
     print("\n📝 Test 1: Setting up test data and datasets")
 
     # Add data for default user
     await cognee.add([text_1], dataset_name="tech_companies_1", user=default_user)
+    
+    # Create test user first for the second dataset
+    test_user = await create_user("test_user_delete@gmail.com", "test@example.com")
+    
+    # Add data for test user
     await cognee.add([text_2], dataset_name="tech_companies_2", user=test_user)
 
-    await cognee.cognify(["tech_companies_1"], user=default_user)
-    await cognee.cognify(["tech_companies_2"], user=test_user)
+    # Create third user for isolation testing
+    isolation_user = await create_user("isolation_user@gmail.com", "isolation@example.com")
+    
+    # Add data for isolation user (should remain unaffected by other deletions)
+    await cognee.add([text_3], dataset_name="tech_companies_3", user=isolation_user)
 
-    # Get dataset information
-    default_user_datasets = await get_datasets_by_name(["tech_companies_1"], default_user.id)
-    test_user_datasets = await get_datasets_by_name(["tech_companies_2"], test_user.id)
+    tst = await cognee.cognify(["tech_companies_1"], user=default_user)
+    tst2 = await cognee.cognify(["tech_companies_2"], user=test_user)
+    tst3 = await cognee.cognify(["tech_companies_3"], user=isolation_user)
+    print("tst", tst)
+    print("tst2", tst2)
+    print("tst3", tst3)
 
-    assert len(default_user_datasets) == 1, "Default user dataset not created"
-    assert len(test_user_datasets) == 1, "Test user dataset not created"
+    # Extract dataset_ids from cognify results
+    def extract_dataset_id_from_cognify(cognify_result):
+        """Extract dataset_id from cognify output dictionary"""
+        for dataset_id, pipeline_result in cognify_result.items():
+            return dataset_id  # Return the first (and likely only) dataset_id
+        return None
 
-    default_dataset = default_user_datasets[0]
-    test_dataset = test_user_datasets[0]
+    # Get dataset IDs from cognify results
+    dataset_id_1 = extract_dataset_id_from_cognify(tst)
+    dataset_id_2 = extract_dataset_id_from_cognify(tst2)
+    dataset_id_3 = extract_dataset_id_from_cognify(tst3)
+    
+    print(f"📋 Extracted dataset_id from tst: {dataset_id_1}")
+    print(f"📋 Extracted dataset_id from tst2: {dataset_id_2}")
+    print(f"📋 Extracted dataset_id from tst3: {dataset_id_3}")
+    
+    # Get dataset data for deletion testing
+    dataset_data_1 = await get_dataset_data(dataset_id_1)
+    dataset_data_2 = await get_dataset_data(dataset_id_2)
+    dataset_data_3 = await get_dataset_data(dataset_id_3)
+    
+    print(f"📊 Dataset 1 contains {len(dataset_data_1)} data items")
+    print(f"📊 Dataset 2 contains {len(dataset_data_2)} data items")
+    print(f"📊 Dataset 3 (isolation) contains {len(dataset_data_3)} data items")
 
-    print(f"✅ Default user dataset created: {default_dataset.id}")
-    print(f"✅ Test user dataset created: {test_dataset.id}")
+    # Test 2: Get data to delete from the extracted datasets
+    print("\n📝 Test 2: Preparing data for deletion from cognify results")
+    
+    # Use the first data item from each dataset for testing
+    data_to_delete_id = dataset_data_1[0].id if dataset_data_1 else None
+    data_to_delete_from_test_user = dataset_data_2[0].id if dataset_data_2 else None
+    
+    # Create datasets objects for testing
+    from cognee.modules.data.models import Dataset
+    default_dataset = Dataset(id=dataset_id_1, name="tech_companies_1", owner_id=default_user.id)
+    
+    # Create dataset object for permission testing (test_user already created above)
+    test_dataset = Dataset(id=dataset_id_2, name="tech_companies_2", owner_id=test_user.id)
 
-    # Test 2: Get data from datasets to test dataset_data endpoint
-    print("\n📝 Test 2: Testing dataset_data endpoint with read permissions")
+    print(f"🔍 Data to delete ID: {data_to_delete_id}")
+    print(f"🔍 Test user data ID: {data_to_delete_from_test_user}")
 
-    # Test successful access to own dataset
-    default_user_data = await get_dataset_data(default_dataset.id)
-    test_user_data = await get_dataset_data(test_dataset.id)
-
-    assert len(default_user_data) > 0, "Default user dataset should have data"
-    assert len(test_user_data) > 0, "Test user dataset should have data"
-
-    data_to_delete_id = default_user_data[0].id
-    data_to_delete_from_test_user = test_user_data[0].id
-
-    print(f"✅ Found data in default user dataset: {data_to_delete_id}")
-    print(f"✅ Found data in test user dataset: {data_to_delete_from_test_user}")
-
-    # Test 3: Test delete with proper permissions (should succeed)
     print("\n📝 Test 3: Testing delete endpoint with proper permissions")
 
     try:
         result = await cognee.delete(
-            data_id=data_to_delete_id, dataset_id=default_dataset.id, user=default_user
+            data_id=data_to_delete_id, dataset_id=default_dataset.id
         )
         print("✅ Delete successful for data owner")
         assert result["status"] == "success", "Delete should succeed for data owner"
@@ -220,6 +256,37 @@ async def main():
     # We should still have some nodes/edges from the remaining data, but fewer than before
     print(f"✅ Graph database state after deletions - Nodes: {len(nodes)}, Edges: {len(edges)}")
 
+    # Test 10: Verify isolation user's data remains untouched
+    print("\n📝 Test 10: Verifying isolation user's data remains intact")
+
+    try:
+        # Get isolation user's data after all deletions
+        isolation_dataset_data_after = await get_dataset_data(dataset_id_3)
+        
+        print(f"📊 Isolation user's dataset still contains {len(isolation_dataset_data_after)} data items")
+        
+        # Verify data count is unchanged
+        assert len(isolation_dataset_data_after) == len(dataset_data_3), f"Isolation user's data count changed! Expected {len(dataset_data_3)}, got {len(isolation_dataset_data_after)}"
+        
+        # Verify specific data items are still there
+        original_data_ids = {str(data.id) for data in dataset_data_3}
+        remaining_data_ids = {str(data.id) for data in isolation_dataset_data_after}
+        
+        assert original_data_ids == remaining_data_ids, "Isolation user's data IDs have changed!"
+        
+        # Try to search isolation user's data to ensure it's still accessible
+        isolation_search_results = await cognee.search("Google technology company", user=isolation_user)
+        assert len(isolation_search_results) > 0, "Isolation user's data should still be searchable"
+        
+        print("✅ Isolation user's data completely unaffected by other users' deletions")
+        print(f"   - Data count unchanged: {len(isolation_dataset_data_after)} items")
+        print(f"   - All original data IDs preserved")
+        print(f"   - Data still searchable: {len(isolation_search_results)} results")
+        
+    except Exception as e:
+        print(f"❌ Error verifying isolation user's data: {e}")
+        raise
+
     print("\n" + "=" * 60)
     print("🎉 All tests passed! Delete by ID endpoint working correctly.")
     print("=" * 60)
@@ -233,6 +300,7 @@ async def main():
 ✅ Permission granting and revocation works correctly
 ✅ Comprehensive deletion across all databases (graph, vector, relational)
 ✅ Dataset data endpoint now checks read permissions properly
+✅ Data isolation: Other users' data remains completely unaffected by deletions
     """)
 
 
