@@ -7,6 +7,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user, create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.data.methods import get_dataset_data
 
 logger = get_logger()
 
@@ -53,8 +54,19 @@ async def main():
     test_user = await create_user("user@example.com", "example")
     await cognee.add([text], dataset_name="QUANTUM", user=test_user)
 
-    await cognee.cognify(["NLP"], user=default_user)
-    await cognee.cognify(["QUANTUM"], user=test_user)
+    nlp_cognify_result = await cognee.cognify(["NLP"], user=default_user)
+    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=test_user)
+
+    # Extract dataset_ids from cognify results
+    def extract_dataset_id_from_cognify(cognify_result):
+        """Extract dataset_id from cognify output dictionary"""
+        for dataset_id, pipeline_result in cognify_result.items():
+            return dataset_id  # Return the first (and likely only) dataset_id
+        return None
+
+    # Get dataset IDs from cognify results
+    default_user_dataset_id = extract_dataset_id_from_cognify(nlp_cognify_result)
+    test_user_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
 
     # Check if default_user can only see information from the NLP dataset
     search_results = await cognee.search(
@@ -85,7 +97,6 @@ async def main():
     )
 
     # Try to add document with default_user to test_users dataset (test write permission enforcement)
-    test_user_dataset_id = search_results[0]["dataset_id"]
     add_error = False
     try:
         await cognee.add(
@@ -176,14 +187,26 @@ async def main():
     # Try deleting data from test_user dataset with default_user without delete permission
     delete_error = False
     try:
-        await cognee.delete([text], dataset_id=test_user_dataset_id, user=default_user)
+        # Get the dataset data to find the ID of the first data item (text)
+        test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
+        text_data_id = test_user_dataset_data[0].id if test_user_dataset_data else None
+
+        if text_data_id:
+            await cognee.delete(
+                data_id=text_data_id, dataset_id=test_user_dataset_id, user=default_user
+            )
     except PermissionDeniedError:
         delete_error = True
 
     assert delete_error, "PermissionDeniedError was not raised during delete operation as expected"
 
     # Try deleting data from test_user dataset with test_user
-    await cognee.delete([text], dataset_id=test_user_dataset_id, user=test_user)
+    # Get the dataset data to find the ID of the first data item (text)
+    test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
+    text_data_id = test_user_dataset_data[0].id if test_user_dataset_data else None
+
+    if text_data_id:
+        await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
 
     # Actually give permission to default_user to delete data for test_users dataset
     await authorized_give_permission_on_datasets(
@@ -194,7 +217,14 @@ async def main():
     )
 
     # Try deleting data from test_user dataset with default_user after getting delete permission
-    await cognee.delete([explanation_file_path], dataset_id=test_user_dataset_id, user=default_user)
+    # Get the dataset data to find the ID of the remaining data item (explanation_file_path)
+    test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
+    explanation_file_data_id = test_user_dataset_data[0].id if test_user_dataset_data else None
+
+    if explanation_file_data_id:
+        await cognee.delete(
+            data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
+        )
 
 
 if __name__ == "__main__":
