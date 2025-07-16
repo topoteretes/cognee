@@ -3,6 +3,9 @@ name: test | s3 file storage
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   test-gemini:
     name: Run S3 File Storage Test
