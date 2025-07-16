@@ -41,7 +41,50 @@ def get_cognify_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
-        """This endpoint is responsible for the cognitive processing of the content."""
+        """
+        Transform datasets into structured knowledge graphs through cognitive processing.
+
+        This endpoint is the core of Cognee's intelligence layer, responsible for converting
+        raw text, documents, and data added through the add endpoint into semantic knowledge graphs.
+        It performs deep analysis to extract entities, relationships, and insights from ingested content.
+
+        ## Processing Pipeline
+        1. Document classification and permission validation
+        2. Text chunking and semantic segmentation
+        3. Entity extraction using LLM-powered analysis
+        4. Relationship detection and graph construction
+        5. Vector embeddings generation for semantic search
+        6. Content summarization and indexing
+
+        ## Request Parameters
+        - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
+        - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
+        - **graph_model** (Optional[BaseModel]): Custom Pydantic model defining the knowledge graph schema. Defaults to KnowledgeGraph for general-purpose processing.
+        - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
+
+        ## Response
+        - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
+        - **Background execution**: Pipeline run metadata including pipeline_run_id for status monitoring via WebSocket subscription
+
+        ## Error Codes
+        - **400 Bad Request**: When neither datasets nor dataset_ids are provided, or when specified datasets don't exist
+        - **409 Conflict**: When processing fails due to system errors, missing LLM API keys, database connection failures, or corrupted content
+
+        ## Example Request
+        ```json
+        {
+            "datasets": ["research_papers", "documentation"],
+            "run_in_background": false
+        }
+        ```
+
+        ## Notes
+        To cognify data in datasets not owned by the user and for which the current user has write permission,
+        the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True).
+
+        ## Next Steps
+        After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
+        """
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(
                 status_code=400, content={"error": "No datasets or dataset_ids provided"}

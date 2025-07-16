@@ -1,6 +1,6 @@
 import asyncio
+from uuid import UUID
 from typing import Union
-from uuid import NAMESPACE_OID, uuid5, UUID
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data

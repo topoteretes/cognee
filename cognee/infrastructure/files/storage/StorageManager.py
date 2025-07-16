@@ -1,45 +1,8 @@
-from typing import Protocol, BinaryIO
+import inspect
+from typing import BinaryIO
+from contextlib import asynccontextmanager
 
-
-class Storage(Protocol):
-    """
-    Abstract interface for storage operations.
-    """
-
-    def store(self, file_path: str, data: bytes):
-        """
-        Store data at the specified file path.
-
-        Parameters:
-        -----------
-
-            - file_path (str): The path where the data will be stored.
-            - data (bytes): The binary data to be stored.
-        """
-        pass
-
-    def retrieve(self, file_path: str):
-        """
-        Retrieve data from the specified file path.
-
-        Parameters:
-        -----------
-
-            - file_path (str): The path from where the data will be retrieved.
-        """
-        pass
-
-    @staticmethod
-    def remove(file_path: str):
-        """
-        Remove the storage at the specified file path.
-
-        Parameters:
-        -----------
-
-            - file_path (str): The path of the file to be removed.
-        """
-        pass
+from .storage import Storage
 
 
 class StorageManager:
@@ -48,8 +11,9 @@ class StorageManager:
 
     Public methods include:
     - store: Store data in the specified path.
-    - retrieve: Retrieve data from the specified path.
+    - open: Open a file from the specified path.
     - remove: Remove the file at the specified path.
+    - remove_all: Remove all files under the directory tree.
     """
 
     storage: Storage = None
@@ -57,7 +21,26 @@ class StorageManager:
     def __init__(self, storage: Storage):
         self.storage = storage
 
-    def store(self, file_path: str, data: BinaryIO):
+    async def file_exists(self, file_path: str):
+        """
+        Check if a specified file exists in the storage.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The path of the file to check for existence.
+
+        Returns:
+        --------
+
+            - bool: True if the file exists, otherwise False.
+        """
+        if inspect.iscoroutinefunction(self.storage.file_exists):
+            return await self.storage.file_exists(file_path)
+        else:
+            return self.storage.file_exists(file_path)
+
+    async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.
 
@@ -66,16 +49,20 @@ class StorageManager:
 
             - file_path (str): The path where the data should be stored.
             - data (BinaryIO): The data in a binary format that needs to be stored.
+            - overwrite (bool): If True, overwrite the existing file.
 
         Returns:
         --------
 
-            Returns the outcome of the store operation, as defined by the storage
-            implementation.
+            Returns the full path to the file.
         """
-        return self.storage.store(file_path, data)
+        if inspect.iscoroutinefunction(self.storage.store):
+            return await self.storage.store(file_path, data, overwrite)
+        else:
+            return self.storage.store(file_path, data, overwrite)
 
-    def retrieve(self, file_path: str):
+    @asynccontextmanager
+    async def open(self, file_path: str, encoding: str = None, *args, **kwargs):
         """
         Retrieve data from the specified file path.
 
@@ -89,9 +76,34 @@ class StorageManager:
 
             Returns the retrieved data, as defined by the storage implementation.
         """
-        return self.storage.retrieve(file_path)
+        # Check the actual storage type by class name to determine if open() is async or sync
 
-    def remove(self, file_path: str):
+        if self.storage.__class__.__name__ == "S3FileStorage":
+            # S3FileStorage.open() is async
+            async with self.storage.open(file_path, *args, **kwargs) as file:
+                yield file
+        else:
+            # LocalFileStorage.open() is sync
+            with self.storage.open(file_path, *args, **kwargs) as file:
+                yield file
+
+    async def ensure_directory_exists(self, directory_path: str = None):
+        """
+        Ensure that the specified directory exists, creating it if necessary.
+
+        If the directory already exists, no action is taken.
+
+        Parameters:
+        -----------
+
+            - directory_path (str): The path of the directory to check or create.
+        """
+        if inspect.iscoroutinefunction(self.storage.ensure_directory_exists):
+            return await self.storage.ensure_directory_exists(directory_path)
+        else:
+            return self.storage.ensure_directory_exists(directory_path)
+
+    async def remove(self, file_path: str):
         """
         Remove the file at the specified path.
 
@@ -106,4 +118,24 @@ class StorageManager:
             Returns the outcome of the remove operation, as defined by the storage
             implementation.
         """
-        return self.storage.remove(file_path)
+        if inspect.iscoroutinefunction(self.storage.remove):
+            return await self.storage.remove(file_path)
+        else:
+            return self.storage.remove(file_path)
+
+    async def remove_all(self, tree_path: str = None):
+        """
+        Remove an entire directory tree at the specified path, including all files and
+        subdirectories.
+
+        If the directory does not exist, no action is taken and no exception is raised.
+
+        Parameters:
+        -----------
+
+            - tree_path (str): The root path of the directory tree to be removed.
+        """
+        if inspect.iscoroutinefunction(self.storage.remove_all):
+            return await self.storage.remove_all(tree_path)
+        else:
+            return self.storage.remove_all(tree_path)

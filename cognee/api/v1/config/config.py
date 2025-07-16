@@ -9,21 +9,28 @@ from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
-from cognee.infrastructure.files.storage import LocalStorage
 
 
 class config:
     @staticmethod
     def system_root_directory(system_root_directory: str):
-        databases_directory_path = os.path.join(system_root_directory, "databases")
+        base_config = get_base_config()
+        base_config.system_root_directory = os.path.join(system_root_directory, ".cognee_system")
+
+        databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
 
         relational_config = get_relational_config()
         relational_config.db_path = databases_directory_path
-        LocalStorage.ensure_directory_exists(databases_directory_path)
 
         graph_config = get_graph_config()
         graph_file_name = graph_config.graph_filename
-        graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
+        # For Kuzu v0.11.0+, use single-file database with .kuzu extension
+        if graph_config.graph_database_provider.lower() == "kuzu":
+            graph_config.graph_file_path = os.path.join(
+                databases_directory_path, f"{graph_file_name}.kuzu"
+            )
+        else:
+            graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
 
         vector_config = get_vectordb_config()
         if vector_config.vector_db_provider == "lancedb":
@@ -32,7 +39,7 @@ class config:
     @staticmethod
     def data_root_directory(data_root_directory: str):
         base_config = get_base_config()
-        base_config.data_root_directory = data_root_directory
+        base_config.data_root_directory = os.path.join(data_root_directory, ".data_storage")
 
     @staticmethod
     def monitoring_tool(monitoring_tool: object):
