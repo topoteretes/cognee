@@ -1,4 +1,3 @@
-
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 import os
@@ -96,7 +95,6 @@ async def delete(
 
     # Use the existing comprehensive deletion logic
     return await delete_single_document(content_hash, dataset.id, mode)
-
 
 
 async def delete_single_document(content_hash: str, dataset_id: UUID = None, mode: str = "soft"):

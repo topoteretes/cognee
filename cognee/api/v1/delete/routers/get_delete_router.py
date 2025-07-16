@@ -1,4 +1,3 @@
-
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
@@ -20,7 +19,6 @@ def get_delete_router() -> APIRouter:
         mode: str = "soft",
         user: User = Depends(get_authenticated_user),
     ):
-
         """Delete data by its ID from the specified dataset.
 
         Args:
@@ -36,7 +34,6 @@ def get_delete_router() -> APIRouter:
         from cognee.api.v1.delete import delete as cognee_delete
 
         try:
-
             result = await cognee_delete(
                 data_id=data_id,
                 dataset_id=dataset_id,
