@@ -66,6 +66,7 @@ async def main():
 
     # Get dataset IDs from cognify results
     default_user_dataset_id = extract_dataset_id_from_cognify(nlp_cognify_result)
+    print("User is", default_user_dataset_id)
     test_user_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
 
     # Check if default_user can only see information from the NLP dataset
