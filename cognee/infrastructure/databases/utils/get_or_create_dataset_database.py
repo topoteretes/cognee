@@ -33,7 +33,7 @@ async def get_or_create_dataset_database(
     dataset_id = await get_unique_dataset_id(dataset, user)
 
     vector_db_name = f"{dataset_id}.lance.db"
-    graph_db_name = str(dataset_id)
+    graph_db_name = f"{dataset_id}.pkl"
 
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist

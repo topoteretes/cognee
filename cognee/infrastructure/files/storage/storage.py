@@ -24,6 +24,22 @@ class Storage(Protocol):
         """
         pass
 
+    def is_file(self, file_path: str) -> bool:
+        """
+        Check if a specified file is a regular file.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The path of the file to check.
+
+        Returns:
+        --------
+
+            - bool: True if the file is a regular file, otherwise False.
+        """
+        pass
+
     def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool):
         """
         Store data at the specified file path.

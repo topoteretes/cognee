@@ -171,6 +171,24 @@ class LocalFileStorage(Storage):
 
         return os.path.exists(os.path.join(parsed_storage_path, file_path))
 
+    def is_file(self, file_path: str):
+        """
+        Check if a specified file is a regular file.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The path of the file to check.
+
+        Returns:
+        --------
+
+            - bool: True if the file is a regular file, otherwise False.
+        """
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        return os.path.isfile(os.path.join(parsed_storage_path, file_path))
+
     def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.

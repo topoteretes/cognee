@@ -40,6 +40,12 @@ class StorageManager:
         else:
             return self.storage.file_exists(file_path)
 
+    async def is_file(self, file_path: str):
+        if inspect.iscoroutinefunction(self.storage.is_file):
+            return await self.storage.is_file(file_path)
+        else:
+            return self.storage.is_file(file_path)
+
     async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.
