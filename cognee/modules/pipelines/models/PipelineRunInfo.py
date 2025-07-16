@@ -9,7 +9,7 @@ class PipelineRunInfo(BaseModel):
     dataset_id: UUID
     dataset_name: str
     payload: Optional[Any] = None
-    data_ingestion_info: Optional[dict] = None
+    data_ingestion_info: Optional[list] = None
 
     model_config = {
         "arbitrary_types_allowed": True,

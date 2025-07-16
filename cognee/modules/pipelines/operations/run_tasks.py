@@ -1,6 +1,7 @@
 import os
 import cognee.modules.ingestion as ingestion
 
+import asyncio
 from uuid import UUID
 from typing import Any
 from functools import wraps
@@ -53,6 +54,143 @@ def override_run_tasks(new_gen):
     return decorator
 
 
+# TODO: Check if we should split task_per_data_generator into two functions one for regular and one for incremental loading instead of if statements
+async def run_tasks_per_data_generator(
+    data_item,
+    dataset,
+    tasks,
+    pipeline_name,
+    pipeline_id,
+    pipeline_run_id,
+    context,
+    fs,
+    user,
+    incremental_loading,
+):
+    db_engine = get_relational_engine()
+    # If incremental_loading of data is set to True don't process documents already processed by pipeline
+    if incremental_loading:
+        # If data is being added to Cognee for the first time calculate the id of the data
+        if not isinstance(data_item, Data):
+            file_path = await save_data_item_to_storage(data_item, dataset.name)
+            # Ingest data and add metadata
+            with open_data_file(file_path, s3fs=fs) as file:
+                classified_data = ingestion.classify(file, s3fs=fs)
+                # data_id is the hash of file contents + owner id to avoid duplicate data
+                data_id = ingestion.identify(classified_data, user)
+        else:
+            # If data was already processed by Cognee get data id
+            data_id = data_item.id
+
+        # Check pipeline status, if Data already processed for pipeline before skip current processing
+        async with db_engine.get_async_session() as session:
+            data_point = (
+                await session.execute(select(Data).filter(Data.id == data_id))
+            ).scalar_one_or_none()
+            if data_point:
+                if data_point.pipeline_status.get(pipeline_name) == "Completed":
+                    return
+
+    try:
+        # Process data based on data_item and list of tasks
+        async for result in run_tasks_with_telemetry(
+            tasks=tasks,
+            data=[data_item],
+            user=user,
+            pipeline_name=pipeline_id,
+            context=context,
+        ):
+            yield PipelineRunYield(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                payload=result,
+            )
+
+        if incremental_loading:
+            # Update pipeline status for Data element
+            async with db_engine.get_async_session() as session:
+                data_point = (
+                    await session.execute(select(Data).filter(Data.id == data_id))
+                ).scalar_one_or_none()
+                data_point.pipeline_status[pipeline_name] = "Completed"
+                await session.merge(data_point)
+                await session.commit()
+
+            yield {
+                "run_info": PipelineRunCompleted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                ),
+                "data_id": data_id,
+            }
+        else:
+            yield {
+                "run_info": PipelineRunCompleted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                )
+            }
+
+    except Exception as error:
+        # Temporarily swallow error and try to process rest of documents first, then re-raise error at end of data ingestion pipeline
+        logger.error(
+            f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
+        )
+        if incremental_loading:
+            yield {
+                "run_info": PipelineRunErrored(
+                    pipeline_run_id=pipeline_run_id,
+                    payload=error,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                ),
+                "data_id": data_id,
+            }
+        else:
+            yield {
+                "run_info": PipelineRunErrored(
+                    pipeline_run_id=pipeline_run_id,
+                    payload=error,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                )
+            }
+
+
+async def run_tasks_per_data_task(
+    data_item,
+    dataset,
+    tasks,
+    pipeline_name,
+    pipeline_id,
+    pipeline_run_id,
+    context,
+    fs,
+    user,
+    incremental_loading,
+):
+    # Go through async generator and return data item processing result. Result can be None when data item is skipped,
+    # PipelineRunCompleted when processing was successful and PipelineRunErrored if there were issues
+    result = None
+    async for result in run_tasks_per_data_generator(
+        data_item,
+        dataset,
+        tasks,
+        pipeline_name,
+        pipeline_id,
+        pipeline_run_id,
+        context,
+        fs,
+        user,
+        incremental_loading,
+    ):
+        pass
+    return result
+
+
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
     tasks: list[Task],
@@ -74,9 +212,7 @@ async def run_tasks(
         dataset = await session.get(Dataset, dataset_id)
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
-
     pipeline_run_id = pipeline_run.pipeline_run_id
 
     yield PipelineRunStarted(
@@ -87,8 +223,6 @@ async def run_tasks(
     )
 
     fs = get_s3_fs()
-    data_items_pipeline_run_info = {}
-    ingestion_error = None
     try:
         if not isinstance(data, list):
             data = [data]
@@ -96,85 +230,32 @@ async def run_tasks(
         if incremental_loading:
             data = await resolve_data_directories(data)
 
-        # TODO: Convert to async gather task instead of for loop (just make sure it can work there were some issues when async gathering datasets)
-        for data_item in data:
-            # If incremental_loading of data is set to True don't process documents already processed by pipeline
-            if incremental_loading:
-                # If data is being added to Cognee for the first time calculate the id of the data
-                if not isinstance(data_item, Data):
-                    file_path = await save_data_item_to_storage(data_item, dataset.name)
-                    # Ingest data and add metadata
-                    with open_data_file(file_path, s3fs=fs) as file:
-                        classified_data = ingestion.classify(file, s3fs=fs)
-                        # data_id is the hash of file contents + owner id to avoid duplicate data
-                        data_id = ingestion.identify(classified_data, user)
-                else:
-                    # If data was already processed by Cognee get data id
-                    data_id = data_item.id
-
-                    # Check pipeline status, if Data already processed for pipeline before skip current processing
-                    async with db_engine.get_async_session() as session:
-                        data_point = (
-                            await session.execute(select(Data).filter(Data.id == data_id))
-                        ).scalar_one_or_none()
-                        if data_point:
-                            if data_point.pipeline_status.get(pipeline_name) == "Completed":
-                                continue
-
-            try:
-                async for result in run_tasks_with_telemetry(
-                    tasks=tasks,
-                    data=[data_item],
-                    user=user,
-                    pipeline_name=pipeline_id,
-                    context=context,
-                ):
-                    yield PipelineRunYield(
-                        pipeline_run_id=pipeline_run_id,
-                        dataset_id=dataset.id,
-                        dataset_name=dataset.name,
-                        payload=result,
-                    )
-
-                if incremental_loading:
-                    data_items_pipeline_run_info[data_id] = {
-                        "run_info": PipelineRunCompleted(
-                            pipeline_run_id=pipeline_run_id,
-                            dataset_id=dataset.id,
-                            dataset_name=dataset.name,
-                        ),
-                        "data_id": data_id,
-                    }
-
-                    # Update pipeline status for Data element
-                    async with db_engine.get_async_session() as session:
-                        data_point = (
-                            await session.execute(select(Data).filter(Data.id == data_id))
-                        ).scalar_one_or_none()
-                        data_point.pipeline_status[pipeline_name] = "Completed"
-                        await session.merge(data_point)
-                        await session.commit()
-
-            except Exception as error:
-                # Temporarily swallow error and try to process rest of documents first, then re-raise error at end of data ingestion pipeline
-                ingestion_error = error
-                logger.error(
-                    f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
+        # Create async tasks per data item that will run the pipeline for the data item
+        data_item_tasks = [
+            asyncio.create_task(
+                run_tasks_per_data_task(
+                    data_item,
+                    dataset,
+                    tasks,
+                    pipeline_name,
+                    pipeline_id,
+                    pipeline_run_id,
+                    context,
+                    fs,
+                    user,
+                    incremental_loading,
                 )
-                if incremental_loading:
-                    data_items_pipeline_run_info = {
-                        "run_info": PipelineRunErrored(
-                            pipeline_run_id=pipeline_run_id,
-                            payload=error,
-                            dataset_id=dataset.id,
-                            dataset_name=dataset.name,
-                        ),
-                        "data_id": data_id,
-                    }
+            )
+            for data_item in data
+        ]
+        results = await asyncio.gather(*data_item_tasks)
+        # Remove skipped data items from results
+        results = [result for result in results if result]
 
-        # re-raise error found during data ingestion
-        if ingestion_error:
-            raise ingestion_error
+        # If any data item could not be processed propagate error
+        errored_results = [result for result in results if isinstance(result, PipelineRunErrored)]
+        if errored_results:
+            raise errored_results[0]["run_info"].payload
 
         await log_pipeline_run_complete(
             pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data
@@ -184,7 +265,7 @@ async def run_tasks(
             pipeline_run_id=pipeline_run_id,
             dataset_id=dataset.id,
             dataset_name=dataset.name,
-            data_ingestion_info=data_items_pipeline_run_info,
+            data_ingestion_info=results,
         )
 
     except Exception as error:
@@ -197,7 +278,9 @@ async def run_tasks(
             payload=error,
             dataset_id=dataset.id,
             dataset_name=dataset.name,
-            data_ingestion_info=data_items_pipeline_run_info,
+            data_ingestion_info=locals().get(
+                "results"
+            ),  # Returns results if they exist or returns None
         )
 
         raise error
