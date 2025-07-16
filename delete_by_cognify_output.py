@@ -100,7 +100,7 @@ async def delete_from_real_cognify_output(cognify_result):
                     result = await cognee.delete(
                         data_id=data_item.id, dataset_id=actual_dataset_id, user=default_user
                     )
-                    print(f"✅ Deleted data item {data_item.id}")
+                    print(f"✅ Deleted data item {data_item.id}", str(result))
                 except Exception as e:
                     print(f"❌ Failed to delete data item {data_item.id}: {e}")
 

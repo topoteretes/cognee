@@ -239,7 +239,7 @@ async def main():
             dataset_id=test_dataset.id,
             user=default_user,  # Now should work with granted permission
         )
-        print("✅ Delete successful after granting permission")
+        print("✅ Delete successful after granting permission", result)
         assert result["status"] == "success", "Delete should succeed after granting permission"
     except Exception as e:
         print(f"❌ Unexpected error after granting permission: {e}")
@@ -286,7 +286,7 @@ async def main():
 
         print("✅ Isolation user's data completely unaffected by other users' deletions")
         print(f"   - Data count unchanged: {len(isolation_dataset_data_after)} items")
-        print(f"   - All original data IDs preserved")
+        print("   - All original data IDs preserved")
         print(f"   - Data still searchable: {len(isolation_search_results)} results")
 
     except Exception as e:
