@@ -54,8 +54,8 @@ class KuzuAdapter(GraphDBInterface):
 
                 self.db = Database(
                     self.temp_graph_file,
-                    buffer_pool_size=256 * 1024 * 1024,  # 256MB buffer pool
-                    max_db_size=1024 * 1024 * 1024,
+                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                    max_db_size=4096 * 1024 * 1024,
                 )
             else:
                 # Ensure the parent directory exists before creating the database
