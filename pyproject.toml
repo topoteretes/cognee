@@ -1,6 +1,6 @@
 [project]
 name = "cognee"
-version = "0.2.1-dev1"
+version = "0.2.1-dev3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -156,7 +156,6 @@ exclude = [
   "/.data",
   "/.github",
   "/alembic",
-  "/distributed",
   "/deployment",
   "/cognee-mcp",
   "/cognee-frontend",
@@ -169,6 +168,9 @@ exclude = [
   "/tests",
   "/tools",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee", "distributed"]
 
 [tool.ruff]
 line-length = 100

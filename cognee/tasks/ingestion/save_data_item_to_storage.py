@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -20,17 +21,27 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
 
-        file_path = await get_data_from_llama_index(data_item)
+        return await get_data_from_llama_index(data_item)
 
     # data is a file object coming from upload.
-    elif hasattr(data_item, "file"):
-        file_path = await save_data_to_file(data_item.file, filename=data_item.filename)
+    if hasattr(data_item, "file"):
+        return await save_data_to_file(data_item.file, filename=data_item.filename)
 
-    elif isinstance(data_item, str):
-        # data is s3 file or local file path
-        if data_item.startswith("s3://") or data_item.startswith("file://"):
-            file_path = data_item
-        # data is a file path
+    if isinstance(data_item, str):
+        parsed_url = urlparse(data_item)
+
+        # data is s3 file path
+        if parsed_url.scheme == "s3":
+            return data_item
+
+        # data is local file path
+        elif parsed_url.scheme == "file":
+            if settings.accept_local_file_path:
+                return data_item
+            else:
+                raise IngestionError(message="Local files are not accepted.")
+
+        # data is an absolute file path
         elif data_item.startswith("/") or (
             os.name == "nt" and len(data_item) > 1 and data_item[1] == ":"
         ):
@@ -41,12 +52,13 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
                 # Use forward slashes in file URLs for consistency
                 url_path = normalized_path.replace(os.sep, "/")
                 file_path = "file://" + url_path
+
+                return file_path
             else:
                 raise IngestionError(message="Local files are not accepted.")
-        # data is text
-        else:
-            file_path = await save_data_to_file(data_item)
-    else:
-        raise IngestionError(message=f"Data type not supported: {type(data_item)}")
 
-    return file_path
+        # data is text, save it to data storage and return the file path
+        return await save_data_to_file(data_item)
+
+    # data is not a supported type
+    raise IngestionError(message=f"Data type not supported: {type(data_item)}")

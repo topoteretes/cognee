@@ -679,11 +679,11 @@ class NetworkXAdapter(GraphDBInterface):
             )  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
             file_dir_path = os.path.dirname(file_path)
-            file_path = os.path.basename(file_path)
+            file_name = os.path.basename(file_path)
 
             file_storage = get_file_storage(file_dir_path)
 
-            await file_storage.remove(file_path)
+            await file_storage.remove(file_name)
 
             self.graph = None
             logger.info("Graph deleted successfully.")

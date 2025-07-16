@@ -1452,9 +1452,13 @@ class KuzuAdapter(GraphDBInterface):
             db_name = os.path.basename(self.db_path)
             file_storage = get_file_storage(db_dir)
 
-            if await file_storage.file_exists(db_name):
-                await file_storage.remove_all()
-                logger.info(f"Deleted Kuzu database files at {self.db_path}")
+            if await file_storage.is_file(db_name):
+                await file_storage.remove(db_name)
+                await file_storage.remove(f"{db_name}.lock")
+            else:
+                await file_storage.remove_all(db_name)
+
+            logger.info(f"Deleted Kuzu database files at {self.db_path}")
 
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
