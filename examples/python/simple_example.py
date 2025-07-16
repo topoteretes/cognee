@@ -12,8 +12,8 @@ from cognee.api.v1.search import SearchType
 async def main():
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
-    # await cognee.prune.prune_data()
-    # await cognee.prune.prune_system(metadata=True)
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
     print("Data reset complete.\n")
 
     # cognee knowledge graph will be created based on this text
@@ -25,7 +25,7 @@ async def main():
     print("Adding text to cognee:")
     print(text.strip())
     # Add the text, and make it available for cognify
-    await cognee.add([text, "TESTTT", "TROSEYOOEOEEE", "TESTTTTS"])
+    await cognee.add(text)
     print("Text added successfully.\n")
 
     print("Running cognify to create knowledge graph...\n")
