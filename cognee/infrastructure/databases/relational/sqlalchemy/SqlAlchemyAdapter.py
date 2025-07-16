@@ -496,9 +496,9 @@ class SQLAlchemyAdapter:
                 # Wait for the database connections to close and release the file (Windows)
                 await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
-                file_path = path.basename(self.db_path)
+                file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                await file_storage.remove(file_path)
+                await file_storage.remove(file_name)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information

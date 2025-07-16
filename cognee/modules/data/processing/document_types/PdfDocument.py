@@ -1,10 +1,11 @@
 from pypdf import PdfReader
+
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.data.processing.document_types.exceptions.exceptions import PyPdfInternalError
 
 from .Document import Document
+from .exceptions.exceptions import PyPdfInternalError
 
 logger = get_logger("PDFDocument")
 
@@ -14,7 +15,7 @@ class PdfDocument(Document):
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
         async with open_data_file(self.raw_data_location, mode="rb") as stream:
-            logger.info(f"Reading PDF:{self.raw_data_location}")
+            logger.info(f"Reading PDF: {self.raw_data_location}")
 
             try:
                 file = PdfReader(stream, strict=False)
