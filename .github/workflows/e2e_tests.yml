@@ -297,7 +297,7 @@ jobs:
       - name: Run Knowledge Graph Quality Test
         env:
           ENV: 'dev'
-          # Model selection is handled by the test with fallback priority
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
