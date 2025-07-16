@@ -254,8 +254,6 @@ async def test_knowledge_graph_quality_with_gpt4o():
     print("QUALITY ASSESSMENT:")
     print("-" * 40)
     print(f"Model used: {selected_model}")
-    print(f"Minimum entity coverage threshold: {min_entity_coverage:.1%}")
-    print(f"Minimum concept coverage threshold: {min_concept_coverage:.1%}")
     print()
 
     # Adjust quality thresholds based on model capability
