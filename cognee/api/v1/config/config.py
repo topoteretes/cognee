@@ -15,7 +15,7 @@ class config:
     @staticmethod
     def system_root_directory(system_root_directory: str):
         base_config = get_base_config()
-        base_config.system_root_directory = os.path.join(system_root_directory, ".cognee_system")
+        base_config.system_root_directory = system_root_directory
 
         databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
 
@@ -24,13 +24,7 @@ class config:
 
         graph_config = get_graph_config()
         graph_file_name = graph_config.graph_filename
-        # For Kuzu v0.11.0+, use single-file database with .kuzu extension
-        if graph_config.graph_database_provider.lower() == "kuzu":
-            graph_config.graph_file_path = os.path.join(
-                databases_directory_path, f"{graph_file_name}.kuzu"
-            )
-        else:
-            graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
+        graph_config.graph_file_path = os.path.join(databases_directory_path, graph_file_name)
 
         vector_config = get_vectordb_config()
         if vector_config.vector_db_provider == "lancedb":
@@ -39,7 +33,7 @@ class config:
     @staticmethod
     def data_root_directory(data_root_directory: str):
         base_config = get_base_config()
-        base_config.data_root_directory = os.path.join(data_root_directory, ".data_storage")
+        base_config.data_root_directory = data_root_directory
 
     @staticmethod
     def monitoring_tool(monitoring_tool: object):
