@@ -25,4 +25,4 @@ jobs:
           ENABLE_BACKEND_ACCESS_CONTROL: True
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: poetry run python ./examples/python/test_s3_file_storage.py
+        run: poetry run python ./cognee/tests/test_s3_file_storage.py
