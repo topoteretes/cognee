@@ -4,6 +4,7 @@ import os
 from uuid import UUID
 from typing import List, Optional
 
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -80,29 +81,11 @@ class MilvusAdapter(VectorDBInterface):
         if self.url and not self.url.startswith(("http://", "https://", "grpc://")):
             # This is likely a local file path, ensure the directory exists
             db_dir = os.path.dirname(self.url)
-            if db_dir and not os.path.exists(db_dir):
-                try:
-                    file_storage = get_file_storage(db_dir)
-                    if hasattr(file_storage, "ensure_directory_exists"):
-                        if asyncio.iscoroutinefunction(file_storage.ensure_directory_exists):
-                            # Run async function synchronously in this sync method
-                            loop = asyncio.get_event_loop()
-                            if loop.is_running():
-                                # If we're already in an async context, we can't use run_sync easily
-                                # Create the directory directly as a fallback
-                                os.makedirs(db_dir, exist_ok=True)
-                            else:
-                                loop.run_until_complete(file_storage.ensure_directory_exists())
-                        else:
-                            file_storage.ensure_directory_exists()
-                    else:
-                        # Fallback to os.makedirs if file_storage doesn't have ensure_directory_exists
-                        os.makedirs(db_dir, exist_ok=True)
-                except Exception as e:
-                    logger.warning(
-                        f"Could not create directory {db_dir} using file_storage, falling back to os.makedirs: {e}"
-                    )
-                    os.makedirs(db_dir, exist_ok=True)
+            file_storage = get_file_storage(db_dir)
+            try:
+                run_sync(file_storage.ensure_directory_exists())
+            except Exception as e:
+                logger.warning(f"Could not create directory {db_dir} using file_storage: {e}")
 
         if self.api_key:
             client = MilvusClient(uri=self.url, token=self.api_key)

@@ -66,7 +66,7 @@ class Storage(Protocol):
         """
         pass
 
-    def ensure_directory_exists(self, directory_path: str = None):
+    def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.
 

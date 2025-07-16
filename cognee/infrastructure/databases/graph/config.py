@@ -40,7 +40,7 @@ class GraphConfig(BaseSettings):
     graph_database_password: str = ""
     graph_database_port: int = 123
     graph_file_path: str = ""
-    graph_filename: str = ""
+    graph_filename: str = "cognee_graph"
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
@@ -50,19 +50,26 @@ class GraphConfig(BaseSettings):
     @pydantic.model_validator(mode="after")
     def fill_derived(cls, values):
         provider = values.graph_database_provider.lower()
-        # Set filename based on graph database provider if no filename is provided
+
+        # Set default filename if no filename is provided
         if not values.graph_filename:
-            values.graph_filename = f"cognee_graph_{provider}"
+            values.graph_filename = "cognee_graph"
+
         # Set file path based on graph database provider if no file path is provided
         if not values.graph_file_path:
             base_config = get_base_config()
 
-            base = os.path.join(base_config.system_root_directory, "databases")
+            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
             # For Kuzu v0.11.0+, use single-file database with .kuzu extension
             if provider == "kuzu":
-                values.graph_file_path = os.path.join(base, f"{values.graph_filename}.kuzu")
+                values.graph_file_path = os.path.join(
+                    databases_directory_path, f"{values.graph_filename}.kuzu"
+                )
             else:
-                values.graph_file_path = os.path.join(base, values.graph_filename)
+                values.graph_file_path = os.path.join(
+                    databases_directory_path, values.graph_filename
+                )
+
         return values
 
     def to_dict(self) -> dict:

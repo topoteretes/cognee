@@ -78,7 +78,7 @@ class StorageManager:
         """
         # Check the actual storage type by class name to determine if open() is async or sync
 
-        if self.storage.__class__.__name__ == "S3FileStorage":
+        if self.storage.__class__.__name__ == "S3FileStorage" and file_path.startswith("s3://"):
             # S3FileStorage.open() is async
             async with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
@@ -87,7 +87,7 @@ class StorageManager:
             with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
 
-    async def ensure_directory_exists(self, directory_path: str = None):
+    async def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.
 

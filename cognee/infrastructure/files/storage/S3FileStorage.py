@@ -3,7 +3,7 @@ import s3fs
 from typing import BinaryIO, Union
 from contextlib import asynccontextmanager
 
-from cognee.api.v1.add.config import get_s3_config
+from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from .storage import Storage
@@ -127,7 +127,7 @@ class S3FileStorage(Storage):
             self.s3.exists, os.path.join(self.storage_path.replace("s3://", ""), file_path)
         )
 
-    async def ensure_directory_exists(self, directory_path: str = None):
+    async def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -138,7 +138,7 @@ class S3FileStorage(Storage):
 
             - directory_path (str): The path of the directory to check or create.
         """
-        if directory_path is None:
+        if not directory_path.strip():
             directory_path = self.storage_path.replace("s3://", "")
 
         def ensure_directory():
