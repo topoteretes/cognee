@@ -14,9 +14,9 @@ logger = get_logger()
 
 async def main():
     test_run_id = uuid4()
-    data_directory_path = f"s3://github-runner-cognee-tests/{test_run_id}/data"
+    data_directory_path = f"s3://cognee-storage-dev/{test_run_id}/data"
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = f"s3://github-runner-cognee-tests/{test_run_id}/system"
+    cognee_directory_path = f"s3://cognee-storage-dev/{test_run_id}/system"
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
