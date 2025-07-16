@@ -19,9 +19,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import (
     get_all_user_permission_datasets,
     give_permission_on_dataset,
-    get_specific_user_permission_datasets,
 )
-from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
 

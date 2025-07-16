@@ -60,7 +60,6 @@ dependencies = [
     "onnxruntime>=1.0.0,<2.0.0",
     "pylance>=0.22.0,<1.0.0",
     "kuzu (==0.11.0)"
-
 ]
 
 [project.optional-dependencies]
