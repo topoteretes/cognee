@@ -53,7 +53,7 @@ class GraphConfig(BaseSettings):
 
         # Set default filename if no filename is provided
         if not values.graph_filename:
-            values.graph_filename = "cognee_graph"
+            values.graph_filename = f"cognee_graph_{provider}"
 
         # Set file path based on graph database provider if no file path is provided
         if not values.graph_file_path:
