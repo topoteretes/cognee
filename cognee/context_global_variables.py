@@ -62,7 +62,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     graph_config = {
         "graph_database_provider": "kuzu",
         "graph_file_path": os.path.join(
-            databases_directory_path, f"{dataset_database.graph_database_name}.kuzu"
+            databases_directory_path, dataset_database.graph_database_name
         ),
     }
 

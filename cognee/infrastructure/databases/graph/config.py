@@ -40,7 +40,7 @@ class GraphConfig(BaseSettings):
     graph_database_password: str = ""
     graph_database_port: int = 123
     graph_file_path: str = ""
-    graph_filename: str = "cognee_graph"
+    graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
@@ -60,15 +60,7 @@ class GraphConfig(BaseSettings):
             base_config = get_base_config()
 
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            # For Kuzu v0.11.0+, use single-file database with .kuzu extension
-            if provider == "kuzu":
-                values.graph_file_path = os.path.join(
-                    databases_directory_path, f"{values.graph_filename}.kuzu"
-                )
-            else:
-                values.graph_file_path = os.path.join(
-                    databases_directory_path, values.graph_filename
-                )
+            values.graph_file_path = os.path.join(databases_directory_path, values.graph_filename)
 
         return values
 
