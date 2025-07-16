@@ -190,12 +190,11 @@ async def main():
     try:
         # Get the dataset data to find the ID of the first data item (text)
         test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
-        text_data_id = test_user_dataset_data[0].id if test_user_dataset_data else None
+        text_data_id = test_user_dataset_data[0].id
 
-        if text_data_id:
-            await cognee.delete(
-                data_id=text_data_id, dataset_id=test_user_dataset_id, user=default_user
-            )
+        await cognee.delete(
+            data_id=text_data_id, dataset_id=test_user_dataset_id, user=default_user
+        )
     except PermissionDeniedError:
         delete_error = True
 
@@ -204,10 +203,9 @@ async def main():
     # Try deleting data from test_user dataset with test_user
     # Get the dataset data to find the ID of the first data item (text)
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
-    text_data_id = test_user_dataset_data[0].id if test_user_dataset_data else None
+    text_data_id = test_user_dataset_data[0].id
 
-    if text_data_id:
-        await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
+    await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
 
     # Actually give permission to default_user to delete data for test_users dataset
     await authorized_give_permission_on_datasets(
@@ -220,12 +218,11 @@ async def main():
     # Try deleting data from test_user dataset with default_user after getting delete permission
     # Get the dataset data to find the ID of the remaining data item (explanation_file_path)
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
-    explanation_file_data_id = test_user_dataset_data[0].id if test_user_dataset_data else None
+    explanation_file_data_id = test_user_dataset_data[0].id
 
-    if explanation_file_data_id:
-        await cognee.delete(
-            data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
-        )
+    await cognee.delete(
+        data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
+    )
 
 
 if __name__ == "__main__":
