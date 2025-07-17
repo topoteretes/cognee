@@ -155,12 +155,14 @@ async def brute_force_search(
         logger.error("Failed to initialize vector engine: %s", e)
         raise RuntimeError("Initialization error") from e
 
+    query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
+
     send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
 
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
-                collection_name=collection_name, query_text=query, limit=0
+                collection_name=collection_name, query_vector=query_vector, limit=0
             )
         except CollectionNotFoundError:
             return []
