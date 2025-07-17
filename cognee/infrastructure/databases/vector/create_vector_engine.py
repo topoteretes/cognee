@@ -149,9 +149,9 @@ def create_vector_engine(
         if vector_db_url.startswith("neptune-graph://"):
             graph_identifier = vector_db_url.replace("neptune-graph://", "")
 
-            from .neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsAdapter
+            from .neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsVectorDB
 
-            return NeptuneAnalyticsAdapter(
+            return NeptuneAnalyticsVectorDB(
                 graph_id=graph_identifier,
                 embedding_engine=embedding_engine,
             )

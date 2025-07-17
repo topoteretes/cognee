@@ -3,7 +3,7 @@
 import json
 from typing import Optional, Any, List, Dict, Type, Tuple
 from uuid import UUID
-from cognee.shared.logging_utils import get_logger, ERROR
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
@@ -24,7 +24,7 @@ from .neptune_analytics_utils import (
     format_neptune_error,
 )
 
-logger = get_logger("NeptuneAnalyticsAdapter")
+logger = get_logger("NeptuneAnalyticsGraphDB")
 
 try:
     from langchain_aws import NeptuneAnalyticsGraph
@@ -33,12 +33,12 @@ except ImportError:
     logger.warning("langchain_aws not available. Neptune Analytics functionality will be limited.")
     LANGCHAIN_AWS_AVAILABLE = False
 
-class NeptuneAnalyticsAdapter(GraphDBInterface):
+class NeptuneAnalyticsGraphDB(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
     This class provides methods for querying, adding, deleting nodes and edges using the aws_langchain library.
     """
-    _GRAPH_NODE_LABEL = "COGNEE_GRAPH_NODE"
+    _GRAPH_NODE_LABEL = "COGNEE_NODE"
 
     def __init__(
         self,
@@ -199,7 +199,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             query = f"""
             MERGE (n:{self._GRAPH_NODE_LABEL} {{`~id`: $node_id}})
             ON CREATE SET n = $properties, n.updated_at = timestamp()
-            ON MATCH SET n = $properties, n.updated_at = timestamp()
+            ON MATCH SET n += $properties, n.updated_at = timestamp()
             RETURN n
             """
 
@@ -235,7 +235,7 @@ class NeptuneAnalyticsAdapter(GraphDBInterface):
             UNWIND $nodes AS node
             MERGE (n:{self._GRAPH_NODE_LABEL} {{`~id`: node.node_id}})
             ON CREATE SET n = node.properties, n.updated_at = timestamp()
-            ON MATCH SET n = node.properties, n.updated_at = timestamp()
+            ON MATCH SET n += node.properties, n.updated_at = timestamp()
             RETURN count(n) AS nodes_processed
             """
 

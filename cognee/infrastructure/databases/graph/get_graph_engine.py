@@ -139,9 +139,9 @@ def create_graph_engine(
         if graph_database_url.startswith("neptune-graph://"):
             graph_identifier = graph_database_url.replace("neptune-graph://", "")
 
-            from .neptune_analytics_driver.adapter import NeptuneAnalyticsAdapter
+            from .neptune_analytics_driver.adapter import NeptuneAnalyticsGraphDB
 
-            return NeptuneAnalyticsAdapter(
+            return NeptuneAnalyticsGraphDB(
                 graph_id=graph_identifier,
             )
 

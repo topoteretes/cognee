@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import asyncio
-from cognee.infrastructure.databases.graph.neptune_analytics_driver import NeptuneAnalyticsAdapter
+from cognee.infrastructure.databases.graph.neptune_analytics_driver import NeptuneAnalyticsGraphDB
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
@@ -10,7 +10,7 @@ from cognee.modules.data.processing.document_types import TextDocument
 load_dotenv()
 graph_id = os.getenv('GRAPH_ID', "")
 
-na_adapter = NeptuneAnalyticsAdapter(graph_id)
+na_adapter = NeptuneAnalyticsGraphDB(graph_id)
 
 def setup():
     # Define nodes data before the main function
@@ -113,7 +113,8 @@ async def main():
     nodes, edges = setup()
 
     print("------ADD NODES-------")
-    await na_adapter.add_nodes(nodes)
+    await na_adapter.add_node(nodes[0])
+    await na_adapter.add_nodes(nodes[1:])
 
     print("------GET NODES FROM DATA-------")
     node_ids = [str(node.id) for node in nodes]
@@ -124,7 +125,8 @@ async def main():
         print(n)
 
     print("------ADD EDGES-------")
-    await na_adapter.add_edges(edges)
+    await na_adapter.add_edge(edges[0][0], edges[0][1], edges[0][2])
+    await na_adapter.add_edges(edges[1:])
 
     print("------HAS EDGES-------")
     has_edge = await na_adapter.has_edge(

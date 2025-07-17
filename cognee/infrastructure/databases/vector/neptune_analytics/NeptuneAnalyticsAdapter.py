@@ -1,17 +1,20 @@
 import asyncio
-from typing import List, Optional
+import json
+from typing import List, Optional, Any, Dict
+from uuid import UUID
+
 from langchain_aws import NeptuneAnalyticsGraph
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.storage.utils import get_own_properties
+from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.PayloadSchema import PayloadSchema
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
-logger = get_logger("NeptuneAnalyticsDBAdapter")
+logger = get_logger("NeptuneAnalyticsAdapter")
 
 class IndexSchema(DataPoint):
     """
@@ -29,14 +32,13 @@ class IndexSchema(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
-class NeptuneAnalyticsAdapter(VectorDBInterface):
+class NeptuneAnalyticsVectorDB(VectorDBInterface):
     name = "Neptune Analytics"
 
-    VECTOR_NODE_IDENTIFIER = "COGNEE_VECTOR_NODE"
-    COLLECTION_PREFIX = "VECTOR_COLLECTION"
+    _VECTOR_NODE_LABEL = "COGNEE_NODE"
+    _COLLECTION_PREFIX = "VECTOR_COLLECTION"
     TOPK_LOWER_BOUND = 0
     TOPK_UPPER_BOUND = 10
-
 
     def __init__(self,
                  graph_id: Optional[str],
@@ -148,17 +150,22 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             data_vector = data_vectors[index]
 
             # Fetch properties
-            properties = get_own_properties(data_point)
-            properties[self.COLLECTION_PREFIX] = collection_name
-            params = dict(node_id = node_id, properties = properties,
-                          embedding = data_vector, collection_name = collection_name)
+            properties = self.serialize_properties(data_point.model_dump())
+            properties[self._COLLECTION_PREFIX] = collection_name
+            params = dict(
+                node_id = str(node_id),
+                properties = properties,
+                embedding = data_vector,
+                collection_name = collection_name
+            )
 
             # Compose the query and send
             query_string = (
                     f"MERGE (n "
-                    f":{self.VECTOR_NODE_IDENTIFIER} "
-                    f" {{{self.COLLECTION_PREFIX}: $collection_name, `~id`: $node_id}}) "
-                    f"SET n += $properties "
+                    f":{self._VECTOR_NODE_LABEL} "
+                    f" {{`~id`: $node_id}}) "
+                    f"ON CREATE SET n = $properties, n.updated_at = timestamp() "
+                    f"ON MATCH SET n += $properties, n.updated_at = timestamp() "
                     f"WITH n, $embedding AS embedding "
                     f"CALL neptune.algo.vectors.upsert(n, embedding) "
                     f"YIELD success "
@@ -182,9 +189,9 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         """
         # Do the fetch for each node
         params = dict(node_ids=data_point_ids, collection_name=collection_name)
-        query_string = (f"MATCH( n :{self.VECTOR_NODE_IDENTIFIER}) "
+        query_string = (f"MATCH( n :{self._VECTOR_NODE_LABEL}) "
                         f"WHERE id(n) in $node_ids AND "
-                        f"n.{self.COLLECTION_PREFIX} = $collection_name "
+                        f"n.{self._COLLECTION_PREFIX} = $collection_name "
                         f"RETURN n as payload ")
 
         try:
@@ -261,7 +268,7 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         CALL neptune.algo.vectors.topKByEmbeddingWithFiltering({{
                 topK: {limit},
                 embedding: {embedding}, 
-                nodeFilter: {{ equals: {{property: '{self.COLLECTION_PREFIX}', value: '{collection_name}'}} }}
+                nodeFilter: {{ equals: {{property: '{self._COLLECTION_PREFIX}', value: '{collection_name}'}} }}
               }}
             )
         YIELD node, score
@@ -332,9 +339,9 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
             - data_point_ids (list[str]): A list of IDs of the data points to delete.
         """
         params = dict(node_ids=data_point_ids, collection_name=collection_name)
-        query_string = (f"MATCH (n :{self.VECTOR_NODE_IDENTIFIER}) "
+        query_string = (f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
                         f"WHERE id(n) IN $node_ids "
-                        f"AND n.{self.COLLECTION_PREFIX} = $collection_name "
+                        f"AND n.{self._COLLECTION_PREFIX} = $collection_name "
                         f"DETACH DELETE n")
         try:
             self._client.query(query_string, params)
@@ -384,9 +391,35 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         Remove obsolete or unnecessary data from the database.
         """
         # Run actual truncate
-        self._client.query(f"MATCH (n :{self.VECTOR_NODE_IDENTIFIER}) "
+        self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
                            f"DETACH DELETE n")
         pass
+
+    @staticmethod
+    def serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Serialize properties for Neptune Analytics storage.
+        Parameters:
+        -----------
+            - properties (Dict[str, Any]): Properties to serialize.
+        Returns:
+        --------
+            - Dict[str, Any]: Serialized properties.
+        """
+        serialized_properties = {}
+
+        for property_key, property_value in properties.items():
+            if isinstance(property_value, UUID):
+                serialized_properties[property_key] = str(property_value)
+                continue
+
+            if isinstance(property_value, dict):
+                serialized_properties[property_key] = json.dumps(property_value, cls=JSONEncoder)
+                continue
+
+            serialized_properties[property_key] = property_value
+
+        return serialized_properties
 
     @staticmethod
     def _na_exception_handler(ex, query_string: str):
