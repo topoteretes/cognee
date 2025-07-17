@@ -24,10 +24,8 @@ class IndexSchema(DataPoint):
     - metadata: A dictionary with default index fields for the schema, currently configured
     to include 'text'.
     """
-
     id: str
     text: str
-
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -36,6 +34,9 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
 
     VECTOR_NODE_IDENTIFIER = "COGNEE_VECTOR_NODE"
     COLLECTION_PREFIX = "VECTOR_COLLECTION"
+    TOPK_LOWER_BOUND = 0
+    TOPK_UPPER_BOUND = 10
+
 
     def __init__(self,
                  graph_id: Optional[str],
@@ -66,7 +67,23 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         self.aws_session_token = aws_session_token
         self._client = NeptuneAnalyticsGraph(graph_id)
 
-    """ Collection related """
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
+        """
+        Embeds the provided textual data into vector representation.
+
+        Uses the embedding engine to convert the list of strings into a list of float vectors.
+
+        Parameters:
+        -----------
+
+            - data (list[str]): A list of strings representing the data to be embedded.
+
+        Returns:
+        --------
+
+            - list[list[float]]: A list of embedded vectors corresponding to the input data.
+        """
+        return await self.embedding_engine.embed_text(data)
 
     async def has_collection(self, collection_name: str) -> bool:
         """
@@ -88,9 +105,8 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         payload_schema: Optional[PayloadSchema] = None,
     ):
         """
-Neptune Analytics stores vector on a node level, so create_collection() implements interface for compliance but performs no operations when called.```
+        Neptune Analytics stores vector on a node level, so create_collection() implements interface for compliance but performs no operations when called.```
         as the result, create_collection( ) will be no-op.
-        is available.
 
         Parameters:
         -----------
@@ -100,7 +116,6 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
         """
         pass
 
-    """ Data points """
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """
@@ -133,14 +148,17 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
                     f"MERGE (n "
                     f":{self.VECTOR_NODE_IDENTIFIER} "
                     f" {{{self.COLLECTION_PREFIX}: $collection_name, `~id`: $node_id}}) "
-                    f"SET n = $properties "
+                    f"SET n += $properties "
                     f"WITH n, $embedding AS embedding "
                     f"CALL neptune.algo.vectors.upsert(n, embedding) "
                     f"YIELD success "
                     f"RETURN success ")
-            self._client.query(query_string, params)
-        pass
 
+            try:
+                self._client.query(query_string, params)
+            except Exception as e:
+                self._na_exception_handler(e, query_string)
+        pass
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """
@@ -158,23 +176,20 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
                         f"WHERE id(n) in $node_ids AND "
                         f"n.{self.COLLECTION_PREFIX} = $collection_name "
                         f"RETURN n as payload ")
-        result = self._client.query(query_string, params)
 
-        result_set = [ScoredResult(
-            id=item.get('payload').get('~id'),
-            payload=item.get('payload').get('~properties'),
-            score=0
-        ) for item in result]
-        return result_set
+        try:
+            result = self._client.query(query_string, params)
+            return [self._get_scored_result(item) for item in result]
+        except Exception as e:
+            self._na_exception_handler(e, query_string)
 
-    """ Search """
 
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str],
-        query_vector: Optional[List[float]],
-        limit: int,
+        query_text: Optional[str] = None,
+        query_vector: Optional[List[float]] = None,
+        limit: int = None,
         with_vector: bool = False,
     ):
         """
@@ -205,6 +220,14 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
                 "This may trigger a resource-intensive query and increase response time. "
                 "Use this option only when vector data is required."
             )
+
+        # In the case of excessive limit, or zero / negative value, limit will be set to 10.
+        if not limit or limit <= self.TOPK_LOWER_BOUND or limit > self.TOPK_UPPER_BOUND:
+            logger.warning(
+                "Provided limit (%s) is invalid (zero, negative, or exceeds maximum). "
+                "Defaulting to limit=10.", limit
+            )
+            limit = self.TOPK_UPPER_BOUND
 
         if query_vector and query_text:
             raise InvalidValueError(
@@ -246,13 +269,14 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
         RETURN node as payload, score
         """
 
-        query_response = self._client.query(query_string, params)
-        return [ScoredResult(
-            id=item.get('payload').get('~id'),
-            payload=item.get('payload').get('~properties'),
-            score=item.get('score'),
-            vector=item.get('embedding') if with_vector else None
-        ) for item in query_response]
+        try:
+            query_response = self._client.query(query_string, params)
+            return [self._get_scored_result(
+                item = item, with_score = True
+            ) for item in query_response]
+        except Exception as e:
+            self._na_exception_handler(e, query_string)
+
 
     async def batch_search(
         self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
@@ -283,7 +307,6 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
             for vector in data_vectors
         ])
 
-
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         """
         Delete specified data points from a collection, by executing an OpenCypher query,
@@ -300,8 +323,48 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
                         f"WHERE id(n) IN $node_ids "
                         f"AND n.{self.COLLECTION_PREFIX} = $collection_name "
                         f"DETACH DELETE n")
-        self._client.query(query_string, params)
+        try:
+            self._client.query(query_string, params)
+        except Exception as e:
+            self._na_exception_handler(e, query_string)
         pass
+
+    async def create_vector_index(self, index_name: str, index_property_name: str):
+        """
+        Neptune Analytics stores vectors at the node level,
+        so create_vector_index() implements the interface for compliance but performs no operation when called.
+        As a result, create_vector_index() invokes create_collection(), which is also a no-op.
+        This ensures the logic flow remains consistent, even if the concept of collections is introduced in a future release.
+        """
+        await self.create_collection(f"{index_name}_{index_property_name}")
+
+    async def index_data_points(
+            self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+    ):
+        """
+        Indexes a list of data points into Neptune Analytics by creating them as nodes.
+
+        This method constructs a unique collection name by combining the `index_name` and
+        `index_property_name`, then delegates to `create_data_points()` to store the data.
+
+        Args:
+            index_name (str): The base name of the index.
+            index_property_name (str): The property name to append to the index name for uniqueness.
+            data_points (list[DataPoint]): A list of `DataPoint` instances to be indexed.
+
+        Returns:
+            None
+        """
+        await self.create_data_points(
+            f"{index_name}_{index_property_name}",
+            [
+                IndexSchema(
+                    id=str(data_point.id),
+                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                )
+                for data_point in data_points
+            ],
+        )
 
     async def prune(self):
         """
@@ -312,3 +375,24 @@ Neptune Analytics stores vector on a node level, so create_collection() implemen
                            f"DETACH DELETE n")
         pass
 
+    @staticmethod
+    def _na_exception_handler(ex, query_string: str):
+        """
+        Generic exception handler for NA langchain.
+        """
+        logger.error(
+            "Neptune Analytics query failed: %s | Query: [%s]", ex, query_string
+        )
+        raise ex
+
+    @staticmethod
+    def _get_scored_result(item: dict, with_vector: bool = False, with_score: bool = False) -> ScoredResult:
+        """
+        Util method to simplify the object creation of ScoredResult base on incoming NX payload response.
+        """
+        return ScoredResult(
+            id=item.get('payload').get('~id'),
+            payload=item.get('payload').get('~properties'),
+            score=item.get('score') if with_score else 0,
+            vector=item.get('embedding') if with_vector else None
+        )
