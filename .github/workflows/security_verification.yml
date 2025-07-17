@@ -1,0 +1,290 @@
+name: Security Verification
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly security scan on Sundays at 2 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+          uv sync --dev
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Run pip-audit for Python vulnerabilities
+        run: |
+          pip install pip-audit
+          pip-audit --format=json --output=pip-audit-results.json || true
+      
+      - name: Check for critical vulnerabilities
+        run: |
+          python -c "
+          import json
+          import sys
+          try:
+              with open('pip-audit-results.json', 'r') as f:
+                  data = json.load(f)
+                  vulns = data.get('vulnerabilities', [])
+                  critical_vulns = [v for v in vulns if v.get('aliases', []) and any('CVE' in alias for alias in v['aliases'])]
+                  if critical_vulns:
+                      print('CRITICAL VULNERABILITIES FOUND:')
+                      for vuln in critical_vulns:
+                          print(f'  - {vuln.get(\"id\", \"Unknown\")} in {vuln.get(\"package\", \"Unknown\")}')
+                      sys.exit(1)
+          except (FileNotFoundError, json.JSONDecodeError):
+              print('No vulnerabilities file found or invalid format')
+              pass
+          "
+      
+      - name: Upload vulnerability reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-reports
+          path: |
+            trivy-results.sarif
+            pip-audit-results.json
+
+  code-quality-scan:
+    name: Code Quality & Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install analysis tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit[toml] semgrep safety
+      
+      - name: Run Bandit security linter
+        run: |
+          bandit -r cognee/ -f json -o bandit-report.json || true
+          bandit -r cognee/ -f txt || true
+      
+      - name: Run Semgrep security analysis
+        run: |
+          semgrep --config=auto --json --output=semgrep-results.json cognee/ || true
+      
+      - name: Run Safety check
+        run: |
+          safety check --json --output safety-results.json || true
+      
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-analysis
+          path: |
+            bandit-report.json
+            semgrep-results.json
+            safety-results.json
+
+  package-integrity:
+    name: Package Integrity & Signing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine hatchling
+      
+      - name: Build package
+        run: |
+          python -m build
+      
+      - name: Generate package hashes
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          sha512sum * > SHA512SUMS
+          md5sum * > MD5SUMS
+          echo "Generated checksums:"
+          cat SHA256SUMS
+      
+      - name: Import GPG key
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            echo "GPG key imported successfully"
+            # List imported keys for verification
+            gpg --list-secret-keys --keyid-format LONG
+          else
+            echo "GPG_PRIVATE_KEY not set, skipping GPG signing"
+          fi
+      
+      - name: Sign packages with GPG
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            cd dist
+            for file in *; do
+              if [ -f "$file" ]; then
+                echo "Signing $file..."
+                gpg --batch --yes --passphrase "$GPG_PASSPHRASE" --detach-sign --armor "$file"
+                echo "Created signature: $file.asc"
+              fi
+            done
+            # Sign the checksum files
+            gpg --batch --yes --passphrase "$GPG_PASSPHRASE" --detach-sign --armor SHA256SUMS
+            gpg --batch --yes --passphrase "$GPG_PASSPHRASE" --detach-sign --armor SHA512SUMS
+            echo "All files signed successfully"
+          else
+            echo "GPG_PASSPHRASE not set, skipping signing"
+          fi
+      
+      - name: Verify signatures
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cd dist
+          for sig_file in *.asc; do
+            if [ -f "$sig_file" ]; then
+              echo "Verifying signature: $sig_file"
+              gpg --verify "$sig_file"
+            fi
+          done
+      
+      - name: Upload signed packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-packages
+          path: |
+            dist/
+          retention-days: 30
+
+  security-policy-check:
+    name: Security Policy Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check for security policy files
+        run: |
+          echo "Checking for security policy files..."
+          
+          # Check for SECURITY.md
+          if [ -f "SECURITY.md" ]; then
+            echo "✓ SECURITY.md found"
+          else
+            echo "✗ SECURITY.md not found"
+            exit 1
+          fi
+          
+          # Check for CODE_OF_CONDUCT.md
+          if [ -f "CODE_OF_CONDUCT.md" ]; then
+            echo "✓ CODE_OF_CONDUCT.md found"
+          else
+            echo "✗ CODE_OF_CONDUCT.md not found"
+            exit 1
+          fi
+          
+          # Check for LICENSE file
+          if [ -f "LICENSE" ] || [ -f "LICENSE.md" ] || [ -f "LICENSE.txt" ]; then
+            echo "✓ LICENSE file found"
+          else
+            echo "✗ LICENSE file not found"
+            exit 1
+          fi
+      
+      - name: Validate Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+          uv sync --dev
+          
+          # Check for pinned dependencies in production
+          echo "Checking for properly pinned dependencies..."
+          python -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+          
+          deps = data.get('project', {}).get('dependencies', [])
+          unpinned = []
+          for dep in deps:
+              if '>=' in dep and '<' not in dep:
+                  unpinned.append(dep)
+          
+          if unpinned:
+              print('WARNING: Unpinned dependencies found:')
+              for dep in unpinned:
+                  print(f'  - {dep}')
+          else:
+              print('✓ All dependencies properly version-constrained')
+          "
+      
+      - name: Check for secrets in code
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --all-files --baseline .secrets.baseline || true
+          
+          # Basic regex checks for common secrets
+          echo "Checking for potential secrets..."
+          if grep -r "password\s*=" . --include="*.py" --include="*.yml" --include="*.yaml" | grep -v ".git" | grep -v "example" | grep -v "test"; then
+            echo "WARNING: Potential hardcoded passwords found"
+          fi
+          
+          if grep -r "api_key\s*=" . --include="*.py" --include="*.yml" --include="*.yaml" | grep -v ".git" | grep -v "example" | grep -v "test"; then
+            echo "WARNING: Potential hardcoded API keys found"
+          fi 

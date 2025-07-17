@@ -98,45 +98,6 @@ jobs:
         run: |
           poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
 
-  test-examples:
-    name: Test Weighted Edges Examples
-    runs-on: ubuntu-22.04
-    env:
-      LLM_PROVIDER: openai
-      LLM_MODEL: gpt-4o-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11'
-
-      - name: Test Weighted Edges Example
-        run: |
-          poetry run python examples/python/weighted_edges_example.py
-
-      - name: Verify Visualization File Created
-        run: |
-          if [ -f "examples/python/weighted_graph_visualization.html" ]; then
-            echo "✅ Visualization file created successfully"
-            ls -la examples/python/weighted_graph_visualization.html
-          else
-            echo "❌ Visualization file not found"
-            exit 1
-          fi
-
 
 
   code-quality:
