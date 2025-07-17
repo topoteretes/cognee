@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Optional
-from langchain_aws import NeptuneAnalyticsGraph, NeptuneGraph
+from langchain_aws import NeptuneAnalyticsGraph
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.engine import DataPoint
@@ -67,6 +67,12 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         self.aws_session_token = aws_session_token
         self._client = NeptuneAnalyticsGraph(graph_id)
 
+    async def get_connection(self):
+        # This method is part of the default implementation but not defined in the interface.
+        # No operation is performed and None will be returned here,
+        # because the concept of connection is not applicable in this context.
+        return None
+
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
         Embeds the provided textual data into vector representation.
@@ -116,6 +122,10 @@ class NeptuneAnalyticsAdapter(VectorDBInterface):
         """
         pass
 
+    async def get_collection(self, collection_name: str):
+        # This method is part of the default implementation but not defined in the interface.
+        # No operation is performed here because the concept of collection is not applicable in NeptuneAnalytics vector store.
+        return None
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """
