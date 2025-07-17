@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Callable, Optional
 from uuid import UUID, uuid4
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -22,22 +22,26 @@ from cognee.modules.settings import get_current_settings
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
-from .run_tasks_base import run_tasks_base
+from .run_tasks_base import run_tasks_base, default_telemetry_handler
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
 async def run_tasks_with_telemetry(
-    tasks: list[Task], data, user: User, pipeline_name: str, context: dict = None
+    tasks: list[Task], data, user: User, pipeline_name: str, context: dict = None, telemetry_handler: Optional[Callable[[str, str, dict], None]] = None
 ):
     config = get_current_settings()
+
+    if telemetry_handler is None:
+        from cognee.shared.utils import send_telemetry
+        telemetry_handler = send_telemetry
 
     logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)
-        send_telemetry(
+        telemetry_handler(
             "Pipeline Run Started",
             user.id,
             additional_properties={
@@ -46,11 +50,11 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        async for result in run_tasks_base(tasks, data, user, context):
+        async for result in run_tasks_base(tasks, data, user, context, telemetry_handler=telemetry_handler):
             yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
-        send_telemetry(
+        telemetry_handler(
             "Pipeline Run Completed",
             user.id,
             additional_properties={
@@ -64,7 +68,7 @@ async def run_tasks_with_telemetry(
             str(error),
             exc_info=True,
         )
-        send_telemetry(
+        telemetry_handler(
             "Pipeline Run Errored",
             user.id,
             additional_properties={
@@ -83,6 +87,7 @@ async def run_tasks(
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
+    telemetry_handler: Optional[Callable[[str, str, dict], None]] = None,
 ):
     if not user:
         user = get_default_user()
@@ -114,6 +119,7 @@ async def run_tasks(
             user=user,
             pipeline_name=pipeline_id,
             context=context,
+            telemetry_handler=telemetry_handler,
         ):
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
