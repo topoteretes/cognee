@@ -160,7 +160,7 @@ async def brute_force_search(
             return await vector_engine.search(
                 collection_name=collection_name,
                 query_text=query,
-                # limit=0,
+                limit=0,
             )
         except CollectionNotFoundError:
             return []
