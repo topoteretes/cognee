@@ -1,4 +1,5 @@
 from typing import BinaryIO
+from contextlib import asynccontextmanager
 from cognee.infrastructure.data.utils.extract_keywords import extract_keywords
 from .IngestionData import IngestionData
 
@@ -28,5 +29,6 @@ class TextData(IngestionData):
         if self.metadata is None:
             self.metadata = {}
 
-    def get_data(self):
-        return self.data
+    @asynccontextmanager
+    async def get_data(self):
+        yield self.data

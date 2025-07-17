@@ -1,24 +1,19 @@
 """This module contains utility functions for the cognee."""
 
 import os
-from typing import BinaryIO, Union
-
 import requests
-import hashlib
 from datetime import datetime, timezone
 import networkx as nx
 import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
-import sys
+import pathlib
+from uuid import uuid4
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 
-from uuid import uuid4
-import pathlib
-from cognee.shared.exceptions import IngestionError
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -100,91 +95,6 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
-    h = hashlib.md5()
-
-    try:
-        if isinstance(file_obj, str):
-            with open(file_obj, "rb") as file:
-                while True:
-                    # Reading is buffered, so we can read smaller chunks.
-                    chunk = file.read(h.block_size)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-        else:
-            while True:
-                # Reading is buffered, so we can read smaller chunks.
-                chunk = file_obj.read(h.block_size)
-                if not chunk:
-                    break
-                h.update(chunk)
-
-        return h.hexdigest()
-    except IOError as e:
-        raise IngestionError(message=f"Failed to load data from {file}: {e}")
-
-
-def generate_color_palette(unique_layers):
-    colormap = plt.cm.get_cmap("viridis", len(unique_layers))
-    colors = [colormap(i) for i in range(len(unique_layers))]
-    hex_colors = [
-        "#%02x%02x%02x" % (int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
-        for rgb in colors
-    ]
-
-    return dict(zip(unique_layers, hex_colors))
-
-
-# def sanitize_df(df):
-#     """Replace NaNs and infinities in a DataFrame with None, making it JSON compliant."""
-#     return df.replace([np.inf, -np.inf, np.nan], None)
-
-
-async def convert_to_serializable_graph(G):
-    """
-    Convert a graph into a serializable format with stringified node and edge attributes.
-    """
-
-    (nodes, edges) = G
-
-    networkx_graph = nx.MultiDiGraph()
-    networkx_graph.add_nodes_from(nodes)
-    networkx_graph.add_edges_from(edges)
-
-    # Create a new graph to store the serializable version
-    new_G = nx.MultiDiGraph()
-
-    # Serialize nodes
-    for node, data in networkx_graph.nodes(data=True):
-        serializable_data = {k: str(v) for k, v in data.items()}
-        new_G.add_node(str(node), **serializable_data)
-
-    # Serialize edges
-    for u, v, data in networkx_graph.edges(data=True):
-        serializable_data = {k: str(v) for k, v in data.items()}
-        new_G.add_edge(str(u), str(v), **serializable_data)
-
-    return new_G
-
-
-def generate_layout_positions(G, layout_func, layout_scale):
-    """
-    Generate layout positions for the graph using the specified layout function.
-    """
-    positions = layout_func(G)
-    return {str(node): (x * layout_scale, y * layout_scale) for node, (x, y) in positions.items()}
-
-
-def assign_node_colors(G, node_attribute, palette):
-    """
-    Assign colors to nodes based on a specified attribute and a given palette.
-    """
-    unique_attrs = set(G.nodes[node].get(node_attribute, "Unknown") for node in G.nodes)
-    color_map = {attr: palette[i % len(palette)] for i, attr in enumerate(unique_attrs)}
-    return [color_map[G.nodes[node].get(node_attribute, "Unknown")] for node in G.nodes], color_map
-
-
 def embed_logo(p, layout_scale, logo_alpha, position):
     """
     Embed a logo into the graph visualization as a watermark.
@@ -212,18 +122,6 @@ def embed_logo(p, layout_scale, logo_alpha, position):
         anchor=position,
         global_alpha=logo_alpha,
     )
-
-
-def graph_to_tuple(graph):
-    """
-    Converts a networkx graph to a tuple of (nodes, edges).
-
-    :param graph: A networkx graph.
-    :return: A tuple (nodes, edges).
-    """
-    nodes = list(graph.nodes(data=True))  # Get nodes with attributes
-    edges = list(graph.edges(data=True))  # Get edges with attributes
-    return (nodes, edges)
 
 
 def start_visualization_server(

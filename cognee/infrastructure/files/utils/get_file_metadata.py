@@ -1,8 +1,9 @@
 import io
+import os.path
 from typing import BinaryIO, TypedDict
 
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import get_file_content_hash
+from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
 from .guess_file_type import guess_file_type
 
 logger = get_logger("FileMetadata")
@@ -22,9 +23,10 @@ class FileMetadata(TypedDict):
     mime_type: str
     extension: str
     content_hash: str
+    file_size: int
 
 
-def get_file_metadata(file: BinaryIO) -> FileMetadata:
+async def get_file_metadata(file: BinaryIO) -> FileMetadata:
     """
     Retrieve metadata from a file object.
 
@@ -45,7 +47,7 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
     """
     try:
         file.seek(0)
-        content_hash = get_file_content_hash(file)
+        content_hash = await get_file_content_hash(file)
         file.seek(0)
     except io.UnsupportedOperation as error:
         logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
@@ -55,10 +57,17 @@ def get_file_metadata(file: BinaryIO) -> FileMetadata:
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
     file_name = str(file_path).split("/")[-1].split(".")[0] if file_path else None
 
+    # Get file size
+    pos = file.tell()  # remember current pointer
+    file.seek(0, os.SEEK_END)  # jump to end
+    file_size = file.tell()  # byte count
+    file.seek(pos)
+
     return FileMetadata(
         name=file_name,
         file_path=file_path,
         mime_type=file_type.mime,
         extension=file_type.extension,
         content_hash=content_hash,
+        file_size=file_size,
     )

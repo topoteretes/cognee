@@ -10,7 +10,6 @@ WORKFLOWS=(
   "test_kuzu.yml"
   "test_multimetric_qa_eval_run.yaml"
   "test_graphrag_vs_rag_notebook.yml"
-  "test_milvus.yml"
   "test_gemini.yml"
   "test_multimedia_example.yaml"
   "test_deduplication.yml"

@@ -1,17 +1,17 @@
 """Adapter for NetworkX graph database."""
 
-from datetime import datetime, timezone
 import os
 import json
 import asyncio
+import numpy as np
+from uuid import UUID
+import networkx as nx
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Union, Type, Tuple
 
 from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
+from cognee.infrastructure.files.storage import get_file_storage
 from cognee.shared.logging_utils import get_logger
-from typing import Dict, Any, List, Union, Type, Tuple
-from uuid import UUID
-import aiofiles
-import aiofiles.os as aiofiles_os
-import networkx as nx
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
@@ -19,7 +19,6 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.modules.storage.utils import JSONEncoder
-import numpy as np
 
 logger = get_logger()
 
@@ -551,11 +550,6 @@ class NetworkXAdapter(GraphDBInterface):
         """
         self.graph = nx.MultiDiGraph()
 
-        # Only create directory if file_path contains a directory
-        file_dir = os.path.dirname(file_path)
-        if file_dir and not os.path.exists(file_dir):
-            os.makedirs(file_dir, exist_ok=True)
-
         await self.save_graph_to_file(file_path)
 
     async def save_graph_to_file(self, file_path: str = None) -> None:
@@ -573,9 +567,14 @@ class NetworkXAdapter(GraphDBInterface):
 
         graph_data = nx.readwrite.json_graph.node_link_data(self.graph, edges="links")
 
-        async with aiofiles.open(file_path, "w") as file:
-            json_data = json.dumps(graph_data, cls=JSONEncoder)
-            await file.write(json_data)
+        file_dir_path = os.path.dirname(file_path)
+        file_path = os.path.basename(file_path)
+
+        file_storage = get_file_storage(file_dir_path)
+
+        json_data = json.dumps(graph_data, cls=JSONEncoder)
+
+        await file_storage.store(file_path, json_data, overwrite=True)
 
     async def load_graph_from_file(self, file_path: str = None):
         """
@@ -590,9 +589,14 @@ class NetworkXAdapter(GraphDBInterface):
         if not file_path:
             file_path = self.filename
         try:
-            if os.path.exists(file_path):
-                async with aiofiles.open(file_path, "r") as file:
-                    graph_data = json.loads(await file.read())
+            file_dir_path = os.path.dirname(file_path)
+            file_name = os.path.basename(file_path)
+
+            file_storage = get_file_storage(file_dir_path)
+
+            if await file_storage.file_exists(file_name):
+                async with file_storage.open(file_name, "r") as file:
+                    graph_data = json.loads(file.read())
                     for node in graph_data["nodes"]:
                         try:
                             if not isinstance(node["id"], UUID):
@@ -674,8 +678,12 @@ class NetworkXAdapter(GraphDBInterface):
                 self.filename
             )  # Assuming self.filename is defined elsewhere and holds the default graph file path
         try:
-            if os.path.exists(file_path):
-                await aiofiles_os.remove(file_path)
+            file_dir_path = os.path.dirname(file_path)
+            file_name = os.path.basename(file_path)
+
+            file_storage = get_file_storage(file_dir_path)
+
+            await file_storage.remove(file_name)
 
             self.graph = None
             logger.info("Graph deleted successfully.")

@@ -7,5 +7,5 @@ readme = "README.md"
 requires-python = ">=3.10, <=3.13"
 
 dependencies = [
-    "cognee>=0.1.38",
+    "cognee>=0.1.38,<1.0.0",
 ]
