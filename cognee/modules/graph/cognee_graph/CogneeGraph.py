@@ -142,7 +142,7 @@ class CogneeGraph(CogneeAbstractGraph):
             edge_distances = await vector_engine.search(
                 collection_name="EdgeType_relationship_name",
                 query_text=query,
-                # limit=0,
+                limit=0,
             )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
