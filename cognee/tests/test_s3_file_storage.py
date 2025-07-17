@@ -1,7 +1,9 @@
 import os
-import cognee
 import pathlib
-from cognee.infrastructure.files.storage import get_storage_config
+from uuid import uuid4
+
+import cognee
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -10,60 +12,11 @@ from cognee.modules.search.types import SearchType
 logger = get_logger()
 
 
-async def check_falkordb_connection():
-    """Check if FalkorDB is available at localhost:6379"""
-    try:
-        from falkordb import FalkorDB
-
-        client = FalkorDB(host="localhost", port=6379)
-        # Try to list graphs to check connection
-        client.list_graphs()
-        return True
-    except Exception as e:
-        logger.warning(f"FalkorDB not available at localhost:6379: {e}")
-        return False
-
-
 async def main():
-    # Check if FalkorDB is available
-    if not await check_falkordb_connection():
-        print("⚠️  FalkorDB is not available at localhost:6379")
-        print("   To run this test, start FalkorDB server:")
-        print("   docker run -p 6379:6379 falkordb/falkordb:latest")
-        print("   Skipping FalkorDB test...")
-        return
-
-    print("✅ FalkorDB connection successful, running test...")
-
-    # Configure FalkorDB as the graph database provider
-    cognee.config.set_graph_db_config(
-        {
-            "graph_database_url": "localhost",  # FalkorDB URL (using Redis protocol)
-            "graph_database_port": 6379,
-            "graph_database_provider": "falkordb",
-        }
-    )
-
-    # Configure FalkorDB as the vector database provider too since it's a hybrid adapter
-    cognee.config.set_vector_db_config(
-        {
-            "vector_db_url": "localhost",
-            "vector_db_port": 6379,
-            "vector_db_provider": "falkordb",
-        }
-    )
-
-    data_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_falkordb")
-        ).resolve()
-    )
+    test_run_id = uuid4()
+    data_directory_path = f"s3://cognee-storage-dev/{test_run_id}/data"
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_falkordb")
-        ).resolve()
-    )
+    cognee_directory_path = f"s3://cognee-storage-dev/{test_run_id}/system"
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
@@ -89,7 +42,7 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("entity.name", "AI"))[0]
+    random_node = (await vector_engine.search("Entity_name", "AI"))[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
@@ -127,45 +80,34 @@ async def main():
     # Assert relational, vector and graph databases have been cleaned properly
     await cognee.prune.prune_system(metadata=True)
 
-    # For FalkorDB vector engine, check if collections are empty
-    # Since FalkorDB is a hybrid adapter, we can check if the graph is empty
-    # as the vector data is stored in the same graph
-    if hasattr(vector_engine, "driver"):
-        # This is FalkorDB - check if graphs exist
-        collections = vector_engine.driver.list_graphs()
-        # The graph should be deleted, so either no graphs or empty graph
-        if vector_engine.graph_name in collections:
-            # Graph exists but should be empty
-            vector_graph_data = await vector_engine.get_graph_data()
-            vector_nodes, vector_edges = vector_graph_data
-            assert len(vector_nodes) == 0 and len(vector_edges) == 0, (
-                "FalkorDB vector database is not empty"
-            )
-    else:
-        # Fallback for other vector engines like LanceDB
-        connection = await vector_engine.get_connection()
-        collection_names = await connection.table_names()
-        assert len(collection_names) == 0, "Vector database is not empty"
+    connection = await vector_engine.get_connection()
+    collection_names = await connection.table_names()
+    assert len(collection_names) == 0, "LanceDB vector database is not empty"
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    assert not os.path.exists(get_relational_engine().db_path), (
-        "SQLite relational database is not empty"
+    db_path = get_relational_engine().db_path
+    dir_path = os.path.dirname(db_path)
+    file_name = os.path.basename(db_path)
+    file_storage = get_file_storage(dir_path)
+
+    assert not await file_storage.file_exists(file_name), (
+        "SQLite relational database is not deleted"
     )
 
-    # For FalkorDB, check if the graph database is empty
-    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.infrastructure.databases.graph import get_graph_config
 
-    graph_engine = get_graph_engine()
-    graph_data = await graph_engine.get_graph_data()
-    nodes, edges = graph_data
-    assert len(nodes) == 0 and len(edges) == 0, "FalkorDB graph database is not empty"
-
-    print("🎉 FalkorDB test completed successfully!")
-    print("   ✓ Data ingestion worked")
-    print("   ✓ Cognify processing worked")
-    print("   ✓ Search operations worked")
-    print("   ✓ Cleanup worked")
+    graph_config = get_graph_config()
+    # For Kuzu v0.11.0+, check if database file doesn't exist (single-file format with .kuzu extension)
+    # For older versions or other providers, check if directory is empty
+    if graph_config.graph_database_provider.lower() == "kuzu":
+        assert not os.path.exists(graph_config.graph_file_path), (
+            "Kuzu graph database file still exists"
+        )
+    else:
+        assert not os.path.exists(graph_config.graph_file_path) or not os.listdir(
+            graph_config.graph_file_path
+        ), "Graph database directory is not empty"
 
 
 if __name__ == "__main__":
