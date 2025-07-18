@@ -28,7 +28,10 @@ export default function CrewAITrigger({ onData, onActivity }: CrewAITriggerProps
       username2: formElements.username2.value,
     };
 
-    const websocket = new WebSocket("ws://localhost:8000/api/v1/crewai/subscribe");
+    const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL;
+    const wsUrl = backendApiUrl.replace(/^http(s)?/, "ws");
+
+    const websocket = new WebSocket(`${wsUrl}/v1/crewai/subscribe`);
 
     onActivity([{ id: uuid4(), timestamp: Date.now(), activity: "Dispatching hiring crew agents" }]);
 
