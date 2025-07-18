@@ -133,21 +133,54 @@ def create_graph_engine(
         )
 
     elif graph_database_provider == "neptune":
-        if not (graph_database_url):
-            raise EnvironmentError("Missing Neptune endpoint.")
-
-        if graph_database_url.startswith("neptune-graph://"):
-            graph_identifier = graph_database_url.replace("neptune-graph://", "")
-
-            from .neptune_analytics_driver.adapter import NeptuneAnalyticsGraphDB
-
-            return NeptuneAnalyticsGraphDB(
-                graph_id=graph_identifier,
+        try:
+            from langchain_aws import NeptuneAnalyticsGraph
+        except ImportError:
+            raise ImportError(
+                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
             )
 
-        raise ValueError("Neptune endpoint must have the format neptune-graph://<GRAPH_ID>")
+        if not graph_database_url:
+            raise EnvironmentError("Missing Neptune endpoint.")
 
+        if not graph_database_url.startswith("neptune-graph://"):
+            raise ValueError("Neptune endpoint must have the format neptune-graph://<GRAPH_ID>")
 
+        graph_identifier = graph_database_url.replace("neptune-graph://", "")
+
+        from .neptune_driver.adapter import NeptuneGraphDB
+
+        return NeptuneGraphDB(
+            graph_id=graph_identifier,
+        )
+
+    elif graph_database_provider == "neptune_analytics":
+        """
+        Creates a graph DB from config
+        We want to use a hybrid (graph & vector) DB and we should update this
+        to make a single instance of the hybrid configuration (with embedder)
+        instead of creating the hybrid object twice.  
+        """
+        try:
+            from langchain_aws import NeptuneAnalyticsGraph
+        except ImportError:
+            raise ImportError(
+                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
+            )
+
+        if not graph_database_url:
+            raise EnvironmentError("Missing Neptune endpoint.")
+
+        if not graph_database_url.startswith("neptune-graph://"):
+            raise ValueError("Neptune endpoint must have the format neptune-graph://<GRAPH_ID>")
+
+        graph_identifier = graph_database_url.replace("neptune-graph://", "")
+
+        from ..hybrid.neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsAdapter
+
+        return NeptuneAnalyticsAdapter(
+            graph_id=graph_identifier,
+        )
 
     from .networkx.adapter import NetworkXAdapter
 

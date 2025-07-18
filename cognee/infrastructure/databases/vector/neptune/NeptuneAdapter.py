@@ -14,7 +14,7 @@ from ..models.PayloadSchema import PayloadSchema
 from ..models.ScoredResult import ScoredResult
 from ..vector_db_interface import VectorDBInterface
 
-logger = get_logger("NeptuneAnalyticsAdapter")
+logger = get_logger("NeptuneAdapter")
 
 class IndexSchema(DataPoint):
     """
@@ -32,8 +32,7 @@ class IndexSchema(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
-class NeptuneAnalyticsVectorDB(VectorDBInterface):
-    name = "Neptune Analytics"
+class NeptuneVectorDB(VectorDBInterface):
 
     _VECTOR_NODE_LABEL = "COGNEE_NODE"
     _COLLECTION_PREFIX = "VECTOR_COLLECTION"

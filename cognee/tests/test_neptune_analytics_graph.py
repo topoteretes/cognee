@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import asyncio
-from cognee.infrastructure.databases.graph.neptune_analytics_driver import NeptuneAnalyticsGraphDB
+from cognee.infrastructure.databases.graph.neptune_driver import NeptuneGraphDB
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
@@ -10,7 +10,7 @@ from cognee.modules.data.processing.document_types import TextDocument
 load_dotenv()
 graph_id = os.getenv('GRAPH_ID', "")
 
-na_adapter = NeptuneAnalyticsGraphDB(graph_id)
+na_adapter = NeptuneGraphDB(graph_id)
 
 def setup():
     # Define nodes data before the main function

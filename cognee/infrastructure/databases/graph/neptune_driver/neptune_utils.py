@@ -1,4 +1,4 @@
-"""Neptune Analytics Utilities
+"""Neptune Utilities
 
 This module provides utility functions for Neptune Analytics operations including
 connection management, URL parsing, and Neptune-specific configurations.
@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger("NeptuneAnalyticsUtils")
+logger = get_logger("NeptuneUtils")
 
 
 def parse_neptune_url(url: str) -> Tuple[str, str]:

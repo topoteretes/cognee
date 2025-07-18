@@ -22,18 +22,18 @@ async def main():
     """
 
     # Set up Amazon credentials in .env file and get the values from environment variables
-    graph_endpoint_url = os.getenv('GRAPH_DATABASE_URL', "")
+    graph_endpoint_url = "neptune-graph://" + os.getenv('GRAPH_ID', "")
 
     # Configure Neptune Analytics as the graph & vector database provider
     cognee.config.set_graph_db_config(
         {
-            "graph_database_provider": "neptune",  # Specify Neptune Analytics as provider
+            "graph_database_provider": "neptune_analytics",  # Specify Neptune Analytics as provider
             "graph_database_url": graph_endpoint_url,  # Neptune Analytics endpoint with the format neptune-graph://<GRAPH_ID>
         }
     )
     cognee.config.set_vector_db_config(
         {
-            "vector_db_provider": "neptune",  # Specify Neptune Analytics as provider
+            "vector_db_provider": "neptune_analytics",  # Specify Neptune Analytics as provider
             "vector_db_url": graph_endpoint_url,  # Neptune Analytics endpoint with the format neptune-graph://<GRAPH_ID>
         }
     )
@@ -78,7 +78,7 @@ async def main():
     # Now let's perform some searches
     # 1. Search for insights related to "Neptune Analytics"
     insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="Neptune Analytics")
-    print("\nInsights about Neptune Analytics:")
+    print("\n========Insights about Neptune Analytics========:")
     for result in insights_results:
         print(f"- {result}")
 
@@ -86,7 +86,7 @@ async def main():
     chunks_results = await cognee.search(
         query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
     )
-    print("\nChunks about graph database:")
+    print("\n========Chunks about graph database========:")
     for result in chunks_results:
         print(f"- {result}")
 
@@ -94,7 +94,7 @@ async def main():
     graph_completion_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
     )
-    print("\nGraph completion for databases:")
+    print("\n========Graph completion for databases========:")
     for result in graph_completion_results:
         print(f"- {result}")
 

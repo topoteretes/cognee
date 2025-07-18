@@ -4,12 +4,12 @@ This module provides the Neptune Analytics adapter and utilities for interacting
 with Amazon Neptune Analytics graph databases.
 """
 
-from .adapter import NeptuneAnalyticsGraphDB
-from . import neptune_analytics_utils
+from .adapter import NeptuneGraphDB
+from . import neptune_utils
 from . import exceptions
 
 __all__ = [
-    "NeptuneAnalyticsGraphDB",
-    "neptune_analytics_utils",
+    "NeptuneGraphDB",
+    "neptune_utils",
     "exceptions",
 ]

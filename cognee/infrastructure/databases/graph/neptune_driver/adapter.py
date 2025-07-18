@@ -17,14 +17,14 @@ from cognee.infrastructure.engine import DataPoint
 from .exceptions import (
     NeptuneAnalyticsConfigurationError,
 )
-from .neptune_analytics_utils import (
+from .neptune_utils import (
     validate_graph_id,
     validate_aws_region,
     build_neptune_config,
     format_neptune_error,
 )
 
-logger = get_logger("NeptuneAnalyticsGraphDB")
+logger = get_logger("NeptuneGraphDB")
 
 try:
     from langchain_aws import NeptuneAnalyticsGraph
@@ -33,7 +33,7 @@ except ImportError:
     logger.warning("langchain_aws not available. Neptune Analytics functionality will be limited.")
     LANGCHAIN_AWS_AVAILABLE = False
 
-class NeptuneAnalyticsGraphDB(GraphDBInterface):
+class NeptuneGraphDB(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
     This class provides methods for querying, adding, deleting nodes and edges using the aws_langchain library.
