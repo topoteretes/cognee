@@ -84,6 +84,12 @@ async def delete(
         # Get the content hash for deletion
         content_hash = data_point.content_hash
 
+        # Debug logging
+        logger.info(
+            f"🔍 Retrieved from database - data_id: {data_id}, content_hash: {content_hash}"
+        )
+        logger.info(f"🔍 Document name in database: {data_point.name}")
+
     # Use the existing comprehensive deletion logic
     return await delete_single_document(content_hash, dataset.id, mode)
 

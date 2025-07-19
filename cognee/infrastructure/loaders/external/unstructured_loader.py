@@ -1,0 +1,168 @@
+import os
+from typing import List
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.loaders.models.LoaderResult import LoaderResult, ContentType
+from cognee.shared.logging_utils import get_logger
+
+
+class UnstructuredLoader(LoaderInterface):
+    """
+    Document loader using the unstructured library.
+
+    Handles various document formats including docx, pptx, xlsx, odt, etc.
+    Uses the unstructured library's auto-partition functionality.
+    """
+
+    def __init__(self):
+        self.logger = get_logger(__name__)
+
+    @property
+    def supported_extensions(self) -> List[str]:
+        return [
+            ".docx",
+            ".doc",
+            ".odt",  # Word documents
+            ".xlsx",
+            ".xls",
+            ".ods",  # Spreadsheets
+            ".pptx",
+            ".ppt",
+            ".odp",  # Presentations
+            ".rtf",
+            ".html",
+            ".htm",  # Rich text and HTML
+            ".eml",
+            ".msg",  # Email formats
+            ".epub",  # eBooks
+        ]
+
+    @property
+    def supported_mime_types(self) -> List[str]:
+        return [
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # docx
+            "application/msword",  # doc
+            "application/vnd.oasis.opendocument.text",  # odt
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # xlsx
+            "application/vnd.ms-excel",  # xls
+            "application/vnd.oasis.opendocument.spreadsheet",  # ods
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # pptx
+            "application/vnd.ms-powerpoint",  # ppt
+            "application/vnd.oasis.opendocument.presentation",  # odp
+            "application/rtf",  # rtf
+            "text/html",  # html
+            "message/rfc822",  # eml
+            "application/epub+zip",  # epub
+        ]
+
+    @property
+    def loader_name(self) -> str:
+        return "unstructured_loader"
+
+    def get_dependencies(self) -> List[str]:
+        return ["unstructured>=0.10.0"]
+
+    def can_handle(self, file_path: str, mime_type: str = None) -> bool:
+        """Check if file can be handled by this loader."""
+        # Check file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext not in self.supported_extensions:
+            return False
+
+        # Check MIME type if provided
+        if mime_type and mime_type not in self.supported_mime_types:
+            return False
+
+        # Validate dependencies
+        return self.validate_dependencies()
+
+    async def load(self, file_path: str, strategy: str = "auto", **kwargs) -> LoaderResult:
+        """
+        Load document using unstructured library.
+
+        Args:
+            file_path: Path to the document file
+            strategy: Partitioning strategy ("auto", "fast", "hi_res", "ocr_only")
+            **kwargs: Additional arguments passed to unstructured partition
+
+        Returns:
+            LoaderResult with extracted text content and metadata
+
+        Raises:
+            ImportError: If unstructured is not installed
+            Exception: If document processing fails
+        """
+        try:
+            from unstructured.partition.auto import partition
+        except ImportError as e:
+            raise ImportError(
+                "unstructured is required for document processing. "
+                "Install with: pip install unstructured"
+            ) from e
+
+        try:
+            self.logger.info(f"Processing document: {file_path}")
+
+            # Determine content type from file extension
+            file_ext = os.path.splitext(file_path)[1].lower()
+
+            # Get file size and basic info
+            file_size = os.path.getsize(file_path)
+            file_name = os.path.basename(file_path)
+
+            # Set partitioning parameters
+            partition_kwargs = {"filename": file_path, "strategy": strategy, **kwargs}
+
+            # Use partition to extract elements
+            elements = partition(**partition_kwargs)
+
+            # Process elements into text content
+            text_parts = []
+            element_info = []
+
+            for element in elements:
+                element_text = str(element).strip()
+                if element_text:
+                    text_parts.append(element_text)
+                    element_info.append(
+                        {
+                            "type": type(element).__name__,
+                            "text": element_text[:100] + "..."
+                            if len(element_text) > 100
+                            else element_text,
+                        }
+                    )
+
+            # Combine all text content
+            full_content = "\n\n".join(text_parts)
+
+            # Determine content type based on structure
+            content_type = ContentType.STRUCTURED if len(element_info) > 1 else ContentType.TEXT
+
+            # Gather metadata
+            metadata = {
+                "name": file_name,
+                "size": file_size,
+                "extension": file_ext,
+                "loader": self.loader_name,
+                "elements_count": len(elements),
+                "text_elements_count": len(text_parts),
+                "strategy": strategy,
+                "element_types": list(set(info["type"] for info in element_info)),
+            }
+
+            return LoaderResult(
+                content=full_content,
+                metadata=metadata,
+                content_type=content_type,
+                chunks=text_parts,  # Pre-chunked by elements
+                source_info={
+                    "file_path": file_path,
+                    "strategy": strategy,
+                    "elements": element_info[:10],  # First 10 elements for debugging
+                    "total_elements": len(elements),
+                },
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to process document {file_path}: {e}")
+            raise Exception(f"Document processing failed: {e}") from e

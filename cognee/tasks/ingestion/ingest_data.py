@@ -60,7 +60,7 @@ async def ingest_data(
         else:
             # Find existing dataset or create a new one
             existing_datasets = await get_authorized_existing_datasets(
-                user=user, permission_type="write", datasets=[dataset_name]
+                datasets=[dataset_name], permission_type="write", user=user
             )
             dataset = await load_or_create_datasets(
                 dataset_names=[dataset_name],
