@@ -26,7 +26,8 @@ class S3FileStorage(Storage):
                 key=s3_config.aws_access_key_id,
                 secret=s3_config.aws_secret_access_key,
                 anon=False,
-                endpoint_url="https://s3-eu-west-1.amazonaws.com",
+                endpoint_url=s3_config.aws_endpoint_url,
+                client_kwargs={"region_name": s3_config.aws_region},
             )
         else:
             raise ValueError("S3 credentials are not set in the configuration.")

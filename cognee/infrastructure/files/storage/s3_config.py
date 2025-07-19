@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class S3Config(BaseSettings):
+    aws_region: Optional[str] = None
+    aws_endpoint_url: Optional[str] = None
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
