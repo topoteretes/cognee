@@ -52,6 +52,11 @@ def extract_pos_tags(sentence):
 
 def get_anonymous_id():
     """Creates or reads a anonymous user id"""
+    tracking_id = os.getenv("TRACKING_ID", None)
+
+    if tracking_id:
+        return tracking_id
+
     home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
 
     if not os.path.isdir(home_dir):
