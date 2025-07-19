@@ -33,7 +33,7 @@ from .neo4j_metrics_utils import (
 from .deadlock_retry import deadlock_retry
 
 
-logger = get_logger("Neo4jAdapter", level=ERROR)
+logger = get_logger("Neo4jAdapter")
 
 BASE_LABEL = "__Node__"
 
@@ -870,34 +870,106 @@ class Neo4jAdapter(GraphDBInterface):
 
             A tuple containing two lists: nodes and edges with their properties.
         """
-        query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+        logger.info("Starting full graph data retrieval from Neo4j")
+        import time
 
-        result = await self.query(query)
+        start_time = time.time()
 
-        nodes = [
-            (
-                record["properties"]["id"],
-                record["properties"],
+        try:
+            # Retrieve nodes
+            logger.debug("Executing nodes query")
+            query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+            result = await self.query(query)
+
+            logger.debug(f"Raw nodes query returned {len(result)} records")
+
+            nodes = []
+            processed_nodes = 0
+            failed_nodes = 0
+
+            for record in result:
+                try:
+                    if (
+                        "properties" in record
+                        and record["properties"]
+                        and "id" in record["properties"]
+                    ):
+                        nodes.append(
+                            (
+                                record["properties"]["id"],
+                                record["properties"],
+                            )
+                        )
+                        processed_nodes += 1
+                    else:
+                        failed_nodes += 1
+                        logger.debug(
+                            f"Skipping node record due to missing properties or id: {record}"
+                        )
+                except Exception as e:
+                    failed_nodes += 1
+                    logger.warning(f"Failed to process node record: {str(e)}")
+
+            logger.info(
+                f"Nodes processing completed: {processed_nodes} processed, {failed_nodes} failed"
             )
-            for record in result
-        ]
 
-        query = """
-        MATCH (n)-[r]->(m)
-        RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
-        """
-        result = await self.query(query)
-        edges = [
-            (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
-                record["type"],
-                record["properties"],
+            # Retrieve edges
+            logger.debug("Executing edges query")
+            query = """
+            MATCH (n)-[r]->(m)
+            RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
+            """
+            result = await self.query(query)
+
+            logger.debug(f"Raw edges query returned {len(result)} records")
+
+            edges = []
+            processed_edges = 0
+            failed_edges = 0
+
+            for record in result:
+                try:
+                    if (
+                        "properties" in record
+                        and record["properties"]
+                        and "source_node_id" in record["properties"]
+                        and "target_node_id" in record["properties"]
+                    ):
+                        edges.append(
+                            (
+                                record["properties"]["source_node_id"],
+                                record["properties"]["target_node_id"],
+                                record["type"],
+                                record["properties"],
+                            )
+                        )
+                        processed_edges += 1
+                    else:
+                        failed_edges += 1
+                        logger.debug(f"Skipping edge record due to missing properties: {record}")
+                except Exception as e:
+                    failed_edges += 1
+                    logger.warning(f"Failed to process edge record: {str(e)}")
+
+            logger.info(
+                f"Edges processing completed: {processed_edges} processed, {failed_edges} failed"
             )
-            for record in result
-        ]
 
-        return (nodes, edges)
+            retrieval_time = time.time() - start_time
+            logger.info(f"Full graph data retrieval completed in {retrieval_time:.2f} seconds")
+            logger.info(f"Retrieved {len(nodes)} nodes and {len(edges)} edges")
+
+            if len(nodes) == 0:
+                logger.warning("No nodes found in the graph database")
+            if len(edges) == 0 and len(nodes) > 0:
+                logger.warning(f"Found {len(nodes)} nodes but no edges - graph has isolated nodes")
+
+            return (nodes, edges)
+
+        except Exception as e:
+            logger.error(f"Error during graph data retrieval: {str(e)}")
+            raise
 
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
@@ -918,50 +990,117 @@ class Neo4jAdapter(GraphDBInterface):
             - Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]}: A tuple
               containing nodes and edges in the requested subgraph.
         """
-        label = node_type.__name__
+        logger.info(f"Starting nodeset subgraph retrieval for node_type={node_type.__name__}")
+        logger.debug(f"Target node names: {node_name}")
 
-        query = f"""
-        UNWIND $names AS wantedName
-        MATCH (n:`{label}`)
-        WHERE n.name = wantedName
-        WITH collect(DISTINCT n) AS primary
-        UNWIND primary AS p
-        OPTIONAL MATCH (p)--(nbr)
-        WITH primary, collect(DISTINCT nbr) AS nbrs
-        WITH primary + nbrs AS nodelist
-        UNWIND nodelist AS node
-        WITH collect(DISTINCT node) AS nodes
-        MATCH (a)-[r]-(b)
-        WHERE a IN nodes AND b IN nodes
-        WITH nodes, collect(DISTINCT r) AS rels
-        RETURN
-          [n IN nodes |
-             {{ id: n.id,
-                properties: properties(n) }}] AS rawNodes,
-          [r IN rels  |
-             {{ type: type(r),
-                properties: properties(r) }}] AS rawRels
-        """
+        import time
 
-        result = await self.query(query, {"names": node_name})
-        if not result:
-            return [], []
+        start_time = time.time()
 
-        raw_nodes = result[0]["rawNodes"]
-        raw_rels = result[0]["rawRels"]
+        try:
+            label = node_type.__name__
+            logger.debug(f"Using node label: {label}")
 
-        nodes = [(n["properties"]["id"], n["properties"]) for n in raw_nodes]
-        edges = [
-            (
-                r["properties"]["source_node_id"],
-                r["properties"]["target_node_id"],
-                r["type"],
-                r["properties"],
+            query = f"""
+            UNWIND $names AS wantedName
+            MATCH (n:`{label}`)
+            WHERE n.name = wantedName
+            WITH collect(DISTINCT n) AS primary
+            UNWIND primary AS p
+            OPTIONAL MATCH (p)--(nbr)
+            WITH primary, collect(DISTINCT nbr) AS nbrs
+            WITH primary + nbrs AS nodelist
+            UNWIND nodelist AS node
+            WITH collect(DISTINCT node) AS nodes
+            MATCH (a)-[r]-(b)
+            WHERE a IN nodes AND b IN nodes
+            WITH nodes, collect(DISTINCT r) AS rels
+            RETURN
+              [n IN nodes |
+                 {{ id: n.id,
+                    properties: properties(n) }}] AS rawNodes,
+              [r IN rels  |
+                 {{ type: type(r),
+                    properties: properties(r) }}] AS rawRels
+            """
+
+            logger.debug("Executing nodeset subgraph query")
+            result = await self.query(query, {"names": node_name})
+
+            if not result:
+                logger.warning("Nodeset subgraph query returned no results")
+                return [], []
+
+            logger.debug("Processing nodeset subgraph query results")
+            raw_nodes = result[0]["rawNodes"]
+            raw_rels = result[0]["rawRels"]
+
+            logger.debug(
+                f"Raw query returned {len(raw_nodes)} nodes and {len(raw_rels)} relationships"
             )
-            for r in raw_rels
-        ]
 
-        return nodes, edges
+            # Process nodes
+            nodes = []
+            processed_nodes = 0
+            failed_nodes = 0
+
+            for n in raw_nodes:
+                try:
+                    if "properties" in n and "id" in n["properties"]:
+                        nodes.append((n["properties"]["id"], n["properties"]))
+                        processed_nodes += 1
+                    else:
+                        failed_nodes += 1
+                        logger.debug(f"Skipping node due to missing properties or id: {n}")
+                except Exception as e:
+                    failed_nodes += 1
+                    logger.warning(f"Failed to process node in nodeset subgraph: {str(e)}")
+
+            # Process edges
+            edges = []
+            processed_edges = 0
+            failed_edges = 0
+
+            for r in raw_rels:
+                try:
+                    if (
+                        "properties" in r
+                        and r["properties"]
+                        and "source_node_id" in r["properties"]
+                        and "target_node_id" in r["properties"]
+                    ):
+                        edges.append(
+                            (
+                                r["properties"]["source_node_id"],
+                                r["properties"]["target_node_id"],
+                                r["type"],
+                                r["properties"],
+                            )
+                        )
+                        processed_edges += 1
+                    else:
+                        failed_edges += 1
+                        logger.debug(f"Skipping relationship due to missing properties: {r}")
+                except Exception as e:
+                    failed_edges += 1
+                    logger.warning(f"Failed to process relationship in nodeset subgraph: {str(e)}")
+
+            retrieval_time = time.time() - start_time
+            logger.info(f"Nodeset subgraph retrieval completed in {retrieval_time:.2f} seconds")
+            logger.info(
+                f"Processed {processed_nodes} nodes and {processed_edges} edges (failed: {failed_nodes} nodes, {failed_edges} edges)"
+            )
+
+            if len(nodes) == 0:
+                logger.warning(
+                    f"No nodes found for node_type={node_type.__name__} with names={node_name}"
+                )
+
+            return nodes, edges
+
+        except Exception as e:
+            logger.error(f"Error during nodeset subgraph retrieval: {str(e)}")
+            raise
 
     async def get_filtered_graph_data(self, attribute_filters):
         """

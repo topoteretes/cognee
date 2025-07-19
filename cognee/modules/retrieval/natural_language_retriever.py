@@ -1,5 +1,5 @@
 from typing import Any, Optional
-import logging
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
 from cognee.infrastructure.llm.get_llm_client import get_llm_client
@@ -8,7 +8,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
-logger = logging.getLogger("NaturalLanguageRetriever")
+logger = get_logger("NaturalLanguageRetriever")
 
 
 class NaturalLanguageRetriever(BaseRetriever):
@@ -30,6 +30,7 @@ class NaturalLanguageRetriever(BaseRetriever):
         """Initialize retriever with optional custom prompt paths."""
         self.system_prompt_path = system_prompt_path
         self.max_attempts = max_attempts
+        logger.info(f"Initialized NaturalLanguageRetriever with max_attempts={self.max_attempts}")
 
     async def _get_graph_schema(self, graph_engine) -> tuple:
         """Retrieve the node and edge schemas from the graph database."""

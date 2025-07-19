@@ -10,7 +10,7 @@ from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger()
+logger = get_logger("GraphCompletionRetriever")
 
 
 class GraphCompletionRetriever(BaseRetriever):
@@ -40,47 +40,58 @@ class GraphCompletionRetriever(BaseRetriever):
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
+        logger.info(
+            f"Initialized GraphCompletionRetriever with top_k={self.top_k}, node_type={self.node_type}, node_name={self.node_name}"
+        )
 
-    def _get_nodes(self, retrieved_edges: list) -> dict:
-        """Creates a dictionary of nodes with their names and content."""
-        nodes = {}
-        for edge in retrieved_edges:
-            for node in (edge.node1, edge.node2):
-                if node.id not in nodes:
-                    text = node.attributes.get("text")
-                    if text:
-                        name = self._get_title(text)
-                        content = text
-                    else:
-                        name = node.attributes.get("name", "Unnamed Node")
-                        content = node.attributes.get("description", name)
-                    nodes[node.id] = {"node": node, "name": name, "content": content}
-        return nodes
-
-    async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
+    def resolve_edges_to_text(self, edges) -> str:
         """
-        Converts retrieved graph edges into a human-readable string format.
+        Transform nodes and relationships within edges to a human-readable text format.
+
+        Takes a list of edges and converts them into natural text by extracting name, text,
+        and description attributes of each relationship. Suitable formatting is applied if
+        attributes are missing.
 
         Parameters:
         -----------
 
-            - retrieved_edges (list): A list of edges retrieved from the graph.
+            - edges: The edges from the graph to transform into text. Each edge should be a
+              list/tuple with three elements (subject, relationship, object).
 
         Returns:
         --------
 
-            - str: A formatted string representation of the nodes and their connections.
+            - str: A formatted text representation of the edges.
         """
-        nodes = self._get_nodes(retrieved_edges)
-        node_section = "\n".join(
-            f"Node: {info['name']}\n__node_content_start__\n{info['content']}\n__node_content_end__\n"
-            for info in nodes.values()
-        )
-        connection_section = "\n".join(
-            f"{nodes[edge.node1.id]['name']} --[{edge.attributes['relationship_type']}]--> {nodes[edge.node2.id]['name']}"
-            for edge in retrieved_edges
-        )
-        return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
+        logger.debug(f"Resolving {len(edges)} edges to text")
+
+        relationships_text = []
+        for edge in edges:
+            subject, relationship, obj = edge
+
+            def get_name_and_content(node_data, name_field="name"):
+                name = node_data.get(name_field)
+                text = node_data.get("text")
+                description = node_data.get("description")
+
+                if description:
+                    return f"{name} ({description})"
+                if text:
+                    return f"{name} ({text})"
+                if name:
+                    return name
+                else:
+                    return "Unknown"
+
+            subject_name = get_name_and_content(subject)
+            relationship_name = relationship.get("relationship_name", "UNKNOWN")
+            object_name = get_name_and_content(obj)
+
+            relationships_text.append(f"{subject_name} {relationship_name} {object_name}")
+
+        result_text = "\n".join(relationships_text)
+        logger.debug(f"Generated {len(result_text)} characters of relationship text")
+        return result_text
 
     async def get_triplets(self, query: str) -> list:
         """
@@ -96,6 +107,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - list: A list of found triplets that match the query.
         """
+        logger.info(
+            f"Starting triplet search for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
+        )
+
         subclasses = get_all_subclasses(DataPoint)
         vector_index_collections = []
 
@@ -108,6 +123,8 @@ class GraphCompletionRetriever(BaseRetriever):
                         for field_name in index_fields:
                             vector_index_collections.append(f"{subclass.__name__}_{field_name}")
 
+        logger.debug(f"Found {len(vector_index_collections)} vector index collections to search")
+
         found_triplets = await brute_force_triplet_search(
             query,
             top_k=self.top_k,
@@ -116,6 +133,7 @@ class GraphCompletionRetriever(BaseRetriever):
             node_name=self.node_name,
         )
 
+        logger.info(f"Retrieved {len(found_triplets)} triplets from graph search")
         return found_triplets
 
     async def get_context(self, query: str) -> str:
@@ -133,13 +151,21 @@ class GraphCompletionRetriever(BaseRetriever):
             - str: A string representing the resolved context from the retrieved triplets, or an
               empty string if no triplets are found.
         """
+        logger.info(
+            f"Starting context retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
+        )
+
         triplets = await self.get_triplets(query)
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
             return ""
 
-        return await self.resolve_edges_to_text(triplets)
+        context = await self.resolve_edges_to_text(triplets)
+        logger.info(
+            f"Generated context with {len(context)} characters from {len(triplets)} triplets"
+        )
+        return context
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
@@ -157,16 +183,32 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
-        if context is None:
-            context = await self.get_context(query)
-
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
+        logger.info(
+            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
-        return [completion]
+
+        if context is None:
+            logger.debug("No context provided, retrieving context from graph")
+            context = await self.get_context(query)
+        else:
+            logger.debug("Using provided context")
+
+        logger.info(
+            f"Generating completion with context length: {len(str(context)) if context else 0} characters"
+        )
+
+        try:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+            )
+            logger.info("Graph completion generation successful")
+            return [completion]
+        except Exception as e:
+            logger.error(f"Error during graph completion generation: {str(e)}")
+            raise
 
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
         """Concatenates the top N frequent words in text."""
