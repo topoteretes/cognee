@@ -56,6 +56,7 @@ async def run_tasks(
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
+    telemetry_handler=None,  # Add telemetry handler argument
 ):
     if not user:
         user = get_default_user()
@@ -87,6 +88,7 @@ async def run_tasks(
             user=user,
             pipeline_name=pipeline_id,
             context=context,
+            telemetry_handler=telemetry_handler,  # Pass telemetry handler
         ):
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
