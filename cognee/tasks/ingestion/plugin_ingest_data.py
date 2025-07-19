@@ -54,6 +54,28 @@ async def plugin_ingest_data(
     if not user:
         user = await get_default_user()
 
+    # Ensure NLTK data is downloaded (preserves automatic download behavior)
+    def ensure_nltk_data():
+        """Download required NLTK data if not already present."""
+        try:
+            import nltk
+
+            # Download essential NLTK data used by the system
+            nltk.download("punkt_tab", quiet=True)
+            nltk.download("punkt", quiet=True)
+            nltk.download("averaged_perceptron_tagger", quiet=True)
+            nltk.download("averaged_perceptron_tagger_eng", quiet=True)
+            nltk.download("maxent_ne_chunker", quiet=True)
+            nltk.download("words", quiet=True)
+            logger.info("NLTK data verified/downloaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to download NLTK data: {e}")
+
+    # Download NLTK data once per session
+    if not hasattr(plugin_ingest_data, "_nltk_initialized"):
+        ensure_nltk_data()
+        plugin_ingest_data._nltk_initialized = True
+
     # Initialize S3 support (maintain existing behavior)
     s3_config = get_s3_config()
     fs = None
