@@ -91,10 +91,12 @@ class GraphCompletionRetriever(BaseRetriever):
                     return "Unknown"
 
             subject_name = get_name_and_content(subject)
-            relationship_name = relationship.get("relationship_name", "UNKNOWN")
+            relationship_name = relationship.get(
+                "relationship_name", relationship.get("relationship_type", "UNKNOWN")
+            )
             object_name = get_name_and_content(obj)
 
-            relationships_text.append(f"{subject_name} {relationship_name} {object_name}")
+            relationships_text.append(f"{subject_name} --[{relationship_name}]--> {object_name}")
 
         result_text = "\n".join(relationships_text)
         logger.debug(f"Generated {len(result_text)} characters of relationship text")
