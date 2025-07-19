@@ -113,15 +113,34 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-- cognify: Turns your data into a structured knowledge graph and stores it in memory
+- **cognify**: Turns your data into a structured knowledge graph and stores it in memory
 
-- codify: Analyse a code repository, build a code graph, stores it in memory
+- **codify**: Analyse a code repository, build a code graph, stores it in memory
 
-- search: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, INSIGHTS
+- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, INSIGHTS
 
-- prune: Reset cognee for a fresh start
+- **list_data**: List all datasets and their data items with IDs for deletion operations
 
-- cognify_status / codify_status: Track pipeline progress
+- **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
+
+- **prune**: Reset cognee for a fresh start (removes all data)
+
+- **cognify_status / codify_status**: Track pipeline progress
+
+**Data Management Examples:**
+```bash
+# List all available datasets and data items
+list_data()
+
+# List data items in a specific dataset
+list_data(dataset_id="your-dataset-id-here")
+
+# Delete specific data (soft deletion - safer, preserves shared entities)
+delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="soft")
+
+# Delete specific data (hard deletion - removes orphaned entities)
+delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="hard")
+```
 
 Remember – use the CODE search type to query your code graph. For huge repos, run codify on modules incrementally and cache results.
 
