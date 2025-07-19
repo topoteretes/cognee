@@ -120,13 +120,22 @@ async def plugin_ingest_data(
         logger.info(f"Plugin-based ingestion starting for dataset: {dataset_name}")
 
         # Preserve existing dataset creation and permission logic
-        existing_datasets = await get_authorized_existing_datasets([dataset_name], "write", user)
-
-        # Use dataset_id if provided, otherwise use dataset_name
-        dataset_names = [dataset_id] if dataset_id else [dataset_name]
-        datasets = await load_or_create_datasets(dataset_names, existing_datasets, user)
-
-        dataset = datasets[0]
+        if dataset_id:
+            # Retrieve existing dataset by ID
+            dataset = await get_specific_user_permission_datasets(user.id, "write", [dataset_id])
+            # Convert from list to Dataset element
+            if isinstance(dataset, list):
+                dataset = dataset[0]
+        else:
+            # Find existing dataset or create a new one by name
+            existing_datasets = await get_authorized_existing_datasets(
+                datasets=[dataset_name], permission_type="write", user=user
+            )
+            datasets = await load_or_create_datasets(
+                dataset_names=[dataset_name], existing_datasets=existing_datasets, user=user
+            )
+            if isinstance(datasets, list):
+                dataset = datasets[0]
 
         new_datapoints = []
         existing_data_points = []
