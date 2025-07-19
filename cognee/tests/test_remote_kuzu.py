@@ -2,11 +2,11 @@ import os
 import shutil
 import cognee
 import pathlib
+from cognee.infrastructure.files.storage import get_storage_config
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
-from cognee.infrastructure.databases.graph.config import get_graph_config
 
 logger = get_logger()
 
@@ -93,7 +93,8 @@ async def main():
         assert len(history) == 6, "Search history is not correct."
 
         await cognee.prune.prune_data()
-        assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+        data_root_directory = get_storage_config()["data_root_directory"]
+        assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
         await cognee.prune.prune_system(metadata=True)
         from cognee.infrastructure.databases.graph import get_graph_engine

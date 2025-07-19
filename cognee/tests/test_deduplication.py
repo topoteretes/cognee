@@ -2,6 +2,7 @@ import hashlib
 import os
 from cognee.shared.logging_utils import get_logger
 import pathlib
+import pytest
 
 import cognee
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -101,6 +102,7 @@ async def test_deduplication():
     await cognee.prune.prune_system(metadata=True)
 
 
+@pytest.mark.asyncio
 async def test_deduplication_postgres():
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
@@ -119,6 +121,7 @@ async def test_deduplication_postgres():
     await test_deduplication()
 
 
+@pytest.mark.asyncio
 async def test_deduplication_sqlite():
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "lancedb"}

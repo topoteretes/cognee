@@ -1,6 +1,5 @@
-from ..get_vector_engine import get_vector_engine, get_vectordb_context_config
 from sqlalchemy import text
-from cognee.context_global_variables import vector_db_config as context_vector_db_config
+from ..get_vector_engine import get_vector_engine, get_vectordb_context_config
 
 
 async def create_db_and_tables():

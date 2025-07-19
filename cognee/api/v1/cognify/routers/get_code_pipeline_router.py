@@ -31,7 +31,22 @@ def get_code_pipeline_router() -> APIRouter:
 
     @router.post("/index", response_model=None)
     async def code_pipeline_index(payload: CodePipelineIndexPayloadDTO):
-        """This endpoint is responsible for running the indexation on code repo."""
+        """
+        Run indexation on a code repository.
+
+        This endpoint processes a code repository to create a knowledge graph
+        of the codebase structure, dependencies, and relationships.
+
+        ## Request Parameters
+        - **repo_path** (str): Path to the code repository
+        - **include_docs** (bool): Whether to include documentation files (default: false)
+
+        ## Response
+        No content returned. Processing results are logged.
+
+        ## Error Codes
+        - **409 Conflict**: Error during indexation process
+        """
         from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 
         try:
@@ -42,7 +57,22 @@ def get_code_pipeline_router() -> APIRouter:
 
     @router.post("/retrieve", response_model=list[dict])
     async def code_pipeline_retrieve(payload: CodePipelineRetrievePayloadDTO):
-        """This endpoint is responsible for retrieving the context."""
+        """
+        Retrieve context from the code knowledge graph.
+
+        This endpoint searches the indexed code repository to find relevant
+        context based on the provided query.
+
+        ## Request Parameters
+        - **query** (str): Search query for code context
+        - **full_input** (str): Full input text for processing
+
+        ## Response
+        Returns a list of relevant code files and context as JSON.
+
+        ## Error Codes
+        - **409 Conflict**: Error during retrieval process
+        """
         try:
             query = (
                 payload.full_input.replace("cognee ", "")

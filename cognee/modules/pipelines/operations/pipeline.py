@@ -1,6 +1,6 @@
 import asyncio
+from uuid import UUID
 from typing import Union
-from uuid import NAMESPACE_OID, uuid5, UUID
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -121,7 +121,7 @@ async def run_pipeline(
     check_dataset_name(dataset.name)
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
-    await set_database_global_context_variables(dataset.name, user.id)
+    await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     # Ugly hack, but no easier way to do this.
     if pipeline_name == "add_pipeline":
@@ -184,7 +184,7 @@ async def run_pipeline(
         if not isinstance(task, Task):
             raise ValueError(f"Task {task} is not an instance of Task")
 
-    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context=context)
+    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context)
 
     async for pipeline_run_info in pipeline_run:
         yield pipeline_run_info

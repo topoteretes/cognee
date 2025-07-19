@@ -1,10 +1,7 @@
 """This module contains utility functions for the cognee."""
 
 import os
-from typing import BinaryIO, Union
-
 import requests
-import hashlib
 from datetime import datetime, timezone
 import graphistry
 import networkx as nx
@@ -13,14 +10,12 @@ import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
-import sys
+import pathlib
+from uuid import uuid4
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 
-from uuid import uuid4
-import pathlib
-from cognee.shared.exceptions import IngestionError
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -59,6 +54,11 @@ def extract_pos_tags(sentence):
 
 def get_anonymous_id():
     """Creates or reads a anonymous user id"""
+    tracking_id = os.getenv("TRACKING_ID", None)
+
+    if tracking_id:
+        return tracking_id
+
     home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
 
     if not os.path.isdir(home_dir):
@@ -102,182 +102,6 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
-    h = hashlib.md5()
-
-    try:
-        if isinstance(file_obj, str):
-            with open(file_obj, "rb") as file:
-                while True:
-                    # Reading is buffered, so we can read smaller chunks.
-                    chunk = file.read(h.block_size)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-        else:
-            while True:
-                # Reading is buffered, so we can read smaller chunks.
-                chunk = file_obj.read(h.block_size)
-                if not chunk:
-                    break
-                h.update(chunk)
-
-        return h.hexdigest()
-    except IOError as e:
-        raise IngestionError(message=f"Failed to load data from {file}: {e}")
-
-
-def generate_color_palette(unique_layers):
-    colormap = plt.cm.get_cmap("viridis", len(unique_layers))
-    colors = [colormap(i) for i in range(len(unique_layers))]
-    hex_colors = [
-        "#%02x%02x%02x" % (int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
-        for rgb in colors
-    ]
-
-    return dict(zip(unique_layers, hex_colors))
-
-
-async def register_graphistry():
-    config = get_base_config()
-    graphistry.register(
-        api=3, username=config.graphistry_username, password=config.graphistry_password
-    )
-
-
-def prepare_edges(graph, source, target, edge_key):
-    edge_list = [
-        {
-            source: str(edge[0]),
-            target: str(edge[1]),
-            edge_key: str(edge[2]),
-        }
-        for edge in graph.edges(keys=True, data=True)
-    ]
-
-    return pd.DataFrame(edge_list)
-
-
-def prepare_nodes(graph, include_size=False):
-    nodes_data = []
-    for node in graph.nodes:
-        node_info = graph.nodes[node]
-
-        if not node_info:
-            continue
-
-        node_data = {
-            **node_info,
-            "id": str(node),
-            "name": node_info["name"] if "name" in node_info else str(node),
-        }
-
-        if include_size:
-            default_size = 10  # Default node size
-            larger_size = 20  # Size for nodes with specific keywords in their ID
-            keywords = ["DOCUMENT", "User"]
-            node_size = (
-                larger_size if any(keyword in str(node) for keyword in keywords) else default_size
-            )
-            node_data["size"] = node_size
-
-        nodes_data.append(node_data)
-
-    return pd.DataFrame(nodes_data)
-
-
-async def render_graph(
-    graph=None, include_nodes=True, include_color=False, include_size=False, include_labels=True
-):
-    await register_graphistry()
-
-    if not isinstance(graph, nx.MultiDiGraph):
-        graph_engine = await get_graph_engine()
-        networkx_graph = nx.MultiDiGraph()
-
-        (nodes, edges) = await graph_engine.get_graph_data()
-
-        networkx_graph.add_nodes_from(nodes)
-        networkx_graph.add_edges_from(edges)
-
-        graph = networkx_graph
-
-    edges = prepare_edges(graph, "source_node", "target_node", "relationship_name")
-    plotter = graphistry.edges(edges, "source_node", "target_node")
-    plotter = plotter.bind(edge_label="relationship_name")
-
-    if include_nodes:
-        nodes = prepare_nodes(graph, include_size=include_size)
-        plotter = plotter.nodes(nodes, "id")
-
-        if include_size:
-            plotter = plotter.bind(point_size="size")
-
-        if include_color:
-            pass
-            # unique_layers = nodes["layer_description"].unique()
-            # color_palette = generate_color_palette(unique_layers)
-            # plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
-            #                                      default_mapping="silver")
-
-        if include_labels:
-            plotter = plotter.bind(point_label="name")
-
-    # Visualization
-    url = plotter.plot(render=False, as_files=True, memoize=False)
-    print(f"Graph is visualized at: {url}")
-    return url
-
-
-# def sanitize_df(df):
-#     """Replace NaNs and infinities in a DataFrame with None, making it JSON compliant."""
-#     return df.replace([np.inf, -np.inf, np.nan], None)
-
-
-async def convert_to_serializable_graph(G):
-    """
-    Convert a graph into a serializable format with stringified node and edge attributes.
-    """
-
-    (nodes, edges) = G
-
-    networkx_graph = nx.MultiDiGraph()
-    networkx_graph.add_nodes_from(nodes)
-    networkx_graph.add_edges_from(edges)
-
-    # Create a new graph to store the serializable version
-    new_G = nx.MultiDiGraph()
-
-    # Serialize nodes
-    for node, data in networkx_graph.nodes(data=True):
-        serializable_data = {k: str(v) for k, v in data.items()}
-        new_G.add_node(str(node), **serializable_data)
-
-    # Serialize edges
-    for u, v, data in networkx_graph.edges(data=True):
-        serializable_data = {k: str(v) for k, v in data.items()}
-        new_G.add_edge(str(u), str(v), **serializable_data)
-
-    return new_G
-
-
-def generate_layout_positions(G, layout_func, layout_scale):
-    """
-    Generate layout positions for the graph using the specified layout function.
-    """
-    positions = layout_func(G)
-    return {str(node): (x * layout_scale, y * layout_scale) for node, (x, y) in positions.items()}
-
-
-def assign_node_colors(G, node_attribute, palette):
-    """
-    Assign colors to nodes based on a specified attribute and a given palette.
-    """
-    unique_attrs = set(G.nodes[node].get(node_attribute, "Unknown") for node in G.nodes)
-    color_map = {attr: palette[i % len(palette)] for i, attr in enumerate(unique_attrs)}
-    return [color_map[G.nodes[node].get(node_attribute, "Unknown")] for node in G.nodes], color_map
-
-
 def embed_logo(p, layout_scale, logo_alpha, position):
     """
     Embed a logo into the graph visualization as a watermark.
@@ -305,18 +129,6 @@ def embed_logo(p, layout_scale, logo_alpha, position):
         anchor=position,
         global_alpha=logo_alpha,
     )
-
-
-def graph_to_tuple(graph):
-    """
-    Converts a networkx graph to a tuple of (nodes, edges).
-
-    :param graph: A networkx graph.
-    :return: A tuple (nodes, edges).
-    """
-    nodes = list(graph.nodes(data=True))  # Get nodes with attributes
-    edges = list(graph.edges(data=True))  # Get edges with attributes
-    return (nodes, edges)
 
 
 def start_visualization_server(
