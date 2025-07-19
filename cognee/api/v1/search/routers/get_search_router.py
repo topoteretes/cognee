@@ -9,7 +9,10 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.data.methods import get_history
+from cognee.shared.logging_utils import get_logger
 from cognee.exceptions import UnsupportedSearchTypeError, InvalidQueryError, NoDataToProcessError
+
+logger = get_logger()
 
 
 class SearchPayloadDTO(InDTO):
@@ -86,6 +89,14 @@ def get_search_router() -> APIRouter:
         # Check if search type is supported
         try:
             search_type = payload.search_type
+            logger.info(
+                f"Search type validated: {search_type.value}",
+                extra={
+                    "search_type": search_type.value,
+                    "user_id": user.id,
+                    "query_length": len(payload.query),
+                },
+            )
         except ValueError:
             raise UnsupportedSearchTypeError(
                 search_type=str(payload.search_type), supported_types=[t.value for t in SearchType]

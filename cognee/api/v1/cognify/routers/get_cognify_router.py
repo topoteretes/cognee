@@ -163,6 +163,14 @@ def get_cognify_router() -> APIRouter:
                             user_manager=user_manager,
                             bearer=None,
                         )
+                        logger.info(
+                            f"WebSocket user authenticated for pipeline {pipeline_run_id}",
+                            extra={
+                                "user_id": user.id,
+                                "user_email": user.email,
+                                "pipeline_run_id": str(pipeline_run_id),
+                            },
+                        )
         except Exception as error:
             logger.error(f"Authentication failed: {str(error)}")
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
