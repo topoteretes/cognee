@@ -144,6 +144,8 @@ DEBUG = True
                     "cognify_status",
                     "codify_status",
                     "cognee_add_developer_rules",
+                    "list_data",
+                    "delete",
                 }
                 available_tools = {tool.name for tool in tools_result.tools}
 
@@ -325,6 +327,168 @@ DEBUG = True
                 }
                 print(f"❌ Search {search_type} test failed: {e}")
 
+    async def test_list_data(self):
+        """Test the list_data functionality."""
+        print("\n🧪 Testing list_data functionality...")
+
+        try:
+            async with self.mcp_server_session() as session:
+                # Test listing all datasets
+                result = await session.call_tool("list_data", arguments={})
+
+                if result.content and len(result.content) > 0:
+                    content = result.content[0].text
+
+                    # Check if the output contains expected elements
+                    if "Available Datasets:" in content or "No datasets found" in content:
+                        self.test_results["list_data_all"] = {
+                            "status": "PASS",
+                            "result": content[:200] + "..." if len(content) > 200 else content,
+                            "message": "list_data (all datasets) successful",
+                        }
+                        print("✅ list_data (all datasets) test passed")
+
+                        # If there are datasets, try to list data for the first one
+                        if "Dataset ID:" in content:
+                            # Extract the first dataset ID from the output
+                            lines = content.split("\n")
+                            dataset_id = None
+                            for line in lines:
+                                if "Dataset ID:" in line:
+                                    dataset_id = line.split("Dataset ID:")[1].strip()
+                                    break
+
+                            if dataset_id:
+                                # Test listing data for specific dataset
+                                specific_result = await session.call_tool(
+                                    "list_data", arguments={"dataset_id": dataset_id}
+                                )
+
+                                if specific_result.content and len(specific_result.content) > 0:
+                                    specific_content = specific_result.content[0].text
+                                    if "Dataset:" in specific_content:
+                                        self.test_results["list_data_specific"] = {
+                                            "status": "PASS",
+                                            "result": specific_content[:200] + "..."
+                                            if len(specific_content) > 200
+                                            else specific_content,
+                                            "message": "list_data (specific dataset) successful",
+                                        }
+                                        print("✅ list_data (specific dataset) test passed")
+                                    else:
+                                        raise Exception(
+                                            "Specific dataset listing returned unexpected format"
+                                        )
+                                else:
+                                    raise Exception("Specific dataset listing returned no content")
+                    else:
+                        raise Exception("list_data returned unexpected format")
+                else:
+                    raise Exception("list_data returned no content")
+
+        except Exception as e:
+            self.test_results["list_data"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "list_data test failed",
+            }
+            print(f"❌ list_data test failed: {e}")
+
+    async def test_delete(self):
+        """Test the delete functionality."""
+        print("\n🧪 Testing delete functionality...")
+
+        try:
+            async with self.mcp_server_session() as session:
+                # First, let's get available data to delete
+                list_result = await session.call_tool("list_data", arguments={})
+
+                if not (list_result.content and len(list_result.content) > 0):
+                    raise Exception("No data available for delete test - list_data returned empty")
+
+                content = list_result.content[0].text
+
+                # Look for data IDs and dataset IDs in the content
+                lines = content.split("\n")
+                dataset_id = None
+                data_id = None
+
+                for line in lines:
+                    if "Dataset ID:" in line:
+                        dataset_id = line.split("Dataset ID:")[1].strip()
+                    elif "Data ID:" in line:
+                        data_id = line.split("Data ID:")[1].strip()
+                        break  # Get the first data item
+
+                if dataset_id and data_id:
+                    # Test soft delete (default)
+                    delete_result = await session.call_tool(
+                        "delete",
+                        arguments={"data_id": data_id, "dataset_id": dataset_id, "mode": "soft"},
+                    )
+
+                    if delete_result.content and len(delete_result.content) > 0:
+                        delete_content = delete_result.content[0].text
+
+                        if "Delete operation completed successfully" in delete_content:
+                            self.test_results["delete_soft"] = {
+                                "status": "PASS",
+                                "result": delete_content[:200] + "..."
+                                if len(delete_content) > 200
+                                else delete_content,
+                                "message": "delete (soft mode) successful",
+                            }
+                            print("✅ delete (soft mode) test passed")
+                        else:
+                            # Check if it's an expected error (like document not found)
+                            if "not found" in delete_content.lower():
+                                self.test_results["delete_soft"] = {
+                                    "status": "PASS",
+                                    "result": delete_content,
+                                    "message": "delete test passed with expected 'not found' error",
+                                }
+                                print("✅ delete test passed (expected 'not found' error)")
+                            else:
+                                raise Exception(
+                                    f"Delete returned unexpected content: {delete_content}"
+                                )
+                    else:
+                        raise Exception("Delete returned no content")
+
+                else:
+                    # Test with invalid UUIDs to check error handling
+                    invalid_result = await session.call_tool(
+                        "delete",
+                        arguments={
+                            "data_id": "invalid-uuid",
+                            "dataset_id": "another-invalid-uuid",
+                            "mode": "soft",
+                        },
+                    )
+
+                    if invalid_result.content and len(invalid_result.content) > 0:
+                        invalid_content = invalid_result.content[0].text
+
+                        if "Invalid UUID format" in invalid_content:
+                            self.test_results["delete_error_handling"] = {
+                                "status": "PASS",
+                                "result": invalid_content,
+                                "message": "delete error handling works correctly",
+                            }
+                            print("✅ delete error handling test passed")
+                        else:
+                            raise Exception(f"Expected UUID error not found: {invalid_content}")
+                    else:
+                        raise Exception("Delete error test returned no content")
+
+        except Exception as e:
+            self.test_results["delete"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "delete test failed",
+            }
+            print(f"❌ delete test failed: {e}")
+
     def test_utility_functions(self):
         """Test utility functions."""
         print("\n🧪 Testing utility functions...")
@@ -465,6 +629,10 @@ class TestModel:
 
         await self.test_codify()
         await self.test_cognee_add_developer_rules()
+
+        # Test list_data and delete functionality
+        await self.test_list_data()
+        await self.test_delete()
 
         await self.test_search_functionality()
 
