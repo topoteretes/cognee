@@ -16,9 +16,12 @@ class TextData(IngestionData):
         self.data = data
 
     def get_identifier(self):
-        keywords = extract_keywords(self.data)
+        import hashlib
 
-        return "text/plain" + "_" + "|".join(keywords)
+        content_bytes = self.data.encode("utf-8")
+        content_hash = hashlib.md5(content_bytes).hexdigest()
+
+        return "text/plain" + "_" + content_hash
 
     def get_metadata(self):
         self.ensure_metadata()
@@ -27,7 +30,20 @@ class TextData(IngestionData):
 
     def ensure_metadata(self):
         if self.metadata is None:
-            self.metadata = {}
+            import hashlib
+
+            keywords = extract_keywords(self.data)
+            content_bytes = self.data.encode("utf-8")
+            content_hash = hashlib.md5(content_bytes).hexdigest()
+
+            self.metadata = {
+                "keywords": keywords,
+                "content_hash": content_hash,
+                "content_type": "text/plain",
+                "mime_type": "text/plain",
+                "extension": "txt",
+                "file_size": len(content_bytes),
+            }
 
     @asynccontextmanager
     async def get_data(self):
