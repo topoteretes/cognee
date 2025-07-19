@@ -159,7 +159,7 @@ async def plugin_ingest_data(
                 logger.warning(f"Plugin system failed for {file_path}, falling back: {e}")
                 # Fallback to existing system for full backward compatibility
                 with open_data_file(file_path) as file:
-                    classified_data = ingestion.classify(file, s3fs=fs)
+                    classified_data = ingestion.classify(file)
 
             # Preserve all existing data processing logic
             data_id = ingestion.identify(classified_data, user)
@@ -212,7 +212,12 @@ async def plugin_ingest_data(
                     }
                     return mime_map.get(ext.lower(), "text/plain")
                 elif field_name == "content_hash":
-                    return str(data_id)
+                    # Extract the raw content hash for compatibility with deletion system
+                    content_identifier = classified_data.get_identifier()
+                    # Remove content type prefix if present (e.g., "text_abc123" -> "abc123")
+                    if "_" in content_identifier:
+                        return content_identifier.split("_", 1)[-1]
+                    return content_identifier
 
                 return default_value
 

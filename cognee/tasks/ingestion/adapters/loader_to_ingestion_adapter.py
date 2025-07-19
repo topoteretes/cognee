@@ -66,7 +66,13 @@ class LoaderResultToIngestionData(IngestionData):
                 metadata["name"] = f"content_{content_hash}{ext}"
 
         if "content_hash" not in metadata:
-            metadata["content_hash"] = self.get_identifier()
+            # Store content hash without prefix for compatibility with deletion system
+            identifier = self.get_identifier()
+            if "_" in identifier:
+                # Remove content type prefix (e.g., "text_abc123" -> "abc123")
+                metadata["content_hash"] = identifier.split("_", 1)[-1]
+            else:
+                metadata["content_hash"] = identifier
 
         if "file_path" not in metadata and self.original_file_path:
             metadata["file_path"] = self.original_file_path
@@ -192,7 +198,7 @@ class LoaderToIngestionAdapter:
         if file_path.startswith("s3://"):
             if s3fs:
                 with s3fs.open(file_path, "rb") as file:
-                    return classify(file, s3fs=s3fs)
+                    return classify(file)
             else:
                 raise ValueError("S3 file path provided but no s3fs available")
         else:
