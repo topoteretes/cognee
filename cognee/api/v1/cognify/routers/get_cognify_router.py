@@ -32,7 +32,6 @@ logger = get_logger("api.cognify")
 class CognifyPayloadDTO(InDTO):
     datasets: Optional[List[str]] = None
     dataset_ids: Optional[List[UUID]] = None
-    graph_model: Optional[BaseModel] = KnowledgeGraph
     run_in_background: Optional[bool] = False
 
 
@@ -96,7 +95,7 @@ def get_cognify_router() -> APIRouter:
             datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
 
             cognify_run = await cognee_cognify(
-                datasets, user, payload.graph_model, run_in_background=payload.run_in_background
+                datasets, user, run_in_background=payload.run_in_background
             )
 
             return cognify_run

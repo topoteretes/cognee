@@ -331,11 +331,19 @@ def get_datasets_router() -> APIRouter:
         ## Error Codes
         - **500 Internal Server Error**: Error retrieving status information
         """
-        from cognee.modules.data.methods import get_dataset_status
+        from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
-        dataset_status = await get_dataset_status(datasets, user.id)
+        try:
+            # Verify user has permission to read dataset
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
 
-        return dataset_status
+            datasets_statuses = await cognee_datasets.get_status(
+                [dataset.id for dataset in authorized_datasets]
+            )
+
+            return datasets_statuses
+        except Exception as error:
+            return JSONResponse(status_code=409, content={"error": str(error)})
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
