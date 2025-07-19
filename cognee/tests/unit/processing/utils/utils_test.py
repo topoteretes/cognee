@@ -10,7 +10,6 @@ from cognee.infrastructure.files.utils.get_file_content_hash import get_file_con
 from cognee.shared.utils import get_anonymous_id
 
 
-
 @pytest.fixture
 def temp_dir(tmp_path):
     return tmp_path
