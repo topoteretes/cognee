@@ -30,9 +30,38 @@ class BinaryData(IngestionData):
 
     async def ensure_metadata(self):
         if self.metadata is None:
-            self.metadata = await get_file_metadata(self.data)
+            # Handle case where file might be closed
+            if hasattr(self.data, "closed") and self.data.closed:
+                # Try to reopen the file if we have a file path
+                if hasattr(self.data, "name") and self.data.name:
+                    try:
+                        with open(self.data.name, "rb") as reopened_file:
+                            self.metadata = await get_file_metadata(reopened_file)
+                    except (OSError, FileNotFoundError):
+                        # If we can't reopen, create minimal metadata
+                        self.metadata = {
+                            "name": self.name or "unknown",
+                            "file_path": getattr(self.data, "name", "unknown"),
+                            "extension": "txt",
+                            "mime_type": "text/plain",
+                            "content_hash": f"closed_file_{id(self.data)}",
+                            "file_size": 0,
+                        }
+                else:
+                    # Create minimal metadata when file is closed and no path available
+                    self.metadata = {
+                        "name": self.name or "unknown",
+                        "file_path": "unknown",
+                        "extension": "txt",
+                        "mime_type": "text/plain",
+                        "content_hash": f"closed_file_{id(self.data)}",
+                        "file_size": 0,
+                    }
+            else:
+                # File is still open, proceed normally
+                self.metadata = await get_file_metadata(self.data)
 
-            if self.metadata["name"] is None:
+            if self.metadata.get("name") is None:
                 self.metadata["name"] = self.name
 
     @asynccontextmanager
