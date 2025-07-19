@@ -71,7 +71,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
         if context is None:
             triplets += await self.get_triplets(query)
-            context = self.resolve_edges_to_text(triplets)
+            context = await self.resolve_edges_to_text(triplets)
 
         round_idx = 1
 
@@ -90,7 +90,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             triplets += await self.get_triplets(completion)
             triplets = list(set(triplets))
-            context = self.resolve_edges_to_text(triplets)
+            context = await self.resolve_edges_to_text(triplets)
 
             num_triplets = len(triplets)
 

@@ -54,5 +54,5 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
 
             - str: A summary string representing the content of the retrieved edges.
         """
-        direct_text = super().resolve_edges_to_text(retrieved_edges)
+        direct_text = await super().resolve_edges_to_text(retrieved_edges)
         return await summarize_text(direct_text, self.summarize_prompt_path)

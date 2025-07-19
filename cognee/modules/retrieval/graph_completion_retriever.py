@@ -44,7 +44,7 @@ class GraphCompletionRetriever(BaseRetriever):
             f"Initialized GraphCompletionRetriever with top_k={self.top_k}, node_type={self.node_type}, node_name={self.node_name}"
         )
 
-    def resolve_edges_to_text(self, edges) -> str:
+    async def resolve_edges_to_text(self, edges) -> str:
         """
         Transform nodes and relationships within edges to a human-readable text format.
 
@@ -170,7 +170,7 @@ class GraphCompletionRetriever(BaseRetriever):
             logger.warning("Empty context was provided to the completion")
             return ""
 
-        context = self.resolve_edges_to_text(triplets)
+        context = await self.resolve_edges_to_text(triplets)
         logger.info(
             f"Generated context with {len(context)} characters from {len(triplets)} triplets"
         )
