@@ -13,10 +13,11 @@ logger = get_logger()
 
 
 async def main():
+    bucket_name = os.getenv("STORAGE_BUCKET_NAME")
     test_run_id = uuid4()
-    data_directory_path = f"s3://cognee-storage-dev/{test_run_id}/data"
+    data_directory_path = f"s3://{bucket_name}/{test_run_id}/data"
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = f"s3://cognee-storage-dev/{test_run_id}/system"
+    cognee_directory_path = f"s3://{bucket_name}/{test_run_id}/system"
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
