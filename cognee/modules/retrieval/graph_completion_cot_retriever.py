@@ -84,7 +84,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     context = await self.get_context(query)
             else:
                 triplets += await self.get_triplets(followup_question)
-                context = await self.resolve_edges_to_text(list(set(triplets)))
+                context = self.resolve_edges_to_text(list(set(triplets)))
 
             answer = await generate_completion(
                 query=query,

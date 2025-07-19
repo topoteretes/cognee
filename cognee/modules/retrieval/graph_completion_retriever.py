@@ -56,7 +56,7 @@ class GraphCompletionRetriever(BaseRetriever):
         -----------
 
             - edges: The edges from the graph to transform into text. Each edge should be a
-              list/tuple with three elements (subject, relationship, object).
+              list/tuple with three elements (subject, relationship, object) or Edge objects.
 
         Returns:
         --------
@@ -67,7 +67,14 @@ class GraphCompletionRetriever(BaseRetriever):
 
         relationships_text = []
         for edge in edges:
-            subject, relationship, obj = edge
+            # Handle Edge objects from CogneeGraphElements
+            if hasattr(edge, "node1") and hasattr(edge, "node2") and hasattr(edge, "attributes"):
+                subject = edge.node1.attributes
+                obj = edge.node2.attributes
+                relationship = edge.attributes
+            else:
+                # Handle tuple format (subject, relationship, object)
+                subject, relationship, obj = edge
 
             def get_name_and_content(node_data, name_field="name"):
                 name = node_data.get(name_field)
@@ -161,7 +168,7 @@ class GraphCompletionRetriever(BaseRetriever):
             logger.warning("Empty context was provided to the completion")
             return ""
 
-        context = await self.resolve_edges_to_text(triplets)
+        context = self.resolve_edges_to_text(triplets)
         logger.info(
             f"Generated context with {len(context)} characters from {len(triplets)} triplets"
         )
