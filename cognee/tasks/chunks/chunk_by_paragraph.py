@@ -31,7 +31,7 @@ def chunk_by_paragraph(
     current_chunk = ""
     chunk_index = 0
     paragraph_ids = []
-    last_cut_type = None
+    last_cut_type = "default"
     current_chunk_size = 0
 
     for paragraph_id, sentence, sentence_size, end_type in chunk_by_sentence(
@@ -76,6 +76,9 @@ def chunk_by_paragraph(
             current_chunk = ""
             current_chunk_size = 0
             chunk_index += 1
+
+        if not end_type:
+            end_type = "default"
 
         last_cut_type = end_type
 

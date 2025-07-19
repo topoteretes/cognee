@@ -1,4 +1,5 @@
 import litellm
+import logging
 from pydantic import BaseModel
 from typing import Type, Optional
 from litellm import acompletion, JSONSchemaValidationError

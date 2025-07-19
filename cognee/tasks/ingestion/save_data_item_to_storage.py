@@ -1,3 +1,4 @@
+import os
 from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -20,6 +21,8 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], datase
             file_path = data_item
         # data is a file path
         elif data_item.startswith("file://") or data_item.startswith("/"):
+            if os.getenv("ACCEPT_LOCAL_FILE_PATH", "true").lower() == "false":
+                raise IngestionError(message="Local files are not accepted.")
             file_path = data_item.replace("file://", "")
         # data is text
         else:

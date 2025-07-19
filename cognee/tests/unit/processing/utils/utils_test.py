@@ -1,7 +1,5 @@
 import os
 import pytest
-import networkx as nx
-import pandas as pd
 from unittest.mock import patch, mock_open
 from io import BytesIO
 from uuid import uuid4
@@ -9,8 +7,6 @@ from uuid import uuid4
 from cognee.shared.utils import (
     get_anonymous_id,
     get_file_content_hash,
-    prepare_edges,
-    prepare_nodes,
 )
 
 
@@ -55,21 +51,3 @@ def test_get_file_content_hash_stream():
     expected_hash = hashlib.md5(b"test_data").hexdigest()
     result = get_file_content_hash(stream)
     assert result == expected_hash
-
-
-def test_prepare_edges():
-    graph = nx.MultiDiGraph()
-    graph.add_edge("A", "B", key="AB", weight=1)
-    edges_df = prepare_edges(graph, "source", "target", "key")
-
-    assert isinstance(edges_df, pd.DataFrame)
-    assert len(edges_df) == 1
-
-
-def test_prepare_nodes():
-    graph = nx.Graph()
-    graph.add_node(1, name="Node1")
-    nodes_df = prepare_nodes(graph)
-
-    assert isinstance(nodes_df, pd.DataFrame)
-    assert len(nodes_df) == 1

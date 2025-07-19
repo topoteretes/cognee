@@ -77,42 +77,52 @@ def record_graph_changes(func):
         async with db_engine.get_async_session() as session:
             if func.__name__ == "add_nodes":
                 nodes: List[DataPoint] = args[0]
+
+                relationship_ledgers = []
+
                 for node in nodes:
-                    try:
-                        node_id = UUID(str(node.id))
-                        relationship = GraphRelationshipLedger(
+                    node_id = UUID(str(node.id))
+                    relationship_ledgers.append(
+                        GraphRelationshipLedger(
                             id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
                             source_node_id=node_id,
                             destination_node_id=node_id,
                             creator_function=f"{creator}.node",
                             node_label=getattr(node, "name", None) or str(node.id),
                         )
-                        session.add(relationship)
-                        await session.flush()
-                    except Exception as e:
-                        logger.debug(f"Error adding relationship: {e}")
-                        await session.rollback()
-                        continue
+                    )
+
+                try:
+                    session.add_all(relationship_ledgers)
+                    await session.flush()
+                except Exception as e:
+                    logger.debug(f"Error adding relationship: {e}")
+                    await session.rollback()
 
             elif func.__name__ == "add_edges":
                 edges = args[0]
+
+                relationship_ledgers = []
+
                 for edge in edges:
-                    try:
-                        source_id = UUID(str(edge[0]))
-                        target_id = UUID(str(edge[1]))
-                        rel_type = str(edge[2])
-                        relationship = GraphRelationshipLedger(
+                    source_id = UUID(str(edge[0]))
+                    target_id = UUID(str(edge[1]))
+                    rel_type = str(edge[2])
+                    relationship_ledgers.append(
+                        GraphRelationshipLedger(
                             id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
                             source_node_id=source_id,
                             destination_node_id=target_id,
                             creator_function=f"{creator}.{rel_type}",
                         )
-                        session.add(relationship)
-                        await session.flush()
-                    except Exception as e:
-                        logger.debug(f"Error adding relationship: {e}")
-                        await session.rollback()
-                        continue
+                    )
+
+                try:
+                    session.add_all(relationship_ledgers)
+                    await session.flush()
+                except Exception as e:
+                    logger.debug(f"Error adding relationship: {e}")
+                    await session.rollback()
 
             try:
                 await session.commit()

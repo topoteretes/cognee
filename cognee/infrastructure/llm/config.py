@@ -49,6 +49,10 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
 
+    fallback_api_key: str = ""
+    fallback_endpoint: str = ""
+    fallback_model: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     @model_validator(mode="after")
@@ -148,6 +152,9 @@ class LLMConfig(BaseSettings):
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
+            "fallback_api_key": self.fallback_api_key,
+            "fallback_endpoint": self.fallback_endpoint,
+            "fallback_model": self.fallback_model,
         }
 
 

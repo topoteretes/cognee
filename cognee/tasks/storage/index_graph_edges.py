@@ -66,11 +66,13 @@ async def index_graph_edges(batch_size: int = 1024):
             indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
-    for index_key, points in index_points.items():
-        index_name, field_name = index_key.split(".")
+    for index_name, indexable_points in index_points.items():
+        index_name, field_name = index_name.split(".")
 
-        for start in range(0, len(points), batch_size):
-            batch = points[start : start + batch_size]
+        # We save the data in batches of {batch_size} to not put a lot of pressure on the database
+        for start in range(0, len(indexable_points), batch_size):
+            batch = indexable_points[start : start + batch_size]
+
             await vector_engine.index_data_points(index_name, field_name, batch)
 
     return None

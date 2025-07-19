@@ -1,6 +1,7 @@
 import os
 import tempfile
 import pytest
+from pathlib import Path
 from cognee.modules.data.processing.document_types.open_data_file import open_data_file
 
 
@@ -29,7 +30,8 @@ class TestOpenDataFile:
             temp_file_path = f.name
 
         try:
-            file_url = f"file://{temp_file_path}"
+            # Use pathlib.Path.as_uri() for proper cross-platform file URL creation
+            file_url = Path(temp_file_path).as_uri()
             with open_data_file(file_url, mode="r") as f:
                 content = f.read()
                 assert content == test_content
@@ -44,7 +46,8 @@ class TestOpenDataFile:
             temp_file_path = f.name
 
         try:
-            file_url = f"file://{temp_file_path}"
+            # Use pathlib.Path.as_uri() for proper cross-platform file URL creation
+            file_url = Path(temp_file_path).as_uri()
             with open_data_file(file_url, mode="rb") as f:
                 content = f.read()
                 assert content == test_content.encode()
@@ -61,7 +64,8 @@ class TestOpenDataFile:
             temp_file_path = f.name
 
         try:
-            file_url = f"file://{temp_file_path}"
+            # Use pathlib.Path.as_uri() for proper cross-platform file URL creation
+            file_url = Path(temp_file_path).as_uri()
             with open_data_file(file_url, mode="r", encoding="utf-8") as f:
                 content = f.read()
                 assert content == test_content
@@ -84,7 +88,9 @@ class TestOpenDataFile:
 
         try:
             # Even if someone accidentally adds multiple file:// prefixes
-            file_url = f"file://file://{temp_file_path}"
+            # Use proper file URL creation first
+            proper_file_url = Path(temp_file_path).as_uri()
+            file_url = f"file://{proper_file_url}"
             with open_data_file(file_url, mode="r") as f:
                 content = f.read()
                 # This should work because we only replace the first occurrence

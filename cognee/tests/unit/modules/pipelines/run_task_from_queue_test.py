@@ -2,7 +2,7 @@ import asyncio
 from queue import Queue
 
 import cognee
-from cognee.modules.pipelines.operations.run_tasks import run_tasks_base
+from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.infrastructure.databases.relational import create_db_and_tables

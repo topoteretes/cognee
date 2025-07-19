@@ -6,9 +6,7 @@ from typing import BinaryIO, Union
 import requests
 import hashlib
 from datetime import datetime, timezone
-import graphistry
 import networkx as nx
-import pandas as pd
 import matplotlib.pyplot as plt
 import http.server
 import socketserver
@@ -136,97 +134,6 @@ def generate_color_palette(unique_layers):
     ]
 
     return dict(zip(unique_layers, hex_colors))
-
-
-async def register_graphistry():
-    config = get_base_config()
-    graphistry.register(
-        api=3, username=config.graphistry_username, password=config.graphistry_password
-    )
-
-
-def prepare_edges(graph, source, target, edge_key):
-    edge_list = [
-        {
-            source: str(edge[0]),
-            target: str(edge[1]),
-            edge_key: str(edge[2]),
-        }
-        for edge in graph.edges(keys=True, data=True)
-    ]
-
-    return pd.DataFrame(edge_list)
-
-
-def prepare_nodes(graph, include_size=False):
-    nodes_data = []
-    for node in graph.nodes:
-        node_info = graph.nodes[node]
-
-        if not node_info:
-            continue
-
-        node_data = {
-            **node_info,
-            "id": str(node),
-            "name": node_info["name"] if "name" in node_info else str(node),
-        }
-
-        if include_size:
-            default_size = 10  # Default node size
-            larger_size = 20  # Size for nodes with specific keywords in their ID
-            keywords = ["DOCUMENT", "User"]
-            node_size = (
-                larger_size if any(keyword in str(node) for keyword in keywords) else default_size
-            )
-            node_data["size"] = node_size
-
-        nodes_data.append(node_data)
-
-    return pd.DataFrame(nodes_data)
-
-
-async def render_graph(
-    graph=None, include_nodes=True, include_color=False, include_size=False, include_labels=True
-):
-    await register_graphistry()
-
-    if not isinstance(graph, nx.MultiDiGraph):
-        graph_engine = await get_graph_engine()
-        networkx_graph = nx.MultiDiGraph()
-
-        (nodes, edges) = await graph_engine.get_graph_data()
-
-        networkx_graph.add_nodes_from(nodes)
-        networkx_graph.add_edges_from(edges)
-
-        graph = networkx_graph
-
-    edges = prepare_edges(graph, "source_node", "target_node", "relationship_name")
-    plotter = graphistry.edges(edges, "source_node", "target_node")
-    plotter = plotter.bind(edge_label="relationship_name")
-
-    if include_nodes:
-        nodes = prepare_nodes(graph, include_size=include_size)
-        plotter = plotter.nodes(nodes, "id")
-
-        if include_size:
-            plotter = plotter.bind(point_size="size")
-
-        if include_color:
-            pass
-            # unique_layers = nodes["layer_description"].unique()
-            # color_palette = generate_color_palette(unique_layers)
-            # plotter = plotter.encode_point_color("layer_description", categorical_mapping=color_palette,
-            #                                      default_mapping="silver")
-
-        if include_labels:
-            plotter = plotter.bind(point_label="name")
-
-    # Visualization
-    url = plotter.plot(render=False, as_files=True, memoize=False)
-    print(f"Graph is visualized at: {url}")
-    return url
 
 
 # def sanitize_df(df):

@@ -1,6 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
+from uuid import UUID
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.users.models import User
+
+from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger()
 
@@ -9,11 +15,17 @@ def get_visualize_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("", response_model=None)
-    async def visualize():
+    async def visualize(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
         """This endpoint is responsible for adding data to the graph."""
         from cognee.api.v1.visualize import visualize_graph
 
         try:
+            # Verify user has permission to read dataset
+            dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+
+            # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
+            await set_database_global_context_variables(dataset[0].id, dataset[0].owner_id)
+
             html_visualization = await visualize_graph()
             return HTMLResponse(html_visualization)
 

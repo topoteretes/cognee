@@ -18,6 +18,7 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
+
 try:
     from codingagents.coding_rule_associations import (
         add_rule_associations,

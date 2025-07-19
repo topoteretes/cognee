@@ -17,7 +17,7 @@ def get_cognee_version() -> str:
                 .strip("'\"\n ")
             )
             # Mark the version as a local Cognee library by appending “-dev”
-            return f"{version}-dev"
+            return f"{version}-local"
     try:
         return importlib.metadata.version("cognee")
     except importlib.metadata.PackageNotFoundError:

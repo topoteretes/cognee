@@ -69,6 +69,9 @@ def get_llm_client():
             transcription_model=llm_config.transcription_model,
             max_tokens=max_tokens,
             streaming=llm_config.llm_streaming,
+            fallback_api_key=llm_config.fallback_api_key,
+            fallback_endpoint=llm_config.fallback_endpoint,
+            fallback_model=llm_config.fallback_model,
         )
 
     elif provider == LLMProvider.OLLAMA:
@@ -102,6 +105,9 @@ def get_llm_client():
             llm_config.llm_model,
             "Custom",
             max_tokens=max_tokens,
+            fallback_api_key=llm_config.fallback_api_key,
+            fallback_endpoint=llm_config.fallback_endpoint,
+            fallback_model=llm_config.fallback_model,
         )
 
     elif provider == LLMProvider.GEMINI:
