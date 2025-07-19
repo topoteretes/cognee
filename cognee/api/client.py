@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
+from cognee.exceptions.enhanced_exceptions import CogneeBaseError
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
@@ -120,8 +121,27 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     )
 
 
+@app.exception_handler(CogneeBaseError)
+async def enhanced_exception_handler(_: Request, exc: CogneeBaseError) -> JSONResponse:
+    """
+    Enhanced exception handler for the new exception hierarchy.
+    Provides standardized error responses with rich context and user guidance.
+    """
+    # Log the full stack trace for debugging
+    logger.error(f"Enhanced exception caught: {exc.__class__.__name__}", exc_info=True)
+
+    # Create standardized error response
+    error_response = {"error": exc.to_dict()}
+
+    return JSONResponse(status_code=exc.status_code, content=error_response)
+
+
 @app.exception_handler(CogneeApiError)
-async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
+async def legacy_exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
+    """
+    Legacy exception handler for backward compatibility.
+    Handles old CogneeApiError instances with fallback formatting.
+    """
     detail = {}
 
     if exc.name and exc.message and exc.status_code:
@@ -136,7 +156,54 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
-    return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
+
+    # Convert to new format for consistency
+    error_response = {
+        "error": {
+            "type": exc.__class__.__name__,
+            "message": detail["message"],
+            "technical_message": detail["message"],
+            "suggestions": [
+                "Check the logs for more details",
+                "Try again or contact support if the issue persists",
+            ],
+            "docs_link": "https://docs.cognee.ai/troubleshooting",
+            "is_retryable": False,
+            "context": {},
+            "operation": None,
+        }
+    }
+
+    return JSONResponse(status_code=status_code, content=error_response)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Global exception handler for any unhandled exceptions.
+    Ensures all errors return a consistent format.
+    """
+    logger.error(f"Unhandled exception in {request.url.path}: {str(exc)}", exc_info=True)
+
+    # Create a standardized error response for unexpected errors
+    error_response = {
+        "error": {
+            "type": "UnexpectedError",
+            "message": "An unexpected error occurred. Please try again.",
+            "technical_message": str(exc) if app_environment != "prod" else "Internal server error",
+            "suggestions": [
+                "Try your request again",
+                "Check if the issue persists",
+                "Contact support if the problem continues",
+            ],
+            "docs_link": "https://docs.cognee.ai/troubleshooting",
+            "is_retryable": True,
+            "context": {"path": str(request.url.path), "method": request.method},
+            "operation": None,
+        }
+    }
+
+    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_response)
 
 
 @app.get("/")

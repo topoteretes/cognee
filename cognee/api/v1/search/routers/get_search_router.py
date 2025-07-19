@@ -1,22 +1,21 @@
 from uuid import UUID
-from typing import Optional
-from datetime import datetime
-from fastapi import Depends, APIRouter
+from typing import List, Optional
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
+from cognee.api.DTO import InDTO
 from cognee.modules.search.types import SearchType
-from cognee.api.DTO import InDTO, OutDTO
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
-from cognee.modules.users.models import User
-from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.data.methods import get_history
+from cognee.exceptions import UnsupportedSearchTypeError, InvalidQueryError, NoDataToProcessError
 
 
-# Note: Datasets sent by name will only map to datasets owned by the request sender
-#       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
     search_type: SearchType
-    datasets: Optional[list[str]] = None
-    dataset_ids: Optional[list[UUID]] = None
+    datasets: Optional[List[str]] = None
+    dataset_ids: Optional[List[UUID]] = None
     query: str
     top_k: Optional[int] = 10
 
@@ -24,36 +23,23 @@ class SearchPayloadDTO(InDTO):
 def get_search_router() -> APIRouter:
     router = APIRouter()
 
-    class SearchHistoryItem(OutDTO):
-        id: UUID
-        text: str
-        user: str
-        created_at: datetime
-
-    @router.get("", response_model=list[SearchHistoryItem])
+    @router.get("/history", response_model=list)
     async def get_search_history(user: User = Depends(get_authenticated_user)):
         """
         Get search history for the authenticated user.
 
-        This endpoint retrieves the search history for the authenticated user,
-        returning a list of previously executed searches with their timestamps.
+        This endpoint retrieves the search history for the current user,
+        showing previous queries and their results.
 
         ## Response
-        Returns a list of search history items containing:
-        - **id**: Unique identifier for the search
-        - **text**: The search query text
-        - **user**: User who performed the search
-        - **created_at**: When the search was performed
+        Returns a list of historical search queries and their metadata.
 
         ## Error Codes
-        - **500 Internal Server Error**: Error retrieving search history
+        - **500 Internal Server Error**: Database or system error while retrieving history
         """
-        try:
-            history = await get_history(user.id, limit=0)
-
-            return history
-        except Exception as error:
-            return JSONResponse(status_code=500, content={"error": str(error)})
+        # Remove try-catch to let enhanced exception handler deal with it
+        history = await get_history(user.id, limit=0)
+        return history
 
     @router.post("", response_model=list)
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
@@ -75,30 +61,51 @@ def get_search_router() -> APIRouter:
         Returns a list of search results containing relevant nodes from the graph.
 
         ## Error Codes
-        - **409 Conflict**: Error during search operation
-        - **403 Forbidden**: User doesn't have permission to search datasets (returns empty list)
+        - **400 Bad Request**: Invalid query or search parameters
+        - **404 Not Found**: No data found to search
+        - **422 Unprocessable Entity**: Unsupported search type
+        - **403 Forbidden**: User doesn't have permission to search datasets
+        - **500 Internal Server Error**: System error during search
 
         ## Notes
         - Datasets sent by name will only map to datasets owned by the request sender
         - To search datasets not owned by the request sender, dataset UUID is needed
-        - If permission is denied, returns empty list instead of error
+        - Enhanced error messages provide actionable suggestions for fixing issues
         """
         from cognee.api.v1.search import search as cognee_search
 
-        try:
-            results = await cognee_search(
-                query_text=payload.query,
-                query_type=payload.search_type,
-                user=user,
-                datasets=payload.datasets,
-                dataset_ids=payload.dataset_ids,
-                top_k=payload.top_k,
+        # Input validation with enhanced exceptions
+        if not payload.query or not payload.query.strip():
+            raise InvalidQueryError(query=payload.query or "", reason="Query cannot be empty")
+
+        if len(payload.query.strip()) < 2:
+            raise InvalidQueryError(
+                query=payload.query, reason="Query must be at least 2 characters long"
             )
 
-            return results
-        except PermissionDeniedError:
+        # Check if search type is supported
+        try:
+            search_type = payload.search_type
+        except ValueError:
+            raise UnsupportedSearchTypeError(
+                search_type=str(payload.search_type), supported_types=[t.value for t in SearchType]
+            )
+
+        # Permission denied errors will be caught and handled by the enhanced exception handler
+        # Other exceptions will also be properly formatted by the global handler
+        results = await cognee_search(
+            query_text=payload.query,
+            query_type=payload.search_type,
+            user=user,
+            datasets=payload.datasets,
+            dataset_ids=payload.dataset_ids,
+            top_k=payload.top_k,
+        )
+
+        # If no results found, that's not necessarily an error, just return empty list
+        if not results:
             return []
-        except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+
+        return results
 
     return router

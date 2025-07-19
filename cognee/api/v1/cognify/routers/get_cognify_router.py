@@ -24,6 +24,13 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     remove_queue,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.exceptions import (
+    CogneeValidationError,
+    EmptyDatasetError,
+    DatasetNotFoundError,
+    MissingAPIKeyError,
+    NoDataToProcessError,
+)
 
 
 logger = get_logger("api.cognify")
@@ -66,8 +73,10 @@ def get_cognify_router() -> APIRouter:
         - **Background execution**: Pipeline run metadata including pipeline_run_id for status monitoring via WebSocket subscription
 
         ## Error Codes
-        - **400 Bad Request**: When neither datasets nor dataset_ids are provided, or when specified datasets don't exist
-        - **409 Conflict**: When processing fails due to system errors, missing LLM API keys, database connection failures, or corrupted content
+        - **400 Bad Request**: Missing required parameters or invalid input
+        - **422 Unprocessable Entity**: No data to process or validation errors
+        - **404 Not Found**: Specified datasets don't exist
+        - **500 Internal Server Error**: System errors, missing API keys, database connection failures
 
         ## Example Request
         ```json
@@ -84,23 +93,53 @@ def get_cognify_router() -> APIRouter:
         ## Next Steps
         After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
         """
+        # Input validation with enhanced exceptions
         if not payload.datasets and not payload.dataset_ids:
-            return JSONResponse(
-                status_code=400, content={"error": "No datasets or dataset_ids provided"}
+            raise CogneeValidationError(
+                message="No datasets or dataset_ids provided",
+                user_message="You must specify which datasets to process.",
+                suggestions=[
+                    "Provide dataset names using the 'datasets' parameter",
+                    "Provide dataset UUIDs using the 'dataset_ids' parameter",
+                    "Use cognee.datasets() to see available datasets",
+                ],
+                docs_link="https://docs.cognee.ai/api/cognify",
+                context={
+                    "provided_datasets": payload.datasets,
+                    "provided_dataset_ids": payload.dataset_ids,
+                },
+                operation="cognify",
             )
+
+        # Check for LLM API key early to provide better error messaging
+        llm_api_key = os.getenv("LLM_API_KEY")
+        if not llm_api_key:
+            raise MissingAPIKeyError(service="LLM", env_var="LLM_API_KEY")
 
         from cognee.api.v1.cognify import cognify as cognee_cognify
 
-        try:
-            datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
+        datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
 
-            cognify_run = await cognee_cognify(
-                datasets, user, run_in_background=payload.run_in_background
-            )
+        logger.info(
+            f"Starting cognify process for user {user.id}",
+            extra={
+                "user_id": user.id,
+                "datasets": datasets,
+                "run_in_background": payload.run_in_background,
+            },
+        )
 
-            return cognify_run
-        except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+        # The enhanced exception handler will catch and format any errors from cognee_cognify
+        cognify_run = await cognee_cognify(
+            datasets, user, run_in_background=payload.run_in_background
+        )
+
+        logger.info(
+            f"Cognify process completed for user {user.id}",
+            extra={"user_id": user.id, "datasets": datasets},
+        )
+
+        return cognify_run
 
     @router.websocket("/subscribe/{pipeline_run_id}")
     async def subscribe_to_cognify_info(websocket: WebSocket, pipeline_run_id: str):
@@ -135,31 +174,43 @@ def get_cognify_router() -> APIRouter:
 
         initialize_queue(pipeline_run_id)
 
-        while True:
-            pipeline_run_info = get_from_queue(pipeline_run_id)
+        try:
+            # If the pipeline is already completed, send the completion status
+            if isinstance(pipeline_run, PipelineRunCompleted):
+                graph_data = await get_formatted_graph_data()
+                pipeline_run.payload = {
+                    "nodes": graph_data.get("nodes", []),
+                    "edges": graph_data.get("edges", []),
+                }
 
-            if not pipeline_run_info:
-                await asyncio.sleep(2)
-                continue
+                await websocket.send_json(pipeline_run.model_dump())
+                await websocket.close(code=WS_1000_NORMAL_CLOSURE)
+                return
 
-            if not isinstance(pipeline_run_info, PipelineRunInfo):
-                continue
+            # Stream pipeline updates
+            while True:
+                try:
+                    pipeline_run_info = await asyncio.wait_for(
+                        get_from_queue(pipeline_run_id), timeout=10.0
+                    )
 
-            try:
-                await websocket.send_json(
-                    {
-                        "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
-                        "status": pipeline_run_info.status,
-                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user.id),
-                    }
-                )
+                    if pipeline_run_info:
+                        await websocket.send_json(pipeline_run_info.model_dump())
 
-                if isinstance(pipeline_run_info, PipelineRunCompleted):
-                    remove_queue(pipeline_run_id)
-                    await websocket.close(code=WS_1000_NORMAL_CLOSURE)
+                        if isinstance(pipeline_run_info, PipelineRunCompleted):
+                            break
+                except asyncio.TimeoutError:
+                    # Send a heartbeat to keep the connection alive
+                    await websocket.send_json({"type": "heartbeat"})
+                except Exception as e:
+                    logger.error(f"Error in WebSocket communication: {str(e)}")
                     break
-            except WebSocketDisconnect:
-                remove_queue(pipeline_run_id)
-                break
+
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket disconnected for pipeline {pipeline_run_id}")
+        except Exception as error:
+            logger.error(f"WebSocket error: {str(error)}")
+        finally:
+            remove_queue(pipeline_run_id)
 
     return router
