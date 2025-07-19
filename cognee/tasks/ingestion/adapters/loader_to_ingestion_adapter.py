@@ -27,13 +27,9 @@ class LoaderResultToIngestionData(IngestionData):
         """
         Get content identifier for deduplication.
 
-        Uses the loader result's source info or generates hash from content.
+        Always generates hash from content to ensure consistency with existing system.
         """
-        # Try to get file hash from metadata first
-        if "content_hash" in self.loader_result.metadata:
-            return self.loader_result.metadata["content_hash"]
-
-        # Fallback: generate hash from content
+        # Always generate hash from content for consistency
         import hashlib
 
         content_bytes = self.loader_result.content.encode("utf-8")
