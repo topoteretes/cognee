@@ -171,30 +171,30 @@ async def add(
     """
 
     # Determine which ingestion system to use
-    use_plugin_system = preferred_loaders is not None or loader_config is not None
+    # use_plugin_system = preferred_loaders is not None or loader_config is not None
 
-    if use_plugin_system:
-        # Use new plugin-based ingestion system
-        from cognee.tasks.ingestion.plugin_ingest_data import plugin_ingest_data
+    # if use_plugin_system:
+    #     # Use new plugin-based ingestion system
+    from cognee.tasks.ingestion.plugin_ingest_data import plugin_ingest_data
 
-        tasks = [
-            Task(resolve_data_directories, include_subdirectories=True),
-            Task(
-                plugin_ingest_data,
-                dataset_name,
-                user,
-                node_set,
-                dataset_id,
-                preferred_loaders,
-                loader_config,
-            ),
-        ]
-    else:
-        # Use existing ingestion system for backward compatibility
-        tasks = [
-            Task(resolve_data_directories, include_subdirectories=True),
-            Task(ingest_data, dataset_name, user, node_set, dataset_id),
-        ]
+    tasks = [
+        Task(resolve_data_directories, include_subdirectories=True),
+        Task(
+            plugin_ingest_data,
+            dataset_name,
+            user,
+            node_set,
+            dataset_id,
+            preferred_loaders,
+            loader_config,
+        ),
+    ]
+    # else:
+    #     # Use existing ingestion system for backward compatibility
+    #     tasks = [
+    #         Task(resolve_data_directories, include_subdirectories=True),
+    #         Task(ingest_data, dataset_name, user, node_set, dataset_id),
+    #     ]
 
     pipeline_run_info = None
 
