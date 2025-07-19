@@ -26,10 +26,6 @@ on:
         required: true
       OPENAI_API_KEY:
         required: true
-      GRAPHISTRY_USERNAME:
-        required: true
-      GRAPHISTRY_PASSWORD:
-        required: true
       AWS_ACCESS_KEY_ID:
         required: true
       AWS_SECRET_ACCESS_KEY:
