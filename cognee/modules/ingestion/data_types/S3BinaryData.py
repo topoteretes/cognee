@@ -2,7 +2,7 @@ import os
 from typing import Optional
 from contextlib import asynccontextmanager
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
-from cognee.infrastructure.utils import run_sync
+from cognee.infrastructure.utils.run_sync import run_sync
 from .IngestionData import IngestionData
 
 
