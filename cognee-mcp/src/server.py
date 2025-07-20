@@ -753,27 +753,27 @@ async def main():
         default="stdio",
         help="Transport to use for communication with the client. (default: stdio)",
     )
-    
+
     # HTTP transport options
     parser.add_argument(
         "--host",
         default="127.0.0.1",
         help="Host to bind the HTTP server to (default: 127.0.0.1)",
     )
-    
+
     parser.add_argument(
         "--port",
         type=int,
         default=8000,
         help="Port to bind the HTTP server to (default: 8000)",
     )
-    
+
     parser.add_argument(
         "--path",
         default="/mcp",
         help="Path for the MCP HTTP endpoint (default: /mcp)",
     )
-    
+
     parser.add_argument(
         "--log-level",
         default="info",
@@ -787,9 +787,7 @@ async def main():
     if args.transport == "stdio":
         await mcp.run_async(transport="stdio")
     elif args.transport == "sse":
-        logger.info(
-            f"Running MCP server with SSE transport on {args.host}:{args.port}"
-        )
+        logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
         await mcp.run_async(
             transport="sse",
             host=args.host,
