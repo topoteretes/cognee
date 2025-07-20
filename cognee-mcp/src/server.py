@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
-from mcp.server import FastMCP
+from fastmcp import FastMCP
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
 from cognee.modules.users.methods import get_default_user
@@ -749,21 +749,65 @@ async def main():
 
     parser.add_argument(
         "--transport",
-        choices=["sse", "stdio"],
+        choices=["sse", "stdio", "http"],
         default="stdio",
         help="Transport to use for communication with the client. (default: stdio)",
+    )
+    
+    # HTTP transport options
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind the HTTP server to (default: 127.0.0.1)",
+    )
+    
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind the HTTP server to (default: 8000)",
+    )
+    
+    parser.add_argument(
+        "--path",
+        default="/mcp",
+        help="Path for the MCP HTTP endpoint (default: /mcp)",
+    )
+    
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=["debug", "info", "warning", "error"],
+        help="Log level for the HTTP server (default: info)",
     )
 
     args = parser.parse_args()
 
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
-        await mcp.run_stdio_async()
+        await mcp.run_async(transport="stdio")
     elif args.transport == "sse":
         logger.info(
-            f"Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}"
+            f"Running MCP server with SSE transport on {args.host}:{args.port}"
         )
-        await mcp.run_sse_async()
+        await mcp.run_async(
+            transport="sse",
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            log_level=args.log_level,
+        )
+    elif args.transport == "http":
+        logger.info(
+            f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+        )
+        await mcp.run_async(
+            transport="http",
+            host=args.host,
+            port=args.port,
+            path=args.path,
+            log_level=args.log_level,
+        )
 
 
 if __name__ == "__main__":

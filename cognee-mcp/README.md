@@ -37,7 +37,7 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 
 ## ✨ Features
 
-- SSE & stdio transports – choose real‑time streaming --transport sse or the classic stdio pipe
+- Multiple transports – choose Streamable HTTP --transport http (recommended for web deployments), SSE --transport sse (real‑time streaming), or stdio (classic pipe, default)
 - Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
 - Local file ingestion – feed .md, source files, Cursor rule‑sets, etc. straight from disk
 - Background pipelines – long‑running cognify & codify jobs spawn off‑thread; check progress with status tools
@@ -80,6 +80,10 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
     python src/server.py --transport sse
     ```
+    or run with Streamable HTTP transport (recommended for web deployments)
+    ```
+    python src/server.py --transport http --host 127.0.0.1 --port 8000 --path /mcp
+    ```
 
 You can do more advanced configurations by creating .env file using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers / database configurations, and for more info check out our <a href="https://docs.cognee.ai">documentation</a>.
@@ -98,12 +102,21 @@ If you’d rather run cognee-mcp in a container, you have two options:
       ```
    3. Run it:
       ```bash
-      docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+      # For HTTP transport (recommended for web deployments)
+      docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport http
+      # For SSE transport  
+      docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport sse
+      # For stdio transport (default)
+      docker run --env-file ./.env --rm -it cognee/cognee-mcp:main
       ```
 2. **Pull from Docker Hub** (no build required):
    ```bash
-   # With your .env file
-   docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+   # With HTTP transport (recommended for web deployments)
+   docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport http
+   # With SSE transport
+   docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport sse
+   # With stdio transport (default)
+   docker run --env-file ./.env --rm -it cognee/cognee-mcp:main
 
 
 ## 💻 Basic Usage

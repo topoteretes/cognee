@@ -43,12 +43,16 @@ if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
         echo "Waiting for the debugger to attach..."
         if [ "$TRANSPORT_MODE" = "sse" ]; then
             exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport sse
+        elif [ "$TRANSPORT_MODE" = "http" ]; then
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport http --host 0.0.0.0 --port 8000
         else
             exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport stdio
         fi
     else
         if [ "$TRANSPORT_MODE" = "sse" ]; then
             exec cognee --transport sse
+        elif [ "$TRANSPORT_MODE" = "http" ]; then
+            exec cognee --transport http --host 0.0.0.0 --port 8000
         else
             exec cognee --transport stdio
         fi
@@ -56,6 +60,8 @@ if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
 else
     if [ "$TRANSPORT_MODE" = "sse" ]; then
         exec cognee --transport sse
+    elif [ "$TRANSPORT_MODE" = "http" ]; then
+        exec cognee --transport http --host 0.0.0.0 --port 8000
     else
         exec cognee --transport stdio
     fi
