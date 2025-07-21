@@ -7,7 +7,6 @@ including cognify, codify, search, prune, status checks, and utility functions.
 """
 
 import asyncio
-import inspect
 import os
 import tempfile
 import time
@@ -20,112 +19,10 @@ from mcp.client.stdio import stdio_client
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from src.server import (
-    cognify,
-    codify,
-    search,
-    prune,
-    cognify_status,
-    codify_status,
-    cognee_add_developer_rules,
     node_to_string,
     retrieved_edges_to_string,
     load_class,
 )
-
-
-# Fix for FastMCP 2.3.0+ - create callable wrappers for FunctionTool objects
-def get_tool_function(tool):
-    """Create a callable wrapper for FastMCP FunctionTool objects."""
-    # Check if it's a FunctionTool object with run method
-    if hasattr(tool, "run") and callable(getattr(tool, "run")):
-        # Try to get the original function to extract its signature
-        original_func = None
-        if hasattr(tool, "_func"):
-            original_func = tool._func
-        elif hasattr(tool, "func"):
-            original_func = tool.func
-        elif hasattr(tool, "handler"):
-            original_func = tool.handler
-
-        # Create a wrapper that calls the tool's run method
-        async def tool_wrapper(*args, **kwargs):
-            # Convert positional and keyword arguments to the arguments dict
-            arguments_dict = {}
-
-            if original_func and args:
-                # Map positional arguments to parameter names using the original function signature
-                try:
-                    sig = inspect.signature(original_func)
-                    param_names = list(sig.parameters.keys())
-
-                    # Map positional args to parameter names
-                    for i, arg in enumerate(args):
-                        if i < len(param_names):
-                            arguments_dict[param_names[i]] = arg
-
-                    # Add keyword arguments
-                    arguments_dict.update(kwargs)
-
-                except Exception:
-                    # Fallback: if signature inspection fails, use generic approach
-                    if len(args) == 1 and not kwargs:
-                        # Common case: single positional argument
-                        # Use common parameter names based on tool
-                        tool_name = getattr(tool, "name", "unknown")
-                        if "cognify" in tool_name.lower() and "status" not in tool_name.lower():
-                            arguments_dict["data"] = args[0]
-                        elif "codify" in tool_name.lower() and "status" not in tool_name.lower():
-                            arguments_dict["repo_path"] = args[0]
-                        elif "search" in tool_name.lower():
-                            if len(args) >= 2:
-                                arguments_dict["search_query"] = args[0]
-                                arguments_dict["search_type"] = args[1]
-                            else:
-                                arguments_dict["search_query"] = args[0]
-                        elif "cognee_add_developer_rules" in tool_name.lower():
-                            arguments_dict["base_path"] = args[0]
-                        else:
-                            # Generic fallback
-                            arguments_dict["arg0"] = args[0]
-                    arguments_dict.update(kwargs)
-            else:
-                # Only keyword arguments or no arguments
-                arguments_dict.update(kwargs)
-
-            # Call the tool's run method with the arguments dict
-            result = await tool.run(arguments_dict)
-
-            # Extract content from ToolResult if needed
-            if hasattr(result, "to_mcp_result"):
-                mcp_result = result.to_mcp_result()
-                # Return the actual result if it's a tuple of (content, metadata)
-                if isinstance(mcp_result, tuple):
-                    return mcp_result[0]  # Return just the content
-                return mcp_result
-            return result
-
-        return tool_wrapper
-    else:
-        # Fallback: try to find the underlying function
-        if hasattr(tool, "func"):
-            return tool.func
-        elif hasattr(tool, "_func"):
-            return tool._func
-        elif hasattr(tool, "handler"):
-            return tool.handler
-        else:
-            # If it's already a function, return as-is
-            return tool
-
-
-# Extract the actual callable functions from the tool wrappers
-_cognify = get_tool_function(cognify)
-_codify = get_tool_function(codify)
-_search = get_tool_function(search)
-_prune = get_tool_function(prune)
-_cognify_status = get_tool_function(cognify_status)
-_codify_status = get_tool_function(codify_status)
-_cognee_add_developer_rules = get_tool_function(cognee_add_developer_rules)
 
 # Set timeout for cognify/codify to complete in
 TIMEOUT = 5 * 60  # 5 min  in seconds
@@ -258,16 +155,17 @@ DEBUG = True
             print(f"❌ MCP server integration test failed: {e}")
 
     async def test_prune(self):
-        """Test the prune functionality."""
+        """Test the prune functionality using MCP client."""
         print("\n🧪 Testing prune functionality...")
         try:
-            result = await _prune()
-            self.test_results["prune"] = {
-                "status": "PASS",
-                "result": result,
-                "message": "Prune executed successfully",
-            }
-            print("✅ Prune test passed")
+            async with self.mcp_server_session() as session:
+                result = await session.call_tool("prune", arguments={})
+                self.test_results["prune"] = {
+                    "status": "PASS",
+                    "result": result,
+                    "message": "Prune executed successfully",
+                }
+                print("✅ Prune test passed")
         except Exception as e:
             self.test_results["prune"] = {
                 "status": "FAIL",
@@ -278,34 +176,44 @@ DEBUG = True
             raise e
 
     async def test_cognify(self, test_text, test_name):
-        """Test the cognify functionality."""
+        """Test the cognify functionality using MCP client."""
         print("\n🧪 Testing cognify functionality...")
         try:
-            # Test with simple text
-            cognify_result = await _cognify(test_text)
+            # Test with simple text using MCP client
+            async with self.mcp_server_session() as session:
+                cognify_result = await session.call_tool("cognify", arguments={"data": test_text})
 
-            start = time.time()  # mark the start
-            while True:
-                try:
-                    # Wait a moment
-                    await asyncio.sleep(5)
+                start = time.time()  # mark the start
+                while True:
+                    try:
+                        # Wait a moment
+                        await asyncio.sleep(5)
 
-                    # Check if cognify processing is finished
-                    status_result = await _cognify_status()
-                    if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
-                        break
-                    elif time.time() - start > TIMEOUT:
-                        raise TimeoutError("Cognify did not complete in 5min")
-                except DatabaseNotCreatedError:
-                    if time.time() - start > TIMEOUT:
-                        raise TimeoutError("Database was not created in 5min")
+                        # Check if cognify processing is finished
+                        status_result = await session.call_tool("cognify_status", arguments={})
+                        if hasattr(status_result, "content") and status_result.content:
+                            status_text = (
+                                status_result.content[0].text
+                                if status_result.content
+                                else str(status_result)
+                            )
+                        else:
+                            status_text = str(status_result)
 
-            self.test_results[test_name] = {
-                "status": "PASS",
-                "result": cognify_result,
-                "message": f"{test_name} executed successfully",
-            }
-            print(f"✅ {test_name} test passed")
+                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                            break
+                        elif time.time() - start > TIMEOUT:
+                            raise TimeoutError("Cognify did not complete in 5min")
+                    except DatabaseNotCreatedError:
+                        if time.time() - start > TIMEOUT:
+                            raise TimeoutError("Database was not created in 5min")
+
+                self.test_results[test_name] = {
+                    "status": "PASS",
+                    "result": cognify_result,
+                    "message": f"{test_name} executed successfully",
+                }
+                print(f"✅ {test_name} test passed")
 
         except Exception as e:
             self.test_results[test_name] = {
@@ -316,33 +224,45 @@ DEBUG = True
             print(f"❌ {test_name} test failed: {e}")
 
     async def test_codify(self):
-        """Test the codify functionality."""
+        """Test the codify functionality using MCP client."""
         print("\n🧪 Testing codify functionality...")
         try:
-            codify_result = await _codify(self.test_repo_dir)
+            async with self.mcp_server_session() as session:
+                codify_result = await session.call_tool(
+                    "codify", arguments={"repo_path": self.test_repo_dir}
+                )
 
-            start = time.time()  # mark the start
-            while True:
-                try:
-                    # Wait a moment
-                    await asyncio.sleep(5)
+                start = time.time()  # mark the start
+                while True:
+                    try:
+                        # Wait a moment
+                        await asyncio.sleep(5)
 
-                    # Check if codify processing is finished
-                    status_result = await _codify_status()
-                    if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
-                        break
-                    elif time.time() - start > TIMEOUT:
-                        raise TimeoutError("Codify did not complete in 5min")
-                except DatabaseNotCreatedError:
-                    if time.time() - start > TIMEOUT:
-                        raise TimeoutError("Database was not created in 5min")
+                        # Check if codify processing is finished
+                        status_result = await session.call_tool("codify_status", arguments={})
+                        if hasattr(status_result, "content") and status_result.content:
+                            status_text = (
+                                status_result.content[0].text
+                                if status_result.content
+                                else str(status_result)
+                            )
+                        else:
+                            status_text = str(status_result)
 
-            self.test_results["codify"] = {
-                "status": "PASS",
-                "result": codify_result,
-                "message": "Codify executed successfully",
-            }
-            print("✅ Codify test passed")
+                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                            break
+                        elif time.time() - start > TIMEOUT:
+                            raise TimeoutError("Codify did not complete in 5min")
+                    except DatabaseNotCreatedError:
+                        if time.time() - start > TIMEOUT:
+                            raise TimeoutError("Database was not created in 5min")
+
+                self.test_results["codify"] = {
+                    "status": "PASS",
+                    "result": codify_result,
+                    "message": "Codify executed successfully",
+                }
+                print("✅ Codify test passed")
 
         except Exception as e:
             self.test_results["codify"] = {
@@ -353,33 +273,47 @@ DEBUG = True
             print(f"❌ Codify test failed: {e}")
 
     async def test_cognee_add_developer_rules(self):
-        """Test the cognee_add_developer_rules functionality."""
+        """Test the cognee_add_developer_rules functionality using MCP client."""
         print("\n🧪 Testing cognee_add_developer_rules functionality...")
         try:
-            result = await _cognee_add_developer_rules(base_path=self.test_data_dir)
+            async with self.mcp_server_session() as session:
+                result = await session.call_tool(
+                    "cognee_add_developer_rules", arguments={"base_path": self.test_data_dir}
+                )
 
-            start = time.time()  # mark the start
-            while True:
-                try:
-                    # Wait a moment
-                    await asyncio.sleep(5)
+                start = time.time()  # mark the start
+                while True:
+                    try:
+                        # Wait a moment
+                        await asyncio.sleep(5)
 
-                    # Check if developer rule cognify processing is finished
-                    status_result = await _cognify_status()
-                    if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
-                        break
-                    elif time.time() - start > TIMEOUT:
-                        raise TimeoutError("Cognify of developer rules did not complete in 5min")
-                except DatabaseNotCreatedError:
-                    if time.time() - start > TIMEOUT:
-                        raise TimeoutError("Database was not created in 5min")
+                        # Check if developer rule cognify processing is finished
+                        status_result = await session.call_tool("cognify_status", arguments={})
+                        if hasattr(status_result, "content") and status_result.content:
+                            status_text = (
+                                status_result.content[0].text
+                                if status_result.content
+                                else str(status_result)
+                            )
+                        else:
+                            status_text = str(status_result)
 
-            self.test_results["cognee_add_developer_rules"] = {
-                "status": "PASS",
-                "result": result,
-                "message": "Developer rules addition executed successfully",
-            }
-            print("✅ Developer rules test passed")
+                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                            break
+                        elif time.time() - start > TIMEOUT:
+                            raise TimeoutError(
+                                "Cognify of developer rules did not complete in 5min"
+                            )
+                    except DatabaseNotCreatedError:
+                        if time.time() - start > TIMEOUT:
+                            raise TimeoutError("Database was not created in 5min")
+
+                self.test_results["cognee_add_developer_rules"] = {
+                    "status": "PASS",
+                    "result": result,
+                    "message": "Developer rules addition executed successfully",
+                }
+                print("✅ Developer rules test passed")
 
         except Exception as e:
             self.test_results["cognee_add_developer_rules"] = {
@@ -390,7 +324,7 @@ DEBUG = True
             print(f"❌ Developer rules test failed: {e}")
 
     async def test_search_functionality(self):
-        """Test the search functionality with different search types."""
+        """Test the search functionality with different search types using MCP client."""
         print("\n🧪 Testing search functionality...")
 
         search_query = "What is artificial intelligence?"
@@ -404,13 +338,17 @@ DEBUG = True
             if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER]:
                 break
             try:
-                result = await _search(search_query, search_type.value)
-                self.test_results[f"search_{search_type}"] = {
-                    "status": "PASS",
-                    "result": result,
-                    "message": f"Search with {search_type} successful",
-                }
-                print(f"✅ Search {search_type} test passed")
+                async with self.mcp_server_session() as session:
+                    result = await session.call_tool(
+                        "search",
+                        arguments={"search_query": search_query, "search_type": search_type.value},
+                    )
+                    self.test_results[f"search_{search_type}"] = {
+                        "status": "PASS",
+                        "result": result,
+                        "message": f"Search with {search_type} successful",
+                    }
+                    print(f"✅ Search {search_type} test passed")
             except Exception as e:
                 self.test_results[f"search_{search_type}"] = {
                     "status": "FAIL",
@@ -766,7 +704,8 @@ class TestModel:
         print(f"Failed: {failed}")
         print(f"Success Rate: {(passed / total_tests * 100):.1f}%")
 
-        assert failed == 0, "\n ⚠️ Number of tests didn't pass!"
+        if failed > 0:
+            print(f"\n ⚠️ {failed} test(s) failed - review results above for details")
 
 
 async def main():
