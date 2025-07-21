@@ -88,7 +88,10 @@ async def run_tasks_per_data_generator(
                 await session.execute(select(Data).filter(Data.id == data_id))
             ).scalar_one_or_none()
             if data_point:
-                if data_point.pipeline_status.get(pipeline_name) == "Completed":
+                if (
+                    data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
+                    == "Completed"
+                ):
                     return
 
     try:
@@ -113,7 +116,7 @@ async def run_tasks_per_data_generator(
                 data_point = (
                     await session.execute(select(Data).filter(Data.id == data_id))
                 ).scalar_one_or_none()
-                data_point.pipeline_status[pipeline_name] = "Completed"
+                data_point.pipeline_status[pipeline_name] = {str(dataset.id): "Completed"}
                 await session.merge(data_point)
                 await session.commit()
 
@@ -249,7 +252,9 @@ async def run_tasks(
         results = [result for result in results if result]
 
         # If any data item could not be processed propagate error
-        errored_results = [result for result in results if isinstance(result, PipelineRunErrored)]
+        errored_results = [
+            result for result in results if isinstance(result["run_info"], PipelineRunErrored)
+        ]
         if errored_results:
             raise errored_results[0]["run_info"].payload
 
