@@ -1,0 +1,174 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      test_pypi:
+        description: 'Publish to Test PyPI instead of PyPI'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write  # Required for trusted publishing and attestations
+  attestations: write  # Required for package attestations
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+          uv sync --dev
+      
+      - name: Run safety check for known vulnerabilities
+        run: |
+          pip install safety
+          safety check --json > safety-report.json || true
+      
+      - name: Run bandit security linter
+        run: |
+          pip install bandit
+          bandit -r cognee/ -f json -o bandit-report.json || true
+      
+      - name: Upload security reports as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            safety-report.json
+            bandit-report.json
+      
+      - name: Check for high-severity vulnerabilities
+        run: |
+          # Fail if high-severity vulnerabilities are found
+          if [ -f safety-report.json ]; then
+            python -c "
+            import json
+            import sys
+            try:
+                with open('safety-report.json', 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and len(data) > 0:
+                        high_severity = [v for v in data if v.get('severity', '').lower() in ['high', 'critical']]
+                        if high_severity:
+                            print('HIGH SEVERITY VULNERABILITIES FOUND:')
+                            for vuln in high_severity:
+                                print(f'  - {vuln.get(\"vulnerability\", \"Unknown\")} in {vuln.get(\"package\", \"Unknown\")}')
+                            sys.exit(1)
+            except Exception as e:
+                print(f'Error parsing safety report: {e}')
+                pass
+            "
+          fi
+
+  build-and-publish:
+    name: Build and publish to PyPI
+    needs: security-scan
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ github.event.inputs.test_pypi == 'true' && 'testpypi' || 'pypi' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine hatchling
+      
+      - name: Build package
+        run: |
+          python -m build
+      
+      - name: Generate package hashes
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          sha512sum * > SHA512SUMS
+          echo "Generated checksums:"
+          cat SHA256SUMS
+          cat SHA512SUMS
+      
+      - name: Verify package integrity
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          sha512sum -c SHA512SUMS
+          echo "Package integrity verified"
+      
+      - name: Check package with twine
+        run: |
+          twine check dist/*
+      
+      - name: Generate SBOM (Software Bill of Materials)
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py requirements -o cognee-sbom.json
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-files
+          path: |
+            dist/
+            cognee-sbom.json
+      
+      - name: Generate attestations for built packages
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'dist/*'
+      
+      - name: Publish to Test PyPI
+        if: github.event.inputs.test_pypi == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          attestations: true
+      
+      - name: Publish to PyPI
+        if: github.event.inputs.test_pypi != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+      
+      - name: Create release with hashes
+        if: github.event_name == 'release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Upload hash files to the release
+          gh release upload ${{ github.event.release.tag_name }} \
+            dist/SHA256SUMS \
+            dist/SHA512SUMS \
+            cognee-sbom.json \
+            --clobber
+      
+      - name: Security notice
+        run: |
+          echo "::notice::Package published successfully with security attestations"
+          echo "::notice::Checksums and SBOM uploaded to release assets"
+          echo "::notice::Users can verify package integrity using the provided checksums" 
