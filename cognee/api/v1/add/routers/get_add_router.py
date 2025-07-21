@@ -1,7 +1,7 @@
 import os
 from uuid import UUID
 
-from fastapi import Form, UploadFile, Depends
+from fastapi import Form, File, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 from typing import List, Optional, Union, Literal
@@ -20,7 +20,7 @@ def get_add_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def add(
-        data: List[UploadFile],
+        data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
         user: User = Depends(get_authenticated_user),

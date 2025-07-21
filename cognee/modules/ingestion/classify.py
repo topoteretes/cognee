@@ -13,7 +13,7 @@ def classify(data: Union[str, BinaryIO], filename: str = None):
 
     if isinstance(data, BufferedReader) or isinstance(data, SpooledTemporaryFile):
         return BinaryData(
-            data, str(data.name).split("/")[-1] if hasattr(data, "name") else filename
+            data, str(data.name).split("/")[-1] if hasattr(data, "name") and data.name else filename
         )
 
     try:
