@@ -4,6 +4,17 @@ Test client for Cognee MCP Server functionality.
 
 This script tests all the tools and functions available in the Cognee MCP server,
 including cognify, codify, search, prune, status checks, and utility functions.
+
+Usage:
+    # Set your OpenAI API key first
+    export OPENAI_API_KEY="your-api-key-here"
+
+    # Run the test client
+    python src/test_client.py
+
+    # Or use LLM_API_KEY instead of OPENAI_API_KEY
+    export LLM_API_KEY="your-api-key-here"
+    python src/test_client.py
 """
 
 import asyncio
@@ -38,6 +49,15 @@ class CogneeTestClient:
     async def setup(self):
         """Setup test environment."""
         print("🔧 Setting up test environment...")
+
+        # Check for required API keys
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
+        if not api_key:
+            print("⚠️  Warning: No OPENAI_API_KEY or LLM_API_KEY found in environment.")
+            print("   Some tests may fail without proper LLM API configuration.")
+            print("   Set OPENAI_API_KEY environment variable for full functionality.")
+        else:
+            print(f"✅ API key configured (key ending in: ...{api_key[-4:]})")
 
         # Create temporary test files
         self.test_data_dir = tempfile.mkdtemp(prefix="cognee_test_")
@@ -102,11 +122,15 @@ DEBUG = True
         # Get the path to the server script
         server_script = os.path.join(os.path.dirname(__file__), "server.py")
 
+        # Pass current environment variables to the server process
+        # This ensures OpenAI API key and other config is available
+        server_env = os.environ.copy()
+
         # Start the server process
         server_params = StdioServerParameters(
             command="python",
             args=[server_script, "--transport", "stdio"],
-            env=None,
+            env=server_env,
         )
 
         async with stdio_client(server_params) as (read, write):
