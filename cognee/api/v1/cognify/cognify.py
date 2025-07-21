@@ -243,8 +243,12 @@ async def run_cognify_as_background_process(
     vector_db_config: dict = False,
     incremental_loading: bool = True,
 ):
+    # Convert dataset to list if it's a string
+    if isinstance(datasets, str):
+        datasets = [datasets]
+
     # Store pipeline status for all pipelines
-    pipeline_run_started_info = []
+    pipeline_run_started_info = {}
 
     async def handle_rest_of_the_run(pipeline_list):
         # Execute all provided pipelines one by one to avoid database write conflicts
@@ -277,7 +281,14 @@ async def run_cognify_as_background_process(
         )
 
         # Save dataset Pipeline run started info
-        pipeline_run_started_info.append(await anext(pipeline_run))
+        run_info = await anext(pipeline_run)
+        pipeline_run_started_info[run_info.dataset_id] = run_info
+
+        if pipeline_run_started_info[run_info.dataset_id].payload:
+            # Remove payload info to avoid serialization
+            # TODO: Handle payload serialization
+            pipeline_run_started_info[run_info.dataset_id].payload = []
+
         pipeline_list.append(pipeline_run)
 
     # Send all started pipelines to execute one by one in background

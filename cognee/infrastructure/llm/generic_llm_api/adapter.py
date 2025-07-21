@@ -1,5 +1,6 @@
 """Adapter for Generic API LLM provider API"""
 
+import logging
 import litellm
 import instructor
 from typing import Type

@@ -1,5 +1,6 @@
 import json
 import inspect
+from os import path
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
@@ -9,7 +10,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.modules.ingestion.methods import get_s3_fs, open_data_file
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_dataset_data,
@@ -28,8 +29,6 @@ async def ingest_data(
 ):
     if not user:
         user = await get_default_user()
-
-    fs = get_s3_fs()
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
@@ -75,11 +74,11 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
-            file_path = await save_data_item_to_storage(data_item, dataset_name)
+            file_path = await save_data_item_to_storage(data_item)
 
             # Ingest data and add metadata
-            with open_data_file(file_path, s3fs=fs) as file:
-                classified_data = ingestion.classify(file, s3fs=fs)
+            async with open_data_file(file_path) as file:
+                classified_data = ingestion.classify(file)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)
@@ -108,8 +107,10 @@ async def ingest_data(
                     data_point.mime_type = file_metadata["mime_type"]
                     data_point.owner_id = user.id
                     data_point.content_hash = file_metadata["content_hash"]
+                    data_point.file_size = file_metadata["file_size"]
                     data_point.external_metadata = ext_metadata
                     data_point.node_set = json.dumps(node_set) if node_set else None
+                    data_point.tenant_id = user.tenant_id if user.tenant_id else None
 
                     # Check if data is already in dataset
                     if str(data_point.id) in dataset_data_map:
@@ -131,6 +132,8 @@ async def ingest_data(
                         content_hash=file_metadata["content_hash"],
                         external_metadata=ext_metadata,
                         node_set=json.dumps(node_set) if node_set else None,
+                        data_size=file_metadata["file_size"],
+                        tenant_id=user.tenant_id if user.tenant_id else None,
                         pipeline_status={},
                         token_count=-1,
                     )

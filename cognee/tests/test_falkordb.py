@@ -1,16 +1,58 @@
 import os
 import cognee
 import pathlib
+from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-# from cognee.shared.utils import render_graph
 
 logger = get_logger()
 
 
+async def check_falkordb_connection():
+    """Check if FalkorDB is available at localhost:6379"""
+    try:
+        from falkordb import FalkorDB
+
+        client = FalkorDB(host="localhost", port=6379)
+        # Try to list graphs to check connection
+        client.list_graphs()
+        return True
+    except Exception as e:
+        logger.warning(f"FalkorDB not available at localhost:6379: {e}")
+        return False
+
+
 async def main():
+    # Check if FalkorDB is available
+    if not await check_falkordb_connection():
+        print("⚠️  FalkorDB is not available at localhost:6379")
+        print("   To run this test, start FalkorDB server:")
+        print("   docker run -p 6379:6379 falkordb/falkordb:latest")
+        print("   Skipping FalkorDB test...")
+        return
+
+    print("✅ FalkorDB connection successful, running test...")
+
+    # Configure FalkorDB as the graph database provider
+    cognee.config.set_graph_db_config(
+        {
+            "graph_database_url": "localhost",  # FalkorDB URL (using Redis protocol)
+            "graph_database_port": 6379,
+            "graph_database_provider": "falkordb",
+        }
+    )
+
+    # Configure FalkorDB as the vector database provider too since it's a hybrid adapter
+    cognee.config.set_vector_db_config(
+        {
+            "vector_db_url": "localhost",
+            "vector_db_port": 6379,
+            "vector_db_provider": "falkordb",
+        }
+    )
+
     data_directory_path = str(
         pathlib.Path(
             os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_falkordb")
@@ -43,8 +85,6 @@ async def main():
     await cognee.add([text], dataset_name)
 
     await cognee.cognify([dataset_name])
-
-    # await render_graph(None, include_labels = True, include_nodes = True)
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -81,14 +121,31 @@ async def main():
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+    data_root_directory = get_storage_config()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     # Assert relational, vector and graph databases have been cleaned properly
     await cognee.prune.prune_system(metadata=True)
 
-    connection = await vector_engine.get_connection()
-    collection_names = await connection.table_names()
-    assert len(collection_names) == 0, "LanceDB vector database is not empty"
+    # For FalkorDB vector engine, check if collections are empty
+    # Since FalkorDB is a hybrid adapter, we can check if the graph is empty
+    # as the vector data is stored in the same graph
+    if hasattr(vector_engine, "driver"):
+        # This is FalkorDB - check if graphs exist
+        collections = vector_engine.driver.list_graphs()
+        # The graph should be deleted, so either no graphs or empty graph
+        if vector_engine.graph_name in collections:
+            # Graph exists but should be empty
+            vector_graph_data = await vector_engine.get_graph_data()
+            vector_nodes, vector_edges = vector_graph_data
+            assert len(vector_nodes) == 0 and len(vector_edges) == 0, (
+                "FalkorDB vector database is not empty"
+            )
+    else:
+        # Fallback for other vector engines like LanceDB
+        connection = await vector_engine.get_connection()
+        collection_names = await connection.table_names()
+        assert len(collection_names) == 0, "Vector database is not empty"
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -96,10 +153,19 @@ async def main():
         "SQLite relational database is not empty"
     )
 
-    from cognee.infrastructure.databases.graph import get_graph_config
+    # For FalkorDB, check if the graph database is empty
+    from cognee.infrastructure.databases.graph import get_graph_engine
 
-    graph_config = get_graph_config()
-    assert not os.path.exists(graph_config.graph_file_path), "Networkx graph database is not empty"
+    graph_engine = get_graph_engine()
+    graph_data = await graph_engine.get_graph_data()
+    nodes, edges = graph_data
+    assert len(nodes) == 0 and len(edges) == 0, "FalkorDB graph database is not empty"
+
+    print("🎉 FalkorDB test completed successfully!")
+    print("   ✓ Data ingestion worked")
+    print("   ✓ Cognify processing worked")
+    print("   ✓ Search operations worked")
+    print("   ✓ Cleanup worked")
 
 
 if __name__ == "__main__":

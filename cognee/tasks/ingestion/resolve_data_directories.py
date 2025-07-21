@@ -1,7 +1,7 @@
 import os
-from typing import List, Union, BinaryIO
 from urllib.parse import urlparse
-from cognee.api.v1.add.config import get_s3_config
+from typing import List, Union, BinaryIO
+from cognee.infrastructure.files.storage.s3_config import get_s3_config
 
 
 async def resolve_data_directories(

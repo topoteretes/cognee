@@ -7,11 +7,12 @@ from typing import Any
 from functools import wraps
 from sqlalchemy import select
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Data
-from cognee.modules.ingestion.methods import get_s3_fs, open_data_file
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
@@ -63,7 +64,6 @@ async def run_tasks_per_data_generator(
     pipeline_id,
     pipeline_run_id,
     context,
-    fs,
     user,
     incremental_loading,
 ):
@@ -72,10 +72,10 @@ async def run_tasks_per_data_generator(
     if incremental_loading:
         # If data is being added to Cognee for the first time calculate the id of the data
         if not isinstance(data_item, Data):
-            file_path = await save_data_item_to_storage(data_item, dataset.name)
+            file_path = await save_data_item_to_storage(data_item)
             # Ingest data and add metadata
-            with open_data_file(file_path, s3fs=fs) as file:
-                classified_data = ingestion.classify(file, s3fs=fs)
+            async with open_data_file(file_path) as file:
+                classified_data = ingestion.classify(file)
                 # data_id is the hash of file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)
         else:
@@ -168,7 +168,6 @@ async def run_tasks_per_data(
     pipeline_id,
     pipeline_run_id,
     context,
-    fs,
     user,
     incremental_loading,
 ):
@@ -183,7 +182,6 @@ async def run_tasks_per_data(
         pipeline_id,
         pipeline_run_id,
         context,
-        fs,
         user,
         incremental_loading,
     ):
@@ -222,7 +220,6 @@ async def run_tasks(
         payload=data,
     )
 
-    fs = get_s3_fs()
     try:
         if not isinstance(data, list):
             data = [data]
@@ -241,7 +238,6 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_run_id,
                     context,
-                    fs,
                     user,
                     incremental_loading,
                 )
@@ -267,6 +263,14 @@ async def run_tasks(
             dataset_name=dataset.name,
             data_ingestion_info=results,
         )
+
+        graph_engine = await get_graph_engine()
+        if hasattr(graph_engine, "push_to_s3"):
+            await graph_engine.push_to_s3()
+
+        relational_engine = get_relational_engine()
+        if hasattr(relational_engine, "push_to_s3"):
+            await relational_engine.push_to_s3()
 
     except Exception as error:
         await log_pipeline_run_error(

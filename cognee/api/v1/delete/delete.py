@@ -1,90 +1,91 @@
-from typing import Union, BinaryIO, List
-from cognee.modules.ingestion import classify
-from cognee.infrastructure.databases.relational import get_relational_engine
+from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.sql import delete as sql_delete
-from cognee.modules.data.models import Data, DatasetData, Dataset
-from cognee.infrastructure.databases.graph import get_graph_engine
-from io import BytesIO
-import hashlib
-from uuid import UUID
-from cognee.modules.users.models import User
-from cognee.infrastructure.databases.vector import get_vector_engine
+
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.databases.graph import get_graph_engine
+
+from cognee.modules.users.models import User
+
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.models import Data, DatasetData, Dataset
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.context_global_variables import set_database_global_context_variables
+
 from .exceptions import DocumentNotFoundError, DatasetNotFoundError, DocumentSubgraphNotFoundError
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-def get_text_content_hash(text: str) -> str:
-    encoded_text = text.encode("utf-8")
-    return hashlib.md5(encoded_text).hexdigest()
-
-
 async def delete(
-    data: Union[BinaryIO, List[BinaryIO], str, List[str]],
-    dataset_name: str = "main_dataset",
-    dataset_id: UUID = None,
+    data_id: UUID,
+    dataset_id: UUID,
     mode: str = "soft",
     user: User = None,
 ):
-    """Delete a document and all its related nodes from both relational and graph databases.
+    """Delete data by its ID from the specified dataset.
 
     Args:
-        data: The data to delete (file, URL, or text)
-        dataset_name: Name of the dataset to delete from
+        data_id: The UUID of the data to delete
+        dataset_id: The UUID of the dataset containing the data
         mode: "soft" (default) or "hard" - hard mode also deletes degree-one entity nodes
         user: User doing the operation, if none default user will be used.
-    """
 
+    Returns:
+        Dict with deletion results
+
+    Raises:
+        DocumentNotFoundError: If data is not found
+        DatasetNotFoundError: If dataset is not found
+        PermissionDeniedError: If user doesn't have delete permission on dataset
+    """
     if user is None:
         user = await get_default_user()
 
-    # Verify user has permission to work with given dataset. If dataset_id is given use it, if not use dataset_name
-    dataset = await get_authorized_existing_datasets(
-        [dataset_id] if dataset_id else [dataset_name], "delete", user
-    )
+    # Verify user has delete permission on the dataset
+    dataset_list = await get_authorized_existing_datasets([dataset_id], "delete", user)
+
+    if not dataset_list:
+        raise DatasetNotFoundError(f"Dataset not found or access denied: {dataset_id}")
+
+    dataset = dataset_list[0]
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
-    await set_database_global_context_variables(dataset[0].id, dataset[0].owner_id)
 
-    # Handle different input types
-    if isinstance(data, str):
-        if data.startswith("file://") or data.startswith("/"):  # It's a file path
-            with open(data.replace("file://", ""), mode="rb") as file:
-                classified_data = classify(file)
-                content_hash = classified_data.get_metadata()["content_hash"]
-                return await delete_single_document(content_hash, dataset[0].id, mode)
-        elif data.startswith("http"):  # It's a URL
-            import requests
+    await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
-            response = requests.get(data)
-            response.raise_for_status()
-            file_data = BytesIO(response.content)
-            classified_data = classify(file_data)
-            content_hash = classified_data.get_metadata()["content_hash"]
-            return await delete_single_document(content_hash, dataset[0].id, mode)
-        else:  # It's a text string
-            content_hash = get_text_content_hash(data)
-            classified_data = classify(data)
-            return await delete_single_document(content_hash, dataset[0].id, mode)
-    elif isinstance(data, list):
-        # Handle list of inputs sequentially
-        results = []
-        for item in data:
-            result = await delete(item, dataset_name, dataset[0].id, mode, user=user)
-            results.append(result)
-        return {"status": "success", "message": "Multiple documents deleted", "results": results}
-    else:  # It's already a BinaryIO
-        data.seek(0)  # Ensure we're at the start of the file
-        classified_data = classify(data)
-        content_hash = classified_data.get_metadata()["content_hash"]
-        return await delete_single_document(content_hash, dataset[0].id, mode)
+    # Get the data record and verify it exists and belongs to the dataset
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        # Check if data exists
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+
+        if data_point is None:
+            raise DocumentNotFoundError(f"Data not found with ID: {data_id}")
+
+        # Check if data belongs to the specified dataset
+        dataset_data_link = (
+            await session.execute(
+                select(DatasetData).filter(
+                    DatasetData.data_id == data_id, DatasetData.dataset_id == dataset_id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if dataset_data_link is None:
+            raise DocumentNotFoundError(f"Data {data_id} not found in dataset {dataset_id}")
+
+        # Get the content hash for deletion
+        content_hash = data_point.content_hash
+
+    # Use the existing comprehensive deletion logic
+    return await delete_single_document(content_hash, dataset.id, mode)
 
 
 async def delete_single_document(content_hash: str, dataset_id: UUID = None, mode: str = "soft"):
