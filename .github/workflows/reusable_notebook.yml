@@ -8,10 +8,6 @@ on:
         required: true
         type: string
     secrets:
-      GRAPHISTRY_USERNAME:
-        required: true
-      GRAPHISTRY_PASSWORD:
-        required: true
       #LLM_MODEL:
       #  required: true
       #LLM_ENDPOINT:
@@ -67,8 +63,6 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
         run: |
           poetry run jupyter nbconvert \
           --to notebook \
