@@ -1,7 +1,7 @@
 import os
 import asyncio
-import cognee
 import pathlib
+import cognee
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-async def test_knowledge_graph_quality_with_gpt4o():
+async def test_knowledge_graph_quality():
     """
     Test that verifies all main concepts and entities from a specific document are found
     in the knowledge graph using the configured LLM model for entity extraction.
@@ -25,7 +25,7 @@ async def test_knowledge_graph_quality_with_gpt4o():
         raise ValueError("LLM_API_KEY must be set for this test")
 
     # Get model from environment variable
-    current_model = os.environ.get("LLM_MODEL", "gpt-4o")
+    current_model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
     print(f"Using model from environment: {current_model}")
 
     # Set up test directories
@@ -91,9 +91,9 @@ async def test_knowledge_graph_quality_with_gpt4o():
     ]
 
     print("=" * 80)
-    print("KNOWLEDGE GRAPH QUALITY TEST WITH GPT-4o")
+    print("KNOWLEDGE GRAPH QUALITY TEST")
     print("=" * 80)
-    print(f"Using model: {os.environ.get('LLM_MODEL', 'gpt-4o')}")
+    print(f"Using model: {current_model}")
     print(f"Test document: {test_document_path}")
     print()
 
@@ -297,4 +297,4 @@ async def test_knowledge_graph_quality_with_gpt4o():
 
 
 if __name__ == "__main__":
-    asyncio.run(test_knowledge_graph_quality_with_gpt4o())
+    asyncio.run(test_knowledge_graph_quality())
