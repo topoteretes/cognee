@@ -1,7 +1,7 @@
 import os
 import asyncio
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
