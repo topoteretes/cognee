@@ -1,8 +1,6 @@
 import os
 import tempfile
 import pytest
-import networkx as nx
-import pandas as pd
 from unittest.mock import patch, mock_open
 from io import BytesIO
 from uuid import uuid4
