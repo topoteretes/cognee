@@ -7,6 +7,7 @@ including cognify, codify, search, prune, status checks, and utility functions.
 """
 
 import asyncio
+import inspect
 import os
 import tempfile
 import time
@@ -32,18 +33,89 @@ from src.server import (
 )
 
 
-# Fix for FastMCP 2.3.0+ - extract underlying functions from FunctionTool objects
+# Fix for FastMCP 2.3.0+ - create callable wrappers for FunctionTool objects
 def get_tool_function(tool):
-    """Extract the underlying function from a FastMCP FunctionTool object."""
-    if hasattr(tool, "func"):
-        return tool.func
-    elif hasattr(tool, "_func"):
-        return tool._func
-    elif hasattr(tool, "handler"):
-        return tool.handler
+    """Create a callable wrapper for FastMCP FunctionTool objects."""
+    # Check if it's a FunctionTool object with run method
+    if hasattr(tool, "run") and callable(getattr(tool, "run")):
+        # Try to get the original function to extract its signature
+        original_func = None
+        if hasattr(tool, "_func"):
+            original_func = tool._func
+        elif hasattr(tool, "func"):
+            original_func = tool.func
+        elif hasattr(tool, "handler"):
+            original_func = tool.handler
+
+        # Create a wrapper that calls the tool's run method
+        async def tool_wrapper(*args, **kwargs):
+            # Convert positional and keyword arguments to the arguments dict
+            arguments_dict = {}
+
+            if original_func and args:
+                # Map positional arguments to parameter names using the original function signature
+                try:
+                    sig = inspect.signature(original_func)
+                    param_names = list(sig.parameters.keys())
+
+                    # Map positional args to parameter names
+                    for i, arg in enumerate(args):
+                        if i < len(param_names):
+                            arguments_dict[param_names[i]] = arg
+
+                    # Add keyword arguments
+                    arguments_dict.update(kwargs)
+
+                except Exception:
+                    # Fallback: if signature inspection fails, use generic approach
+                    if len(args) == 1 and not kwargs:
+                        # Common case: single positional argument
+                        # Use common parameter names based on tool
+                        tool_name = getattr(tool, "name", "unknown")
+                        if "cognify" in tool_name.lower() and "status" not in tool_name.lower():
+                            arguments_dict["data"] = args[0]
+                        elif "codify" in tool_name.lower() and "status" not in tool_name.lower():
+                            arguments_dict["repo_path"] = args[0]
+                        elif "search" in tool_name.lower():
+                            if len(args) >= 2:
+                                arguments_dict["search_query"] = args[0]
+                                arguments_dict["search_type"] = args[1]
+                            else:
+                                arguments_dict["search_query"] = args[0]
+                        elif "cognee_add_developer_rules" in tool_name.lower():
+                            arguments_dict["base_path"] = args[0]
+                        else:
+                            # Generic fallback
+                            arguments_dict["arg0"] = args[0]
+                    arguments_dict.update(kwargs)
+            else:
+                # Only keyword arguments or no arguments
+                arguments_dict.update(kwargs)
+
+            # Call the tool's run method with the arguments dict
+            result = await tool.run(arguments_dict)
+
+            # Extract content from ToolResult if needed
+            if hasattr(result, "to_mcp_result"):
+                mcp_result = result.to_mcp_result()
+                # Return the actual result if it's a tuple of (content, metadata)
+                if isinstance(mcp_result, tuple):
+                    return mcp_result[0]  # Return just the content
+                return mcp_result
+            return result
+
+        return tool_wrapper
     else:
-        # If it's already a function, return as-is
-        return tool
+        # Fallback: try to find the underlying function
+        if hasattr(tool, "func"):
+            return tool.func
+        elif hasattr(tool, "_func"):
+            return tool._func
+        elif hasattr(tool, "handler"):
+            return tool.handler
+        else:
+            # If it's already a function, return as-is
+            return tool
 
 
 # Extract the actual callable functions from the tool wrappers
