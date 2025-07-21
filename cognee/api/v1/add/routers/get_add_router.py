@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import Form, UploadFile, Depends
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
-from typing import List, Optional
+from typing import List, Optional, Union, Literal
 import subprocess
 from cognee.shared.logging_utils import get_logger
 import requests
@@ -22,7 +22,7 @@ def get_add_router() -> APIRouter:
     async def add(
         data: List[UploadFile],
         datasetName: Optional[str] = Form(default=None),
-        datasetId: Optional[UUID] = Form(default=None),
+        datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -38,7 +38,7 @@ def get_add_router() -> APIRouter:
           - GitHub repository URLs (will be cloned and processed)
           - Regular file uploads
         - **datasetName** (Optional[str]): Name of the dataset to add data to
-        - **datasetId** (Optional[UUID]): UUID of the dataset to add data to
+        - **datasetId** (Optional[UUID]): UUID of an already existing dataset
 
         Either datasetName or datasetId must be provided.
 
@@ -58,6 +58,7 @@ def get_add_router() -> APIRouter:
         - GitHub repositories are cloned and all files are processed
         - HTTP URLs are fetched and their content is processed
         - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
+        - datasetId value can only be the UUID of an already existing dataset
         """
         from cognee.api.v1.add import add as cognee_add
 
