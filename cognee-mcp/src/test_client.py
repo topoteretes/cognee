@@ -29,6 +29,30 @@ from src.server import (
     load_class,
 )
 
+
+# Fix for FastMCP 2.3.0+ - extract underlying functions from FunctionTool objects
+def get_tool_function(tool):
+    """Extract the underlying function from a FastMCP FunctionTool object."""
+    if hasattr(tool, "func"):
+        return tool.func
+    elif hasattr(tool, "_func"):
+        return tool._func
+    elif hasattr(tool, "handler"):
+        return tool.handler
+    else:
+        # If it's already a function, return as-is
+        return tool
+
+
+# Extract the actual callable functions from the tool wrappers
+_cognify = get_tool_function(cognify)
+_codify = get_tool_function(codify)
+_search = get_tool_function(search)
+_prune = get_tool_function(prune)
+_cognify_status = get_tool_function(cognify_status)
+_codify_status = get_tool_function(codify_status)
+_cognee_add_developer_rules = get_tool_function(cognee_add_developer_rules)
+
 # Import MCP client functionality for server testing
 
 from mcp import ClientSession, StdioServerParameters
@@ -169,7 +193,7 @@ DEBUG = True
         """Test the prune functionality."""
         print("\n🧪 Testing prune functionality...")
         try:
-            result = await prune()
+            result = await _prune()
             self.test_results["prune"] = {
                 "status": "PASS",
                 "result": result,
@@ -190,7 +214,7 @@ DEBUG = True
         print("\n🧪 Testing cognify functionality...")
         try:
             # Test with simple text
-            cognify_result = await cognify(test_text)
+            cognify_result = await _cognify(test_text)
 
             start = time.time()  # mark the start
             while True:
@@ -199,7 +223,7 @@ DEBUG = True
                     await asyncio.sleep(5)
 
                     # Check if cognify processing is finished
-                    status_result = await cognify_status()
+                    status_result = await _cognify_status()
                     if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
                         break
                     elif time.time() - start > TIMEOUT:
@@ -227,7 +251,7 @@ DEBUG = True
         """Test the codify functionality."""
         print("\n🧪 Testing codify functionality...")
         try:
-            codify_result = await codify(self.test_repo_dir)
+            codify_result = await _codify(self.test_repo_dir)
 
             start = time.time()  # mark the start
             while True:
@@ -236,7 +260,7 @@ DEBUG = True
                     await asyncio.sleep(5)
 
                     # Check if codify processing is finished
-                    status_result = await codify_status()
+                    status_result = await _codify_status()
                     if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
                         break
                     elif time.time() - start > TIMEOUT:
@@ -264,7 +288,7 @@ DEBUG = True
         """Test the cognee_add_developer_rules functionality."""
         print("\n🧪 Testing cognee_add_developer_rules functionality...")
         try:
-            result = await cognee_add_developer_rules(base_path=self.test_data_dir)
+            result = await _cognee_add_developer_rules(base_path=self.test_data_dir)
 
             start = time.time()  # mark the start
             while True:
@@ -273,7 +297,7 @@ DEBUG = True
                     await asyncio.sleep(5)
 
                     # Check if developer rule cognify processing is finished
-                    status_result = await cognify_status()
+                    status_result = await _cognify_status()
                     if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
                         break
                     elif time.time() - start > TIMEOUT:
@@ -312,7 +336,7 @@ DEBUG = True
             if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER]:
                 break
             try:
-                result = await search(search_query, search_type.value)
+                result = await _search(search_query, search_type.value)
                 self.test_results[f"search_{search_type}"] = {
                     "status": "PASS",
                     "result": result,
