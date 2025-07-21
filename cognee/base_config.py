@@ -11,8 +11,6 @@ class BaseConfig(BaseSettings):
     system_root_directory: str = get_absolute_path(".cognee_system")
     monitoring_tool: object = Observer.LANGFUSE
     structured_output_framework: str = os.getenv("STRUCTURED_OUTPUT_FRAMEWORK", "")
-    graphistry_username: Optional[str] = os.getenv("GRAPHISTRY_USERNAME")
-    graphistry_password: Optional[str] = os.getenv("GRAPHISTRY_PASSWORD")
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
     langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
