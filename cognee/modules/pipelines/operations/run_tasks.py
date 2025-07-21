@@ -160,7 +160,7 @@ async def run_tasks_per_data_generator(
             }
 
 
-async def run_tasks_per_data_task(
+async def run_tasks_per_data(
     data_item,
     dataset,
     tasks,
@@ -233,7 +233,7 @@ async def run_tasks(
         # Create async tasks per data item that will run the pipeline for the data item
         data_item_tasks = [
             asyncio.create_task(
-                run_tasks_per_data_task(
+                run_tasks_per_data(
                     data_item,
                     dataset,
                     tasks,
