@@ -13,6 +13,8 @@ import time
 from contextlib import asynccontextmanager
 from cognee.shared.logging_utils import setup_logging
 
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
@@ -52,12 +54,6 @@ _prune = get_tool_function(prune)
 _cognify_status = get_tool_function(cognify_status)
 _codify_status = get_tool_function(codify_status)
 _cognee_add_developer_rules = get_tool_function(cognee_add_developer_rules)
-
-# Import MCP client functionality for server testing
-
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
 
 # Set timeout for cognify/codify to complete in
 TIMEOUT = 5 * 60  # 5 min  in seconds
