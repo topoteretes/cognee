@@ -1024,7 +1024,6 @@ postgres = [
 postgres-binary = [
     { name = "asyncpg" },
     { name = "pgvector" },
-    { name = "psycopg2" },
     { name = "psycopg2-binary" },
 ]
 posthog = [
@@ -1095,7 +1094,6 @@ requires-dist = [
     { name = "posthog", marker = "extra == 'posthog'", specifier = ">=3.5.0,<4" },
     { name = "pre-commit", specifier = ">=4.0.1,<5" },
     { name = "psycopg2", marker = "extra == 'postgres'", specifier = ">=2.9.10,<3" },
-    { name = "psycopg2", marker = "extra == 'postgres-binary'", specifier = ">=2.9.10,<3" },
     { name = "psycopg2-binary", marker = "extra == 'postgres-binary'", specifier = ">=2.9.10,<3.0.0" },
     { name = "pydantic", specifier = ">=2.10.5,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.2.1,<3" },
