@@ -37,8 +37,8 @@ def get_delete_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "DELETE /v1/delete",
-                "dataset_id": dataset_id,
-                "data_id": data_id,
+                "dataset_id": str(dataset_id),
+                "data_id": str(data_id),
             },
         )
 

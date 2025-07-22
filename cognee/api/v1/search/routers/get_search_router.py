@@ -100,7 +100,7 @@ def get_search_router() -> APIRouter:
                 "endpoint": "POST /v1/search",
                 "search_type": payload.search_type,
                 "datasets": payload.datasets,
-                "dataset_ids": payload.dataset_ids,
+                "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
                 "query": payload.query,
                 "top_k": payload.top_k,
             },

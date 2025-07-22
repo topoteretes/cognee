@@ -45,7 +45,7 @@ def get_visualize_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "GET /v1/visualize",
-                "dataset_id": dataset_id,
+                "dataset_id": str(dataset_id),
             },
         )
 

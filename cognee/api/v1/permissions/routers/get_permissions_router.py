@@ -45,9 +45,9 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/datasets/{principal_id}",
-                "dataset_ids": dataset_ids,
-                "principal_id": principal_id,
+                "endpoint": f"POST /v1/permissions/datasets/{str(principal_id)}",
+                "dataset_ids": str(dataset_ids),
+                "principal_id": str(principal_id),
             },
         )
 
@@ -128,9 +128,9 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/users/{user_id}/roles",
-                "user_id": user_id,
-                "role_id": role_id,
+                "endpoint": f"POST /v1/permissions/users/{str(user_id)}/roles",
+                "user_id": str(user_id),
+                "role_id": str(role_id),
             },
         )
 
@@ -170,9 +170,9 @@ def get_permissions_router() -> APIRouter:
             "Permissions API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": f"POST /v1/permissions/users/{user_id}/tenants",
-                "user_id": user_id,
-                "tenant_id": tenant_id,
+                "endpoint": f"POST /v1/permissions/users/{str(user_id)}/tenants",
+                "user_id": str(user_id),
+                "tenant_id": str(tenant_id),
             },
         )
 
