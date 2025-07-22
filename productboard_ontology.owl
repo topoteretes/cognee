@@ -1,0 +1,460 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://productboard.com/ontology#"
+     xml:base="http://productboard.com/ontology"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://productboard.com/ontology">
+        <rdfs:label>Productboard Knowledge Graph Ontology</rdfs:label>
+        <rdfs:comment>Ontology for Productboard customer feedback, features, and product management data</rdfs:comment>
+    </owl:Ontology>
+    
+    <!-- 
+    =======================================================================
+    HIGHER-LEVEL ENTITIES (Universal Concepts)
+    =======================================================================
+    -->
+    
+    <!-- Person/User -->
+    <owl:Class rdf:about="#Person">
+        <rdfs:label>Person</rdfs:label>
+        <rdfs:comment>Any individual involved in the system - customers, support agents, internal team members</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Customer">
+        <rdfs:subClassOf rdf:resource="#Person"/>
+        <rdfs:label>Customer</rdfs:label>
+        <rdfs:comment>External customer or user of Productboard</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#SupportAgent">
+        <rdfs:subClassOf rdf:resource="#Person"/>
+        <rdfs:label>Support Agent</rdfs:label>
+        <rdfs:comment>Productboard support team member</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#InternalTeamMember">
+        <rdfs:subClassOf rdf:resource="#Person"/>
+        <rdfs:label>Internal Team Member</rdfs:label>
+        <rdfs:comment>Productboard internal team member (sales, product, engineering)</rdfs:comment>
+    </owl:Class>
+    
+    <!-- Feedback Types -->
+    <owl:Class rdf:about="#Feedback">
+        <rdfs:label>Feedback</rdfs:label>
+        <rdfs:comment>Any form of customer or user feedback</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#FeatureRequest">
+        <rdfs:subClassOf rdf:resource="#Feedback"/>
+        <rdfs:label>Feature Request</rdfs:label>
+        <rdfs:comment>Request for new functionality</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#BugReport">
+        <rdfs:subClassOf rdf:resource="#Feedback"/>
+        <rdfs:label>Bug Report</rdfs:label>
+        <rdfs:comment>Report of system malfunction or error</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Enhancement">
+        <rdfs:subClassOf rdf:resource="#Feedback"/>
+        <rdfs:label>Enhancement</rdfs:label>
+        <rdfs:comment>Improvement to existing functionality</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Question">
+        <rdfs:subClassOf rdf:resource="#Feedback"/>
+        <rdfs:label>Question</rdfs:label>
+        <rdfs:comment>Support question or inquiry</rdfs:comment>
+    </owl:Class>
+    
+    <!-- Communication Channels -->
+    <owl:Class rdf:about="#Channel">
+        <rdfs:label>Channel</rdfs:label>
+        <rdfs:comment>Communication channel or source of feedback</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#SupportTicket">
+        <rdfs:subClassOf rdf:resource="#Channel"/>
+        <rdfs:label>Support Ticket</rdfs:label>
+        <rdfs:comment>Formal support request</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Call">
+        <rdfs:subClassOf rdf:resource="#Channel"/>
+        <rdfs:label>Call</rdfs:label>
+        <rdfs:comment>Phone or video call interaction</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#PortalSubmission">
+        <rdfs:subClassOf rdf:resource="#Channel"/>
+        <rdfs:label>Portal Submission</rdfs:label>
+        <rdfs:comment>Feedback submitted through customer portal</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#InternalNote">
+        <rdfs:subClassOf rdf:resource="#Channel"/>
+        <rdfs:label>Internal Note</rdfs:label>
+        <rdfs:comment>Internal team communication or note</rdfs:comment>
+    </owl:Class>
+    
+    <!-- 
+    =======================================================================
+    LOWER-LEVEL ENTITIES (Productboard-Specific)
+    =======================================================================
+    -->
+    
+    <!-- Product and Features -->
+    <owl:Class rdf:about="#Product">
+        <rdfs:label>Product</rdfs:label>
+        <rdfs:comment>The Productboard product as a whole</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#ProductboardFeature">
+        <rdfs:label>Productboard Feature</rdfs:label>
+        <rdfs:comment>Specific functionality within the Productboard platform</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Roadmaps">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Roadmaps</rdfs:label>
+        <rdfs:comment>Product roadmap planning and visualization features</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Insights">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Insights</rdfs:label>
+        <rdfs:comment>Customer feedback collection and analysis features</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Portal">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Portal</rdfs:label>
+        <rdfs:comment>Customer-facing portal for feature requests and voting</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Docs">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Docs</rdfs:label>
+        <rdfs:comment>Documentation and release notes features</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Reports">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Reports</rdfs:label>
+        <rdfs:comment>Analytics, reporting, and data export features</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Boards">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Boards</rdfs:label>
+        <rdfs:comment>Grid boards, timeline boards, and board management features</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Integrations">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>Integrations</rdfs:label>
+        <rdfs:comment>Third-party integrations (Jira, Salesforce, HubSpot, etc.)</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#AIFeatures">
+        <rdfs:subClassOf rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>AI Features</rdfs:label>
+        <rdfs:comment>AI-powered functionality including auto-linking, summarization, and insights</rdfs:comment>
+    </owl:Class>
+    
+    <!-- Company/Organization -->
+    <owl:Class rdf:about="#Company">
+        <rdfs:label>Company</rdfs:label>
+        <rdfs:comment>Customer organization or company</rdfs:comment>
+    </owl:Class>
+    
+    <!-- Example Customer Companies -->
+    <owl:Class rdf:about="#Autodesk">
+        <rdfs:subClassOf rdf:resource="#Company"/>
+        <rdfs:label>Autodesk</rdfs:label>
+        <rdfs:comment>Autodesk customer company</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Zoom">
+        <rdfs:subClassOf rdf:resource="#Company"/>
+        <rdfs:label>Zoom</rdfs:label>
+        <rdfs:comment>Zoom customer company</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Kroger">
+        <rdfs:subClassOf rdf:resource="#Company"/>
+        <rdfs:label>Kroger</rdfs:label>
+        <rdfs:comment>Kroger customer company</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Microsoft">
+        <rdfs:subClassOf rdf:resource="#Company"/>
+        <rdfs:label>Microsoft</rdfs:label>
+        <rdfs:comment>Microsoft customer company</rdfs:comment>
+    </owl:Class>
+    
+    <!-- Customer Segments -->
+    <owl:Class rdf:about="#Segment">
+        <rdfs:label>Segment</rdfs:label>
+        <rdfs:comment>Customer segmentation category</rdfs:comment>
+    </owl:Class>
+    <owl:Class rdf:about="#SelfServeCustomers">
+        <rdfs:subClassOf rdf:resource="#Segment"/>
+        <rdfs:label>Self-serve Customers</rdfs:label>
+        <rdfs:comment>Self-service customers with minimal touch</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Commercial101To500Employees">
+        <rdfs:subClassOf rdf:resource="#Segment"/>
+        <rdfs:label>Commercial - 101-500 employees</rdfs:label>
+        <rdfs:comment>Commercial segment customers with 101-500 employees</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#LargeEnterprise5001PlusEmployees">
+        <rdfs:subClassOf rdf:resource="#Segment"/>
+        <rdfs:label>Large Enterprise - 5001+ employees</rdfs:label>
+        <rdfs:comment>Large enterprise customers with 5001+ employees</rdfs:comment>
+    </owl:Class>
+    
+    <!-- Initiatives -->
+    <owl:Class rdf:about="#Initiative">
+        <rdfs:label>Initiative</rdfs:label>
+        <rdfs:comment>Strategic initiative or large project</rdfs:comment>
+    </owl:Class>
+    
+
+    
+    <!-- 
+    =======================================================================
+    ENUMERATED VALUES
+    =======================================================================
+    -->
+    
+    <!-- Priority Levels -->
+    <owl:Class rdf:about="#Priority">
+        <rdfs:label>Priority</rdfs:label>
+        <rdfs:comment>Priority level for feedback or requests</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#HighPriority">
+        <rdfs:subClassOf rdf:resource="#Priority"/>
+        <rdfs:label>High Priority</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#MediumPriority">
+        <rdfs:subClassOf rdf:resource="#Priority"/>
+        <rdfs:label>Medium Priority</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#LowPriority">
+        <rdfs:subClassOf rdf:resource="#Priority"/>
+        <rdfs:label>Low Priority</rdfs:label>
+    </owl:Class>
+    
+    <!-- Status -->
+    <owl:Class rdf:about="#Status">
+        <rdfs:label>Status</rdfs:label>
+        <rdfs:comment>Current status of feedback or request</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Open">
+        <rdfs:subClassOf rdf:resource="#Status"/>
+        <rdfs:label>Open</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#InProgress">
+        <rdfs:subClassOf rdf:resource="#Status"/>
+        <rdfs:label>In Progress</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Closed">
+        <rdfs:subClassOf rdf:resource="#Status"/>
+        <rdfs:label>Closed</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Planned">
+        <rdfs:subClassOf rdf:resource="#Status"/>
+        <rdfs:label>Planned</rdfs:label>
+    </owl:Class>
+    
+    <!-- Sentiment -->
+    <owl:Class rdf:about="#Sentiment">
+        <rdfs:label>Sentiment</rdfs:label>
+        <rdfs:comment>Emotional tone of feedback</rdfs:comment>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Positive">
+        <rdfs:subClassOf rdf:resource="#Sentiment"/>
+        <rdfs:label>Positive</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Negative">
+        <rdfs:subClassOf rdf:resource="#Sentiment"/>
+        <rdfs:label>Negative</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Neutral">
+        <rdfs:subClassOf rdf:resource="#Sentiment"/>
+        <rdfs:label>Neutral</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Frustrated">
+        <rdfs:subClassOf rdf:resource="#Sentiment"/>
+        <rdfs:label>Frustrated</rdfs:label>
+    </owl:Class>
+    
+    <owl:Class rdf:about="#Excited">
+        <rdfs:subClassOf rdf:resource="#Sentiment"/>
+        <rdfs:label>Excited</rdfs:label>
+    </owl:Class>
+    
+    <!-- 
+    =======================================================================
+    OBJECT PROPERTIES (Relationships)
+    =======================================================================
+    -->
+    
+    <!-- Person relationships -->
+    <owl:ObjectProperty rdf:about="#worksFor">
+        <rdfs:domain rdf:resource="#Person"/>
+        <rdfs:range rdf:resource="#Company"/>
+        <rdfs:label>works for</rdfs:label>
+        <rdfs:comment>Person works for a company</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#belongsToSegment">
+        <rdfs:domain rdf:resource="#Customer"/>
+        <rdfs:range rdf:resource="#Segment"/>
+        <rdfs:label>belongs to segment</rdfs:label>
+        <rdfs:comment>Customer belongs to a market segment</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <!-- Feedback relationships -->
+    <owl:ObjectProperty rdf:about="#submittedBy">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Person"/>
+        <rdfs:label>submitted by</rdfs:label>
+        <rdfs:comment>Feedback was submitted by a person</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#relatesTo">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#ProductboardFeature"/>
+        <rdfs:label>relates to feature</rdfs:label>
+        <rdfs:comment>Feedback relates to a specific Productboard feature</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#relatesToProduct">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Product"/>
+        <rdfs:label>relates to product</rdfs:label>
+        <rdfs:comment>Feedback relates to the Productboard product as a whole</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#receivedVia">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Channel"/>
+        <rdfs:label>received via</rdfs:label>
+        <rdfs:comment>Feedback was received through a specific channel</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#hasPriority">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Priority"/>
+        <rdfs:label>has priority</rdfs:label>
+        <rdfs:comment>Feedback has a priority level</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#hasStatus">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Status"/>
+        <rdfs:label>has status</rdfs:label>
+        <rdfs:comment>Feedback has a current status</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <owl:ObjectProperty rdf:about="#hasSentiment">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Sentiment"/>
+        <rdfs:label>has sentiment</rdfs:label>
+        <rdfs:comment>Feedback has an emotional sentiment</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <!-- Company relationships -->
+    <owl:ObjectProperty rdf:about="#fromCompany">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="#Company"/>
+        <rdfs:label>from company</rdfs:label>
+        <rdfs:comment>Feedback originates from a company</rdfs:comment>
+    </owl:ObjectProperty>
+    
+    <!-- 
+    =======================================================================
+    DATA PROPERTIES (Attributes)
+    =======================================================================
+    -->
+    
+    <!-- Person attributes -->
+    <owl:DatatypeProperty rdf:about="#personName">
+        <rdfs:domain rdf:resource="#Person"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>person name</rdfs:label>
+    </owl:DatatypeProperty>
+    
+    <owl:DatatypeProperty rdf:about="#email">
+        <rdfs:domain rdf:resource="#Person"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>email</rdfs:label>
+    </owl:DatatypeProperty>
+    
+    <!-- Company attributes -->
+    <owl:DatatypeProperty rdf:about="#companyName">
+        <rdfs:domain rdf:resource="#Company"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>company name</rdfs:label>
+    </owl:DatatypeProperty>
+    
+    <owl:DatatypeProperty rdf:about="#arr">
+        <rdfs:domain rdf:resource="#Company"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+        <rdfs:label>ARR</rdfs:label>
+        <rdfs:comment>Annual Recurring Revenue</rdfs:comment>
+    </owl:DatatypeProperty>
+    
+    <!-- Feedback attributes -->
+    <owl:DatatypeProperty rdf:about="#feedbackTitle">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>feedback title</rdfs:label>
+    </owl:DatatypeProperty>
+    
+    <owl:DatatypeProperty rdf:about="#feedbackContent">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>feedback content</rdfs:label>
+    </owl:DatatypeProperty>
+    
+    <owl:DatatypeProperty rdf:about="#uuid">
+        <rdfs:domain rdf:resource="#Feedback"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>UUID</rdfs:label>
+        <rdfs:comment>Unique identifier</rdfs:comment>
+    </owl:DatatypeProperty>
+    
+    <!-- Call attributes -->
+    <owl:DatatypeProperty rdf:about="#callTitle">
+        <rdfs:domain rdf:resource="#Call"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:label>call title</rdfs:label>
+    </owl:DatatypeProperty>
+    
+    <owl:DatatypeProperty rdf:about="#gongUrl">
+        <rdfs:domain rdf:resource="#Call"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#anyURI"/>
+        <rdfs:label>Gong URL</rdfs:label>
+        <rdfs:comment>Link to call recording in Gong</rdfs:comment>
+    </owl:DatatypeProperty>
+</rdf:RDF>
