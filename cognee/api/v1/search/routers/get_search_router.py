@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Optional
 from datetime import datetime
+from pydantic import Field
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
 from cognee.modules.search.types import SearchType
@@ -14,11 +15,11 @@ from cognee.modules.users.methods import get_authenticated_user
 # Note: Datasets sent by name will only map to datasets owned by the request sender
 #       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
-    search_type: SearchType
-    datasets: Optional[list[str]] = None
-    dataset_ids: Optional[list[UUID]] = None
-    query: str
-    top_k: Optional[int] = 10
+    search_type: SearchType = Field(default=SearchType.GRAPH_COMPLETION)
+    datasets: Optional[list[str]] = Field(default=None)
+    dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
+    query: str = Field(default="What is in the document?")
+    top_k: Optional[int] = Field(default=10)
 
 
 def get_search_router() -> APIRouter:
