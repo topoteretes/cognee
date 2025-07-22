@@ -23,6 +23,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     remove_queue,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 
 logger = get_logger("api.cognify")
@@ -82,6 +83,14 @@ def get_cognify_router() -> APIRouter:
         ## Next Steps
         After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
         """
+        send_telemetry(
+            "Cognify API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/cognify",
+            },
+        )
+
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(
                 status_code=400, content={"error": "No datasets or dataset_ids provided"}

@@ -1,16 +1,17 @@
 import os
+import requests
+import subprocess
 from uuid import UUID
 
-from fastapi import Form, File, UploadFile, Depends
-from fastapi.responses import JSONResponse
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from fastapi import Form, File, UploadFile, Depends
 from typing import List, Optional, Union, Literal
-import subprocess
-from cognee.shared.logging_utils import get_logger
-import requests
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.shared.utils import send_telemetry
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -60,6 +61,14 @@ def get_add_router() -> APIRouter:
         - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
         - datasetId value can only be the UUID of an already existing dataset
         """
+        send_telemetry(
+            "Add API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/add",
+            },
+        )
+
         from cognee.api.v1.add import add as cognee_add
 
         if not datasetId and not datasetName:
