@@ -7683,7 +7683,7 @@ description = "psycopg2 - Python-PostgreSQL Database Adapter"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"postgres\" or extra == \"postgres-binary\""
+markers = "extra == \"postgres\""
 files = [
     {file = "psycopg2-2.9.10-cp310-cp310-win32.whl", hash = "sha256:5df2b672140f95adb453af93a7d669d7a7bf0a56bcd26f1502329166f4a61716"},
     {file = "psycopg2-2.9.10-cp310-cp310-win_amd64.whl", hash = "sha256:c6f7b8561225f9e711a9c47087388a97fdc948211c10a4bccbf0ba68ab7b3b5a"},
@@ -12262,7 +12262,7 @@ neo4j = ["neo4j"]
 notebook = ["notebook"]
 ollama = ["transformers"]
 postgres = ["asyncpg", "pgvector", "psycopg2"]
-postgres-binary = ["asyncpg", "pgvector", "psycopg2", "psycopg2-binary"]
+postgres-binary = ["asyncpg", "pgvector", "psycopg2-binary"]
 posthog = ["posthog"]
 qdrant = ["qdrant-client"]
 weaviate = ["weaviate-client"]
@@ -12270,4 +12270,4 @@ weaviate = ["weaviate-client"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "fc071b47dfc4ff9c287d01d5d7f4b67d6486e136caf2f50c6d34a942f9876aa4"
+content-hash = "bfd833e6837328c446785f36d71df227f6b783c584442d57c0f408b726f1ebd2"
